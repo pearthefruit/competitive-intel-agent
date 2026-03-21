@@ -5,7 +5,7 @@ def build_patent_prompt(company, patents_text, total_count):
     """Build prompt for LLM-generated patent analysis."""
     return f"""You are an intellectual property analyst specializing in competitive intelligence. Analyze the following US patent data for "{company}" and write a strategic IP assessment.
 
-PATENT DATA (from USPTO PatentsView):
+PATENT DATA (from USPTO Open Data Portal):
 {patents_text}
 
 Write a concise patent/IP analysis report (500-700 words) with these sections:
@@ -30,6 +30,9 @@ Rules:
 - If the patent count is low (<5), note this and what it might mean.
 - Be direct and analytical — this is competitive intelligence.
 - Focus on strategic implications, not just listing patents.
+
+## Sources
+At the end of the report, include a **Sources** section listing the patent URLs from the data (Google Patents links). Format as markdown links: `[US<patent_number> - Title](url)`.
 """
 
 
@@ -50,4 +53,7 @@ What does the available information suggest about their IP strategy?
 Rules:
 - Only state what the search results support. Note when information is limited.
 - The company may hold patents under a different legal entity name, or may be a private company with limited patent visibility.
+
+## Sources
+At the end of the report, include a **Sources** section listing the URLs from the search results. Format as markdown links: `[Title](url)`.
 """

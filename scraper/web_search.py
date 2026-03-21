@@ -1,6 +1,13 @@
-"""Web search via DuckDuckGo — no API key required."""
+"""Web search via DuckDuckGo + Reddit RSS fallback.
 
+Primary: DuckDuckGo (no API key required).
+Fallback: Reddit RSS feeds (direct, no DDG dependency).
+"""
+
+import time
 from ddgs import DDGS
+
+from scraper.reddit_rss import search_reddit_rss
 
 
 def search_news(query, max_results=10):
@@ -8,13 +15,21 @@ def search_news(query, max_results=10):
 
     Returns list of dicts with: title, url, body, date, source.
     """
-    try:
-        with DDGS() as ddgs:
+    for attempt in range(3):
+        try:
+            ddgs = DDGS()
             results = list(ddgs.news(query, max_results=max_results))
-        return results
-    except Exception as e:
-        print(f"[search] News search failed: {e}")
-        return []
+            return results
+        except Exception as e:
+            if "futures" in str(e).lower():
+                print(f"[search] News search failed (threading): {e}")
+                return []
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            print(f"[search] News search failed after {attempt + 1} attempts: {e}")
+            return []
+    return []
 
 
 def search_web(query, max_results=5):
@@ -22,13 +37,44 @@ def search_web(query, max_results=5):
 
     Returns list of dicts with: title, href, body.
     """
-    try:
-        with DDGS() as ddgs:
+    for attempt in range(3):
+        try:
+            ddgs = DDGS()
             results = list(ddgs.text(query, max_results=max_results))
+            return results
+        except Exception as e:
+            if "futures" in str(e).lower():
+                print(f"[search] Web search failed (threading): {e}")
+                return []
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            print(f"[search] Web search failed after {attempt + 1} attempts: {e}")
+            return []
+    return []
+
+
+def search_reddit(query, max_results=5):
+    """Search Reddit — tries DDG first, falls back to direct RSS feeds.
+
+    Returns list of dicts with: title, href, body.
+    """
+    # Try DDG site-scoped search first
+    results = search_web(f"site:reddit.com {query}", max_results=max_results)
+    if results:
         return results
-    except Exception as e:
-        print(f"[search] Web search failed: {e}")
-        return []
+
+    # Fallback: direct Reddit RSS
+    print("[search] DDG Reddit search failed, falling back to Reddit RSS...")
+    return search_reddit_rss(query, max_results=max_results)
+
+
+def search_youtube(query, max_results=5):
+    """Search YouTube via DuckDuckGo site-scoped query.
+
+    Returns list of dicts with: title, href, body.
+    """
+    return search_web(f"site:youtube.com {query}", max_results=max_results)
 
 
 def format_news_for_prompt(articles, max_chars=2000):

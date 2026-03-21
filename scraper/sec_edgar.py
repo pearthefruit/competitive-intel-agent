@@ -267,17 +267,27 @@ def get_recent_filings(cik, max_filings=10):
         dates = recent.get("filingDate", [])
         docs = recent.get("primaryDocument", [])
         descriptions = recent.get("primaryDocDescription", [])
+        accessions = recent.get("accessionNumber", [])
 
         filings = []
         target_forms = {"10-K", "10-Q", "8-K", "10-K/A", "10-Q/A", "DEF 14A", "S-1"}
 
         for i in range(len(forms)):
             if forms[i] in target_forms:
+                # Build SEC filing URL
+                accession = accessions[i] if i < len(accessions) else ""
+                doc = docs[i] if i < len(docs) else ""
+                filing_url = ""
+                if accession and doc:
+                    acc_no_dashes = accession.replace("-", "")
+                    filing_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{doc}"
+
                 filings.append({
                     "form": forms[i],
                     "date": dates[i] if i < len(dates) else "",
-                    "document": docs[i] if i < len(docs) else "",
+                    "document": doc,
                     "description": descriptions[i] if i < len(descriptions) else "",
+                    "url": filing_url,
                 })
                 if len(filings) >= max_filings:
                     break
@@ -320,6 +330,9 @@ def format_financials_for_prompt(financials, filings):
     if filings:
         lines.append("\n### Recent Filings")
         for f in filings[:8]:
-            lines.append(f"  {f['date']}: {f['form']} — {f.get('description', '')}")
+            line = f"  {f['date']}: {f['form']} — {f.get('description', '')}"
+            if f.get("url"):
+                line += f"\n    URL: {f['url']}"
+            lines.append(line)
 
     return "\n".join(lines)

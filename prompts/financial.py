@@ -37,26 +37,35 @@ Rules:
 - Calculate growth rates where consecutive periods are available.
 - Be direct and analytical — this is for competitive intelligence, not investor relations.
 - If data for a section is missing, note it briefly and move on.
+
+## Sources
+At the end of the report, include a **Sources** section listing the SEC filing URLs provided in the data. Format as markdown links: `[Form Type - Date](url)`. If no URLs are available, link to the company's SEC EDGAR page: `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={ticker}&type=&dateb=&owner=include&count=40`
 """
 
 
 def build_financial_prompt_private(company, search_results):
-    """Build prompt for financial analysis of a private company using search results."""
-    return f"""You are a financial analyst specializing in competitive intelligence. The company "{company}" is private and does not file with the SEC. Based on the following search results, write what is publicly known about their financial position.
+    """Build prompt for financial analysis when company is not in SEC EDGAR (private or foreign-listed)."""
+    return f"""You are a financial analyst specializing in competitive intelligence. The company "{company}" was not found in SEC EDGAR. It may be a private company, or it may be publicly traded on a non-US exchange (e.g., London Stock Exchange, Euronext, SIX Swiss Exchange, Tokyo Stock Exchange, etc.). Based on the following search results, write what is publicly known about their financial position.
 
 SEARCH RESULTS:
 {search_results}
 
+IMPORTANT: First determine whether this company is publicly traded on a non-US exchange, or truly private. This distinction matters for the report framing.
+
 Write a concise financial intelligence report (400-600 words) with these sections:
 
 ## Executive Summary
-What is publicly known about this company's financial position.
+What is publicly known about this company's financial position. Note where the company is listed if it's publicly traded.
+
+## Revenue & Growth
+Reported or estimated revenue figures, growth rates, recent earnings.
+
+## Profitability & Financial Health
+Margins, profits, cash position, debt — whatever is available from public reporting or estimates.
 
 ## Funding & Valuation
-Known funding rounds, investors, and valuation estimates.
-
-## Revenue Estimates
-Any publicly reported or estimated revenue figures, growth rates.
+For private companies: known funding rounds, investors, and valuation estimates.
+For public companies: market cap, recent stock performance, major shareholders.
 
 ## Business Model
 How the company makes money, based on available information.
@@ -66,6 +75,10 @@ What the financial signals suggest about the company's strategy and trajectory.
 
 Rules:
 - Only state what the search results support. Clearly note when information is estimated or unconfirmed.
+- Do NOT assume the company is private just because it's not in SEC EDGAR — many large companies are listed on non-US exchanges.
 - Be direct and analytical.
 - If very little is known, say so — do not speculate extensively.
+
+## Sources
+At the end of the report, include a **Sources** section listing the URLs from the search results that informed your analysis. Format as markdown links: `[Title](url)`.
 """

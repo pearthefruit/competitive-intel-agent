@@ -30,4 +30,7 @@ Rules:
 - Note when a technology was detected on all pages vs only some pages (indicates site-wide vs page-specific).
 - Be direct and analytical — this is competitive intelligence, not a product review.
 - If the detected tech is minimal, note this and suggest what it might mean (e.g., custom-built stack, server-rendered, minimal client-side).
+
+## Sources
+At the end of the report, include a **Sources** section listing the page URLs that were crawled for technology detection.
 """

@@ -16,6 +16,8 @@ from agents.patents import patent_analysis
 from agents.pricing import pricing_analysis
 from agents.competitors import competitor_analysis
 from agents.sentiment import sentiment_analysis
+from agents.profile import company_profile
+from agents.compare import compare_companies, landscape_analysis
 
 
 @click.group()
@@ -127,11 +129,49 @@ def sentiment_cmd(company):
     sentiment_analysis(company)
 
 
+@cli.command("profile")
+@click.option("--company", required=True, help="Company name")
+@click.option("--url", default=None, help="ATS job board URL (optional, enables hiring analysis)")
+@click.option("--db", default="intel.db", help="SQLite database path")
+def profile_cmd(company, url, db):
+    """Run a complete company profile (financial + competitors + sentiment + patents)."""
+    company_profile(company, url, db)
+
+
+@cli.command("compare")
+@click.option("--company-a", required=True, help="First company")
+@click.option("--company-b", required=True, help="Second company")
+def compare_cmd(company_a, company_b):
+    """Compare two companies side by side."""
+    compare_companies(company_a, company_b)
+
+
+@cli.command("landscape")
+@click.option("--company", required=True, help="Company name")
+@click.option("--top-n", default=3, help="Number of competitors to analyze (default: 3)")
+def landscape_cmd(company, top_n):
+    """Auto-discover competitors and generate landscape analysis."""
+    landscape_analysis(company, top_n)
+
+
 @cli.command("chat")
 @click.option("--db", default="intel.db", help="SQLite database path")
 def chat_cmd(db):
     """Interactive chat — ask questions in plain English."""
     chat_repl(db)
+
+
+@cli.command("web")
+@click.option("--port", default=5001, help="Port to run on (default: 5001)")
+@click.option("--db", default="intel.db", help="SQLite database path")
+def web_cmd(port, db):
+    """Launch the web dashboard."""
+    from web.app import create_app
+    app = create_app(db)
+    print(f"\n  SignalForge: http://localhost:{port}")
+    print(f"  Press Ctrl+C to quit\n")
+    # use_reloader=False prevents the reloader from killing background analysis threads
+    app.run(debug=True, port=port, threaded=True, use_reloader=False)
 
 
 if __name__ == "__main__":

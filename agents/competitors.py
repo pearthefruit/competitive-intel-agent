@@ -1,51 +1,12 @@
 """Agent: Competitor Mapping — discover and map competitive landscape via web search."""
 
-import os
 from datetime import datetime
 from pathlib import Path
 
-import httpx
-import google.generativeai as genai
-
-from scraper.web_search import search_web, search_news, format_search_results
+from agents.llm import generate_text, save_to_dossier
+from scraper.web_search import search_web, search_news, search_reddit, search_youtube, format_search_results
+from scraper.hackernews import search_hackernews
 from prompts.competitors import build_competitor_prompt
-
-PROVIDERS = [
-    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
-    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
-]
-
-
-def _generate_text(prompt):
-    """Try providers in order until one works. Returns (text, model_name)."""
-    http = httpx.Client(timeout=60, follow_redirects=True)
-    for p in PROVIDERS:
-        key = os.environ.get(p["env_key"], "").strip()
-        if not key:
-            continue
-        if "," in key:
-            key = key.split(",")[0].strip()
-
-        try:
-            if p["name"] == "gemini":
-                genai.configure(api_key=key)
-                model = genai.GenerativeModel(p["model"])
-                response = model.generate_content(prompt)
-                http.close()
-                return response.text, f"gemini/{p['model']}"
-            else:
-                headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-                body = {"model": p["model"], "messages": [{"role": "user", "content": prompt}], "temperature": 0.3}
-                resp = http.post(p["url"], json=body, headers=headers)
-                if resp.status_code == 200:
-                    text = resp.json()["choices"][0]["message"]["content"]
-                    http.close()
-                    return text, f"{p['name']}/{p['model']}"
-        except Exception:
-            continue
-    http.close()
-    raise RuntimeError("All providers failed for competitor report generation")
 
 
 def competitor_analysis(company):
@@ -64,12 +25,33 @@ def competitor_analysis(company):
         results = search_web(query, max_results=5)
         all_results.extend(results)
 
+    web_count = len(all_results)
+    if web_count < 3:
+        print(f"[competitors] Only {web_count} web results — company may operate in a niche market, be a subsidiary, or use a name that's hard to search for")
+        print(f"[competitors] Expanding search to Reddit, YouTube, and Hacker News for community-sourced competitive data...")
+
     # Also check news
     news = search_news(f"{company} competition market", max_results=3)
     all_results.extend(news)
 
+    # Reddit discussions (often mention competitors by name)
+    print("[competitors] Searching Reddit for community competitor mentions...")
+    reddit = search_reddit(f"{company} vs alternatives competitors", max_results=3)
+    all_results.extend(reddit)
+
+    # YouTube (analyst videos, comparisons)
+    print("[competitors] Searching YouTube for analyst comparisons...")
+    yt = search_youtube(f"{company} vs competitors comparison", max_results=2)
+    all_results.extend(yt)
+
+    # Hacker News (tech community perspective)
+    print("[competitors] Searching Hacker News for tech community perspective...")
+    hn = search_hackernews(f"{company} vs alternatives", max_results=3)
+    all_results.extend(hn)
+
     if not all_results:
-        print("[competitors] No search results found")
+        print("[competitors] No competitive data found from any source — company may be too niche or newly launched")
+        print("[competitors] Try searching with the company's product category instead of its name (e.g., 'CRM software competitors' instead of 'Acme competitors')")
         return None
 
     # Deduplicate
@@ -87,7 +69,7 @@ def competitor_analysis(company):
     prompt = build_competitor_prompt(company, search_text)
 
     print("[competitors] Generating report...")
-    text, model = _generate_text(prompt)
+    text, model = generate_text(prompt)
 
     # Save report
     today = datetime.now().strftime("%Y-%m-%d")
@@ -109,4 +91,5 @@ def competitor_analysis(company):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[competitors] Report saved to {filename}")
+    save_to_dossier(company, "competitors", report_file=str(filename), report_text=report, model_used=model)
     return str(filename)

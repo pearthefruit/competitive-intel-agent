@@ -5,3 +5,5 @@ beautifulsoup4
 lxml
 python-dotenv
 ddgs
+youtube-transcript-api
+flask

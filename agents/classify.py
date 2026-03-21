@@ -7,8 +7,10 @@ import time
 import httpx
 import google.generativeai as genai
 
-from db import init_db, get_connection, get_company_id, get_unclassified_jobs, insert_classification
-from prompts.classify import build_batch_classify_prompt
+from agents.llm import gemini_lock
+from db import (init_db, get_connection, get_company_id, get_unclassified_jobs,
+                insert_classification, get_company_seniority_framework, set_company_seniority_framework)
+from prompts.classify import build_batch_classify_prompt, SENIORITY_FRAMEWORKS
 
 BATCH_SIZE = 5
 
@@ -45,6 +47,22 @@ def _parse_json_response(text):
         lines = [l for l in lines[1:] if not l.strip().startswith("```")]
         text = "\n".join(lines)
     return json.loads(text)
+
+
+def _normalize_classification(result):
+    """Ensure new fields have valid defaults if the LLM omits them."""
+    if not result.get("department_subcategory"):
+        result["department_subcategory"] = "General"
+    tags = result.get("strategic_tags")
+    if not isinstance(tags, list):
+        result["strategic_tags"] = []
+    # Ensure strategic_signals is a string (new prompt returns a sentence, not a list)
+    signals = result.get("strategic_signals")
+    if isinstance(signals, list):
+        result["strategic_signals"] = "; ".join(str(s) for s in signals)
+    elif not isinstance(signals, str):
+        result["strategic_signals"] = ""
+    return result
 
 
 class MultiProviderLLM:
@@ -111,9 +129,10 @@ class MultiProviderLLM:
         raise RuntimeError("All providers rate limited")
 
     def _call_gemini(self, p, prompt):
-        genai.configure(api_key=p["key"])
-        model = genai.GenerativeModel(p["model"])
-        response = model.generate_content(prompt)
+        with gemini_lock:
+            genai.configure(api_key=p["key"])
+            model = genai.GenerativeModel(p["model"])
+            response = model.generate_content(prompt)
         return response.text
 
     def _call_openai_compat(self, p, prompt):
@@ -138,9 +157,11 @@ class MultiProviderLLM:
         self.http.close()
 
 
-def classify(company_name, db_path="intel.db"):
+def classify(company_name, db_path="intel.db", seniority_framework=None, custom_seniority_rules=None):
     """Classify all unclassified jobs in batches of 5, rotating across providers.
 
+    seniority_framework: "tech", "banking", "consulting", "corporate" (auto-detected if None)
+    custom_seniority_rules: user-defined rules string (overrides framework)
     Returns number of jobs classified.
     """
     init_db(db_path)
@@ -151,6 +172,22 @@ def classify(company_name, db_path="intel.db"):
         print(f"[error] Company '{company_name}' not found. Run collect first.")
         conn.close()
         return 0
+
+    # Resolve seniority framework: explicit param > stored on company > default "tech"
+    if seniority_framework and seniority_framework in SENIORITY_FRAMEWORKS:
+        set_company_seniority_framework(conn, company_id, seniority_framework)
+        print(f"[classify] Using {SENIORITY_FRAMEWORKS[seniority_framework]['name']} seniority framework")
+    elif not seniority_framework:
+        stored = get_company_seniority_framework(conn, company_id)
+        if stored and stored in SENIORITY_FRAMEWORKS:
+            seniority_framework = stored
+            print(f"[classify] Using stored {SENIORITY_FRAMEWORKS[stored]['name']} seniority framework")
+        else:
+            seniority_framework = "tech"
+            print(f"[classify] Using default Tech seniority framework")
+
+    if custom_seniority_rules:
+        print(f"[classify] Using custom seniority rules provided by user")
 
     jobs = get_unclassified_jobs(conn, company_id)
     if not jobs:
@@ -178,7 +215,8 @@ def classify(company_name, db_path="intel.db"):
             "department": j["department"] or "",
         } for j in batch]
 
-        prompt = build_batch_classify_prompt(batch_data)
+        prompt = build_batch_classify_prompt(batch_data, seniority_framework=seniority_framework,
+                                                    custom_seniority_rules=custom_seniority_rules)
 
         try:
             text, model_name = llm.generate(prompt)
@@ -193,6 +231,7 @@ def classify(company_name, db_path="intel.db"):
             for job_data in batch_data:
                 result = results_by_id.get(job_data["id"])
                 if result:
+                    result = _normalize_classification(result)
                     insert_classification(conn, job_data["id"], result, model_name)
                     batch_classified += 1
                 else:
@@ -220,6 +259,7 @@ def classify(company_name, db_path="intel.db"):
                     for job_data in batch_data:
                         result = results_by_id.get(job_data["id"])
                         if result:
+                            result = _normalize_classification(result)
                             insert_classification(conn, job_data["id"], result, model_name)
                             classified += 1
                         else:

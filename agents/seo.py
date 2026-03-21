@@ -1,54 +1,12 @@
 """Agent 5: SEO & AEO Audit — crawl a site and analyze on-page signals."""
 
-import os
-import json
 from datetime import datetime
 from urllib.parse import urlparse
 from pathlib import Path
 
-import httpx
-import google.generativeai as genai
-
+from agents.llm import generate_text, save_to_dossier
 from scraper.site_crawler import crawl_site
 from prompts.seo import build_seo_prompt
-
-# Reuse the same provider pattern as analyze.py
-PROVIDERS = [
-    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
-    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
-]
-
-
-def _generate_text(prompt):
-    """Try providers in order until one works. Returns (text, model_name)."""
-    http = httpx.Client(timeout=60, follow_redirects=True)
-    for p in PROVIDERS:
-        key = os.environ.get(p["env_key"], "").strip()
-        if not key:
-            continue
-        if "," in key:
-            key = key.split(",")[0].strip()
-
-        try:
-            if p["name"] == "gemini":
-                genai.configure(api_key=key)
-                model = genai.GenerativeModel(p["model"])
-                response = model.generate_content(prompt)
-                http.close()
-                return response.text, f"gemini/{p['model']}"
-            else:
-                headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-                body = {"model": p["model"], "messages": [{"role": "user", "content": prompt}], "temperature": 0.3}
-                resp = http.post(p["url"], json=body, headers=headers)
-                if resp.status_code == 200:
-                    text = resp.json()["choices"][0]["message"]["content"]
-                    http.close()
-                    return text, f"{p['name']}/{p['model']}"
-        except Exception:
-            continue
-    http.close()
-    raise RuntimeError("All providers failed for SEO report generation")
 
 
 def _extract_seo_signals(page):
@@ -242,8 +200,15 @@ def seo_audit(url, max_pages=10):
     # Crawl the site
     pages = crawl_site(url, max_pages=max_pages)
     if not pages:
-        print("[error] No pages crawled. Check the URL and try again.")
+        print("[seo] Crawl returned zero pages — possible causes:")
+        print("[seo]   - Site may block automated crawlers (check robots.txt or Cloudflare/bot protection)")
+        print("[seo]   - Site may be fully JS-rendered (SPA) and requires a headless browser to access content")
+        print("[seo]   - URL may be invalid, behind authentication, or returning non-200 status codes")
+        print("[seo]   - Try using the site's root domain if you used a deep link")
         return None
+
+    if len(pages) < max_pages:
+        print(f"[seo] Only crawled {len(pages)}/{max_pages} pages — site may have few internal links, aggressive rate-limiting, or a flat structure")
 
     # Extract signals
     print(f"[seo] Analyzing {len(pages)} pages...")
@@ -259,7 +224,7 @@ def seo_audit(url, max_pages=10):
     prompt = build_seo_prompt(url, len(pages), seo_summary, aeo_summary, page_details)
 
     try:
-        narrative, model_used = _generate_text(prompt)
+        narrative, model_used = generate_text(prompt)
         print(f"[seo] Report generated via {model_used}")
     except Exception as e:
         print(f"[error] LLM report generation failed: {e}")
@@ -317,4 +282,5 @@ def seo_audit(url, max_pages=10):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[seo] Report saved to {filename}")
+    save_to_dossier(domain, "seo", report_file=str(filename), report_text=report, model_used=model_used)
     return str(filename)

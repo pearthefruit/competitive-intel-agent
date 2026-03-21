@@ -32,4 +32,7 @@ Rules:
 - Only mention competitors that appear in the search results or are widely known.
 - Be specific about what differentiates each competitor.
 - Be direct and actionable — this is for strategic decision-making.
+
+## Sources
+At the end of the report, include a **Sources** section listing the URLs from the search results that informed your analysis. Format as markdown links: `[Title](url)`.
 """

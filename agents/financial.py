@@ -1,52 +1,12 @@
 """Agent: Financial Analysis — SEC EDGAR for public companies, web search for private."""
 
-import os
 from datetime import datetime
 from pathlib import Path
 
-import httpx
-import google.generativeai as genai
-
+from agents.llm import generate_text, save_to_dossier
 from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, get_recent_filings, format_financials_for_prompt
 from scraper.web_search import search_web, search_news, format_search_results
 from prompts.financial import build_financial_prompt, build_financial_prompt_private
-
-PROVIDERS = [
-    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
-    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
-]
-
-
-def _generate_text(prompt):
-    """Try providers in order until one works. Returns (text, model_name)."""
-    http = httpx.Client(timeout=60, follow_redirects=True)
-    for p in PROVIDERS:
-        key = os.environ.get(p["env_key"], "").strip()
-        if not key:
-            continue
-        if "," in key:
-            key = key.split(",")[0].strip()
-
-        try:
-            if p["name"] == "gemini":
-                genai.configure(api_key=key)
-                model = genai.GenerativeModel(p["model"])
-                response = model.generate_content(prompt)
-                http.close()
-                return response.text, f"gemini/{p['model']}"
-            else:
-                headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-                body = {"model": p["model"], "messages": [{"role": "user", "content": prompt}], "temperature": 0.3}
-                resp = http.post(p["url"], json=body, headers=headers)
-                if resp.status_code == 200:
-                    text = resp.json()["choices"][0]["message"]["content"]
-                    http.close()
-                    return text, f"{p['name']}/{p['model']}"
-        except Exception:
-            continue
-    http.close()
-    raise RuntimeError("All providers failed for financial report generation")
 
 
 def financial_analysis(company):
@@ -93,7 +53,9 @@ def financial_analysis(company):
                     pass
         return _analyze_public(company, cik_result)
     else:
-        print(f"[financial] {company} not found in SEC EDGAR — using web search (private company)")
+        print(f"[financial] {company} not found in SEC EDGAR — could be private, foreign-listed, or filed under a different entity name")
+        print(f"[financial] Falling back to web search — financial data will be less precise without official SEC filings")
+        print(f"[financial] For better data, try checking Bloomberg, PitchBook, or the company's investor relations page directly")
         return _analyze_private(company)
 
 
@@ -108,12 +70,15 @@ def _analyze_public(company, cik_info):
     # Fetch EDGAR data
     facts = get_company_facts(cik)
     if not facts:
-        print("[financial] Could not fetch company facts — falling back to web search")
+        print("[financial] Could not fetch XBRL company facts — SEC EDGAR API may be rate-limited or this entity hasn't filed in XBRL format")
+        print("[financial] Falling back to web search — results will lack the precision of structured SEC data")
         return _analyze_private(company)
 
     financials = extract_financials(facts)
     if not financials:
-        print("[financial] No financial data found in XBRL — falling back to web search")
+        print("[financial] XBRL data exists but no standard financial metrics (revenue, net income, etc.) could be extracted")
+        print("[financial] This sometimes happens with holding companies or entities that file non-standard XBRL taxonomies")
+        print("[financial] Falling back to web search for financial data")
         return _analyze_private(company)
 
     filings = get_recent_filings(cik)
@@ -125,7 +90,7 @@ def _analyze_public(company, cik_info):
     prompt = build_financial_prompt(company, ticker, financials_text)
 
     print("[financial] Generating report...")
-    text, model = _generate_text(prompt)
+    text, model = generate_text(prompt)
 
     # Build and save report
     today = datetime.now().strftime("%Y-%m-%d")
@@ -147,6 +112,7 @@ def _analyze_public(company, cik_info):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[financial] Report saved to {filename}")
+    save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model)
     return str(filename)
 
 
@@ -154,11 +120,11 @@ def _analyze_private(company):
     """Analyze a private company using web search results."""
     print(f"[financial] Searching for financial data on {company}...")
 
-    # Multiple targeted searches
+    # Multiple targeted searches (cover both private and foreign-listed companies)
     queries = [
-        f"{company} funding valuation",
-        f"{company} revenue growth",
-        f"{company} financial news",
+        f"{company} revenue earnings financial results",
+        f"{company} funding valuation market cap",
+        f"{company} financial news 2024 2025",
     ]
 
     all_results = []
@@ -169,7 +135,8 @@ def _analyze_private(company):
         all_results.extend(news)
 
     if not all_results:
-        print("[financial] No search results found")
+        print("[financial] No web search results found — company may be too obscure, newly formed, or using a different public-facing name")
+        print("[financial] Try searching with the parent company name, or check Crunchbase/PitchBook manually")
         return None
 
     # Deduplicate by title
@@ -187,7 +154,7 @@ def _analyze_private(company):
     prompt = build_financial_prompt_private(company, search_text)
 
     print("[financial] Generating report...")
-    text, model = _generate_text(prompt)
+    text, model = generate_text(prompt)
 
     # Save report
     today = datetime.now().strftime("%Y-%m-%d")
@@ -195,7 +162,7 @@ def _analyze_private(company):
 
     header = f"""# Financial Analysis: {company}
 
-**Status:** Private Company | **Date:** {today}
+**Status:** Not in SEC EDGAR (private or foreign-listed) | **Date:** {today}
 **Source:** Web Search | **Model:** {model}
 
 ---
@@ -209,4 +176,5 @@ def _analyze_private(company):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[financial] Report saved to {filename}")
+    save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model)
     return str(filename)

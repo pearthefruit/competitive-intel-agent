@@ -32,4 +32,7 @@ Rules:
 - If information is limited, say so — do not speculate extensively.
 - Be balanced — note both positives and negatives.
 - Be direct and analytical — this is competitive intelligence, not a career advice column.
+
+## Sources
+At the end of the report, include a **Sources** section listing the URLs from the search results that informed your analysis. Format as markdown links: `[Title](url)`.
 """

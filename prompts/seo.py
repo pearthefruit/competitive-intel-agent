@@ -41,4 +41,7 @@ Which 2-3 pages are best optimized and why?
 ## Biggest Opportunities
 Top 5 specific, actionable recommendations ranked by impact. Each should reference a specific page or pattern found in the data.
 
+## Sources
+At the end of the report, list all crawled page URLs as a reference list.
+
 Keep it under 1000 words. Dense with specifics, no filler."""

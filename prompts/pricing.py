@@ -37,4 +37,7 @@ Rules:
 - If the pricing page says "Contact Sales" or "Request a Demo" with no public pricing, note this as enterprise/sales-led pricing.
 - Be direct and analytical — this is competitive intelligence.
 - Note if pricing information was limited or hidden.
+
+## Sources
+At the end of the report, include a **Sources** section listing the page URLs that were crawled and analyzed. Format as markdown links: `[Page Title](url)`.
 """

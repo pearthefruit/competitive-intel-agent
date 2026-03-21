@@ -1,51 +1,12 @@
 """Agent: Employee Sentiment — analyze workplace culture and employer reputation via web search."""
 
-import os
 from datetime import datetime
 from pathlib import Path
 
-import httpx
-import google.generativeai as genai
-
-from scraper.web_search import search_web, search_news, format_search_results
+from agents.llm import generate_text, save_to_dossier
+from scraper.web_search import search_web, search_news, search_reddit, format_search_results
+from scraper.hackernews import search_hackernews
 from prompts.sentiment import build_sentiment_prompt
-
-PROVIDERS = [
-    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
-    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
-]
-
-
-def _generate_text(prompt):
-    """Try providers in order until one works. Returns (text, model_name)."""
-    http = httpx.Client(timeout=60, follow_redirects=True)
-    for p in PROVIDERS:
-        key = os.environ.get(p["env_key"], "").strip()
-        if not key:
-            continue
-        if "," in key:
-            key = key.split(",")[0].strip()
-
-        try:
-            if p["name"] == "gemini":
-                genai.configure(api_key=key)
-                model = genai.GenerativeModel(p["model"])
-                response = model.generate_content(prompt)
-                http.close()
-                return response.text, f"gemini/{p['model']}"
-            else:
-                headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-                body = {"model": p["model"], "messages": [{"role": "user", "content": prompt}], "temperature": 0.3}
-                resp = http.post(p["url"], json=body, headers=headers)
-                if resp.status_code == 200:
-                    text = resp.json()["choices"][0]["message"]["content"]
-                    http.close()
-                    return text, f"{p['name']}/{p['model']}"
-        except Exception:
-            continue
-    http.close()
-    raise RuntimeError("All providers failed for sentiment report generation")
 
 
 def sentiment_analysis(company):
@@ -65,12 +26,31 @@ def sentiment_analysis(company):
         results = search_web(query, max_results=3)
         all_results.extend(results)
 
+    web_count = len(all_results)
+    if web_count == 0:
+        print(f"[sentiment] No Glassdoor/web results — company may be too small, too new, or using an unusual name that search engines don't associate with employer reviews")
+
     # News about workplace/culture
     news = search_news(f"{company} employees workplace culture", max_results=3)
     all_results.extend(news)
 
+    # Reddit discussions (often candid employee perspectives)
+    print("[sentiment] Searching Reddit for candid employee perspectives...")
+    reddit = search_reddit(f"{company} working at employee experience", max_results=3)
+    all_results.extend(reddit)
+    if web_count == 0 and reddit:
+        print(f"[sentiment] Reddit returned {len(reddit)} results — these tend to be more candid than formal review sites")
+
+    # Hacker News (tech community — candid takes on companies)
+    print("[sentiment] Searching Hacker News for tech community perspectives...")
+    hn = search_hackernews(f"{company} working culture employees", max_results=3)
+    all_results.extend(hn)
+    if web_count == 0 and hn:
+        print(f"[sentiment] Hacker News returned {len(hn)} results — useful for tech industry sentiment")
+
     if not all_results:
-        print("[sentiment] No search results found")
+        print("[sentiment] No results from any source (web, news, Reddit, HN)")
+        print("[sentiment] This company likely has very low public visibility — try checking Blind, Fishbowl, or Comparably directly")
         return None
 
     # Deduplicate
@@ -88,7 +68,7 @@ def sentiment_analysis(company):
     prompt = build_sentiment_prompt(company, search_text)
 
     print("[sentiment] Generating report...")
-    text, model = _generate_text(prompt)
+    text, model = generate_text(prompt)
 
     # Save report
     today = datetime.now().strftime("%Y-%m-%d")
@@ -110,4 +90,5 @@ def sentiment_analysis(company):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[sentiment] Report saved to {filename}")
+    save_to_dossier(company, "sentiment", report_file=str(filename), report_text=report, model_used=model)
     return str(filename)

@@ -8,7 +8,7 @@ DATA:
 - Total open roles: {total_jobs}
 {stats_summary}
 
-RAW CLASSIFICATION DATA:
+RAW CLASSIFICATION DATA (sampled):
 {classifications_json}"""
 
     if news_context:
@@ -25,13 +25,19 @@ Write a strategic intelligence report with these sections. Write in direct, anal
 2-3 sentences. What is {company_name} doing and why should a competitor care?
 
 ## Hiring Velocity & Focus
-Where is the hiring concentrated? What does the department mix tell us about priorities?
+Where is the hiring concentrated? Use the SUB-CATEGORY breakdown, not just top-level departments. "12 Engineering roles" is not useful — "8 AI/ML Engineering and 4 Platform/Infrastructure roles" tells the real story. Reference specific sub-category counts and what they reveal about priorities.
 
 ## Technical Stack & Skills
 What technologies and tools are they investing in? What does the skills concentration reveal about their technical direction?
 
+## Strategic Signals
+Analyze the strategic tags across all roles. If 7 of {total_jobs} roles are tagged "AI/ML Investment", say that explicitly with the count and percentage. Connect tags to business strategy. What patterns emerge when you look at which tags appear most frequently?
+
+## Growth vs. Backfill
+Reference the growth signal distribution directly. "{total_jobs} roles: X% likely new positions, Y% possible backfills" is a leading indicator. A company adding net new headcount is building something; a company backfilling is maintaining. What does the ratio suggest?
+
 ## Geographic Signals
-Where are they hiring? What does the location spread suggest about expansion or operational strategy?"""
+Where are they hiring? Note any unusual concentration. If {company_name} has 15 roles in one city and 2 in another, that's a geographic strategy signal. If they're hiring in a new city they haven't been in before, flag it."""
 
     if news_context:
         prompt += f"""

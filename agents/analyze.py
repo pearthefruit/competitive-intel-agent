@@ -1,56 +1,14 @@
 """Agent 3: Strategic Report — generate competitive intelligence report."""
 
-import os
 import json
 from datetime import datetime
 from collections import Counter
 from pathlib import Path
 
-import httpx
-import google.generativeai as genai
-
+from agents.llm import generate_text, save_to_dossier
 from db import init_db, get_connection, get_company_id, get_all_classified_jobs, get_company_info
 from prompts.analyze import build_analyze_prompt
 from scraper.web_search import search_news, format_news_for_prompt
-
-# Providers to try in order for report generation (single call, needs good reasoning)
-PROVIDERS = [
-    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
-    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
-]
-
-
-def _generate_text(prompt):
-    """Try providers in order until one works. Returns (text, model_name)."""
-    http = httpx.Client(timeout=60, follow_redirects=True)
-    for p in PROVIDERS:
-        key = os.environ.get(p["env_key"], "").strip()
-        if not key:
-            continue
-        # Handle comma-separated keys (Gemini)
-        if "," in key:
-            key = key.split(",")[0].strip()
-
-        try:
-            if p["name"] == "gemini":
-                genai.configure(api_key=key)
-                model = genai.GenerativeModel(p["model"])
-                response = model.generate_content(prompt)
-                http.close()
-                return response.text, f"gemini/{p['model']}"
-            else:
-                headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-                body = {"model": p["model"], "messages": [{"role": "user", "content": prompt}], "temperature": 0.3}
-                resp = http.post(p["url"], json=body, headers=headers)
-                if resp.status_code == 200:
-                    text = resp.json()["choices"][0]["message"]["content"]
-                    http.close()
-                    return text, f"{p['name']}/{p['model']}"
-        except Exception:
-            continue
-    http.close()
-    raise RuntimeError("All providers failed for report generation")
 
 
 def _safe_json_loads(text):
@@ -67,13 +25,20 @@ def _safe_json_loads(text):
 def _compute_stats(jobs):
     """Compute aggregate statistics from classified jobs."""
     dept_counts = Counter()
+    subcat_counts = Counter()  # (subcategory, department) pairs
     seniority_counts = Counter()
     location_counts = Counter()
     skill_counts = Counter()
     growth_counts = Counter()
+    strategic_tag_counts = Counter()
 
     for job in jobs:
-        dept_counts[job["department_category"] or "Other"] += 1
+        dept = job["department_category"] or "Other"
+        dept_counts[dept] += 1
+
+        subcat = job.get("department_subcategory") or "General"
+        subcat_counts[(subcat, dept)] += 1
+
         seniority_counts[job["seniority_level"] or "Unknown"] += 1
 
         loc = job["location"] or "Unknown"
@@ -85,7 +50,12 @@ def _compute_stats(jobs):
 
         growth_counts[job["growth_signal"] or "unclear"] += 1
 
-    return dept_counts, seniority_counts, location_counts, skill_counts, growth_counts
+        tags = _safe_json_loads(job.get("strategic_tags"))
+        for tag in tags:
+            strategic_tag_counts[tag] += 1
+
+    return (dept_counts, subcat_counts, seniority_counts, location_counts,
+            skill_counts, growth_counts, strategic_tag_counts)
 
 
 def _format_counter(counter, label, top_n=None):
@@ -96,21 +66,41 @@ def _format_counter(counter, label, top_n=None):
     return f"- {label}:\n" + "\n".join(lines)
 
 
+def _format_subcat_counter(subcat_counts, label):
+    """Format subcategory counter (keyed by (subcat, dept) tuples)."""
+    items = subcat_counts.most_common()
+    total = sum(subcat_counts.values())
+    lines = [f"  {subcat} ({dept}): {count} ({count*100//total}%)" for (subcat, dept), count in items]
+    return f"- {label}:\n" + "\n".join(lines)
+
+
 def _build_classifications_json(jobs, max_jobs=50):
     """Build a compact JSON summary for the LLM prompt, sampling if too many jobs."""
-    # For large job sets, send a representative sample to stay under context limits
     sample = jobs if len(jobs) <= max_jobs else jobs[::len(jobs)//max_jobs][:max_jobs]
     summaries = []
     for job in sample:
-        summaries.append({
+        entry = {
             "title": job["title"],
             "dept": job["department_category"],
+            "subcat": job.get("department_subcategory") or "General",
             "level": job["seniority_level"],
             "loc": job["location"],
             "skills": _safe_json_loads(job["key_skills"])[:5],
-            "signals": _safe_json_loads(job["strategic_signals"])[:2],
-        })
+            "growth": job.get("growth_signal") or "unclear",
+        }
+        tags = _safe_json_loads(job.get("strategic_tags"))
+        if tags:
+            entry["tags"] = tags
+        signal = job.get("strategic_signals") or ""
+        if signal and signal != "[]":
+            entry["signal"] = signal[:100]
+        summaries.append(entry)
     return json.dumps(summaries, indent=1)
+
+
+def _pct(count, total):
+    """Calculate percentage, avoiding division by zero."""
+    return count * 100 // total if total else 0
 
 
 def analyze(company_name, db_path="intel.db"):
@@ -123,7 +113,8 @@ def analyze(company_name, db_path="intel.db"):
 
     company_id = get_company_id(conn, company_name)
     if not company_id:
-        print(f"[error] Company '{company_name}' not found. Run collect first.")
+        print(f"[analyze] Company '{company_name}' not found in database — the collect step may not have run, or the company name may not match exactly")
+        print(f"[analyze] Try running 'collect' first, or check the exact company name in the database")
         conn.close()
         return None
 
@@ -132,20 +123,30 @@ def analyze(company_name, db_path="intel.db"):
     conn.close()
 
     if not jobs:
-        print(f"[error] No classified jobs for {company_name}. Run classify first.")
+        print(f"[analyze] No classified jobs for {company_name} — the classify step may not have run yet, or all jobs were filtered out")
+        print(f"[analyze] Run 'classify' first to categorize collected job postings")
         return None
 
     print(f"[analyze] Generating report for {company_name} ({len(jobs)} jobs)...")
 
+    if len(jobs) < 5:
+        print(f"[analyze] Only {len(jobs)} jobs classified — small sample makes department/seniority trends unreliable")
+        print(f"[analyze] Company may have few open roles, or the careers page returned limited results")
+
     # Compute stats
-    dept_counts, seniority_counts, location_counts, skill_counts, growth_counts = _compute_stats(jobs)
+    (dept_counts, subcat_counts, seniority_counts, location_counts,
+     skill_counts, growth_counts, strategic_tag_counts) = _compute_stats(jobs)
+
+    total = len(jobs)
 
     stats_summary = "\n".join([
         _format_counter(dept_counts, "By department"),
+        _format_subcat_counter(subcat_counts, "By sub-category"),
         _format_counter(seniority_counts, "By seniority"),
         _format_counter(location_counts, "By location", top_n=10),
         _format_counter(skill_counts, "Top skills", top_n=15),
         _format_counter(growth_counts, "Growth signals"),
+        _format_counter(strategic_tag_counts, "Strategic tags") if strategic_tag_counts else "",
     ])
 
     classifications_json = _build_classifications_json(jobs)
@@ -166,15 +167,16 @@ def analyze(company_name, db_path="intel.db"):
 
     news_context = format_news_for_prompt(unique_news) if unique_news else None
     if news_context:
-        print(f"[analyze] Found {len(unique_news)} recent news articles")
+        print(f"[analyze] Found {len(unique_news)} recent news articles to enrich the hiring analysis")
     else:
-        print(f"[analyze] No recent news found (report will use hiring data only)")
+        print(f"[analyze] No recent news found — report will rely on hiring data alone, which limits strategic context")
+        print(f"[analyze] For richer analysis, consider running financial or competitor agents alongside this one")
 
     # Generate narrative via LLM
-    prompt = build_analyze_prompt(company_name, len(jobs), stats_summary, classifications_json, news_context)
+    prompt = build_analyze_prompt(company_name, total, stats_summary, classifications_json, news_context)
 
     try:
-        narrative, model_used = _generate_text(prompt)
+        narrative, model_used = generate_text(prompt)
         print(f"[analyze] Narrative generated via {model_used}")
     except Exception as e:
         print(f"[error] LLM report generation failed: {e}")
@@ -186,7 +188,7 @@ def analyze(company_name, db_path="intel.db"):
     report = f"""# Competitive Intelligence: {company_name}
 
 **Generated:** {today}
-**Jobs analyzed:** {len(jobs)}
+**Jobs analyzed:** {total}
 **Data source:** {company['url'] or 'N/A'}
 **ATS:** {company['ats_type'] or 'N/A'}
 **Model:** {model_used}
@@ -199,19 +201,44 @@ def analyze(company_name, db_path="intel.db"):
 | Department | Count | % |
 |-----------|-------|---|
 """
-    total = sum(dept_counts.values())
     for dept, count in dept_counts.most_common():
-        report += f"| {dept} | {count} | {count*100//total}% |\n"
+        report += f"| {dept} | {count} | {_pct(count, total)}% |\n"
 
-    report += f"""
+    # Sub-category breakdown (the strategic signal)
+    report += """
+### By Sub-Category
+| Sub-Category | Department | Count | % |
+|-------------|-----------|-------|---|
+"""
+    for (subcat, dept), count in subcat_counts.most_common():
+        report += f"| {subcat} | {dept} | {count} | {_pct(count, total)}% |\n"
+
+    report += """
 ### By Seniority
 | Level | Count | % |
 |-------|-------|---|
 """
     for level, count in seniority_counts.most_common():
-        report += f"| {level} | {count} | {count*100//total}% |\n"
+        report += f"| {level} | {count} | {_pct(count, total)}% |\n"
 
-    report += f"""
+    report += """
+### Growth Signals
+| Signal | Count | % |
+|--------|-------|---|
+"""
+    for signal, count in growth_counts.most_common():
+        report += f"| {signal} | {count} | {_pct(count, total)}% |\n"
+
+    if strategic_tag_counts:
+        report += """
+### Strategic Tags
+| Tag | Roles | % |
+|-----|-------|---|
+"""
+        for tag, count in strategic_tag_counts.most_common():
+            report += f"| {tag} | {count} | {_pct(count, total)}% |\n"
+
+    report += """
 ### Top Skills
 | Skill | Mentions |
 |-------|----------|
@@ -219,13 +246,13 @@ def analyze(company_name, db_path="intel.db"):
     for skill, count in skill_counts.most_common(20):
         report += f"| {skill} | {count} |\n"
 
-    report += f"""
+    report += """
 ### Top Locations
-| Location | Count |
-|----------|-------|
+| Location | Count | % |
+|----------|-------|---|
 """
-    for loc, count in location_counts.most_common(10):
-        report += f"| {loc} | {count} |\n"
+    for loc, count in location_counts.most_common(15):
+        report += f"| {loc} | {count} | {_pct(count, total)}% |\n"
 
     report += f"""
 ---
@@ -241,4 +268,5 @@ def analyze(company_name, db_path="intel.db"):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[analyze] Report saved to {filename}")
+    save_to_dossier(company_name, "hiring", report_file=str(filename), report_text=report, model_used=model_used, db_path=db_path)
     return str(filename)
