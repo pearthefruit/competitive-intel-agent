@@ -1,0 +1,7 @@
+click
+google-generativeai
+httpx
+beautifulsoup4
+lxml
+python-dotenv
+ddgs
