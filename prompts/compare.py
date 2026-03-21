@@ -56,8 +56,19 @@ Who has the stronger position overall? What are each company's key advantages an
 
 Be specific and data-driven. Use numbers from the reports. Don't hedge — make clear assessments.
 
+CITATION FORMAT (like Perplexity — clickable numbered links):
+- The source reports contain URLs (SEC filings, Yahoo Finance, patent links, web articles). Extract them.
+- Assign each unique source URL a number (1, 2, 3...).
+- When referencing a specific number or claim, add a clickable superscript citation: `[¹](url)`, `[²](url)`, etc.
+- Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+- Example: "{company_a}'s revenue of $50B [¹](https://sec.gov/...) dwarfs {company_b}'s $12B [²](https://sec.gov/...)."
+- Reuse the same number when citing the same source again.
+
 ## Sources
-At the end, include a **Sources** section consolidating all source URLs from both companies' reports (SEC filings, patents, web sources). Format as markdown links."""
+At the end, list all numbered sources:
+1. [Source Title](url)
+2. [Source Title](url)
+...and so on for each unique source used."""
 
 
 def build_landscape_prompt(company, competitors, all_reports):
@@ -107,8 +118,18 @@ Where can {company} gain advantage? Gaps in the market, competitor weaknesses to
 
 Be specific and use data from the reports. Make clear assessments, not hedged statements.
 
+CITATION FORMAT (like Perplexity — clickable numbered links):
+- The source reports contain URLs (SEC filings, Yahoo Finance, patent links, web articles). Extract them.
+- Assign each unique source URL a number (1, 2, 3...).
+- When referencing a specific number or claim, add a clickable superscript citation: `[¹](url)`, `[²](url)`, etc.
+- Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+- Reuse the same number when citing the same source again.
+
 ## Sources
-At the end, include a **Sources** section consolidating all source URLs from the reports. Format as markdown links."""
+At the end, list all numbered sources:
+1. [Source Title](url)
+2. [Source Title](url)
+...and so on for each unique source used."""
 
 
 def build_extract_competitors_prompt(company, search_results):

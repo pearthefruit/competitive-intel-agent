@@ -7,3 +7,4 @@ python-dotenv
 ddgs
 youtube-transcript-api
 flask
+yfinance

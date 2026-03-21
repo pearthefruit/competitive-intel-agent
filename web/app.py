@@ -25,6 +25,29 @@ from db import init_db, get_connection, get_all_dossiers, get_dossier_by_company
 def _parse_report_filename(filename):
     """Extract company name, analysis type, and date from a report filename."""
     stem = Path(filename).stem  # e.g. "stripe_financial_2026-03-20"
+
+    # Comparison reports: {company_a}_vs_{company_b}_{date}.md
+    if "_vs_" in stem:
+        # Split off date from end
+        parts = stem.rsplit("_", 1)
+        date = parts[-1] if len(parts) >= 2 and len(parts[-1]) == 10 else ""
+        body = parts[0] if date else stem
+        # Split on _vs_ to get both company names
+        vs_parts = body.split("_vs_", 1)
+        company_a = vs_parts[0].replace("_", " ").strip().title()
+        company_b = vs_parts[1].replace("_", " ").strip().title() if len(vs_parts) > 1 else ""
+        company = f"{company_a} Vs {company_b}" if company_b else company_a
+        return {"company": company, "type": "comparison", "date": date, "filename": filename}
+
+    # Landscape reports: {company}_landscape_{date}.md
+    if "_landscape_" in stem:
+        parts = stem.rsplit("_", 1)
+        date = parts[-1] if len(parts) >= 2 and len(parts[-1]) == 10 else ""
+        body = parts[0].rsplit("_landscape", 1)[0] if date else stem
+        company = body.replace("_", " ").title()
+        return {"company": company, "type": "landscape", "date": date, "filename": filename}
+
+    # Standard reports: {company}_{type}_{date}.md
     parts = stem.rsplit("_", 2)
 
     if len(parts) >= 3 and len(parts[-1]) == 10:  # has date at end
@@ -129,6 +152,19 @@ def create_app(db_path="intel.db"):
         )
         conn.close()
         return jsonify({"ok": True, "event_id": event_id})
+
+    @app.route("/api/dossiers/<company_name>/briefing", methods=["POST"])
+    def generate_briefing_api(company_name):
+        """Generate or refresh the intelligence briefing for a company."""
+        from agents.briefing import generate_briefing
+
+        try:
+            briefing = generate_briefing(company_name, db_path)
+            if briefing:
+                return jsonify({"ok": True, "briefing": briefing})
+            return jsonify({"error": "Briefing generation failed — ensure the company has at least 2 analyses in its dossier."}), 400
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     # --- Chat API ---
 

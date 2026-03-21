@@ -107,14 +107,84 @@ Report:
 
 Return ONLY valid JSON, no explanation."""
 
+# Type-specific key facts prompts for richer structured data
+_TECHSTACK_FACTS_PROMPT = """Extract structured tech stack facts from this report about {company}.
 
-def extract_key_facts(company, report_text):
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "frontend_framework": primary frontend framework name (e.g. "React", "Next.js", "Vue.js") or null
+- "css_framework": CSS framework name (e.g. "Tailwind", "Bootstrap") or null
+- "analytics_tools": array of analytics/tracking tools detected (e.g. ["Google Analytics", "Segment", "Mixpanel"])
+- "marketing_tools": array of marketing/CRM tools detected (e.g. ["HubSpot", "Marketo", "Intercom"])
+- "cdn_hosting": array of CDN/hosting providers detected (e.g. ["Cloudflare", "AWS CloudFront", "Vercel"])
+- "cms": CMS platform if any (e.g. "WordPress", "Contentful") or null
+- "monitoring_tools": array of performance/error monitoring tools (e.g. ["Sentry", "Datadog", "New Relic"])
+- "ab_testing_tools": array of A/B testing / experimentation tools (e.g. ["Optimizely", "LaunchDarkly"])
+- "auth_provider": authentication provider if any (e.g. "Auth0", "Okta") or null
+- "search_provider": search infrastructure if any (e.g. "Algolia") or null
+- "payment_provider": payment processor if any (e.g. "Stripe", "PayPal") or null
+- "infrastructure_provider": primary cloud/hosting (e.g. "AWS", "Google Cloud", "Vercel") or null
+- "total_technologies_detected": integer count of all technologies found
+- "tech_modernity_signals": array of 2-3 short observations about whether the stack is modern, legacy, or mixed
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
+_SEO_FACTS_PROMPT = """Extract structured SEO/AEO facts from this audit report about {company}.
+
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "seo_title_optimization_pct": integer 0-100 (percentage of pages with properly optimized title tags)
+- "seo_meta_desc_pct": integer 0-100 (percentage of pages with optimized meta descriptions)
+- "seo_heading_hierarchy_pct": integer 0-100 (percentage of pages with proper heading hierarchy)
+- "seo_schema_types": array of schema.org types found (e.g. ["Organization", "Product", "FAQPage"])
+- "seo_has_faq_schema": boolean — true if FAQ schema markup was found
+- "seo_has_article_schema": boolean — true if Article schema was found
+- "aeo_readiness_signals": array of 2-3 short observations about AI answer engine readiness
+- "seo_overall_assessment": "strong" or "moderate" or "weak"
+- "pages_analyzed": integer count of pages audited
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
+_PRICING_FACTS_PROMPT = """Extract structured pricing facts from this analysis report about {company}.
+
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "pricing_model": one of "freemium", "subscription", "usage_based", "enterprise_only", "contact_sales", "hybrid", "unknown"
+- "pricing_tiers": array of tier/plan names (e.g. ["Free", "Pro", "Enterprise"])
+- "price_range": string describing visible price range (e.g. "$0-$500/mo", "Contact Sales", "$99-$999/mo")
+- "has_public_pricing": boolean — true if specific prices are publicly listed
+- "has_free_tier": boolean — true if a free plan or trial is offered
+- "target_segment": one of "SMB", "Mid-Market", "Enterprise", "All Segments"
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
+_TYPE_KEY_FACTS_PROMPTS = {
+    "techstack": _TECHSTACK_FACTS_PROMPT,
+    "seo": _SEO_FACTS_PROMPT,
+    "pricing": _PRICING_FACTS_PROMPT,
+}
+
+
+def extract_key_facts(company, report_text, analysis_type=None):
     """Extract structured key facts from a report. Returns dict or None."""
     # Truncate very long reports to save tokens
     if len(report_text) > 8000:
         report_text = report_text[:8000] + "\n\n... (truncated)"
 
-    prompt = _KEY_FACTS_PROMPT.format(company=company, report_text=report_text)
+    prompt_template = _TYPE_KEY_FACTS_PROMPTS.get(analysis_type, _KEY_FACTS_PROMPT)
+    prompt = prompt_template.format(company=company, report_text=report_text)
     facts = generate_json(prompt, timeout=30)
 
     if isinstance(facts, dict):
@@ -250,7 +320,7 @@ def save_to_dossier(company, analysis_type, report_file=None, report_text=None,
         new_facts = None
         if report_text:
             print(f"[dossier] Extracting key facts for {company}/{analysis_type}...")
-            new_facts = extract_key_facts(company, report_text)
+            new_facts = extract_key_facts(company, report_text, analysis_type=analysis_type)
             if new_facts:
                 key_facts_json = json.dumps(new_facts)
                 print(f"[dossier] Extracted {len(new_facts)} facts: {list(new_facts.keys())}")

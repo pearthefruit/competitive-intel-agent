@@ -5,6 +5,7 @@ from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier
 from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, get_recent_filings, format_financials_for_prompt
+from scraper.stock_data import get_stock_data, format_stock_data_for_prompt
 from scraper.web_search import search_web, search_news, format_search_results
 from prompts.financial import build_financial_prompt, build_financial_prompt_private
 
@@ -84,6 +85,16 @@ def _analyze_public(company, cik_info):
     filings = get_recent_filings(cik)
     financials_text = format_financials_for_prompt(financials, filings)
 
+    # Fetch live market data (stock price, market cap, valuation ratios)
+    print(f"[financial] Fetching live market data for {ticker}...")
+    stock_data = get_stock_data(ticker)
+    if stock_data:
+        market_text = format_stock_data_for_prompt(stock_data)
+        financials_text += "\n" + market_text
+        print(f"[financial] Got market data: price={stock_data.get('price')}, market_cap={stock_data.get('market_cap')}")
+    else:
+        print(f"[financial] Could not fetch live market data for {ticker} — report will use SEC data only")
+
     print(f"[financial] Extracted {len(financials)} financial metrics, {len(filings)} recent filings")
 
     # Generate report
@@ -149,6 +160,17 @@ def _analyze_private(company):
             unique_results.append(r)
 
     search_text = format_search_results(unique_results)
+
+    # Try to find a ticker and get live market data (works for foreign-listed companies)
+    from scraper.stock_data import lookup_ticker
+    ticker = lookup_ticker(company)
+    if ticker:
+        print(f"[financial] Found ticker {ticker} for {company} — fetching live market data...")
+        stock_data = get_stock_data(ticker)
+        if stock_data:
+            market_text = format_stock_data_for_prompt(stock_data)
+            search_text += f"\n\nLIVE MARKET DATA (from Yahoo Finance, ticker: {ticker}):\n{market_text}"
+            print(f"[financial] Got market data: price={stock_data.get('price')}, market_cap={stock_data.get('market_cap')}")
 
     # Generate report
     prompt = build_financial_prompt_private(company, search_text)

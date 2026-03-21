@@ -462,6 +462,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
         # --- Raw Data Tools ---
         elif name == "search_sec_edgar":
             from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, format_financials_for_prompt, get_recent_filings
+            from scraper.stock_data import get_stock_data, format_stock_data_for_prompt
             company = args["company"]
             cik_result = lookup_cik(company)
             if not cik_result:
@@ -482,6 +483,10 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             financials = extract_financials(facts)
             filings = get_recent_filings(cik)
             text = format_financials_for_prompt(financials, filings)
+            # Append live market data
+            stock_data = get_stock_data(ticker)
+            if stock_data:
+                text += "\n" + format_stock_data_for_prompt(stock_data)
             return f"SEC EDGAR data for {company_name} (ticker: {ticker}, CIK: {cik}):\n\n{text}"
 
         elif name == "search_patents_raw":
@@ -562,19 +567,19 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             return "Sentiment analysis failed — no data found."
 
         elif name == "seo_audit":
-            path = seo_audit(args["url"], args.get("max_pages", 10))
+            path = seo_audit(args["url"], args.get("max_pages", 10), company_name=args.get("company_name"))
             if path:
                 return f"SEO/AEO audit saved to: {path}"
             return "SEO audit failed — could not crawl the site."
 
         elif name == "techstack_analysis":
-            path = techstack_analysis(args["url"], args.get("max_pages", 5))
+            path = techstack_analysis(args["url"], args.get("max_pages", 5), company_name=args.get("company_name"))
             if path:
                 return f"Tech stack analysis saved to: {path}"
             return "Tech stack analysis failed — could not crawl the site."
 
         elif name == "pricing_analysis":
-            path = pricing_analysis(args["url"])
+            path = pricing_analysis(args["url"], company_name=args.get("company_name"))
             if path:
                 return f"Pricing analysis saved to: {path}"
             return "Pricing analysis failed — could not crawl the site."
@@ -673,6 +678,28 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             sys.stdout = old_stdout
             old_stdout = None
             return _save_dossier_event(args, db_path)
+
+        elif name == "generate_briefing":
+            from agents.briefing import generate_briefing
+            briefing = generate_briefing(args["company"], db_path)
+            if briefing:
+                dm = briefing.get("digital_maturity", {})
+                opps = briefing.get("engagement_opportunities", [])
+                summary = f"Intelligence briefing generated for {args['company']}.\n\n"
+                summary += f"**Digital Maturity Score:** {dm.get('overall_score', 'N/A')}/100 ({dm.get('overall_label', '')})\n"
+                subs = dm.get("sub_scores", {})
+                for key, lbl in [("tech_modernity", "Tech Modernity"), ("data_analytics", "Data & Analytics"), ("ai_readiness", "AI Readiness"), ("organizational_readiness", "Org Readiness")]:
+                    sub = subs.get(key, {})
+                    summary += f"- {lbl}: {sub.get('score', '?')}/100\n"
+                summary += f"\n**Engagement Opportunities ({len(opps)}):**\n"
+                for opp in opps:
+                    summary += f"- [{opp.get('priority', '?').upper()}] {opp.get('service', '?')} — {opp.get('estimated_scope', '?')}\n"
+                budget = briefing.get("budget_signals", {})
+                if budget:
+                    summary += f"\n**Budget Confidence:** {budget.get('confidence', '?')}"
+                summary += "\n\nThe briefing is now available in the Dossiers tab."
+                return summary
+            return "Briefing generation failed — ensure the company has a dossier with at least 2 analyses."
 
         else:
             return f"Unknown tool: {name}"

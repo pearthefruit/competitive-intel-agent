@@ -10,7 +10,7 @@ from scraper.tech_detect import detect_technologies, format_tech_for_prompt
 from prompts.techstack import build_techstack_prompt
 
 
-def techstack_analysis(url, max_pages=5):
+def techstack_analysis(url, max_pages=5, company_name=None):
     """Crawl a website and analyze its technology stack. Returns report path or None."""
     # Ensure URL has scheme
     if not url.startswith("http"):
@@ -70,5 +70,6 @@ def techstack_analysis(url, max_pages=5):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[techstack] Report saved to {filename}")
-    save_to_dossier(domain, "techstack", report_file=str(filename), report_text=report, model_used=model)
+    dossier_name = company_name or domain
+    save_to_dossier(dossier_name, "techstack", report_file=str(filename), report_text=report, model_used=model)
     return str(filename)

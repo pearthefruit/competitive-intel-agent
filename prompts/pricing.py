@@ -38,6 +38,15 @@ Rules:
 - Be direct and analytical — this is competitive intelligence.
 - Note if pricing information was limited or hidden.
 
+CITATION FORMAT (like Perplexity — clickable numbered links):
+- Assign each crawled page URL a number (1, 2, 3...).
+- When referencing specific pricing, features, or claims from a page, add a clickable superscript citation: `[¹](url)`, `[²](url)`, etc.
+- Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+- Reuse the same number when citing the same page again.
+
 ## Sources
-At the end of the report, include a **Sources** section listing the page URLs that were crawled and analyzed. Format as markdown links: `[Page Title](url)`.
+At the end, list all numbered sources:
+1. [Page Title](url)
+2. [Page Title](url)
+...and so on.
 """

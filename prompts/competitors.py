@@ -33,6 +33,15 @@ Rules:
 - Be specific about what differentiates each competitor.
 - Be direct and actionable — this is for strategic decision-making.
 
+CITATION FORMAT (like Perplexity — clickable numbered links):
+- Assign each unique source URL a number (1, 2, 3...).
+- When referencing a specific claim or data point, add a clickable superscript citation: `[¹](url)`, `[²](url)`, etc.
+- Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+- Reuse the same number when citing the same source again.
+
 ## Sources
-At the end of the report, include a **Sources** section listing the URLs from the search results that informed your analysis. Format as markdown links: `[Title](url)`.
+At the end, list all numbered sources:
+1. [Source Title](url)
+2. [Source Title](url)
+...and so on.
 """

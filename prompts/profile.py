@@ -44,5 +44,15 @@ Top 3 risks and top 3 opportunities, with supporting evidence from the analyses.
 
 Be concise, data-driven, and specific. Reference actual numbers and findings from the reports. No filler.
 
+CITATION FORMAT (like Perplexity — clickable numbered links):
+- The individual reports contain numbered source citations with URLs. Preserve them.
+- Consolidate all sources into a single numbered list, renumbering as needed.
+- When referencing a specific number or claim in the executive summary, add a clickable superscript citation: `[¹](url)`, `[²](url)`, etc.
+- Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+- Reuse the same number when citing the same source again.
+
 ## Sources
-At the end, include a **Sources** section consolidating all source URLs from the individual reports (SEC filings, patents, web sources). Format as markdown links."""
+At the end, list all numbered sources consolidated from the individual reports:
+1. [Source Title](url)
+2. [Source Title](url)
+...and so on."""

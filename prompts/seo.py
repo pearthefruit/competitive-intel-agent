@@ -41,7 +41,17 @@ Which 2-3 pages are best optimized and why?
 ## Biggest Opportunities
 Top 5 specific, actionable recommendations ranked by impact. Each should reference a specific page or pattern found in the data.
 
+CITATION FORMAT (like Perplexity — clickable numbered links):
+- Assign each crawled page URL a number (1, 2, 3...).
+- When referencing a specific page, issue, or finding, add a clickable superscript citation: `[¹](url)`, `[²](url)`, etc.
+- Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+- Example: "The homepage title tag is 65 characters [¹](https://example.com/) but the pricing page is missing a meta description entirely [²](https://example.com/pricing)."
+- Reuse the same number when citing the same page again.
+
 ## Sources
-At the end of the report, list all crawled page URLs as a reference list.
+At the end, list all numbered sources:
+1. [Page Title](url)
+2. [Page Title](url)
+...and so on.
 
 Keep it under 1000 words. Dense with specifics, no filler."""

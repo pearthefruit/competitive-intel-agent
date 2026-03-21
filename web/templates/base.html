@@ -383,6 +383,339 @@
             margin-left: auto;
         }
 
+        /* --- BRIEFING UI --- */
+        .briefing-header {
+            text-align: center;
+            padding: 16px 12px 12px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 12px;
+        }
+        .briefing-header-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+        .briefing-header-company {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .briefing-header-sector {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+        .briefing-header-meta {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 8px;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .briefing-actions {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .briefing-btn {
+            font-size: 11px;
+            padding: 5px 14px;
+            border-radius: 5px;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .briefing-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .briefing-btn-primary {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+        .briefing-btn-primary:hover { opacity: 0.85; }
+        .briefing-stale-badge {
+            display: inline-block;
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 3px;
+            background: rgba(234,179,8,0.15);
+            color: var(--yellow);
+            margin-top: 6px;
+        }
+
+        /* Score ring */
+        .maturity-ring {
+            width: 120px;
+            height: 120px;
+            position: relative;
+            margin: 0 auto 8px;
+        }
+        .maturity-ring svg { transform: rotate(-90deg); }
+        .maturity-ring circle { fill: none; stroke-width: 8; }
+        .maturity-ring .ring-bg { stroke: rgba(255,255,255,0.06); }
+        .maturity-ring .ring-fill { stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
+        .maturity-value {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 28px;
+            font-weight: 700;
+        }
+        .maturity-label {
+            text-align: center;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        .score-advanced { color: #22c55e; }
+        .score-maturing { color: #3b82f6; }
+        .score-laggard { color: #eab308; }
+        .score-predigital { color: #ef4444; }
+        .ring-advanced { stroke: #22c55e; }
+        .ring-maturing { stroke: #3b82f6; }
+        .ring-laggard { stroke: #eab308; }
+        .ring-predigital { stroke: #ef4444; }
+
+        /* Sub-score bars */
+        .sub-score-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .sub-score-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            min-width: 130px;
+            flex-shrink: 0;
+        }
+        .sub-score-bar {
+            flex: 1;
+            height: 6px;
+            background: rgba(255,255,255,0.06);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .sub-score-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.8s ease;
+        }
+        .sub-score-value {
+            font-size: 12px;
+            font-weight: 600;
+            min-width: 28px;
+            text-align: right;
+        }
+
+        /* Engagement opportunity cards */
+        .opp-card {
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 6px;
+        }
+        .opp-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+        .opp-service {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .opp-priority {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .opp-priority-high { background: rgba(239,68,68,0.15); color: var(--red); }
+        .opp-priority-medium { background: rgba(234,179,8,0.15); color: var(--yellow); }
+        .opp-priority-low { background: rgba(59,130,246,0.15); color: var(--accent); }
+        .opp-evidence {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            line-height: 1.4;
+        }
+        .opp-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: var(--text-secondary);
+        }
+
+        /* Collapsible briefing sections */
+        .briefing-section {
+            margin-bottom: 4px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .briefing-section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            cursor: pointer;
+            background: var(--bg-secondary);
+            transition: background 0.1s;
+        }
+        .briefing-section-header:hover { background: var(--bg-hover); }
+        .briefing-section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .briefing-section-chevron {
+            font-size: 10px;
+            color: var(--text-muted);
+            transition: transform 0.2s;
+        }
+        .briefing-section.open .briefing-section-chevron { transform: rotate(180deg); }
+        .briefing-section-body {
+            display: none;
+            padding: 12px;
+        }
+        .briefing-section.open .briefing-section-body { display: block; }
+
+        /* Metric grid */
+        .metric-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+        .metric-card {
+            padding: 8px 10px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+        }
+        .metric-card-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .metric-card-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-top: 2px;
+        }
+
+        /* Risk cards */
+        .risk-card {
+            padding: 8px 10px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            margin-bottom: 4px;
+            border-left: 3px solid;
+        }
+        .risk-high { border-left-color: var(--red); }
+        .risk-medium { border-left-color: var(--yellow); }
+        .risk-low { border-left-color: var(--green); }
+        .risk-category {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+        }
+        .risk-high .risk-category { color: var(--red); }
+        .risk-medium .risk-category { color: var(--yellow); }
+        .risk-low .risk-category { color: var(--green); }
+        .risk-desc {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        /* Budget signal badges */
+        .budget-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 0;
+            font-size: 12px;
+        }
+        .budget-label {
+            color: var(--text-muted);
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            min-width: 100px;
+        }
+        .budget-value {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        .confidence-badge {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-weight: 600;
+        }
+        .confidence-high { background: rgba(34,197,94,0.15); color: var(--green); }
+        .confidence-medium { background: rgba(234,179,8,0.15); color: var(--yellow); }
+        .confidence-low { background: rgba(239,68,68,0.15); color: var(--red); }
+
+        /* Competitor row in briefing */
+        .competitor-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 0;
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+        }
+        .competitor-row:last-child { border-bottom: none; }
+        .competitor-name {
+            font-weight: 500;
+            color: var(--text-primary);
+            min-width: 100px;
+        }
+        .competitor-maturity {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+        .competitor-threat {
+            font-size: 11px;
+            color: var(--text-muted);
+            flex: 1;
+        }
+
+        /* Skill tags */
+        .skill-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 6px;
+        }
+        .skill-tag {
+            font-size: 10px;
+            padding: 2px 7px;
+            border-radius: 3px;
+            background: rgba(59,130,246,0.12);
+            color: var(--accent);
+        }
+
         /* --- CENTER PANE --- */
         .center-pane {
             flex: 1;
@@ -725,6 +1058,24 @@
         .md-content strong { color: var(--text-primary); font-weight: 600; }
         .md-content a { color: var(--accent); text-decoration: none; }
         .md-content a:hover { text-decoration: underline; }
+        /* Perplexity-style superscript citation links */
+        .md-content a.citation {
+            font-size: 10px;
+            vertical-align: super;
+            line-height: 0;
+            padding: 1px 3px;
+            margin: 0 1px;
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+            color: var(--accent);
+            font-weight: 600;
+            text-decoration: none;
+        }
+        .md-content a.citation:hover {
+            background: var(--accent);
+            color: #fff;
+            text-decoration: none;
+        }
         .md-content hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
         .md-content blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--text-muted); margin: 8px 0; }
         .md-content table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
@@ -781,6 +1132,7 @@
         .dot-analysis { background: #6b7280; }
         .dot-report { background: #6b7280; }
         .dot-landscape { background: #14b8a6; }
+        .dot-comparison { background: #f59e0b; }
 
         /* Print */
         @media print {
@@ -799,6 +1151,7 @@
             .md-content th { background: #f0f0f0 !important; color: #111 !important; }
             .md-content td, .md-content th { border-color: #ccc !important; }
             .md-content a { color: #1a56db !important; }
+            .md-content a.citation { background: #e8edfb !important; color: #1a56db !important; font-size: 9px !important; }
             .md-content blockquote { border-color: #999 !important; color: #555 !important; }
             body { background: white !important; }
         }
@@ -899,6 +1252,28 @@
 </div>
 
 <script>
+// ===================== MARKED CONFIG =====================
+// Make external links open in new tab; keep internal report links in-app
+// Superscript citation links (¹²³...) get styled like Perplexity
+const renderer = new marked.Renderer();
+const SUPERSCRIPT_RE = /^[¹²³⁴⁵⁶⁷⁸⁹⁰]+$/;
+const origLinkRenderer = renderer.link.bind(renderer);
+renderer.link = function({ href, title, text }) {
+    // Internal report links handled by click interception
+    if (href && href.match(/reports[\\\/].+\.md$/)) {
+        return origLinkRenderer({ href, title, text });
+    }
+    const titleAttr = title ? ` title="${title}"` : '';
+    // Superscript citation links → styled badge that opens in new tab
+    const plainText = text.replace(/<[^>]+>/g, '').trim();
+    if (SUPERSCRIPT_RE.test(plainText)) {
+        return `<a href="${href}" class="citation"${titleAttr} target="_blank" rel="noopener noreferrer">${plainText}</a>`;
+    }
+    // Regular external links → new tab
+    return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+};
+marked.setOptions({ renderer });
+
 // ===================== STATE =====================
 const STORAGE_KEY = 'signalforge_chats';
 let chats = [];
@@ -1086,12 +1461,345 @@ async function openDossier(companyName) {
 
 function showDossierDetail(d) {
     const rp = document.getElementById('right-pane');
+    currentReportFilename = null;
+
+    // Try to show briefing if available
+    if (d.briefing_json) {
+        try {
+            const briefing = typeof d.briefing_json === 'string' ? JSON.parse(d.briefing_json) : d.briefing_json;
+            showBriefing(d, briefing);
+            return;
+        } catch (e) { console.error('Failed to parse briefing:', e); }
+    }
+
+    // Fall back to legacy view
+    showLegacyDossierDetail(d);
+}
+
+function _scoreColorClass(score) {
+    if (score >= 80) return 'advanced';
+    if (score >= 60) return 'maturing';
+    if (score >= 40) return 'laggard';
+    return 'predigital';
+}
+
+function renderScoreRing(score, size) {
+    size = size || 120;
+    const radius = (size - 16) / 2;
+    const circumference = 2 * Math.PI * radius;
+    const offset = circumference - (score / 100) * circumference;
+    const cc = _scoreColorClass(score);
+    return `<div class="maturity-ring" style="width:${size}px;height:${size}px">
+        <svg width="${size}" height="${size}">
+            <circle class="ring-bg" cx="${size/2}" cy="${size/2}" r="${radius}" />
+            <circle class="ring-fill ring-${cc}" cx="${size/2}" cy="${size/2}" r="${radius}"
+                    stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" />
+        </svg>
+        <div class="maturity-value score-${cc}">${score}</div>
+    </div>`;
+}
+
+function renderSubScore(label, score) {
+    const cc = _scoreColorClass(score);
+    return `<div class="sub-score-row">
+        <span class="sub-score-label">${escHtml(label)}</span>
+        <div class="sub-score-bar"><div class="sub-score-fill" style="width:${score}%;background:var(--${cc === 'advanced' ? 'green' : cc === 'maturing' ? 'accent' : cc === 'laggard' ? 'yellow' : 'red'})"></div></div>
+        <span class="sub-score-value score-${cc}">${score}</span>
+    </div>`;
+}
+
+function _briefingSection(title, body, open) {
+    return `<div class="briefing-section${open ? ' open' : ''}">
+        <div class="briefing-section-header" onclick="this.parentElement.classList.toggle('open')">
+            <span class="briefing-section-title">${escHtml(title)}</span>
+            <span class="briefing-section-chevron">&#9660;</span>
+        </div>
+        <div class="briefing-section-body">${body}</div>
+    </div>`;
+}
+
+function showBriefing(dossier, b) {
+    const rp = document.getElementById('right-pane');
+    const identity = b.subject_identity || {};
+    document.getElementById('right-company').textContent = identity.name || dossier.company_name;
+    document.getElementById('right-type').textContent = '';
+    document.getElementById('right-date').textContent = '';
+
+    let html = '';
+
+    // --- Header ---
+    html += `<div class="briefing-header">
+        <div class="briefing-header-title">Intelligence Briefing</div>
+        <div class="briefing-header-company">${escHtml(identity.name || dossier.company_name)}</div>
+        ${identity.sector ? `<div class="briefing-header-sector">${escHtml(identity.sector)}</div>` : ''}
+        <div class="briefing-header-meta">`;
+    if (identity.hq_location) html += `<span>${escHtml(identity.hq_location)}</span>`;
+    if (identity.founded) html += `<span>Est. ${identity.founded}</span>`;
+    if (identity.headcount) html += `<span>${escHtml(String(identity.headcount))} employees</span>`;
+    html += `</div>`;
+
+    // Staleness check
+    if (dossier.briefing_generated_at && dossier.analyses && dossier.analyses.length) {
+        const briefingDate = new Date(dossier.briefing_generated_at);
+        const latestAnalysis = new Date(dossier.analyses[0].created_at);
+        if (latestAnalysis > briefingDate) {
+            html += `<div class="briefing-stale-badge">Briefing outdated - new analyses available</div>`;
+        }
+    }
+
+    html += `<div class="briefing-actions">
+        <button class="briefing-btn briefing-btn-primary" onclick="generateBriefing('${escHtml(dossier.company_name)}')">Refresh Briefing</button>
+    </div></div>`;
+
+    // --- Digital Maturity Score (always expanded) ---
+    const dm = b.digital_maturity || {};
+    const score = dm.overall_score || 0;
+    const label = dm.overall_label || '';
+    const subs = dm.sub_scores || {};
+
+    html += `<div style="padding:16px 12px">`;
+    html += renderScoreRing(score, 120);
+    html += `<div class="maturity-label score-${_scoreColorClass(score)}">${escHtml(label)}</div>`;
+
+    // Sub-scores
+    const subLabels = { tech_modernity: 'Tech Modernity', data_analytics: 'Data & Analytics', ai_readiness: 'AI Readiness', organizational_readiness: 'Org Readiness' };
+    Object.entries(subLabels).forEach(([key, lbl]) => {
+        const sub = subs[key] || {};
+        html += renderSubScore(lbl, sub.score || 0);
+    });
+
+    // Sub-score rationales (collapsed)
+    html += `<div style="margin-top:8px">`;
+    Object.entries(subLabels).forEach(([key, lbl]) => {
+        const sub = subs[key] || {};
+        if (sub.rationale) {
+            html += `<div style="margin-bottom:6px"><span style="font-size:10px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:10px;color:var(--text-muted)">${escHtml(sub.rationale)}</span></div>`;
+        }
+    });
+    html += `</div></div>`;
+
+    // --- Engagement Opportunities (always expanded) ---
+    const opps = b.engagement_opportunities || [];
+    if (opps.length) {
+        let oppHtml = '';
+        opps.forEach(opp => {
+            const pClass = `opp-priority-${opp.priority || 'medium'}`;
+            oppHtml += `<div class="opp-card">
+                <div class="opp-card-header">
+                    <span class="opp-service">${escHtml(opp.service || '')}</span>
+                    <span class="opp-priority ${pClass}">${escHtml(opp.priority || '')}</span>
+                </div>
+                <div class="opp-evidence">${escHtml(opp.evidence || '')}</div>
+                <div class="opp-meta">
+                    <span>${escHtml(opp.estimated_scope || '')}</span>
+                    <span>${escHtml(opp.entry_point || '')}</span>
+                </div>
+            </div>`;
+        });
+        html += `<div style="padding:0 12px 12px"><div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Engagement Opportunities</div>${oppHtml}</div>`;
+    }
+
+    // --- Budget & Appetite ---
+    const budget = b.budget_signals || {};
+    if (Object.keys(budget).length) {
+        let budgetHtml = '';
+        const confClass = `confidence-${budget.confidence || 'medium'}`;
+        budgetHtml += `<div class="budget-row"><span class="budget-label">Can Afford</span><span class="budget-value">${budget.can_afford ? 'Yes' : 'Unlikely'}</span> <span class="confidence-badge ${confClass}">${escHtml(budget.confidence || '')} confidence</span></div>`;
+        if (budget.evidence) budgetHtml += `<div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px">${escHtml(budget.evidence)}</div>`;
+        if (budget.revenue_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Revenue Trend</span><span class="budget-value">${escHtml(budget.revenue_trend)}</span></div>`;
+        if (budget.hiring_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Hiring Trend</span><span class="budget-value">${escHtml(budget.hiring_trend)}</span></div>`;
+        if (budget.investment_areas && budget.investment_areas.length) {
+            budgetHtml += `<div class="budget-row"><span class="budget-label">Investing In</span><span class="budget-value">${budget.investment_areas.map(a => escHtml(a)).join(', ')}</span></div>`;
+        }
+        html += _briefingSection('Budget & Appetite Signals', budgetHtml, false);
+    }
+
+    // --- Competitive Pressure ---
+    const comp = b.competitive_pressure || {};
+    if (Object.keys(comp).length) {
+        let compHtml = '';
+        if (comp.urgency) {
+            const urgClass = comp.urgency === 'high' ? 'confidence-high' : comp.urgency === 'medium' ? 'confidence-medium' : 'confidence-low';
+            compHtml += `<div style="margin-bottom:8px">Transformation urgency: <span class="confidence-badge ${urgClass}">${escHtml(comp.urgency)}</span></div>`;
+        }
+        (comp.competitors || []).forEach(c => {
+            compHtml += `<div class="competitor-row">
+                <span class="competitor-name">${escHtml(c.name || '')}</span>
+                <span class="competitor-maturity">${escHtml(c.digital_maturity_estimate || '')}</span>
+                <span class="competitor-threat">${escHtml(c.threat || '')}</span>
+            </div>`;
+        });
+        if (comp.urgency_drivers && comp.urgency_drivers.length) {
+            compHtml += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted)"><strong>Drivers:</strong> ${comp.urgency_drivers.map(d => escHtml(d)).join(' | ')}</div>`;
+        }
+        html += _briefingSection('Competitive Pressure', compHtml, false);
+    }
+
+    // --- Financial Position ---
+    const fin = b.financial_position || {};
+    if (Object.keys(fin).length) {
+        let finHtml = '';
+        if (fin.summary) finHtml += `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${escHtml(fin.summary)}</div>`;
+        if (fin.metrics && fin.metrics.length) {
+            finHtml += '<div class="metric-grid">';
+            fin.metrics.forEach(m => {
+                finHtml += `<div class="metric-card"><div class="metric-card-label">${escHtml(m.label || '')}</div><div class="metric-card-value">${escHtml(m.value || '')}</div></div>`;
+            });
+            finHtml += '</div>';
+        }
+        html += _briefingSection('Financial Position', finHtml, false);
+    }
+
+    // --- Innovation & IP ---
+    const ip = b.innovation_ip || {};
+    if (Object.keys(ip).length) {
+        let ipHtml = '';
+        if (ip.patent_count !== undefined) ipHtml += `<div class="budget-row"><span class="budget-label">Patents</span><span class="budget-value">${ip.patent_count}</span></div>`;
+        if (ip.rd_intensity) ipHtml += `<div class="budget-row"><span class="budget-label">R&D Intensity</span><span class="budget-value">${escHtml(ip.rd_intensity)}</span></div>`;
+        if (ip.top_areas && ip.top_areas.length) {
+            ipHtml += `<div class="budget-row"><span class="budget-label">Top Areas</span><span class="budget-value">${ip.top_areas.map(a => escHtml(a)).join(', ')}</span></div>`;
+        }
+        if (ip.assessment) ipHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5">${escHtml(ip.assessment)}</div>`;
+        html += _briefingSection('Innovation & IP', ipHtml, false);
+    }
+
+    // --- Talent & Culture ---
+    const talent = b.talent_culture || {};
+    if (Object.keys(talent).length) {
+        let talHtml = '';
+        if (talent.sentiment) talHtml += `<div class="budget-row"><span class="budget-label">Sentiment</span><span class="budget-value">${escHtml(talent.sentiment)}</span></div>`;
+        if (talent.hiring_momentum) talHtml += `<div style="font-size:11px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.5">${escHtml(talent.hiring_momentum)}</div>`;
+        // Department focus as mini bars
+        const deptFocus = talent.department_focus || {};
+        if (Object.keys(deptFocus).length) {
+            talHtml += `<div style="margin:8px 0">`;
+            const sorted = Object.entries(deptFocus).sort((a, b) => b[1] - a[1]);
+            sorted.forEach(([dept, pct]) => {
+                talHtml += `<div class="sub-score-row"><span class="sub-score-label">${escHtml(dept)}</span><div class="sub-score-bar"><div class="sub-score-fill" style="width:${pct}%;background:var(--accent)"></div></div><span class="sub-score-value" style="color:var(--text-secondary)">${pct}%</span></div>`;
+            });
+            talHtml += `</div>`;
+        }
+        if (talent.top_skills && talent.top_skills.length) {
+            talHtml += `<div class="skill-tags">${talent.top_skills.map(s => `<span class="skill-tag">${escHtml(s)}</span>`).join('')}</div>`;
+        }
+        if (talent.assessment) talHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5">${escHtml(talent.assessment)}</div>`;
+        html += _briefingSection('Talent & Culture', talHtml, false);
+    }
+
+    // --- Risk Profile ---
+    const risks = b.risk_profile || [];
+    if (risks.length) {
+        let riskHtml = '';
+        risks.forEach(r => {
+            const sev = r.severity || 'medium';
+            riskHtml += `<div class="risk-card risk-${sev}">
+                <div class="risk-category">${escHtml(r.category || '')} - ${escHtml(sev)}</div>
+                <div class="risk-desc">${escHtml(r.description || '')}</div>
+            </div>`;
+        });
+        html += _briefingSection('Risk Profile', riskHtml, false);
+    }
+
+    // --- Strategic Assessment ---
+    if (b.strategic_assessment) {
+        html += _briefingSection('Strategic Assessment', `<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap">${escHtml(b.strategic_assessment)}</div>`, false);
+    }
+
+    // --- Intelligence Timeline (from dossier events) ---
+    const changeEvents = (dossier.events || []).filter(e => e.event_type === 'change_detected');
+    const otherEvents = (dossier.events || []).filter(e => e.event_type !== 'change_detected');
+    if (changeEvents.length || otherEvents.length) {
+        let timeHtml = '';
+        changeEvents.forEach(evt => {
+            let data = {};
+            try { data = JSON.parse(evt.data_json || '{}'); } catch {}
+            const field = data.field || '';
+            const changeType = data.change_type || '';
+            let colorClass = 'change-neutral';
+            if (changeType === 'increased') colorClass = 'change-positive';
+            else if (changeType === 'decreased') colorClass = 'change-negative';
+            timeHtml += `<div class="change-row ${colorClass}">
+                <span class="change-field">${escHtml(field.replace(/_/g, ' '))}</span>
+                <span class="change-arrow"><span class="change-new">${escHtml(evt.title || '')}</span></span>
+                <span class="change-source">${escHtml(evt.event_date || '')}</span>
+            </div>`;
+        });
+        otherEvents.forEach(evt => {
+            timeHtml += `<div class="timeline-event">
+                <div class="timeline-date">${escHtml(evt.event_date || '')}</div>
+                <div class="timeline-type">${escHtml(evt.event_type)}</div>
+                <div><div class="timeline-title">${escHtml(evt.title)}</div></div>
+            </div>`;
+        });
+        html += _briefingSection(`Intelligence Timeline (${changeEvents.length + otherEvents.length})`, timeHtml, false);
+    }
+
+    // --- Source Reports ---
+    if (dossier.analyses && dossier.analyses.length) {
+        let srcHtml = '';
+        const byType = {};
+        dossier.analyses.forEach(a => {
+            if (!byType[a.analysis_type]) byType[a.analysis_type] = [];
+            byType[a.analysis_type].push(a);
+        });
+        const now = new Date();
+        Object.entries(byType).forEach(([type, runs]) => {
+            const latest = runs[0];
+            const lastDate = new Date(latest.created_at);
+            const days = Math.floor((now - lastDate) / (1000 * 60 * 60 * 24));
+            let freshness = 'fresh', flabel = 'Fresh';
+            if (days >= 90) { freshness = 'very-stale'; flabel = `${days}d ago`; }
+            else if (days >= 30) { freshness = 'stale'; flabel = `${days}d ago`; }
+            else if (days >= 7) { freshness = 'recent'; flabel = `${days}d ago`; }
+            else { flabel = days === 0 ? 'Today' : `${days}d ago`; }
+            srcHtml += `<div class="staleness-row">
+                <span style="color:var(--text-primary);font-weight:500;min-width:80px">${escHtml(type)}</span>
+                <span class="staleness-badge staleness-${freshness}">${flabel}</span>
+                <span style="font-size:10px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
+                ${latest.report_file ? `<span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
+            </div>`;
+        });
+        html += _briefingSection('Source Reports', srcHtml, false);
+    }
+
+    document.getElementById('right-content').innerHTML = html;
+    rp.classList.add('open');
+}
+
+async function generateBriefing(companyName) {
+    const btn = event && event.target;
+    if (btn) { btn.disabled = true; btn.textContent = 'Generating...'; }
+
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/briefing`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.ok) {
+            // Reload the dossier to get the updated briefing
+            await openDossier(companyName);
+        } else {
+            alert(data.error || 'Briefing generation failed');
+            if (btn) { btn.disabled = false; btn.textContent = 'Refresh Briefing'; }
+        }
+    } catch (e) {
+        alert('Error generating briefing: ' + e.message);
+        if (btn) { btn.disabled = false; btn.textContent = 'Refresh Briefing'; }
+    }
+}
+
+function showLegacyDossierDetail(d) {
+    const rp = document.getElementById('right-pane');
     document.getElementById('right-company').textContent = d.company_name;
     document.getElementById('right-type').textContent = d.sector || 'Company Dossier';
     document.getElementById('right-date').textContent = `Updated ${d.updated_at || ''}`;
     currentReportFilename = null;
 
     let html = '';
+
+    // Generate Briefing button
+    html += `<div style="padding:12px;text-align:center;border-bottom:1px solid var(--border);margin-bottom:12px">
+        <button class="briefing-btn briefing-btn-primary" onclick="generateBriefing('${escHtml(d.company_name)}')">Generate Intelligence Briefing</button>
+        <div style="font-size:10px;color:var(--text-muted);margin-top:4px">Requires at least 2 analyses</div>
+    </div>`;
 
     // Key facts section
     const allFacts = {};
@@ -1134,18 +1842,15 @@ function showDossierDetail(d) {
             const field = data.field || '';
             const pct = data.pct_change;
             const changeType = data.change_type || '';
-            // Determine color class
             let colorClass = 'change-neutral';
             if (changeType === 'increased') colorClass = 'change-positive';
             else if (changeType === 'decreased') colorClass = 'change-negative';
             else if (changeType === 'changed') {
-                // For sentiment/hiring trend, "stable" or "negative" is a decline
                 const newVal = String(data.new_value || '').toLowerCase();
                 if (newVal === 'negative' || newVal === 'shrinking') colorClass = 'change-negative';
                 else if (newVal === 'positive' || newVal === 'growing') colorClass = 'change-positive';
             }
             const source = (evt.description || '').replace('Detected during ', '').replace(' analysis', '');
-
             html += `<div class="change-row ${colorClass}">
                 <span class="change-field">${escHtml(field.replace(/_/g, ' '))}</span>
                 <span class="change-arrow">`;
@@ -1192,7 +1897,7 @@ function showDossierDetail(d) {
                 <span style="color:var(--text-primary);font-weight:500;min-width:80px">${escHtml(type)}</span>
                 <span class="staleness-badge staleness-${freshness}">${label}</span>
                 <span style="font-size:10px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
-                ${latest.report_file ? `<span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace('reports/',''))}')">View report</span>` : ''}
+                ${latest.report_file ? `<span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
             </div>`;
         });
         html += '</div>';
@@ -1508,7 +2213,23 @@ async function openReport(filename) {
         document.getElementById('right-company').textContent = data.company || '';
         document.getElementById('right-type').textContent = data.type || '';
         document.getElementById('right-date').textContent = data.date || '';
-        document.getElementById('right-content').innerHTML = marked.parse(data.content || '');
+        const contentEl = document.getElementById('right-content');
+        contentEl.innerHTML = marked.parse(data.content || '');
+
+        // Intercept clicks on report file links (e.g. reports\company_financial_2026-03-21.md)
+        contentEl.querySelectorAll('a').forEach(link => {
+            const href = link.getAttribute('href') || '';
+            if (href.match(/reports[\\\/].+\.md$/)) {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    // Extract just the filename from the path
+                    const fn = href.replace(/^reports[\\\/]/, '');
+                    openReport(fn);
+                });
+                link.style.cursor = 'pointer';
+            }
+        });
+
         document.getElementById('right-pane').classList.add('open');
         renderReportList();
     } catch (e) {

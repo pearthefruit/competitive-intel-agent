@@ -101,6 +101,9 @@ def _migrate_db(conn):
         ("classifications", "department_subcategory", "TEXT"),
         ("classifications", "strategic_tags", "TEXT"),
         ("companies", "seniority_framework", "TEXT"),
+        ("dossiers", "briefing_json", "TEXT"),
+        ("dossiers", "briefing_generated_at", "TIMESTAMP"),
+        ("dossiers", "briefing_model", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:

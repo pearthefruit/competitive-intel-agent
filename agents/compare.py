@@ -134,6 +134,7 @@ def compare_companies(company_a, company_b, analyses=None):
     print(f"{'='*60}")
 
     save_to_dossier(company_a, "comparison", report_file=str(filename), report_text=report, model_used=model)
+    save_to_dossier(company_b, "comparison", report_file=str(filename), report_text=report, model_used=model)
     return str(filename)
 
 
@@ -231,4 +232,5 @@ def landscape_analysis(company, top_n=3):
     print(f"  Landscape analysis complete! Report: {filename}")
     print(f"{'='*60}")
 
+    save_to_dossier(company, "landscape", report_file=str(filename), report_text=report, model_used=model)
     return str(filename)

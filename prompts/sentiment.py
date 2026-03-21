@@ -28,11 +28,20 @@ How might sentiment affect their competitive position in the talent market?
 
 Rules:
 - Base analysis on what the search results actually say. Do not fabricate ratings or statistics.
-- Note the source of information when possible (Glassdoor, LinkedIn, news articles, etc.).
 - If information is limited, say so — do not speculate extensively.
 - Be balanced — note both positives and negatives.
 - Be direct and analytical — this is competitive intelligence, not a career advice column.
 
+CITATION FORMAT (like Perplexity — clickable numbered links):
+- Assign each unique source URL a number (1, 2, 3...).
+- When referencing a claim, rating, or quote, add a clickable superscript citation: `[¹](url)`, `[²](url)`, etc.
+- Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+- Example: "Glassdoor reviews rate the company 3.8/5 [¹](https://glassdoor.com/...) with compensation cited as a key strength [²](https://linkedin.com/...)."
+- Reuse the same number when citing the same source again.
+
 ## Sources
-At the end of the report, include a **Sources** section listing the URLs from the search results that informed your analysis. Format as markdown links: `[Title](url)`.
+At the end, list all numbered sources:
+1. [Source Title](url)
+2. [Source Title](url)
+...and so on.
 """

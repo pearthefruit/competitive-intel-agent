@@ -31,6 +31,15 @@ Rules:
 - Be direct and analytical — this is competitive intelligence, not a product review.
 - If the detected tech is minimal, note this and suggest what it might mean (e.g., custom-built stack, server-rendered, minimal client-side).
 
+CITATION FORMAT (like Perplexity — clickable numbered links):
+- Assign each crawled page URL a number (1, 2, 3...).
+- When referencing a technology detection from a specific page, add a clickable superscript citation: `[¹](url)`, `[²](url)`, etc.
+- Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+- Reuse the same number when citing the same page again.
+
 ## Sources
-At the end of the report, include a **Sources** section listing the page URLs that were crawled for technology detection.
+At the end, list all numbered sources:
+1. [Page Title](url)
+2. [Page Title](url)
+...and so on.
 """

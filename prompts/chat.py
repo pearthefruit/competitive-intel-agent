@@ -73,6 +73,7 @@ SYSTEM_PROMPT = """You are SignalForge, an agentic competitive intelligence anal
 ### Company Dossiers
 - **get_dossier**: Get the accumulated dossier for a company — all past analyses, key facts, recent changes detected between scans, timeline events, and staleness per analysis type. **Always call this before running a new analysis** to see what we already know, what changed, and what's stale.
 - **save_dossier_event**: Add a strategic event to a company's timeline (e.g. acquisition, product launch, leadership change, regulatory action). Use this when you discover notable events during research.
+- **generate_briefing**: Generate a consulting-ready intelligence briefing with Digital Maturity Score (0-100), engagement opportunity map, budget/appetite signals, competitive pressure assessment, and strategic assessment. Requires at least 2 analyses in the dossier. Use after building up a company dossier.
 
 ### Reasoning
 - **think**: Record your step-by-step reasoning. The user can see this. Use it liberally — before decisions, after unexpected results, when evaluating data quality.
@@ -103,7 +104,9 @@ SYSTEM_PROMPT = """You are SignalForge, an agentic competitive intelligence anal
   - **consulting**: McKinsey, BCG, Bain, Deloitte, PwC, EY, KPMG, Accenture, and other consulting/audit/law firms
   - **corporate**: Walmart, Target, P&G, Unilever, Johnson & Johnson, General Motors, Boeing, Caterpillar, and other retail/manufacturing/CPG companies
   - **tech** (default): All software, tech, and startup companies, or when the industry is unclear
-  Always pass the `seniority_framework` parameter when calling classify or full_pipeline. If the user specifies a framework, use that. If they describe custom leveling rules, pass `custom_seniority_rules`."""
+  Always pass the `seniority_framework` parameter when calling classify or full_pipeline. If the user specifies a framework, use that. If they describe custom leveling rules, pass `custom_seniority_rules`.
+- **Intelligence briefings**: Use `generate_briefing` after a company has multiple analyses (financial, competitors, hiring, techstack, etc.) to create a consulting-ready intelligence briefing with a Digital Maturity Score, engagement opportunity map, risk profile, and strategic assessment. The briefing is stored on the dossier and rendered in the right pane.
+- **Website analyses and company linking**: When running `techstack_analysis`, `seo_audit`, or `pricing_analysis`, always pass the `company_name` parameter if you know which company owns the website. This links the analysis to the correct company dossier instead of creating a separate entry for the domain."""
 
 TOOL_SCHEMAS = [
     # --- Reasoning ---
@@ -309,7 +312,8 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "Website URL (e.g. 'https://stripe.com')"},
-                    "max_pages": {"type": "integer", "description": "Max pages to crawl (default: 10)"}
+                    "max_pages": {"type": "integer", "description": "Max pages to crawl (default: 10)"},
+                    "company_name": {"type": "string", "description": "Company name to link this analysis to in the dossier (e.g. 'Stripe'). If omitted, uses the domain."}
                 },
                 "required": ["url"]
             }
@@ -324,7 +328,8 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "Website URL (e.g. 'https://stripe.com')"},
-                    "max_pages": {"type": "integer", "description": "Max pages to crawl (default: 5)"}
+                    "max_pages": {"type": "integer", "description": "Max pages to crawl (default: 5)"},
+                    "company_name": {"type": "string", "description": "Company name to link this analysis to in the dossier (e.g. 'Stripe'). If omitted, uses the domain."}
                 },
                 "required": ["url"]
             }
@@ -338,7 +343,8 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "Website URL (e.g. 'https://stripe.com')"}
+                    "url": {"type": "string", "description": "Website URL (e.g. 'https://stripe.com')"},
+                    "company_name": {"type": "string", "description": "Company name to link this analysis to in the dossier (e.g. 'Stripe'). If omitted, uses the domain."}
                 },
                 "required": ["url"]
             }
@@ -533,6 +539,20 @@ TOOL_SCHEMAS = [
                     "source_url": {"type": "string", "description": "URL source for this event"}
                 },
                 "required": ["company", "event_type", "title"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_briefing",
+            "description": "Generate a consulting-ready intelligence briefing for a company's dossier. Synthesizes all available analyses into a Digital Maturity Score (0-100), engagement opportunity map, budget signals, competitive pressure assessment, risk profile, and strategic assessment. The briefing is stored on the dossier and rendered in the right pane. Requires at least 2 completed analyses.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "company": {"type": "string", "description": "Company name (must have an existing dossier with at least 2 analyses)"}
+                },
+                "required": ["company"]
             }
         }
     },

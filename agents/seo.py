@@ -186,7 +186,7 @@ def _build_page_details(seo_signals, aeo_signals):
     return "\n".join(details)
 
 
-def seo_audit(url, max_pages=10):
+def seo_audit(url, max_pages=10, company_name=None):
     """Run a full SEO & AEO audit on a website.
 
     Returns path to the generated report markdown file.
@@ -282,5 +282,6 @@ def seo_audit(url, max_pages=10):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[seo] Report saved to {filename}")
-    save_to_dossier(domain, "seo", report_file=str(filename), report_text=report, model_used=model_used)
+    dossier_name = company_name or domain
+    save_to_dossier(dossier_name, "seo", report_file=str(filename), report_text=report, model_used=model_used)
     return str(filename)

@@ -31,8 +31,18 @@ Rules:
 - Be direct and analytical — this is competitive intelligence.
 - Focus on strategic implications, not just listing patents.
 
+CITATION FORMAT (like Perplexity — clickable numbered links):
+- Assign each unique patent or source a number (1, 2, 3...).
+- When referencing a specific patent, add a clickable superscript citation: `[¹](url)`, `[²](url)`, etc.
+- Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+- Example: "Their most-cited patent covers neural network architectures for edge devices [¹](https://patents.google.com/patent/US...)."
+- Reuse the same number when citing the same patent again.
+
 ## Sources
-At the end of the report, include a **Sources** section listing the patent URLs from the data (Google Patents links). Format as markdown links: `[US<patent_number> - Title](url)`.
+At the end, list all numbered sources:
+1. [US12345678 - Patent Title](https://patents.google.com/patent/US12345678)
+2. [US87654321 - Patent Title](https://patents.google.com/patent/US87654321)
+...and so on.
 """
 
 
@@ -54,6 +64,13 @@ Rules:
 - Only state what the search results support. Note when information is limited.
 - The company may hold patents under a different legal entity name, or may be a private company with limited patent visibility.
 
+CITATION FORMAT (like Perplexity — clickable numbered links):
+- Assign each source URL a number (1, 2, 3...).
+- Add clickable superscript citations inline: `[¹](url)`, `[²](url)`, etc.
+- Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+
 ## Sources
-At the end of the report, include a **Sources** section listing the URLs from the search results. Format as markdown links: `[Title](url)`.
+At the end, list all numbered sources:
+1. [Source Title](url)
+...and so on.
 """

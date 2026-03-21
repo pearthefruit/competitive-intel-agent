@@ -50,7 +50,7 @@ def _extract_pricing_content(page):
     return "\n".join(lines)
 
 
-def pricing_analysis(url):
+def pricing_analysis(url, company_name=None):
     """Crawl a website and analyze its pricing strategy. Returns report path or None."""
     if not url.startswith("http"):
         url = f"https://{url}"
@@ -115,5 +115,6 @@ def pricing_analysis(url):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[pricing] Report saved to {filename}")
-    save_to_dossier(domain, "pricing", report_file=str(filename), report_text=report, model_used=model)
+    dossier_name = company_name or domain
+    save_to_dossier(dossier_name, "pricing", report_file=str(filename), report_text=report, model_used=model)
     return str(filename)
