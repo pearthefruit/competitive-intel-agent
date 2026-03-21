@@ -12,9 +12,17 @@ from agents.collect import collect
 from agents.classify import classify
 from agents.analyze import analyze
 from scraper.web_search import search_news, search_web, format_search_results
+from agents.seo import seo_audit
+from agents.financial import financial_analysis
+from agents.techstack import techstack_analysis
+from agents.patents import patent_analysis
+from agents.pricing import pricing_analysis
+from agents.competitors import competitor_analysis
+from agents.sentiment import sentiment_analysis
 from prompts.chat import SYSTEM_PROMPT, TOOL_SCHEMAS
 
 MAX_HISTORY = 20
+MAX_TOOL_RESULT_CHARS = 4000  # Truncate large tool results to avoid context overflow
 
 # Providers that support OpenAI-compatible function calling
 CHAT_PROVIDERS = [
@@ -48,6 +56,7 @@ class ChatLLM:
 
     def chat(self, messages, tools=None):
         """Send chat completion request. Returns the assistant message dict."""
+        errors = []
         for p in self.providers:
             try:
                 body = {
@@ -66,17 +75,25 @@ class ChatLLM:
                 resp = self.http.post(p["url"], json=body, headers=headers)
 
                 if resp.status_code == 429:
-                    continue  # Try next provider
+                    errors.append(f"{p['name']}: rate limited (429)")
+                    continue
                 if resp.status_code != 200:
+                    # Extract error message from response
+                    try:
+                        err_detail = resp.json().get("error", {}).get("message", resp.text[:200])
+                    except Exception:
+                        err_detail = resp.text[:200]
+                    errors.append(f"{p['name']}: {resp.status_code} — {err_detail}")
                     continue
 
                 data = resp.json()
                 return data["choices"][0]["message"]
 
-            except Exception:
+            except Exception as e:
+                errors.append(f"{p['name']}: {e}")
                 continue
 
-        raise RuntimeError("All chat providers failed")
+        raise RuntimeError("All chat providers failed:\n  " + "\n  ".join(errors))
 
     def close(self):
         self.http.close()
@@ -118,7 +135,12 @@ def _safe_query_db(sql, db_path):
 
 
 def _execute_tool(name, args, db_path):
-    """Execute a tool call and return the result as a string."""
+    """Execute a tool call and return a concise result string for the LLM.
+
+    Verbose progress output is printed to the terminal for the user to see,
+    but only a short summary goes into the LLM conversation history to
+    avoid context overflow.
+    """
     # Capture stdout from pipeline functions
     old_stdout = sys.stdout
     sys.stdout = captured = io.StringIO()
@@ -126,37 +148,31 @@ def _execute_tool(name, args, db_path):
     try:
         if name == "collect":
             new, skipped = collect(args["company"], args.get("url"), db_path)
-            output = captured.getvalue()
-            return f"{output}\nResult: {new} new jobs, {skipped} duplicates skipped."
+            return f"Collected {new} new jobs, {skipped} duplicates skipped."
 
         elif name == "classify":
             count = classify(args["company"], db_path)
-            output = captured.getvalue()
-            return f"{output}\nResult: {count} jobs classified."
+            return f"Classified {count} jobs."
 
         elif name == "analyze":
             path = analyze(args["company"], db_path)
-            output = captured.getvalue()
             if path:
-                return f"{output}\nResult: Report saved to {path}"
-            return f"{output}\nResult: Analysis failed — see output above."
+                return f"Strategic intelligence report saved to: {path}"
+            return "Analysis failed — no data available. Make sure jobs have been collected and classified first."
 
         elif name == "full_pipeline":
             new, skipped = collect(args["company"], args.get("url"), db_path)
             if new == 0 and skipped == 0:
-                output = captured.getvalue()
-                return f"{output}\nPipeline stopped: no jobs collected."
+                return "Pipeline stopped: no jobs collected. Check the company name or provide a direct URL."
 
             count = classify(args["company"], db_path)
             path = analyze(args["company"], db_path)
-            output = captured.getvalue()
-            summary = f"\nPipeline complete: {new} new jobs collected, {count} classified."
+            summary = f"Pipeline complete: {new} new jobs collected, {count} classified."
             if path:
-                summary += f" Report: {path}"
-            return f"{output}{summary}"
+                summary += f" Report saved to: {path}"
+            return summary
 
         elif name == "query_db":
-            # Don't need captured stdout for DB queries
             sys.stdout = old_stdout
             old_stdout = None
             return _safe_query_db(args["sql"], db_path)
@@ -165,11 +181,56 @@ def _execute_tool(name, args, db_path):
             sys.stdout = old_stdout
             old_stdout = None
             query = args["query"]
-            # Search both news and web
             news = search_news(query, max_results=5)
             web = search_web(query, max_results=5)
             all_results = news + web
             return format_search_results(all_results) if all_results else "No results found."
+
+        elif name == "seo_audit":
+            audit_url = args["url"]
+            max_pages = args.get("max_pages", 10)
+            path = seo_audit(audit_url, max_pages)
+            if path:
+                return f"SEO/AEO audit saved to: {path}"
+            return "SEO audit failed — could not crawl the site. Check the URL and try again."
+
+        elif name == "financial_analysis":
+            path = financial_analysis(args["company"])
+            if path:
+                return f"Financial analysis saved to: {path}"
+            return "Financial analysis failed — no data found."
+
+        elif name == "techstack_analysis":
+            tech_url = args["url"]
+            max_pages = args.get("max_pages", 5)
+            path = techstack_analysis(tech_url, max_pages)
+            if path:
+                return f"Tech stack analysis saved to: {path}"
+            return "Tech stack analysis failed — could not crawl the site."
+
+        elif name == "patent_analysis":
+            path = patent_analysis(args["company"])
+            if path:
+                return f"Patent analysis saved to: {path}"
+            return "Patent analysis failed — no patent data found."
+
+        elif name == "pricing_analysis":
+            path = pricing_analysis(args["url"])
+            if path:
+                return f"Pricing analysis saved to: {path}"
+            return "Pricing analysis failed — could not crawl the site."
+
+        elif name == "competitor_analysis":
+            path = competitor_analysis(args["company"])
+            if path:
+                return f"Competitor analysis saved to: {path}"
+            return "Competitor analysis failed — no data found."
+
+        elif name == "sentiment_analysis":
+            path = sentiment_analysis(args["company"])
+            if path:
+                return f"Sentiment analysis saved to: {path}"
+            return "Sentiment analysis failed — no data found."
 
         else:
             return f"Unknown tool: {name}"
@@ -180,10 +241,10 @@ def _execute_tool(name, args, db_path):
     finally:
         if old_stdout is not None:
             sys.stdout = old_stdout
-            # Print captured output so user sees progress
-            progress = captured.getvalue()
-            if progress:
-                print(progress, end="")
+        # Always print captured progress to terminal so user sees live output
+        progress = captured.getvalue()
+        if progress:
+            print(progress, end="")
 
 
 def chat_repl(db_path="intel.db"):
@@ -219,8 +280,21 @@ def chat_repl(db_path="intel.db"):
             try:
                 response = llm.chat(history, tools=TOOL_SCHEMAS)
             except RuntimeError as e:
-                print(f"\n[error] {e}")
-                break
+                error_msg = str(e).lower()
+                # If context overflow, silently trim and retry
+                if any(kw in error_msg for kw in ["token", "context", "length", "too long", "too large", "maximum", "reduce"]):
+                    history = [history[0]] + history[-4:]  # Keep system + last 4 messages
+                    try:
+                        response = llm.chat(history, tools=TOOL_SCHEMAS)
+                    except RuntimeError:
+                        print("\nAssistant: Sorry, I hit a temporary issue. Please try again.\n")
+                        break
+                elif "rate limit" in error_msg or "429" in error_msg:
+                    print("\nAssistant: I'm being rate limited right now. Please wait a moment and try again.\n")
+                    break
+                else:
+                    print("\nAssistant: Sorry, I hit a temporary issue. Please try again.\n")
+                    break
 
             # Check if LLM wants to call tools
             tool_calls = response.get("tool_calls")
@@ -236,6 +310,10 @@ def chat_repl(db_path="intel.db"):
                     print(f"\n[calling {fn_name}({', '.join(f'{k}={v!r}' for k, v in fn_args.items())})]")
 
                     result = _execute_tool(fn_name, fn_args, db_path)
+
+                    # Truncate large results to avoid context overflow
+                    if len(result) > MAX_TOOL_RESULT_CHARS:
+                        result = result[:MAX_TOOL_RESULT_CHARS] + f"\n\n... (truncated — {len(result)} chars total)"
 
                     # Add tool result to history
                     history.append({

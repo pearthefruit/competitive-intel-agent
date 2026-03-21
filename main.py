@@ -9,6 +9,13 @@ from agents.collect import collect
 from agents.classify import classify
 from agents.analyze import analyze
 from agents.chat import chat_repl
+from agents.seo import seo_audit
+from agents.financial import financial_analysis
+from agents.techstack import techstack_analysis
+from agents.patents import patent_analysis
+from agents.pricing import pricing_analysis
+from agents.competitors import competitor_analysis
+from agents.sentiment import sentiment_analysis
 
 
 @click.group()
@@ -67,6 +74,57 @@ def full(company, url, db):
         print(f"\n{'='*60}")
         print(f"  Done! Report: {report_path}")
         print(f"{'='*60}")
+
+
+@cli.command("seo")
+@click.option("--url", required=True, help="Website URL to audit")
+@click.option("--max-pages", default=10, help="Max pages to crawl (default: 10)")
+def seo_cmd(url, max_pages):
+    """Run an SEO & AEO audit on a website."""
+    seo_audit(url, max_pages)
+
+
+@cli.command("financial")
+@click.option("--company", required=True, help="Company name")
+def financial_cmd(company):
+    """Run a financial analysis (SEC EDGAR for public, web search for private)."""
+    financial_analysis(company)
+
+
+@cli.command("techstack")
+@click.option("--url", required=True, help="Website URL to analyze")
+@click.option("--max-pages", default=5, help="Max pages to crawl (default: 5)")
+def techstack_cmd(url, max_pages):
+    """Detect and analyze a website's technology stack."""
+    techstack_analysis(url, max_pages)
+
+
+@cli.command("patents")
+@click.option("--company", required=True, help="Company name")
+def patents_cmd(company):
+    """Analyze a company's patent portfolio (USPTO data)."""
+    patent_analysis(company)
+
+
+@cli.command("pricing")
+@click.option("--url", required=True, help="Website URL to analyze")
+def pricing_cmd(url):
+    """Analyze a website's pricing strategy and product tiers."""
+    pricing_analysis(url)
+
+
+@cli.command("competitors")
+@click.option("--company", required=True, help="Company name")
+def competitors_cmd(company):
+    """Map the competitive landscape for a company."""
+    competitor_analysis(company)
+
+
+@cli.command("sentiment")
+@click.option("--company", required=True, help="Company name")
+def sentiment_cmd(company):
+    """Analyze employee sentiment and workplace culture."""
+    sentiment_analysis(company)
 
 
 @cli.command("chat")
