@@ -158,9 +158,9 @@ def heuristic_preclassify(job, framework="tech"):
     Returns dict with keys that were confidently classified.
     Missing keys mean the heuristic was uncertain — LLM should decide.
     """
-    title = job.get("title") or ""
-    dept_hint = job.get("department") or ""
-    desc = job.get("description") or ""
+    title = job["title"] or ""
+    dept_hint = job["department"] or ""
+    desc = job["description"] or ""
 
     result = {}
 

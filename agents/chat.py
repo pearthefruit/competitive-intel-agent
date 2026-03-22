@@ -521,6 +521,23 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                             custom_seniority_rules=args.get("custom_seniority_rules"))
             return f"Classified {count} jobs."
 
+        elif name == "reclassify":
+            from db import get_connection, get_company_id, clear_classifications
+            conn = get_connection(db_path)
+            cid = get_company_id(conn, args["company"])
+            if not cid:
+                conn.close()
+                return f"Company '{args['company']}' not found."
+            clear_classifications(conn, cid)
+            conn.close()
+            count = classify(args["company"], db_path,
+                            seniority_framework=args.get("seniority_framework"))
+            path = analyze(args["company"], db_path)
+            summary = f"Reclassified {count} jobs with updated subcategories."
+            if path:
+                summary += f" Report saved to: {path}"
+            return summary
+
         elif name == "analyze":
             path = analyze(args["company"], db_path)
             if path:
@@ -678,6 +695,10 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             sys.stdout = old_stdout
             old_stdout = None
             return _save_dossier_event(args, db_path)
+
+        elif name == "refresh_key_facts":
+            from agents.llm import reextract_all_key_facts
+            return reextract_all_key_facts(args["company"], db_path)
 
         elif name == "generate_briefing":
             from agents.briefing import generate_briefing

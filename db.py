@@ -218,13 +218,14 @@ def set_company_seniority_framework(conn, company_id, framework):
 
 
 def get_unclassified_jobs(conn, company_id):
-    return conn.execute(
+    rows = conn.execute(
         """SELECT j.* FROM jobs j
            WHERE j.company_id = ?
              AND j.id NOT IN (SELECT job_id FROM classifications)
            ORDER BY j.id""",
         (company_id,),
     ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def _to_json_str(value, default="[]"):
@@ -255,8 +256,17 @@ def insert_classification(conn, job_id, classification, model_used):
     conn.commit()
 
 
+def clear_classifications(conn, company_id):
+    """Delete all classifications for a company so jobs can be re-classified."""
+    conn.execute(
+        "DELETE FROM classifications WHERE job_id IN (SELECT id FROM jobs WHERE company_id = ?)",
+        (company_id,),
+    )
+    conn.commit()
+
+
 def get_all_classified_jobs(conn, company_id):
-    return conn.execute(
+    rows = conn.execute(
         """SELECT j.*, c.department_category, c.department_subcategory,
                   c.seniority_level, c.key_skills,
                   c.strategic_signals, c.strategic_tags,
@@ -267,10 +277,12 @@ def get_all_classified_jobs(conn, company_id):
            ORDER BY c.department_category, c.seniority_level""",
         (company_id,),
     ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def get_company_info(conn, company_id):
-    return conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+    row = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+    return dict(row) if row else None
 
 
 # --- Dossier helpers ---

@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -1073,6 +1074,91 @@
         .send-btn:hover { opacity: 0.9; }
         .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+        /* Context pill */
+        .context-pill-bar {
+            padding: 4px 24px 0;
+            flex-shrink: 0;
+            background: var(--bg-primary);
+        }
+        .context-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            background: rgba(59,130,246,0.08);
+            border: 1px solid rgba(59,130,246,0.25);
+            border-radius: 16px;
+            font-size: 11px;
+            color: var(--accent);
+            max-width: 100%;
+        }
+        .context-pill-text {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .context-pill-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 14px;
+            padding: 0 2px;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+        .context-pill-close:hover { color: var(--red); }
+
+        /* Resume prompt */
+        .resume-prompt {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 24px;
+            background: var(--bg-tertiary);
+            border-top: 1px solid var(--border);
+            font-size: 12px;
+            color: var(--text-secondary);
+            animation: fadeIn 0.15s ease;
+        }
+        .resume-btn {
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            transition: all 0.1s;
+        }
+        .resume-btn.resume-yes {
+            background: rgba(59,130,246,0.12);
+            border-color: rgba(59,130,246,0.25);
+            color: var(--accent);
+        }
+        .resume-btn.resume-yes:hover { background: rgba(59,130,246,0.22); }
+        .resume-btn.resume-no:hover { background: var(--bg-active); }
+
+        /* Chat item company badge */
+        .chat-item-meta {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 2px;
+        }
+        .chat-item-company {
+            font-size: 10px;
+            color: var(--accent);
+            background: rgba(59,130,246,0.08);
+            padding: 1px 6px;
+            border-radius: 3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100px;
+        }
+
         /* --- RESIZE HANDLE --- */
         .resize-handle {
             width: 0;
@@ -1352,6 +1438,17 @@
                 </div>
             </div>
         </div>
+        <div class="context-pill-bar" id="context-pill-bar" style="display:none">
+            <div class="context-pill" id="context-pill">
+                <span class="context-pill-text" id="context-pill-text"></span>
+                <button class="context-pill-close" onclick="clearContextPill()" title="Clear context">&times;</button>
+            </div>
+        </div>
+        <div class="resume-prompt" id="resume-prompt" style="display:none">
+            <span id="resume-prompt-text"></span>
+            <button class="resume-btn resume-yes" id="resume-yes-btn">Resume</button>
+            <button class="resume-btn" id="resume-new-btn">New chat</button>
+        </div>
         <div class="chat-input-bar">
             <div class="chat-input-wrap">
                 <textarea class="chat-input" id="chat-input" placeholder="Ask about a company..." rows="1"
@@ -1417,6 +1514,79 @@ let messageQueue = [];
 let currentReportFilename = null;
 let allReports = [];
 
+// Context pill state
+let activeContext = null;       // { company, type, label }
+let contextDismissed = false;
+let resumePromptShown = false;
+
+function setContext(company, type, label) {
+    activeContext = { company: company, type: type, label: label };
+    contextDismissed = false;
+    resumePromptShown = false;
+    renderContextPill();
+}
+
+function clearContextPill() {
+    contextDismissed = true;
+    renderContextPill();
+}
+
+function clearContextFull() {
+    activeContext = null;
+    contextDismissed = false;
+    resumePromptShown = false;
+    renderContextPill();
+}
+
+function renderContextPill() {
+    const bar = document.getElementById('context-pill-bar');
+    const text = document.getElementById('context-pill-text');
+    if (!activeContext || contextDismissed) {
+        bar.style.display = 'none';
+        return;
+    }
+    text.textContent = 'Viewing: ' + activeContext.company + ' \u00b7 ' + activeContext.label;
+    bar.style.display = 'block';
+}
+
+function getContextCompany() {
+    return activeContext ? activeContext.company : null;
+}
+
+function findExistingCompanyChat(company) {
+    if (!company) return null;
+    const lc = company.toLowerCase();
+    const chat = getActiveChat();
+    return chats.find(c => c.id !== (chat ? chat.id : '') && (c.company || '').toLowerCase() === lc && c.messages.length > 0);
+}
+
+function showResumePrompt(company, existingChat) {
+    return new Promise(resolve => {
+        const bar = document.getElementById('resume-prompt');
+        const text = document.getElementById('resume-prompt-text');
+        text.textContent = `Continue previous ${company} conversation?`;
+        bar.style.display = 'flex';
+
+        const yesBtn = document.getElementById('resume-yes-btn');
+        const newBtn = document.getElementById('resume-new-btn');
+
+        function cleanup() {
+            bar.style.display = 'none';
+            yesBtn.removeEventListener('click', onYes);
+            newBtn.removeEventListener('click', onNew);
+        }
+        function onYes() { cleanup(); resolve('resume'); }
+        function onNew() { cleanup(); resolve('new'); }
+
+        yesBtn.addEventListener('click', onYes);
+        newBtn.addEventListener('click', onNew);
+    });
+}
+
+function hideResumePrompt() {
+    document.getElementById('resume-prompt').style.display = 'none';
+}
+
 // ===================== INIT =====================
 document.addEventListener('DOMContentLoaded', () => {
     loadChats();
@@ -1459,19 +1629,22 @@ function switchLeftTab(tab) {
 function renderChatList() {
     const filter = (document.getElementById('chat-filter').value || '').toLowerCase();
     const list = document.getElementById('chat-list');
-    const filtered = chats.filter(c => !filter || (c.title || '').toLowerCase().includes(filter));
+    const filtered = chats.filter(c => !filter || (c.title || '').toLowerCase().includes(filter) || (c.company || '').toLowerCase().includes(filter));
 
     list.innerHTML = filtered.map(c => `
         <div class="chat-item ${c.id === activeChatId ? 'active' : ''}" onclick="loadChat('${c.id}')">
             <button class="chat-item-delete" onclick="event.stopPropagation();deleteChat('${c.id}')" title="Delete">&times;</button>
             <div class="chat-item-title">${escHtml(c.title || 'New Chat')}</div>
-            <div class="chat-item-date">${formatDate(c.created)}</div>
+            <div class="chat-item-meta">
+                <span class="chat-item-date">${formatDate(c.created)}</span>
+                ${c.company ? `<span class="chat-item-company">${escHtml(c.company)}</span>` : ''}
+            </div>
         </div>
     `).join('');
 }
 
 function newChat() {
-    const chat = { id: 'chat_' + Date.now(), title: '', messages: [], created: Date.now() };
+    const chat = { id: 'chat_' + Date.now(), title: '', company: null, messages: [], created: Date.now() };
     chats.unshift(chat);
     activeChatId = chat.id;
     saveChats();
@@ -1586,6 +1759,8 @@ async function openDossier(companyName) {
         if (!resp.ok) return;
         const dossier = await resp.json();
         activeDossierName = companyName;
+        const dLabel = dossier.briefing_json ? 'intelligence briefing' : 'dossier';
+        setContext(companyName, dossier.briefing_json ? 'briefing' : 'dossier', dLabel);
         renderDossierList();
         showDossierDetail(dossier);
     } catch (e) {
@@ -1620,19 +1795,67 @@ function _scoreColorClass(score) {
 // Global store for source key facts — populated when briefing is rendered
 let _sourceKeyFacts = {};
 
+const _VALID_SOURCES = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis'];
+
 function _renderCitedText(text) {
     // Replace [source] and [source1, source2] tags with clickable badges
     if (!text) return '';
-    const validSources = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis'];
     return escHtml(text).replace(/\[([\w,\s]+)\]/g, (match, inner) => {
-        // Handle comma-separated sources: [hiring, sentiment, analysis]
         const sources = inner.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
         const badges = sources
-            .filter(s => validSources.includes(s))
+            .filter(s => _VALID_SOURCES.includes(s))
             .map(s => `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`);
         return badges.length ? badges.join(' ') : match;
     });
 }
+
+function _stripCitations(text) {
+    // Remove [source] tags from text, return clean prose
+    if (!text) return '';
+    return escHtml(text).replace(/\s*\[([\w,\s]+)\]/g, (match, inner) => {
+        const sources = inner.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+        const allValid = sources.every(s => _VALID_SOURCES.includes(s));
+        return allValid ? '' : match;
+    }).replace(/\s{2,}/g, ' ').trim();
+}
+
+function _extractSources(text) {
+    // Extract unique source tags from text, return as array
+    if (!text) return [];
+    const found = new Set();
+    text.replace(/\[([\w,\s]+)\]/g, (match, inner) => {
+        inner.split(',').map(s => s.trim().toLowerCase()).filter(s => _VALID_SOURCES.includes(s)).forEach(s => found.add(s));
+    });
+    return [...found];
+}
+
+// Priority keys per analysis type — show these first in popover
+const _SOURCE_PRIORITY_KEYS = {
+    hiring: ['total_open_roles','engineering_ratio','ai_ml_ratio','top_departments','seniority_skew','growth_signal','hiring_trend','top_strategic_tags'],
+    sentiment: ['overall_sentiment','glassdoor_rating','recommend_to_friend_pct','top_pros','top_cons','culture_themes','sentiment_trend'],
+    financial: ['revenue','revenue_growth','market_cap','valuation','headcount','profitability','cash_position','financial_health'],
+    patents: ['total_patents','ai_ml_patents','top_patent_areas','patent_trend','rd_intensity','recent_patents'],
+    competitors: ['key_competitors','market_position','competitive_advantages','competitive_moat','threat_level'],
+    techstack: ['frontend_framework','analytics_tools','ab_testing_tools','infrastructure_provider','tech_modernity_signals'],
+    seo: ['seo_overall_assessment','aeo_readiness_signals','seo_schema_types','pages_analyzed'],
+    pricing: ['pricing_model','pricing_tiers','price_range','target_segment','has_free_tier'],
+    profile: ['sector','key_products','revenue','headcount','key_competitors','business_model'],
+};
+
+const _SOURCE_LABELS = {
+    hiring: 'Hiring Intelligence',
+    sentiment: 'Employee Sentiment',
+    financial: 'Financial Data',
+    patents: 'Patent & IP',
+    competitors: 'Competitive Landscape',
+    techstack: 'Tech Stack',
+    seo: 'SEO/AEO Audit',
+    pricing: 'Pricing Analysis',
+    profile: 'Company Profile',
+    landscape: 'Market Landscape',
+    compare: 'Comparison',
+    analysis: 'Analysis',
+};
 
 function showSourcePopover(event, type) {
     // Remove any existing popover
@@ -1646,22 +1869,38 @@ function showSourcePopover(event, type) {
     pop.className = 'source-popover';
     pop.id = 'active-source-popover';
 
-    let html = `<div class="source-popover-header"><span class="source-badge source-${type}">${type}</span> Analysis Evidence</div>`;
+    const label = _SOURCE_LABELS[type] || (type.charAt(0).toUpperCase() + type.slice(1));
+    let html = `<div class="source-popover-header"><span class="source-badge source-${type}">${type}</span> ${escHtml(label)}</div>`;
 
     if (facts && Object.keys(facts).length) {
-        // Show top 3-4 most useful facts from this source
-        const entries = Object.entries(facts).filter(([k, v]) => v !== null && v !== undefined && v !== '');
-        const shown = entries.slice(0, 4);
-        shown.forEach(([key, val]) => {
-            const label = key.replace(/_/g, ' ');
-            const value = Array.isArray(val) ? val.slice(0, 3).join(', ') : String(val);
-            html += `<div class="source-popover-fact"><strong>${escHtml(label)}:</strong> ${escHtml(value)}</div>`;
+        // Sort entries by priority for this source type
+        const priority = _SOURCE_PRIORITY_KEYS[type] || [];
+        const allEntries = Object.entries(facts).filter(([k, v]) => v !== null && v !== undefined && v !== '');
+        const sorted = allEntries.sort((a, b) => {
+            const ai = priority.indexOf(a[0]);
+            const bi = priority.indexOf(b[0]);
+            if (ai >= 0 && bi >= 0) return ai - bi;
+            if (ai >= 0) return -1;
+            if (bi >= 0) return 1;
+            return 0;
         });
-        if (entries.length > 4) {
-            html += `<div class="source-popover-fact" style="color:var(--text-muted);font-style:italic">+ ${entries.length - 4} more facts</div>`;
+        const shown = sorted.slice(0, 5);
+        shown.forEach(([key, val]) => {
+            const fmtLabel = key.replace(/_/g, ' ').replace(/\bpct\b/g, '%');
+            let value;
+            if (Array.isArray(val)) {
+                value = val.slice(0, 3).join(', ');
+                if (val.length > 3) value += ` (+${val.length - 3} more)`;
+            } else {
+                value = String(val);
+            }
+            html += `<div class="source-popover-fact"><strong>${escHtml(fmtLabel)}:</strong> ${escHtml(value)}</div>`;
+        });
+        if (sorted.length > 5) {
+            html += `<div class="source-popover-fact" style="color:var(--text-muted);font-style:italic">+ ${sorted.length - 5} more facts</div>`;
         }
     } else {
-        html += `<div class="source-popover-fact" style="font-style:italic">No structured facts extracted yet</div>`;
+        html += `<div class="source-popover-fact" style="font-style:italic">No structured facts extracted yet. Run this analysis to populate.</div>`;
     }
 
     html += `<div class="source-popover-link" onclick="dismissSourcePopover();scrollToSourceReport('${type}')">View full report &rarr;</div>`;
@@ -1826,12 +2065,16 @@ function showBriefing(dossier, b) {
         html += renderSubScore(lbl, sub.score || 0);
     });
 
-    // Sub-score rationales with citation badges
+    // Sub-score rationales with source badges at end
     html += `<div style="margin-top:8px">`;
     Object.entries(subLabels).forEach(([key, lbl]) => {
         const sub = subs[key] || {};
         if (sub.rationale) {
-            html += `<div style="margin-bottom:6px"><span style="font-size:10px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:10px;color:var(--text-muted)">${_renderCitedText(sub.rationale)}</span></div>`;
+            const sources = _extractSources(sub.rationale);
+            const badges = sources.map(s =>
+                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')">${s}</span>`
+            ).join(' ');
+            html += `<div style="margin-bottom:6px"><span style="font-size:10px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:10px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
         }
     });
     html += `</div></div>`;
@@ -1863,7 +2106,7 @@ function showBriefing(dossier, b) {
             });
         }
         if (traj.interpretation) {
-            trajHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(traj.interpretation)}</div>`;
+            trajHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_stripCitations(traj.interpretation)}</div>`;
         }
         html += _briefingSection('Hiring Trajectory', trajHtml, true);
     }
@@ -1874,8 +2117,11 @@ function showBriefing(dossier, b) {
         let oppHtml = '';
         opps.forEach(opp => {
             const pClass = `opp-priority-${opp.priority || 'medium'}`;
-            const sources = opp.source_analyses || [];
-            const sourceBadges = sources.map(s =>
+            // Merge explicit source_analyses with any inline [source] tags
+            const explicitSources = opp.source_analyses || [];
+            const inlineSources = _extractSources((opp.evidence || '') + ' ' + (opp.detail || ''));
+            const allSources = [...new Set([...explicitSources, ...inlineSources])];
+            const sourceBadges = allSources.map(s =>
                 `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')">${s}</span>`
             ).join(' ');
             oppHtml += `<div class="opp-card" onclick="this.classList.toggle('expanded')">
@@ -1883,14 +2129,14 @@ function showBriefing(dossier, b) {
                     <span class="opp-service">${escHtml(opp.service || '')}</span>
                     <span class="opp-priority ${pClass}">${escHtml(opp.priority || '')}</span>
                 </div>
-                <div class="opp-evidence">${_renderCitedText(opp.evidence || '')}</div>
+                <div class="opp-evidence">${_stripCitations(opp.evidence || '')}</div>
                 <div class="opp-meta">
                     <span>${escHtml(opp.estimated_scope || '')}</span>
                     <span>${escHtml(opp.entry_point || '')}</span>
                 </div>
                 <div class="opp-detail">
-                    ${opp.detail ? `<div class="opp-detail-text">${_renderCitedText(opp.detail)}</div>` : ''}
-                    ${sources.length ? `<div class="opp-source-links"><span style="font-size:9px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
+                    ${opp.detail ? `<div class="opp-detail-text">${_stripCitations(opp.detail)}</div>` : ''}
+                    ${allSources.length ? `<div class="opp-source-links"><span style="font-size:9px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
                 </div>
             </div>`;
         });
@@ -1903,7 +2149,7 @@ function showBriefing(dossier, b) {
         let budgetHtml = '';
         const confClass = `confidence-${budget.confidence || 'medium'}`;
         budgetHtml += `<div class="budget-row"><span class="budget-label">Can Afford</span><span class="budget-value">${budget.can_afford ? 'Yes' : 'Unlikely'}</span> <span class="confidence-badge ${confClass}">${escHtml(budget.confidence || '')} confidence</span></div>`;
-        if (budget.evidence) budgetHtml += `<div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px">${_renderCitedText(budget.evidence)}</div>`;
+        if (budget.evidence) budgetHtml += `<div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px">${_stripCitations(budget.evidence)}</div>`;
         if (budget.revenue_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Revenue Trend</span><span class="budget-value">${escHtml(budget.revenue_trend)}</span></div>`;
         if (budget.hiring_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Hiring Trend</span><span class="budget-value">${escHtml(budget.hiring_trend)}</span></div>`;
         if (budget.investment_areas && budget.investment_areas.length) {
@@ -2315,12 +2561,35 @@ async function sendMessage() {
     let chat = getActiveChat();
     if (!chat) { newChat(); chat = getActiveChat(); }
 
+    // Resume prompt: if this is first message, context has a company, and a prior chat exists for that company
+    const ctxCompany = getContextCompany();
+    if (chat.messages.length === 0 && ctxCompany && !resumePromptShown) {
+        const existing = findExistingCompanyChat(ctxCompany);
+        if (existing) {
+            resumePromptShown = true;
+            const choice = await showResumePrompt(ctxCompany, existing);
+            if (choice === 'resume') {
+                // Switch to the existing chat and send the message there
+                loadChat(existing.id);
+                chat = getActiveChat();
+            }
+            // 'new' → continue in current empty chat
+        }
+    }
+
     // Clear input immediately
     input.value = '';
     autoResize(input);
 
     if (!chat.title) {
         chat.title = text.slice(0, 60);
+        saveChats();
+        renderChatList();
+    }
+
+    // Seed company from active context
+    if (!chat.company && ctxCompany) {
+        chat.company = ctxCompany;
         saveChats();
         renderChatList();
     }
@@ -2359,11 +2628,18 @@ async function processChat(chat) {
         .filter(m => m.role === 'user' || m.role === 'assistant')
         .map(m => ({ role: m.role, content: m.content }));
 
+    // Build payload with optional company context
+    const payload = { messages: apiMessages };
+    const ctxCompany = activeContext ? activeContext.company : (chat.company || null);
+    if (ctxCompany) {
+        payload.context = { company: ctxCompany, type: activeContext ? activeContext.type : 'inferred' };
+    }
+
     try {
         const resp = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: apiMessages }),
+            body: JSON.stringify(payload),
         });
 
         const reader = resp.body.getReader();
@@ -2446,6 +2722,11 @@ function handleSSE(event, chat) {
         const t = document.getElementById('typing');
         if (t) t.remove();
         chat.messages.push({ role: 'tool_call', name: event.name, args: event.args, result: null, reportFile: null });
+        // Auto-detect company from tool args
+        if (!chat.company && event.args) {
+            const detected = event.args.company || event.args.company_name || event.args.company_a || null;
+            if (detected) { chat.company = detected; }
+        }
         saveChats();
         renderMessages();
 
@@ -2548,6 +2829,7 @@ async function openReport(filename) {
         });
 
         document.getElementById('right-pane').classList.add('open');
+        setContext(data.company || '', 'report', (data.type || 'report') + ' report');
         renderReportList();
     } catch (e) {
         console.error('Failed to load report:', e);
@@ -2561,11 +2843,80 @@ function closeRightPane() {
     rp.style.minWidth = '';
     currentReportFilename = null;
     activeDossierName = null;
+    clearContextFull();
     renderReportList();
     renderDossierList();
 }
 
-function printReport() { window.print(); }
+function printReport() {
+    const content = document.getElementById('right-content').innerHTML;
+    const company = document.getElementById('right-company').textContent || '';
+    const reportType = document.getElementById('right-type').textContent || '';
+    const reportDate = document.getElementById('right-date').textContent || '';
+    const filename = `${(company || 'report').toLowerCase().replace(/\s+/g, '_')}_${reportType}_${reportDate || 'export'}.pdf`;
+
+    // Button feedback
+    const btn = document.querySelector('.right-btn');
+    const origText = btn ? btn.textContent : '';
+    if (btn) { btn.textContent = 'Exporting...'; btn.disabled = true; }
+    const resetBtn = () => { if (btn) { btn.textContent = origText; btn.disabled = false; } };
+
+    // Build element in the main document so html2canvas can access computed styles.
+    // position:absolute at (0,0) with z-index:-1 hides it behind everything
+    // but html2canvas can still capture it.
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'position:absolute;left:0;top:0;width:660px;z-index:-1;background:#09090b;padding:36px 40px;font-family:Inter,-apple-system,system-ui,sans-serif;font-size:13px;line-height:1.6;color:#e4e4e7;';
+
+    // Header + content (uses .md-content class to inherit existing CSS) + footer
+    wrapper.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:12px;border-bottom:2px solid rgba(59,130,246,0.4)">
+            <div>
+                <div style="font-size:20px;font-weight:700;color:#e4e4e7;margin-bottom:4px">${company}</div>
+                <div style="display:flex;align-items:center;gap:8px">
+                    <span style="display:inline-block;padding:2px 8px;border-radius:9999px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;background:rgba(59,130,246,0.15);color:#60a5fa">${reportType}</span>
+                    <span style="font-size:10px;color:#71717a">${reportDate}</span>
+                </div>
+            </div>
+            <div style="text-align:right">
+                <div style="font-size:13px;font-weight:700;color:#60a5fa;letter-spacing:0.3px">SignalForge</div>
+                <div style="font-size:10px;color:#71717a">Competitive Intelligence</div>
+            </div>
+        </div>
+        <div class="md-content">${content}</div>
+        <div style="margin-top:24px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);font-size:9px;color:#52525b;display:flex;justify-content:space-between">
+            <span>Generated by SignalForge</span>
+            <span>${reportDate || new Date().toISOString().slice(0,10)}</span>
+        </div>`;
+
+    document.body.appendChild(wrapper);
+
+    // Small delay for layout to settle
+    requestAnimationFrame(() => {
+        html2pdf().set({
+            margin: [8, 8, 8, 8],
+            filename: filename,
+            image: { type: 'jpeg', quality: 0.95 },
+            html2canvas: {
+                scale: 2,
+                useCORS: true,
+                backgroundColor: '#09090b',
+                logging: false,
+                scrollX: 0,
+                scrollY: 0,
+                windowWidth: 660,
+            },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+        }).from(wrapper).save().then(() => {
+            wrapper.remove();
+            resetBtn();
+        }).catch((err) => {
+            console.error('PDF export error:', err);
+            wrapper.remove();
+            resetBtn();
+        });
+    });
+}
 
 async function deleteCurrentReport() {
     if (!currentReportFilename || !confirm('Delete this report?')) return;

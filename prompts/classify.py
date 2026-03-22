@@ -29,6 +29,28 @@ DEPARTMENT_SUBCATEGORIES = {
     "Design": [
         "UX/Product Design", "Visual/Brand Design", "UX Research", "General Design",
     ],
+    "HR": [
+        "Recruiting/Talent Acquisition", "People Operations", "Compensation/Benefits",
+        "L&D/Training", "HR Business Partner", "DEI", "General HR",
+    ],
+    "Operations": [
+        "Business Operations", "Supply Chain/Logistics", "IT/Systems",
+        "Trust & Safety", "Customer Support", "Facilities", "General Operations",
+    ],
+    "Finance": [
+        "FP&A", "Accounting", "Tax", "Treasury", "Internal Audit",
+        "Investor Relations", "General Finance",
+    ],
+    "Legal": [
+        "Corporate/Commercial", "Privacy/Data Protection", "IP/Patents",
+        "Employment Law", "Compliance/Regulatory", "General Legal",
+    ],
+    "Executive": [
+        "C-Suite", "VP/SVP", "General Manager", "Chief of Staff", "General Executive",
+    ],
+    "Other": [
+        "Administrative", "Workplace/Facilities", "General Other",
+    ],
 }
 
 SENIORITY_LEVELS = [
@@ -156,7 +178,6 @@ def _format_subcategories():
     lines = []
     for dept, subcats in DEPARTMENT_SUBCATEGORIES.items():
         lines.append(f"  {dept}: {', '.join(subcats)}")
-    lines.append("  All other departments: use \"General\"")
     return "\n".join(lines)
 
 
@@ -218,7 +239,7 @@ STRATEGIC TAGS (pick 1-3 ONLY if clearly supported by the job description):
 RULES:
 
 department_category: must be from the provided list exactly.
-department_subcategory: pick the most specific match from the subcategory list above. This is where the strategic signal lives — "Engineering" alone is not useful; "AI/ML" vs "Security" vs "Platform/Infrastructure" tells a very different story.
+department_subcategory: CRITICAL — you MUST pick a specific subcategory from the list above, NOT just "General". The subcategory is the most important strategic signal in this classification. "General" is a last resort ONLY when no other subcategory fits. For example: a recruiter is "Recruiting/Talent Acquisition" not "General HR". A supply chain manager is "Supply Chain/Logistics" not "General Operations". An ML engineer is "AI/ML" not "General Engineering". Read the job title and description carefully to pick the most specific match.
 
 {seniority_rules}
 

@@ -235,6 +235,21 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "reclassify",
+            "description": "Clear existing classifications and re-classify all jobs for a company with improved subcategories. Use when subcategories look wrong (all 'General') or classifications need regeneration.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "company": {"type": "string", "description": "Company name"},
+                    "seniority_framework": {"type": "string", "enum": ["tech", "banking", "consulting", "corporate"], "description": "Industry seniority framework."}
+                },
+                "required": ["company"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "analyze",
             "description": "Generate a strategic intelligence report from classified job data.",
             "parameters": {
@@ -539,6 +554,20 @@ TOOL_SCHEMAS = [
                     "source_url": {"type": "string", "description": "URL source for this event"}
                 },
                 "required": ["company", "event_type", "title"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "refresh_key_facts",
+            "description": "Re-extract structured key facts from all existing analysis reports for a company using improved type-specific prompts. Use this when citation popovers show wrong/generic data (e.g., sentiment badge showing hq_location instead of sentiment scores). Does NOT re-run analyses — just re-reads existing reports and extracts better-structured facts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "company": {"type": "string", "description": "Company name"}
+                },
+                "required": ["company"]
             }
         }
     },

@@ -261,6 +261,29 @@ Format: "Company has 142 open roles with 67% in engineering [hiring]. 29 AI-rela
 
 If you cannot cite a source for a claim, DO NOT make the claim. No unsourced assertions.
 
+SECTION-TO-SOURCE MAPPING — only cite sources that ACTUALLY provide evidence for a section:
+
+| Section | Primary sources | Secondary sources | NEVER cite |
+|---------|----------------|-------------------|------------|
+| tech_modernity | hiring, techstack | patents | sentiment, financial, seo |
+| data_analytics | hiring, techstack | patents | sentiment, financial, seo |
+| ai_readiness | hiring, patents | techstack, competitors | sentiment, financial, seo |
+| organizational_readiness | hiring, sentiment | financial | patents, techstack, seo |
+| hiring_trajectory | hiring ONLY | (none) | sentiment, financial, patents, techstack |
+| engagement_opportunities | Depends on service — cite hiring for hiring-related evidence, financial for budget evidence, patents for IP evidence, techstack for tech evidence, sentiment for culture/org evidence | | Do NOT cite sentiment for tech/data/AI opportunities |
+| budget_signals | financial, hiring | pricing | sentiment, patents, techstack |
+| competitive_pressure | competitors, landscape | hiring | sentiment, financial |
+| financial_position | financial | (none) | sentiment, hiring, patents |
+| innovation_ip | patents | hiring, techstack | sentiment, financial |
+| talent_culture | hiring, sentiment | (none) | patents, financial, techstack |
+| risk_profile | Any source relevant to the specific risk | |
+
+IMPORTANT: [sentiment] = employee sentiment data (Glassdoor/Reddit reviews, sentiment scores). It is ONLY relevant for organizational_readiness, talent_culture, and culture-related engagement opportunities (e.g., Change Management). NEVER cite [sentiment] for tech modernity, data/analytics, AI readiness, hiring trajectory, or budget signals — sentiment has NOTHING to do with those dimensions.
+
+Similarly, [hiring] data should NOT be cited for financial_position or innovation_ip unless directly relevant (e.g., "R&D hiring supports patent activity").
+
+The source_analyses array for each section MUST match the inline [source] tags used in that section's text fields.
+
 ---
 
 DIGITAL CAPABILITY SCORING RUBRIC:

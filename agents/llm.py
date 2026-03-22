@@ -194,11 +194,115 @@ Report:
 
 Return ONLY valid JSON, no explanation."""
 
+_SENTIMENT_FACTS_PROMPT = """Extract structured employee sentiment facts from this analysis report about {company}.
+
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "overall_sentiment": one of "positive", "mixed", "negative"
+- "glassdoor_rating": number (e.g. 4.2) or null
+- "recommend_to_friend_pct": string percentage (e.g. "78%") or null
+- "approve_of_ceo_pct": string percentage (e.g. "92%") or null
+- "top_pros": array of top 3-5 employee pros/positives (short phrases)
+- "top_cons": array of top 3-5 employee cons/negatives (short phrases)
+- "culture_themes": array of 3-5 recurring culture themes (e.g. "mission-driven", "fast-paced", "work-life balance concerns")
+- "notable_concerns": array of 2-3 notable employee concerns or red flags
+- "sentiment_trend": one of "improving", "stable", "declining" or null
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
+_FINANCIAL_FACTS_PROMPT = """Extract structured financial facts from this analysis report about {company}.
+
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "revenue": latest annual revenue as string (e.g. "$50B")
+- "revenue_growth": year-over-year revenue growth as string (e.g. "+23%") or null
+- "market_cap": market cap as string (e.g. "$2.8T") or null
+- "valuation": private valuation as string (e.g. "$380B") or null if public
+- "headcount": approximate employee count as integer
+- "profitability": one of "profitable", "near-breakeven", "unprofitable", "unknown"
+- "cash_position": string describing cash/liquidity (e.g. "$12B cash on hand") or null
+- "recent_funding": string describing latest funding round (e.g. "Series E, $4B at $380B valuation") or null
+- "key_financial_risks": array of top 3 financial risks
+- "financial_health": one of "strong", "moderate", "weak", "unknown"
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
+_COMPETITORS_FACTS_PROMPT = """Extract structured competitive landscape facts from this analysis report about {company}.
+
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "key_competitors": array of top 3-5 direct competitors
+- "market_position": one of "leader", "challenger", "niche", "emerging"
+- "competitive_advantages": array of 3-5 key competitive strengths
+- "competitive_weaknesses": array of 2-3 key competitive vulnerabilities
+- "market_share": string estimate if available (e.g. "~15% of enterprise AI market") or null
+- "competitive_moat": string describing primary defensibility (e.g. "distribution + enterprise relationships") or null
+- "threat_level": one of "high", "medium", "low" — how threatened is this company by competitors
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
+_PATENTS_FACTS_PROMPT = """Extract structured patent/IP facts from this analysis report about {company}.
+
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "total_patents": integer count of patents found
+- "recent_patents": integer count of patents filed in last 2 years or null
+- "top_patent_areas": array of top 3-5 technology areas with patent counts (e.g. ["Machine Learning (12)", "NLP (8)", "Computer Vision (5)"])
+- "ai_ml_patents": integer count of AI/ML related patents or null
+- "patent_trend": one of "accelerating", "steady", "declining" or null
+- "notable_patents": array of 2-3 notable or strategically significant patents (short descriptions)
+- "rd_intensity": one of "very high", "high", "moderate", "low" — overall R&D/innovation intensity
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
+_PROFILE_FACTS_PROMPT = """Extract structured company profile facts from this analysis report about {company}.
+
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "hq_location": headquarters city/state/country
+- "ceo": current CEO name
+- "founded": founding year as integer
+- "sector": industry sector
+- "headcount": approximate employee count as integer
+- "revenue": latest annual revenue as string (e.g. "$50B")
+- "market_cap": market cap as string (e.g. "$2.8T") or null
+- "key_products": array of top 3-5 products/services
+- "key_competitors": array of top 3-5 competitors
+- "business_model": string describing how they make money (1 sentence)
+- "key_risks": array of top 3 business risks
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
 _TYPE_KEY_FACTS_PROMPTS = {
     "techstack": _TECHSTACK_FACTS_PROMPT,
     "seo": _SEO_FACTS_PROMPT,
     "pricing": _PRICING_FACTS_PROMPT,
     "hiring": _HIRING_FACTS_PROMPT,
+    "sentiment": _SENTIMENT_FACTS_PROMPT,
+    "financial": _FINANCIAL_FACTS_PROMPT,
+    "competitors": _COMPETITORS_FACTS_PROMPT,
+    "patents": _PATENTS_FACTS_PROMPT,
+    "profile": _PROFILE_FACTS_PROMPT,
 }
 
 
@@ -216,6 +320,67 @@ def extract_key_facts(company, report_text, analysis_type=None):
         # Clean out null values
         return {k: v for k, v in facts.items() if v is not None}
     return None
+
+
+def reextract_all_key_facts(company, db_path="intel.db"):
+    """Re-extract key facts for all analyses of a company using type-specific prompts.
+
+    Reads existing report files, re-runs extraction with the correct prompt,
+    and updates the DB records in-place. Returns summary of what was updated.
+    """
+    from db import get_connection, get_dossier_by_company
+
+    conn = get_connection(db_path)
+    dossier = get_dossier_by_company(conn, company)
+    if not dossier:
+        conn.close()
+        return f"No dossier found for '{company}'."
+
+    updated = []
+    skipped = []
+
+    for analysis in dossier.get("analyses", []):
+        atype = analysis["analysis_type"]
+        report_file = analysis.get("report_file")
+        analysis_id = analysis["id"]
+
+        if not report_file:
+            skipped.append(f"{atype}: no report file")
+            continue
+
+        report_path = Path(report_file)
+        if not report_path.exists():
+            skipped.append(f"{atype}: report file missing ({report_file})")
+            continue
+
+        try:
+            report_text = report_path.read_text(encoding="utf-8")
+            new_facts = extract_key_facts(company, report_text, analysis_type=atype)
+            if new_facts:
+                facts_json = json.dumps(new_facts)
+                conn.execute(
+                    "UPDATE dossier_analyses SET key_facts_json = ? WHERE id = ?",
+                    (facts_json, analysis_id),
+                )
+                conn.commit()
+                updated.append(f"{atype}: {len(new_facts)} facts extracted")
+            else:
+                skipped.append(f"{atype}: extraction returned nothing")
+        except Exception as e:
+            skipped.append(f"{atype}: error — {e}")
+
+    conn.close()
+
+    lines = [f"Re-extracted key facts for {company}:"]
+    if updated:
+        lines.append(f"\nUpdated ({len(updated)}):")
+        for u in updated:
+            lines.append(f"  ✓ {u}")
+    if skipped:
+        lines.append(f"\nSkipped ({len(skipped)}):")
+        for s in skipped:
+            lines.append(f"  - {s}")
+    return "\n".join(lines)
 
 
 def _parse_numeric(value):

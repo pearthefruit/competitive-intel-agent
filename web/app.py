@@ -18,7 +18,8 @@ load_dotenv()
 from agents.chat import ChatLLM, _execute_tool, MAX_TOOL_RESULT_CHARS
 from prompts.chat import SYSTEM_PROMPT, TOOL_SCHEMAS
 from db import (init_db, get_connection, get_all_dossiers, get_dossier_by_company,
-                get_or_create_dossier, add_dossier_event, get_company_id, get_hiring_snapshots)
+                get_or_create_dossier, add_dossier_event, get_company_id, get_hiring_snapshots,
+                get_latest_key_facts)
 
 
 # --- Helpers ---
@@ -77,6 +78,44 @@ def _get_all_reports():
             info["size"] = f.stat().st_size
             reports.append(info)
     return reports
+
+
+def _build_context_injection(company_name, db_path):
+    """Build a context block for the system prompt when the user is viewing a company."""
+    try:
+        conn = get_connection(db_path)
+        dossier = get_dossier_by_company(conn, company_name)
+        if not dossier:
+            conn.close()
+            return f"[CONTEXT] The user is currently viewing information about {company_name}. No dossier exists yet for this company."
+
+        dossier_id = dossier["id"]
+        facts = get_latest_key_facts(conn, dossier_id)
+        conn.close()
+
+        lines = [f"[CONTEXT] The user is currently viewing information about {company_name}."]
+        if dossier.get("sector"):
+            lines.append(f"Sector: {dossier['sector']}")
+
+        if facts:
+            lines.append("Key intelligence on file:")
+            for atype, info in facts.items():
+                data = info.get("data", {})
+                if isinstance(data, dict):
+                    # Grab up to 5 key facts
+                    snippets = []
+                    for k, v in list(data.items())[:5]:
+                        val = str(v)[:120] if v else ""
+                        if val:
+                            snippets.append(f"  - {k}: {val}")
+                    if snippets:
+                        lines.append(f"  [{atype}] (as of {info.get('as_of', '?')}):")
+                        lines.extend(snippets)
+
+        lines.append("Use this context to answer questions about the company. Don't call get_dossier unless the user asks for deeper details.")
+        return "\n".join(lines)
+    except Exception:
+        return None
 
 
 # --- App Factory ---
@@ -188,7 +227,15 @@ def create_app(db_path="intel.db"):
         if not messages:
             return jsonify({"error": "No messages"}), 400
 
-        history = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+        # Inject company context into system prompt if provided
+        context = data.get("context")
+        system_content = SYSTEM_PROMPT
+        if context and context.get("company"):
+            context_text = _build_context_injection(context["company"], db_path)
+            if context_text:
+                system_content += "\n\n" + context_text
+
+        history = [{"role": "system", "content": system_content}] + messages
 
         def generate():
             try:
