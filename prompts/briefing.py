@@ -60,7 +60,7 @@ _BRIEFING_SCHEMA = {
             "evidence": "string with [source] tags (specific data points justifying this)",
             "detail": "string (2-3 sentences — deeper explanation of why this is needed, what the engagement looks like, expected outcomes)",
             "estimated_scope": "string (e.g. '$1-3M, 6-12 months')",
-            "entry_point": "string (decision-maker title)",
+            "why_now": "string (1-2 sentences — company-specific timing trigger explaining why THIS company needs this NOW, referencing specific data points like recent funding, hiring velocity, sentiment shifts, competitive moves, or regulatory changes)",
             "source_analyses": ["string — which analyses support this opportunity"],
         }
     ],
@@ -340,11 +340,24 @@ Labels (no bias — these are objective descriptors):
 
 ENGAGEMENT OPPORTUNITY MAPPING:
 
-CRITICAL RULE — DO NOT SUGGEST SERVICES THAT ARE THE COMPANY'S CORE COMPETENCY:
-- If the company IS an AI company (OpenAI, Anthropic, Google DeepMind, etc.), do NOT suggest "AI/ML Strategy & Implementation" or "Data & Analytics Modernization" — they are the world experts. Instead, look for adjacent needs: org design for hypergrowth, AI governance/responsible AI frameworks, engineering effectiveness at scale, cybersecurity/compliance for AI products, change management.
-- If the company IS a cloud company (AWS, Azure, GCP), do NOT suggest "Cloud Migration."
+CRITICAL RULE — DO NOT SUGGEST SERVICES THAT ARE THE COMPANY'S CORE COMPETENCY OR ADJACENT EXPERTISE:
+- If the company IS an AI company (OpenAI, Anthropic, Google DeepMind, etc.), do NOT suggest "AI/ML Strategy & Implementation", "Data & Analytics Modernization", OR "AI Governance & Responsible AI" — they are the world experts in ALL of these. Anthropic literally invented Constitutional AI and leads responsible AI research. OpenAI has its own governance frameworks. These companies don't need consulting help with AI anything.
+- If the company IS a cloud company (AWS, Azure, GCP), do NOT suggest "Cloud Migration" or "Enterprise Architecture."
 - If the company IS a cybersecurity company, do NOT suggest "Cybersecurity & Compliance."
-- Apply this principle broadly: never sell a company what they already do better than anyone.
+- Apply this principle broadly and AGGRESSIVELY: never sell a company what they already do better than anyone, AND never sell them what's adjacent to their core expertise either. Think about what they would laugh at if a consultant pitched it.
+
+INSTEAD, focus on their ACTUAL pain points from the data:
+- Hypergrowth scaling problems (99% new roles = organizational chaos)
+- Non-core operational gaps (AI companies still need help with sales ops, supply chain, facilities)
+- M&A integration, international expansion, regulatory compliance in NEW jurisdictions
+- The messy human/org problems that tech excellence doesn't solve
+
+PRIORITY LEVELS — these reflect how much the company NEEDS external help, not how important the category sounds:
+- HIGH = Clear evidence of a gap or pain point in an area OUTSIDE the company's expertise. They can't solve this internally.
+- MEDIUM = Some evidence of need, company has partial capability but could benefit from external expertise.
+- LOW = Minor gap or the company has significant internal capability. Only worth pursuing if the engagement is large or strategic.
+
+If a company scores 80+ in a digital maturity dimension, do NOT suggest HIGH priority consulting for that dimension. A company that IS an AI leader should NEVER have "AI Governance" rated HIGH.
 
 Engagement opportunities should reflect REAL problems the company faces based on evidence, not textbook consulting services. A company can be digitally advanced AND have genuine consulting needs — those needs just won't be in their core domain.
 
@@ -359,7 +372,7 @@ Generate 3-5 prioritized consulting engagement opportunities. Use real consultin
 - Change Management & Org Design
 - Intelligent Automation / RPA
 - Supply Chain Digitization
-- AI Governance & Responsible AI
+- AI Governance & Responsible AI (ONLY for companies ADOPTING AI, never for AI-native companies)
 - Technology Due Diligence (M&A)
 - Engineering Effectiveness & Developer Platform
 - Talent Strategy & Organizational Design
@@ -369,7 +382,7 @@ For each opportunity, provide:
 - Specific evidence from the intelligence data WITH [source] tags (not generic observations)
 - A "detail" field: 2-3 sentences expanding on WHY this is a real need, what the engagement would look like, and what outcomes the client should expect. This is the deeper explanation a partner would want when clicking into the opportunity.
 - Estimated scope: "$500K-1M" (small), "$1-3M" (medium), "$2-5M" (large), "$5M+" (transformation)
-- Decision-maker title who would champion this engagement
+- A "why_now" field: 1-2 sentences explaining the company-specific timing trigger — why THIS company needs this NOW. Reference specific recent events, data points, or inflection points. Examples: "Post-$30B Series G with 99% new roles — the org is scaling faster than its processes can support." or "Revenue grew 29% but sentiment is declining — cultural debt is accumulating during hypergrowth." Make it specific enough that it couldn't apply to a random company.
 - source_analyses: list of which analysis types support this opportunity
 
 ---

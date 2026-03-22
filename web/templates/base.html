@@ -692,6 +692,13 @@
             font-size: 10px;
             color: var(--text-secondary);
         }
+        .opp-why-now {
+            font-size: 10px;
+            color: var(--accent);
+            font-style: italic;
+            margin-top: 4px;
+            line-height: 1.4;
+        }
 
         /* Collapsible briefing sections */
         .briefing-section {
@@ -2132,8 +2139,8 @@ function showBriefing(dossier, b) {
                 <div class="opp-evidence">${_stripCitations(opp.evidence || '')}</div>
                 <div class="opp-meta">
                     <span>${escHtml(opp.estimated_scope || '')}</span>
-                    <span>${escHtml(opp.entry_point || '')}</span>
                 </div>
+                ${opp.why_now ? `<div class="opp-why-now">${escHtml(opp.why_now)}</div>` : ''}
                 <div class="opp-detail">
                     ${opp.detail ? `<div class="opp-detail-text">${_stripCitations(opp.detail)}</div>` : ''}
                     ${allSources.length ? `<div class="opp-source-links"><span style="font-size:9px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
