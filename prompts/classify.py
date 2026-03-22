@@ -119,6 +119,38 @@ NOTE: At companies like Walmart, "Manager" may be an individual contributor. Use
 FRAMEWORK_NAMES = {k: v["name"] for k, v in SENIORITY_FRAMEWORKS.items()}
 
 
+import re
+
+# Patterns that signal the start of EEO / legal boilerplate
+_EEO_PATTERNS = re.compile(
+    r'(?:'
+    r'equal\s+(?:employment\s+)?opportunity|'
+    r'EEO\s|'
+    r'affirmative\s+action|'
+    r'we\s+are\s+(?:an?\s+)?(?:equal|committed\s+to\s+(?:diversity|providing\s+equal))|'
+    r'does\s+not\s+discriminate|'
+    r'without\s+regard\s+to\s+race|'
+    r'reasonable\s+accommodation|'
+    r'E-Verify|'
+    r'background\s+check\s+(?:is\s+)?required|'
+    r'drug[\s-]?free\s+workplace|'
+    r'this\s+(?:job\s+)?description\s+is\s+not\s+(?:designed|intended)\s+to'
+    r')',
+    re.IGNORECASE,
+)
+
+
+def _strip_eeo(text):
+    """Strip EEO / legal boilerplate from end of job descriptions."""
+    if not text:
+        return text
+    match = _EEO_PATTERNS.search(text)
+    if match and match.start() > len(text) * 0.3:
+        # Only strip if the boilerplate starts after the first 30% of the description
+        return text[:match.start()].rstrip()
+    return text
+
+
 def _format_subcategories():
     """Build a readable subcategory reference for the prompt."""
     lines = []
@@ -138,7 +170,7 @@ def build_batch_classify_prompt(jobs, seniority_framework="tech", custom_seniori
     """
     job_blocks = []
     for j in jobs:
-        desc = (j.get("description") or "")[:3000]
+        desc = _strip_eeo((j.get("description") or ""))[:3000]
         dept = j.get("department") or ""
         hint = f" (Department: {dept})" if dept else ""
         job_blocks.append(f"### JOB {j['id']}: {j['title']}{hint}\n{desc}")

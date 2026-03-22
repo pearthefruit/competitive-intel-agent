@@ -477,12 +477,124 @@
         }
         .score-advanced { color: #22c55e; }
         .score-maturing { color: #3b82f6; }
+        .score-developing { color: #eab308; }
         .score-laggard { color: #eab308; }
         .score-predigital { color: #ef4444; }
         .ring-advanced { stroke: #22c55e; }
         .ring-maturing { stroke: #3b82f6; }
+        .ring-developing { stroke: #eab308; }
         .ring-laggard { stroke: #eab308; }
         .ring-predigital { stroke: #ef4444; }
+
+        /* Citation source badges */
+        .source-badge {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 600;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin: 0 1px;
+            cursor: pointer;
+            text-transform: lowercase;
+            vertical-align: middle;
+            transition: opacity 0.15s;
+        }
+        .source-badge:hover { opacity: 0.8; }
+        .source-hiring { background: rgba(59,130,246,0.18); color: #60a5fa; }
+        .source-financial { background: rgba(34,197,94,0.18); color: #4ade80; }
+        .source-patents { background: rgba(168,85,247,0.18); color: #c084fc; }
+        .source-techstack { background: rgba(249,115,22,0.18); color: #fb923c; }
+        .source-sentiment { background: rgba(236,72,153,0.18); color: #f472b6; }
+        .source-competitors { background: rgba(234,179,8,0.18); color: #facc15; }
+        .source-seo { background: rgba(20,184,166,0.18); color: #2dd4bf; }
+        .source-pricing { background: rgba(139,92,246,0.18); color: #a78bfa; }
+        .source-profile { background: rgba(107,114,128,0.18); color: #9ca3af; }
+        .source-landscape { background: rgba(14,165,233,0.18); color: #38bdf8; }
+        .source-compare { background: rgba(251,191,36,0.18); color: #fbbf24; }
+        .source-analysis { background: rgba(107,114,128,0.18); color: #9ca3af; }
+
+        /* Source reference popover */
+        .source-popover {
+            position: fixed;
+            z-index: 2000;
+            max-width: 320px;
+            padding: 10px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-hover);
+            border-radius: 8px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            font-size: 11px;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            animation: popover-in 0.12s ease;
+        }
+        @keyframes popover-in {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .source-popover-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 6px;
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 11px;
+        }
+        .source-popover-fact {
+            margin-bottom: 4px;
+            color: var(--text-muted);
+        }
+        .source-popover-fact strong { color: var(--text-secondary); }
+        .source-popover-link {
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid var(--border);
+            font-size: 10px;
+            color: var(--accent);
+            cursor: pointer;
+        }
+        .source-popover-link:hover { text-decoration: underline; }
+
+        /* Data confidence indicator */
+        .data-confidence-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            margin: 0 12px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .data-confidence-bar .conf-badge {
+            font-size: 9px;
+            font-weight: 600;
+            padding: 1px 5px;
+            border-radius: 3px;
+            text-transform: uppercase;
+        }
+        .conf-high { background: rgba(34,197,94,0.15); color: #22c55e; }
+        .conf-medium { background: rgba(234,179,8,0.15); color: #eab308; }
+        .conf-low { background: rgba(239,68,68,0.15); color: #ef4444; }
+
+        /* Hiring trajectory */
+        .trajectory-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+        .trajectory-arrow {
+            font-size: 10px;
+            font-weight: 700;
+        }
+        .trajectory-up { color: #22c55e; }
+        .trajectory-down { color: #ef4444; }
+        .trajectory-stable { color: #6b7280; }
 
         /* Sub-score bars */
         .sub-score-row {
@@ -523,7 +635,10 @@
             border: 1px solid var(--border);
             border-radius: 8px;
             margin-bottom: 6px;
+            cursor: pointer;
+            transition: border-color 0.15s;
         }
+        .opp-card:hover { border-color: rgba(255,255,255,0.2); }
         .opp-card-header {
             display: flex;
             align-items: center;
@@ -534,6 +649,25 @@
             font-size: 12px;
             font-weight: 600;
             color: var(--text-primary);
+        }
+        .opp-detail {
+            display: none;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border);
+        }
+        .opp-card.expanded .opp-detail { display: block; }
+        .opp-detail-text {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 8px;
+        }
+        .opp-source-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 6px;
         }
         .opp-priority {
             font-size: 10px;
@@ -1479,8 +1613,109 @@ function showDossierDetail(d) {
 function _scoreColorClass(score) {
     if (score >= 80) return 'advanced';
     if (score >= 60) return 'maturing';
-    if (score >= 40) return 'laggard';
+    if (score >= 40) return 'developing';
     return 'predigital';
+}
+
+// Global store for source key facts — populated when briefing is rendered
+let _sourceKeyFacts = {};
+
+function _renderCitedText(text) {
+    // Replace [source] and [source1, source2] tags with clickable badges
+    if (!text) return '';
+    const validSources = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis'];
+    return escHtml(text).replace(/\[([\w,\s]+)\]/g, (match, inner) => {
+        // Handle comma-separated sources: [hiring, sentiment, analysis]
+        const sources = inner.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+        const badges = sources
+            .filter(s => validSources.includes(s))
+            .map(s => `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`);
+        return badges.length ? badges.join(' ') : match;
+    });
+}
+
+function showSourcePopover(event, type) {
+    // Remove any existing popover
+    dismissSourcePopover();
+
+    const facts = _sourceKeyFacts[type];
+    const badge = event.target;
+    const rect = badge.getBoundingClientRect();
+
+    const pop = document.createElement('div');
+    pop.className = 'source-popover';
+    pop.id = 'active-source-popover';
+
+    let html = `<div class="source-popover-header"><span class="source-badge source-${type}">${type}</span> Analysis Evidence</div>`;
+
+    if (facts && Object.keys(facts).length) {
+        // Show top 3-4 most useful facts from this source
+        const entries = Object.entries(facts).filter(([k, v]) => v !== null && v !== undefined && v !== '');
+        const shown = entries.slice(0, 4);
+        shown.forEach(([key, val]) => {
+            const label = key.replace(/_/g, ' ');
+            const value = Array.isArray(val) ? val.slice(0, 3).join(', ') : String(val);
+            html += `<div class="source-popover-fact"><strong>${escHtml(label)}:</strong> ${escHtml(value)}</div>`;
+        });
+        if (entries.length > 4) {
+            html += `<div class="source-popover-fact" style="color:var(--text-muted);font-style:italic">+ ${entries.length - 4} more facts</div>`;
+        }
+    } else {
+        html += `<div class="source-popover-fact" style="font-style:italic">No structured facts extracted yet</div>`;
+    }
+
+    html += `<div class="source-popover-link" onclick="dismissSourcePopover();scrollToSourceReport('${type}')">View full report &rarr;</div>`;
+
+    pop.innerHTML = html;
+    document.body.appendChild(pop);
+
+    // Position below the badge, clamped to viewport
+    const popRect = pop.getBoundingClientRect();
+    let top = rect.bottom + 6;
+    let left = rect.left;
+    if (top + popRect.height > window.innerHeight - 10) top = rect.top - popRect.height - 6;
+    if (left + popRect.width > window.innerWidth - 10) left = window.innerWidth - popRect.width - 10;
+    pop.style.top = top + 'px';
+    pop.style.left = Math.max(10, left) + 'px';
+
+    // Dismiss on outside click (after a tick to avoid immediate dismiss)
+    setTimeout(() => {
+        document.addEventListener('click', _popoverOutsideClick, { once: true });
+    }, 10);
+}
+
+function _popoverOutsideClick(e) {
+    const pop = document.getElementById('active-source-popover');
+    if (pop && !pop.contains(e.target)) {
+        dismissSourcePopover();
+    } else if (pop) {
+        // Re-attach if click was inside popover
+        setTimeout(() => {
+            document.addEventListener('click', _popoverOutsideClick, { once: true });
+        }, 10);
+    }
+}
+
+function dismissSourcePopover() {
+    const pop = document.getElementById('active-source-popover');
+    if (pop) pop.remove();
+}
+
+function scrollToSourceReport(type) {
+    const sections = document.querySelectorAll('.briefing-section');
+    for (const sec of sections) {
+        const title = sec.querySelector('.briefing-section-title');
+        if (title && title.textContent.includes('Source Reports')) {
+            sec.classList.add('open');
+            const row = sec.querySelector(`.staleness-row[data-source-type="${type}"]`);
+            if (row) {
+                row.style.background = 'rgba(59,130,246,0.15)';
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => { row.style.background = ''; }, 2000);
+            }
+            return;
+        }
+    }
 }
 
 function renderScoreRing(score, size) {
@@ -1525,6 +1760,16 @@ function showBriefing(dossier, b) {
     document.getElementById('right-type').textContent = '';
     document.getElementById('right-date').textContent = '';
 
+    // Populate source key facts for popover references (no LLM needed)
+    _sourceKeyFacts = {};
+    (dossier.analyses || []).forEach(a => {
+        if (a.key_facts_json && !_sourceKeyFacts[a.analysis_type]) {
+            try {
+                _sourceKeyFacts[a.analysis_type] = JSON.parse(a.key_facts_json);
+            } catch {}
+        }
+    });
+
     let html = '';
 
     // --- Header ---
@@ -1551,7 +1796,7 @@ function showBriefing(dossier, b) {
         <button class="briefing-btn briefing-btn-primary" onclick="generateBriefing('${escHtml(dossier.company_name)}')">Refresh Briefing</button>
     </div></div>`;
 
-    // --- Digital Maturity Score (always expanded) ---
+    // --- Digital Capability Score (always expanded) ---
     const dm = b.digital_maturity || {};
     const score = dm.overall_score || 0;
     const label = dm.overall_label || '';
@@ -1561,6 +1806,19 @@ function showBriefing(dossier, b) {
     html += renderScoreRing(score, 120);
     html += `<div class="maturity-label score-${_scoreColorClass(score)}">${escHtml(label)}</div>`;
 
+    // Data confidence indicator
+    const conf = b.data_confidence || {};
+    if (conf.jobs_analyzed !== undefined || conf.overall_confidence) {
+        const confClass = `conf-${conf.overall_confidence || 'medium'}`;
+        html += `<div class="data-confidence-bar">
+            <span class="conf-badge ${confClass}">${escHtml(conf.overall_confidence || 'unknown')}</span>`;
+        if (conf.jobs_analyzed) html += `<span>${conf.jobs_analyzed} roles analyzed</span>`;
+        if (conf.scrape_coverage) html += `<span>· ${escHtml(conf.scrape_coverage.split('(')[0].trim())}</span>`;
+        const avail = conf.analyses_available || [];
+        html += `<span>· ${avail.length} analyses</span>`;
+        html += `</div>`;
+    }
+
     // Sub-scores
     const subLabels = { tech_modernity: 'Tech Modernity', data_analytics: 'Data & Analytics', ai_readiness: 'AI Readiness', organizational_readiness: 'Org Readiness' };
     Object.entries(subLabels).forEach(([key, lbl]) => {
@@ -1568,35 +1826,75 @@ function showBriefing(dossier, b) {
         html += renderSubScore(lbl, sub.score || 0);
     });
 
-    // Sub-score rationales (collapsed)
+    // Sub-score rationales with citation badges
     html += `<div style="margin-top:8px">`;
     Object.entries(subLabels).forEach(([key, lbl]) => {
         const sub = subs[key] || {};
         if (sub.rationale) {
-            html += `<div style="margin-bottom:6px"><span style="font-size:10px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:10px;color:var(--text-muted)">${escHtml(sub.rationale)}</span></div>`;
+            html += `<div style="margin-bottom:6px"><span style="font-size:10px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:10px;color:var(--text-muted)">${_renderCitedText(sub.rationale)}</span></div>`;
         }
     });
     html += `</div></div>`;
 
-    // --- Engagement Opportunities (always expanded) ---
+    // --- Hiring Trajectory (if available) ---
+    const traj = b.hiring_trajectory;
+    if (traj && traj.trend) {
+        let trajHtml = '';
+        if (traj.velocity) {
+            const trendUp = ['accelerating','growing'].includes(traj.trend);
+            const trendDown = ['decelerating','shrinking'].includes(traj.trend);
+            const arrowClass = trendUp ? 'trajectory-up' : trendDown ? 'trajectory-down' : 'trajectory-stable';
+            const arrow = trendUp ? '&#9650;' : trendDown ? '&#9660;' : '&#8226;';
+            trajHtml += `<div class="trajectory-row">
+                <span class="trajectory-arrow ${arrowClass}">${arrow}</span>
+                <span style="color:var(--text-primary);font-weight:600">${escHtml(traj.velocity)}</span>
+                <span style="color:var(--text-muted)">· ${escHtml(traj.trend)}</span>
+            </div>`;
+        }
+        if (traj.department_shifts && traj.department_shifts.length) {
+            traj.department_shifts.forEach(shift => {
+                const arrowClass = shift.direction === 'up' ? 'trajectory-up' : shift.direction === 'down' ? 'trajectory-down' : 'trajectory-stable';
+                const arrow = shift.direction === 'up' ? '↑' : shift.direction === 'down' ? '↓' : '→';
+                trajHtml += `<div class="trajectory-row">
+                    <span class="trajectory-arrow ${arrowClass}">${arrow}</span>
+                    <span style="color:var(--text-secondary)">${escHtml(shift.department || '')}</span>
+                    <span style="color:var(--text-muted);font-size:10px">${escHtml(shift.detail || '')}</span>
+                </div>`;
+            });
+        }
+        if (traj.interpretation) {
+            trajHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(traj.interpretation)}</div>`;
+        }
+        html += _briefingSection('Hiring Trajectory', trajHtml, true);
+    }
+
+    // --- Consulting Opportunities (always expanded, cards expandable) ---
     const opps = b.engagement_opportunities || [];
     if (opps.length) {
         let oppHtml = '';
         opps.forEach(opp => {
             const pClass = `opp-priority-${opp.priority || 'medium'}`;
-            oppHtml += `<div class="opp-card">
+            const sources = opp.source_analyses || [];
+            const sourceBadges = sources.map(s =>
+                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')">${s}</span>`
+            ).join(' ');
+            oppHtml += `<div class="opp-card" onclick="this.classList.toggle('expanded')">
                 <div class="opp-card-header">
                     <span class="opp-service">${escHtml(opp.service || '')}</span>
                     <span class="opp-priority ${pClass}">${escHtml(opp.priority || '')}</span>
                 </div>
-                <div class="opp-evidence">${escHtml(opp.evidence || '')}</div>
+                <div class="opp-evidence">${_renderCitedText(opp.evidence || '')}</div>
                 <div class="opp-meta">
                     <span>${escHtml(opp.estimated_scope || '')}</span>
                     <span>${escHtml(opp.entry_point || '')}</span>
                 </div>
+                <div class="opp-detail">
+                    ${opp.detail ? `<div class="opp-detail-text">${_renderCitedText(opp.detail)}</div>` : ''}
+                    ${sources.length ? `<div class="opp-source-links"><span style="font-size:9px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
+                </div>
             </div>`;
         });
-        html += `<div style="padding:0 12px 12px"><div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Engagement Opportunities</div>${oppHtml}</div>`;
+        html += `<div style="padding:0 12px 12px"><div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Consulting Opportunities</div>${oppHtml}</div>`;
     }
 
     // --- Budget & Appetite ---
@@ -1605,7 +1903,7 @@ function showBriefing(dossier, b) {
         let budgetHtml = '';
         const confClass = `confidence-${budget.confidence || 'medium'}`;
         budgetHtml += `<div class="budget-row"><span class="budget-label">Can Afford</span><span class="budget-value">${budget.can_afford ? 'Yes' : 'Unlikely'}</span> <span class="confidence-badge ${confClass}">${escHtml(budget.confidence || '')} confidence</span></div>`;
-        if (budget.evidence) budgetHtml += `<div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px">${escHtml(budget.evidence)}</div>`;
+        if (budget.evidence) budgetHtml += `<div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px">${_renderCitedText(budget.evidence)}</div>`;
         if (budget.revenue_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Revenue Trend</span><span class="budget-value">${escHtml(budget.revenue_trend)}</span></div>`;
         if (budget.hiring_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Hiring Trend</span><span class="budget-value">${escHtml(budget.hiring_trend)}</span></div>`;
         if (budget.investment_areas && budget.investment_areas.length) {
@@ -1734,6 +2032,25 @@ function showBriefing(dossier, b) {
         html += _briefingSection(`Intelligence Timeline (${changeEvents.length + otherEvents.length})`, timeHtml, false);
     }
 
+    // --- Data Confidence ---
+    if (conf && (conf.caveats && conf.caveats.length || conf.analyses_missing && conf.analyses_missing.length)) {
+        let confHtml = '';
+        if (conf.scrape_coverage) confHtml += `<div class="budget-row"><span class="budget-label">Scrape Coverage</span><span class="budget-value">${escHtml(conf.scrape_coverage)}</span></div>`;
+        if (conf.jobs_analyzed) confHtml += `<div class="budget-row"><span class="budget-label">Jobs Analyzed</span><span class="budget-value">${conf.jobs_analyzed}</span></div>`;
+        if (conf.analyses_available && conf.analyses_available.length) {
+            confHtml += `<div class="budget-row"><span class="budget-label">Completed</span><span class="budget-value">${conf.analyses_available.map(a => `<span class="source-badge source-${a}">${a}</span>`).join(' ')}</span></div>`;
+        }
+        if (conf.analyses_missing && conf.analyses_missing.length) {
+            confHtml += `<div class="budget-row"><span class="budget-label">Missing</span><span class="budget-value" style="color:var(--text-muted)">${conf.analyses_missing.join(', ')}</span></div>`;
+        }
+        if (conf.caveats && conf.caveats.length) {
+            confHtml += `<div style="margin-top:8px;font-size:10px;color:var(--text-muted)">`;
+            conf.caveats.forEach(c => { confHtml += `<div style="margin-bottom:3px">⚠ ${escHtml(c)}</div>`; });
+            confHtml += `</div>`;
+        }
+        html += _briefingSection('Data Confidence', confHtml, false);
+    }
+
     // --- Source Reports ---
     if (dossier.analyses && dossier.analyses.length) {
         let srcHtml = '';
@@ -1752,7 +2069,7 @@ function showBriefing(dossier, b) {
             else if (days >= 30) { freshness = 'stale'; flabel = `${days}d ago`; }
             else if (days >= 7) { freshness = 'recent'; flabel = `${days}d ago`; }
             else { flabel = days === 0 ? 'Today' : `${days}d ago`; }
-            srcHtml += `<div class="staleness-row">
+            srcHtml += `<div class="staleness-row" data-source-type="${escHtml(type)}">
                 <span style="color:var(--text-primary);font-weight:500;min-width:80px">${escHtml(type)}</span>
                 <span class="staleness-badge staleness-${freshness}">${flabel}</span>
                 <span style="font-size:10px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>

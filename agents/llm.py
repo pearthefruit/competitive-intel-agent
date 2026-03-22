@@ -53,7 +53,8 @@ def generate_text(prompt, timeout=60, providers=None):
                     text = resp.json()["choices"][0]["message"]["content"]
                     http.close()
                     return text, f"{p['name']}/{p['model']}"
-        except Exception:
+        except Exception as e:
+            print(f"[llm] {p['name']}/{p['model']} failed: {e}")
             continue
 
     http.close()
@@ -170,10 +171,34 @@ Report:
 
 Return ONLY valid JSON, no explanation."""
 
+_HIRING_FACTS_PROMPT = """Extract structured hiring intelligence from this competitive hiring analysis report about {company}.
+
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "total_open_roles": integer count of open positions analyzed
+- "engineering_ratio": string percentage of roles in Engineering (e.g. "67%")
+- "ai_ml_ratio": string percentage of engineering roles in AI/ML specifically (e.g. "12% of engineering")
+- "top_departments": array of top 3-5 departments with counts (e.g. ["Engineering (67%)", "Data (19%)", "Product (10%)"])
+- "top_subcategories": array of top 5-8 subcategories with counts (e.g. ["AI/ML (15)", "Platform/Infrastructure (8)"])
+- "seniority_skew": string describing the distribution (e.g. "senior-heavy (43% Senior+)" or "mid-heavy (55% Mid-level)")
+- "growth_signal": string percentage of likely new roles (e.g. "67% likely new roles")
+- "top_strategic_tags": array of most common strategic tags (e.g. ["AI/ML Investment", "Platform Migration"])
+- "hiring_trend": one of "growing", "stable", "shrinking"
+- "notable_shifts": string describing any noteworthy patterns (e.g. "Heavy PhD-required AI roles suggest research expansion")
+- "top_skills": array of top 10 most demanded skills/technologies
+- "primary_locations": array of top 3-5 hiring locations
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
 _TYPE_KEY_FACTS_PROMPTS = {
     "techstack": _TECHSTACK_FACTS_PROMPT,
     "seo": _SEO_FACTS_PROMPT,
     "pricing": _PRICING_FACTS_PROMPT,
+    "hiring": _HIRING_FACTS_PROMPT,
 }
 
 

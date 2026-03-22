@@ -17,26 +17,64 @@ _BRIEFING_SCHEMA = {
     },
     "digital_maturity": {
         "overall_score": "integer 0-100",
-        "overall_label": "Digitally Advanced | Digitally Maturing | Digital Laggard | Pre-Digital",
+        "overall_label": "Digitally Advanced | Digitally Maturing | Digitally Developing | Pre-Digital",
         "sub_scores": {
-            "tech_modernity": {"score": "integer 0-100", "rationale": "string", "signals": ["string"]},
-            "data_analytics": {"score": "integer 0-100", "rationale": "string", "signals": ["string"]},
-            "ai_readiness": {"score": "integer 0-100", "rationale": "string", "signals": ["string"]},
-            "organizational_readiness": {"score": "integer 0-100", "rationale": "string", "signals": ["string"]},
+            "tech_modernity": {
+                "score": "integer 0-100",
+                "rationale": "string with [source] tags",
+                "signals": ["string with [source] tag"],
+                "source_analyses": ["string — which analyses informed this score"],
+            },
+            "data_analytics": {
+                "score": "integer 0-100",
+                "rationale": "string with [source] tags",
+                "signals": ["string with [source] tag"],
+                "source_analyses": ["string"],
+            },
+            "ai_readiness": {
+                "score": "integer 0-100",
+                "rationale": "string with [source] tags",
+                "signals": ["string with [source] tag"],
+                "source_analyses": ["string"],
+            },
+            "organizational_readiness": {
+                "score": "integer 0-100",
+                "rationale": "string with [source] tags",
+                "signals": ["string with [source] tag"],
+                "source_analyses": ["string"],
+            },
         },
+    },
+    "hiring_trajectory": {
+        "trend": "accelerating | growing | stable | decelerating | shrinking",
+        "velocity": "string (e.g. '+45% in 5 weeks')",
+        "interpretation": "string (2-3 sentences analyzing what the hiring shifts reveal about strategy)",
+        "department_shifts": [
+            {"department": "string", "direction": "up | down | stable", "detail": "string (e.g. '8% → 15%')"}
+        ],
     },
     "engagement_opportunities": [
         {
             "service": "string (consulting service name)",
             "priority": "high | medium | low",
-            "evidence": "string (specific data points justifying this)",
+            "evidence": "string with [source] tags (specific data points justifying this)",
+            "detail": "string (2-3 sentences — deeper explanation of why this is needed, what the engagement looks like, expected outcomes)",
             "estimated_scope": "string (e.g. '$1-3M, 6-12 months')",
             "entry_point": "string (decision-maker title)",
+            "source_analyses": ["string — which analyses support this opportunity"],
         }
     ],
+    "data_confidence": {
+        "jobs_analyzed": "integer",
+        "scrape_coverage": "string (e.g. 'full ATS board' or 'LinkedIn sample — 100 of ~500 estimated')",
+        "analyses_available": ["string — list of analysis types completed"],
+        "analyses_missing": ["string — analysis types NOT yet run"],
+        "overall_confidence": "high | medium | low",
+        "caveats": ["string — important limitations or data gaps"],
+    },
     "budget_signals": {
         "can_afford": "boolean",
-        "evidence": "string",
+        "evidence": "string with [source] tags",
         "revenue_trend": "string",
         "hiring_trend": "string",
         "investment_areas": ["string"],
@@ -73,28 +111,32 @@ _BRIEFING_SCHEMA = {
 }
 
 
-def build_briefing_prompt(company_name, all_key_facts, report_summaries, hiring_stats=None):
+def build_briefing_prompt(company_name, all_key_facts, report_summaries,
+                          hiring_stats=None, hiring_snapshots=None,
+                          data_confidence=None):
     """Build the intelligence briefing prompt.
 
     Args:
         company_name: Target company name
         all_key_facts: dict of {analysis_type: {fact_key: value}} — merged from all analyses
         report_summaries: dict of {analysis_type: truncated_report_text}
-        hiring_stats: dict with dept_counts, seniority_counts, strategic_tag_counts, etc. or None
+        hiring_stats: dict with dept_counts, seniority_counts, etc. or None
+        hiring_snapshots: list of historical snapshot dicts (most recent first) or None
+        data_confidence: dict with jobs_analyzed, scrape_source, analyses_available, etc. or None
     """
-    # Format key facts
+    # Format key facts with source labels
     facts_lines = []
     for atype, facts in all_key_facts.items():
-        facts_lines.append(f"### {atype.upper()} ANALYSIS KEY FACTS")
+        facts_lines.append(f"### {atype.upper()} ANALYSIS KEY FACTS  [source: {atype}]")
         for k, v in facts.items():
             facts_lines.append(f"- {k}: {v}")
         facts_lines.append("")
     formatted_facts = "\n".join(facts_lines) if facts_lines else "No structured key facts available."
 
-    # Format report summaries
+    # Format report summaries with source labels
     summary_lines = []
     for atype, text in report_summaries.items():
-        summary_lines.append(f"### {atype.upper()} REPORT (excerpt)")
+        summary_lines.append(f"### {atype.upper()} REPORT (excerpt)  [source: {atype}]")
         summary_lines.append(text)
         summary_lines.append("\n---\n")
     formatted_summaries = "\n".join(summary_lines) if summary_lines else "No report summaries available."
@@ -112,6 +154,12 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries, hiring_
                 pct = round(count * 100 / total) if total else 0
                 hiring_lines.append(f"  - {dept}: {count} roles ({pct}%)")
 
+        subcat_counts = hiring_stats.get("subcategory_counts", {})
+        if subcat_counts:
+            hiring_lines.append("\nSub-category distribution:")
+            for subcat, count in sorted(subcat_counts.items(), key=lambda x: -x[1])[:15]:
+                hiring_lines.append(f"  - {subcat}: {count} roles")
+
         seniority_counts = hiring_stats.get("seniority_counts", {})
         if seniority_counts:
             hiring_lines.append("\nSeniority distribution:")
@@ -127,9 +175,55 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries, hiring_
         hiring_lines.append(f"\nAI/ML roles: {hiring_stats.get('ai_ml_role_count', 0)}")
         hiring_lines.append(f"Growth signal ratio: {hiring_stats.get('growth_signal_ratio', 'unknown')}")
 
+        top_skills = hiring_stats.get("top_skills", [])
+        if top_skills:
+            hiring_lines.append(f"\nTop skills: {', '.join(top_skills[:15])}")
+
         formatted_hiring = "\n".join(hiring_lines)
     else:
         formatted_hiring = "No hiring data available."
+
+    # Format hiring snapshots for temporal analysis
+    if hiring_snapshots and len(hiring_snapshots) > 1:
+        snap_lines = ["HIRING TREND DATA (historical snapshots):"]
+        for i, snap in enumerate(reversed(hiring_snapshots)):  # chronological order
+            marker = " ← current" if i == len(hiring_snapshots) - 1 else ""
+            dept = snap.get("dept_counts", {})
+            total = snap.get("total_roles", 0)
+            eng_pct = round(dept.get("Engineering", 0) * 100 / total) if total else 0
+            ai_count = snap.get("ai_ml_role_count", 0)
+            ai_pct = round(ai_count * 100 / total) if total else 0
+            snap_lines.append(
+                f"- {snap['snapshot_date']}: {total} roles "
+                f"(Eng: {eng_pct}%, AI/ML: {ai_pct}%, "
+                f"AI/ML count: {ai_count}){marker}"
+            )
+
+        # Compute trend
+        oldest = hiring_snapshots[-1]  # list is most-recent-first
+        newest = hiring_snapshots[0]
+        old_total = oldest.get("total_roles", 0)
+        new_total = newest.get("total_roles", 0)
+        if old_total and old_total > 0:
+            pct_change = round((new_total - old_total) * 100 / old_total)
+            snap_lines.append(f"\nOverall trend: {pct_change:+d}% total roles "
+                              f"({oldest['snapshot_date']} → {newest['snapshot_date']})")
+
+        formatted_snapshots = "\n".join(snap_lines)
+    else:
+        formatted_snapshots = "No historical hiring snapshots available (only current data)."
+
+    # Format data confidence
+    if data_confidence:
+        conf_lines = [
+            f"- Jobs analyzed: {data_confidence.get('jobs_analyzed', 'unknown')}",
+            f"- Scrape coverage: {data_confidence.get('scrape_coverage', 'unknown')}",
+            f"- Analyses completed: {', '.join(data_confidence.get('analyses_available', []))}",
+            f"- Analyses NOT run: {', '.join(data_confidence.get('analyses_missing', []))}",
+        ]
+        formatted_confidence = "\n".join(conf_lines)
+    else:
+        formatted_confidence = "No confidence metadata available."
 
     schema_str = json.dumps(_BRIEFING_SCHEMA, indent=2)
 
@@ -137,10 +231,10 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries, hiring_
 
 Your audience is a consulting partner who needs to quickly assess:
 1. Can this company afford consulting? (Budget signals)
-2. Do they need digital transformation? (Digital maturity gaps)
-3. What specific services can we sell? (Engagement opportunities)
+2. What is their actual digital capability? (Honest digital maturity assessment)
+3. What specific services can we sell? (Engagement opportunities — independent of maturity score)
 4. Is there urgency? (Competitive pressure + recent changes)
-5. What's their org structure like? (Decision maker signals)
+5. How is their hiring strategy shifting? (Hiring trajectory)
 6. What are the risks of engaging? (Due diligence)
 
 AVAILABLE INTELLIGENCE:
@@ -149,58 +243,92 @@ AVAILABLE INTELLIGENCE:
 
 {formatted_summaries}
 
-HIRING DATA:
+HIRING DATA:  [source: hiring]
 {formatted_hiring}
+
+{formatted_snapshots}
+
+DATA CONFIDENCE:
+{formatted_confidence}
 
 ---
 
-DIGITAL MATURITY SCORING RUBRIC:
+CRITICAL CITATION REQUIREMENT:
 
-Score each dimension 0-100 based on ALL available evidence. Use the rubric below.
+Every factual claim in rationale, signals, and evidence fields MUST include a source tag in square brackets referencing which analysis produced the data. Valid source tags: {list(all_key_facts.keys()) + (['hiring'] if hiring_stats else [])}
+
+Format: "Company has 142 open roles with 67% in engineering [hiring]. 29 AI-related patents filed [patents]. Revenue reached $20B [financial]."
+
+If you cannot cite a source for a claim, DO NOT make the claim. No unsourced assertions.
+
+---
+
+DIGITAL CAPABILITY SCORING RUBRIC:
+
+IMPORTANT: This score measures the company's ACTUAL digital and technological capability — NOT their attractiveness as a consulting target. Score honestly. A digitally advanced company can still need consulting help (specialized AI work, org design, M&A integration, etc.).
+
+Score each dimension 0-100 based on ALL available evidence.
 
 ### Tech Modernity (weight: 30%)
-- 80-100: Modern stack (React/Vue/Next.js/Svelte + modern analytics + modern hosting like Vercel/Cloudflare + monitoring + experimentation tools). No legacy dependencies.
-- 60-79: Mixed stack. Some modern tools but legacy components present (jQuery alongside React, WordPress as main CMS, old CDN).
-- 40-59: Predominantly legacy. Old frameworks, minimal analytics beyond Google Analytics, traditional hosting, no experimentation or monitoring tools.
-- 20-39: Very legacy or minimal detectable stack (raw HTML, no framework, no analytics, Wix/Squarespace for a company that should have custom tech).
-- 0-19: No tech data available or fully pre-digital.
-- If no tech stack data: score 50 and note "insufficient data — tech stack analysis recommended".
+Primary signals: hiring data (what technologies they hire for), sector/product (what they build), engineering ratio.
+Secondary signals: website tech stack (what's on their public site — this is a weak signal for internal capability).
 
-### Data & Analytics Maturity (weight: 25%)
-- 80-100: Advanced analytics (Segment/Amplitude/Mixpanel/PostHog + A/B testing tools like Optimizely/LaunchDarkly + CDP/data warehouse signals from hiring). Marketing automation in place.
-- 60-79: Standard analytics (Google Analytics/GA4) + 1-2 advanced tools (tag management, basic marketing automation).
-- 40-59: Basic analytics only (Google Analytics alone). No experimentation, no advanced marketing tools.
-- 20-39: No analytics detected or minimal tracking.
-- Hiring data bonus: +5-10 if company is actively hiring Data Engineers, Data Scientists, Analytics Engineers, or ML Ops roles.
+- 80-100: Company IS a technology/software/AI company (core product is technology), OR hiring data shows modern stack (React/Go/Rust/K8s/cloud-native/microservices roles dominate), high engineering ratio (>50% of open roles). If a company literally BUILDS software, LLMs, cloud infrastructure, or AI products, floor at 80 — their tech modernity is self-evident regardless of what's on their marketing website.
+- 60-79: Tech-adjacent company with significant engineering investment (30-50% engineering roles), modern tools in hiring reqs, some legacy maintenance roles. Mixed website tech stack.
+- 40-59: Non-tech company with modest engineering team (<30% roles). Hiring shows legacy technologies (COBOL, mainframe, .NET Framework, on-prem). Website shows dated stack.
+- 20-39: Minimal tech hiring. No engineering culture signals. Basic or outsourced IT.
+- 0-19: No tech data available or fully pre-digital.
+- If no tech stack data AND no hiring data: score 50 and note "insufficient data" in rationale.
+
+### Data & Analytics (weight: 25%)
+Primary signals: hiring data (Data Engineers, Data Scientists, ML Ops, Analytics Engineers — these tell you far more than website trackers), data-related strategic tags, company product.
+Secondary signals: analytics tools detected on website (Segment, Amplitude, etc. — useful for non-tech companies, but irrelevant for companies whose product IS data/AI).
+
+- 80-100: Company's core product IS data or AI, OR actively hiring multiple data roles (Data Engineers, Data Scientists, Analytics Engineers, ML Ops). "Data Infrastructure" strategic tag present. Evidence of data platform investment.
+- 60-79: Some data hiring but not a strategic focus. OR advanced analytics tooling on website (Segment/Amplitude + A/B testing). Marketing automation signals.
+- 40-59: No data-specific hiring. Basic website analytics only (GA alone). No experimentation signals.
+- 20-39: No data signals at all — no data roles, no analytics tools.
 
 ### AI Readiness (weight: 25%)
-- 80-100: Active AI hiring (AI/ML roles > 10% of engineering), AI-related patents, AI tools/platforms detected or referenced in strategic signals. "AI/ML Investment" strategic tag present.
-- 60-79: Some AI hiring (5-10% of engineering) or AI patents exist, but no visible AI tooling or unified AI platform.
-- 40-59: Minimal AI signals (1-3 AI roles, or "AI" mentioned in strategic signals but not a primary focus).
-- 20-39: No AI signals at all — no AI hiring, no AI patents, no AI tools.
+- 95-100: Company's core product IS AI/ML (e.g., OpenAI, Anthropic, Google DeepMind, Nvidia AI). AI is the business, not a capability being adopted. Score accordingly.
+- 80-94: Active AI hiring (AI/ML roles >10% of engineering), AI-related patents, AI tools/platforms, "AI/ML Investment" strategic tag. AI is a major strategic focus but not the core product.
+- 60-79: Some AI hiring (5-10% of engineering) or AI patents exist, but no visible unified AI platform strategy.
+- 40-59: Minimal AI signals (1-3 AI roles, or "AI" mentioned in strategy but not a focus).
+- 20-39: No AI signals — no AI hiring, no AI patents, no AI tools.
 - Patent bonus: +5-10 if AI/ML patent areas exist in the IP portfolio.
 
 ### Organizational Readiness (weight: 20%)
-- 80-100: Growing hiring trend, high engineering ratio (>50% of roles), strong strategic tags (Cloud/Infrastructure, AI/ML Investment, Platform Migration, Automation). Positive employee sentiment.
+- 80-100: Growing hiring trend, high engineering ratio (>50%), strong strategic investment tags (Cloud/Infrastructure, AI/ML Investment, Platform Migration, Automation). Positive employee sentiment.
 - 60-79: Stable hiring, moderate engineering ratio (30-50%), some strategic investment tags.
 - 40-59: Mixed signals. Flat or slightly declining hiring. Low engineering ratio (<30%). Few strategic tags.
-- 20-39: Shrinking hiring, negative sentiment, no strategic investment signals. Indicates organizational resistance to change.
+- 20-39: Shrinking hiring, negative sentiment, no strategic investment signals.
+- NUANCE: Negative sentiment from rapid growth (burnout, equity complaints during hypergrowth) is NOT the same as organizational resistance to change. Distinguish growing pains from structural dysfunction. A company growing from 1000 to 8000 employees will have cultural friction — that's an org design opportunity, not a sign of low readiness.
 
-**Overall score = weighted average (Tech×0.30 + Data×0.25 + AI×0.25 + Org×0.20). Round to integer.**
+**Overall score = weighted average (Tech×0.30 + Data×0.25 + AI×0.25 + Org×0.20). COMPUTE THIS PRECISELY — do the arithmetic, show your work mentally, and round to the nearest integer. The overall_score must equal the weighted average of sub-scores.**
 
-Labels:
-- 80-100: "Digitally Advanced" — harder to sell broad transformation, focus on specialized AI/optimization engagements
-- 60-79: "Digitally Maturing" — prime target for acceleration and optimization engagements
-- 40-59: "Digital Laggard" — major transformation opportunity, biggest potential engagement value
-- 20-39: "Pre-Digital" — massive opportunity but verify budget/appetite before investing pursuit effort
-- 0-19: "Not Assessed" — insufficient data
+Labels (no bias — these are objective descriptors):
+- 80-100: "Digitally Advanced"
+- 60-79: "Digitally Maturing"
+- 40-59: "Digitally Developing"
+- 20-39: "Pre-Digital"
+- 0-19: "Not Assessed"
+
+---
 
 ENGAGEMENT OPPORTUNITY MAPPING:
 
-Based on gaps between the company's current state and best-in-class digital maturity, generate 3-5 prioritized consulting engagement opportunities. Use real consulting service names:
+CRITICAL RULE — DO NOT SUGGEST SERVICES THAT ARE THE COMPANY'S CORE COMPETENCY:
+- If the company IS an AI company (OpenAI, Anthropic, Google DeepMind, etc.), do NOT suggest "AI/ML Strategy & Implementation" or "Data & Analytics Modernization" — they are the world experts. Instead, look for adjacent needs: org design for hypergrowth, AI governance/responsible AI frameworks, engineering effectiveness at scale, cybersecurity/compliance for AI products, change management.
+- If the company IS a cloud company (AWS, Azure, GCP), do NOT suggest "Cloud Migration."
+- If the company IS a cybersecurity company, do NOT suggest "Cybersecurity & Compliance."
+- Apply this principle broadly: never sell a company what they already do better than anyone.
+
+Engagement opportunities should reflect REAL problems the company faces based on evidence, not textbook consulting services. A company can be digitally advanced AND have genuine consulting needs — those needs just won't be in their core domain.
+
+Generate 3-5 prioritized consulting engagement opportunities. Use real consulting service names:
 - Cloud Migration & Architecture
-- AI/ML Strategy & Implementation
-- Data & Analytics Modernization
+- AI/ML Strategy & Implementation (only for companies ADOPTING AI, not building it)
+- Data & Analytics Modernization (only for companies that DON'T have data as their core product)
 - Digital Customer Experience
 - IT Operating Model Transformation
 - Cybersecurity & Compliance
@@ -208,11 +336,40 @@ Based on gaps between the company's current state and best-in-class digital matu
 - Change Management & Org Design
 - Intelligent Automation / RPA
 - Supply Chain Digitization
+- AI Governance & Responsible AI
+- Technology Due Diligence (M&A)
+- Engineering Effectiveness & Developer Platform
+- Talent Strategy & Organizational Design
+- Enterprise Architecture & Technical Debt
 
 For each opportunity, provide:
-- Specific evidence from the intelligence data (not generic observations)
-- Estimated scope using consulting conventions: "$500K-1M" (small), "$1-3M" (medium), "$2-5M" (large), "$5M+" (transformation)
-- The decision-maker title who would champion this engagement
+- Specific evidence from the intelligence data WITH [source] tags (not generic observations)
+- A "detail" field: 2-3 sentences expanding on WHY this is a real need, what the engagement would look like, and what outcomes the client should expect. This is the deeper explanation a partner would want when clicking into the opportunity.
+- Estimated scope: "$500K-1M" (small), "$1-3M" (medium), "$2-5M" (large), "$5M+" (transformation)
+- Decision-maker title who would champion this engagement
+- source_analyses: list of which analysis types support this opportunity
+
+---
+
+HIRING TRAJECTORY:
+
+If historical hiring snapshots are provided, analyze the trajectory:
+- Is total headcount growing, stable, or shrinking?
+- Which departments are growing vs shrinking as a percentage?
+- What strategic shifts does this reveal?
+- Generate the hiring_trajectory section with trend, velocity, interpretation, and department_shifts.
+
+If no historical data exists, set hiring_trajectory to null.
+
+---
+
+DATA CONFIDENCE:
+
+Assess the overall confidence of this briefing based on the data available. Consider:
+- How many jobs were analyzed (>100 = high confidence, 30-100 = medium, <30 = low for hiring signals)
+- Whether the scrape covered the full ATS board or was a limited sample
+- How many of the 12 analysis types have been completed
+- Any significant data gaps that affect specific scores
 
 ---
 
@@ -222,7 +379,9 @@ Return ONLY valid JSON matching this exact schema. No commentary outside the JSO
 
 IMPORTANT:
 - Base everything on actual data provided above. Do not fabricate numbers or claims.
-- If a dimension has no data, score it 50 and note "insufficient data" in the rationale.
+- EVERY factual claim must have a [source] tag. Unsourced claims destroy credibility.
+- If a dimension has no data, score it 50 and note "insufficient data — [analysis type] recommended" in the rationale.
 - The strategic_assessment should be the most opinionated section — give a clear recommendation on whether to pursue this company and why.
-- For engagement_opportunities, be specific about what the evidence shows, not generic consulting advice.
-- For risk_profile, include both business risks to the target company AND engagement risks for the consulting firm (e.g., "long procurement cycles", "recent leadership change may delay decisions")."""
+- For engagement_opportunities, identify REAL needs from the evidence. A company that builds AI doesn't need "AI Strategy basics" — they might need AI governance, responsible AI, or org design to scale their AI workforce.
+- For risk_profile, include both business risks to the target company AND engagement risks for the consulting firm (e.g., "long procurement cycles", "recent leadership change may delay decisions").
+- COMPUTE the overall_score as the exact weighted average. Do not round sub-scores to produce a convenient overall number."""

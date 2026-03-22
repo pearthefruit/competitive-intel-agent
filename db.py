@@ -83,6 +83,24 @@ CREATE TABLE IF NOT EXISTS dossier_events (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (dossier_id) REFERENCES dossiers(id)
 );
+
+-- Hiring snapshots: periodic captures of hiring stats for temporal trend analysis
+CREATE TABLE IF NOT EXISTS hiring_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL REFERENCES companies(id),
+    snapshot_date TEXT NOT NULL,
+    total_roles INTEGER,
+    dept_counts TEXT,
+    subcategory_counts TEXT,
+    seniority_counts TEXT,
+    strategic_tag_counts TEXT,
+    ai_ml_role_count INTEGER,
+    growth_signal_ratio TEXT,
+    top_skills TEXT,
+    top_locations TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(company_id, snapshot_date)
+);
 """
 
 
@@ -404,6 +422,140 @@ def get_previous_key_facts(conn, dossier_id, analysis_type):
         except (json.JSONDecodeError, TypeError):
             return None
     return None
+
+
+def compute_hiring_stats(conn, company_id):
+    """Compute aggregate hiring stats from classified jobs for a company.
+
+    Returns dict with dept_counts, subcategory_counts, seniority_counts,
+    strategic_tag_counts, ai_ml_role_count, total_roles, growth_signal_ratio,
+    top_skills, top_locations — or None if no data.
+    """
+    from collections import Counter
+
+    rows = conn.execute(
+        """SELECT c.department_category, c.department_subcategory, c.seniority_level,
+                  c.strategic_tags, c.growth_signal, c.key_skills, j.location
+           FROM classifications c
+           JOIN jobs j ON c.job_id = j.id
+           WHERE j.company_id = ?""",
+        (company_id,),
+    ).fetchall()
+
+    if not rows:
+        return None
+
+    dept_counts = Counter()
+    subcat_counts = Counter()
+    seniority_counts = Counter()
+    strategic_tag_counts = Counter()
+    growth_counts = Counter()
+    skill_counts = Counter()
+    location_counts = Counter()
+    ai_ml_count = 0
+
+    for r in rows:
+        dept = r["department_category"] or "Other"
+        dept_counts[dept] += 1
+
+        subcat = r["department_subcategory"] or "General"
+        subcat_counts[subcat] += 1
+
+        seniority_counts[r["seniority_level"] or "Unknown"] += 1
+        growth_counts[r["growth_signal"] or "unclear"] += 1
+
+        loc = r["location"]
+        if loc:
+            location_counts[loc] += 1
+
+        # Parse strategic tags
+        tags_raw = r["strategic_tags"]
+        if tags_raw:
+            try:
+                tags = json.loads(tags_raw)
+                for tag in tags:
+                    strategic_tag_counts[tag] += 1
+                    if "AI" in tag or "ML" in tag:
+                        ai_ml_count += 1
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Parse key skills
+        skills_raw = r["key_skills"]
+        if skills_raw:
+            try:
+                skills = json.loads(skills_raw) if isinstance(skills_raw, str) else skills_raw
+                if isinstance(skills, list):
+                    for skill in skills:
+                        skill_counts[str(skill)] += 1
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Count AI/ML department roles
+        if "AI" in subcat or "ML" in subcat or "Machine Learning" in subcat:
+            ai_ml_count += 1
+
+    total = len(rows)
+    new_roles = growth_counts.get("likely new role", 0)
+    growth_ratio = f"{round(new_roles * 100 / total)}% new roles" if total else "unknown"
+
+    return {
+        "total_roles": total,
+        "dept_counts": dict(dept_counts),
+        "subcategory_counts": dict(subcat_counts.most_common(20)),
+        "seniority_counts": dict(seniority_counts),
+        "strategic_tag_counts": dict(strategic_tag_counts),
+        "ai_ml_role_count": ai_ml_count,
+        "growth_signal_ratio": growth_ratio,
+        "top_skills": [s for s, _ in skill_counts.most_common(20)],
+        "top_locations": dict(location_counts.most_common(15)),
+    }
+
+
+def save_hiring_snapshot(conn, company_id, stats):
+    """Save a hiring stats snapshot for today. Uses INSERT OR REPLACE for idempotency."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    conn.execute(
+        """INSERT OR REPLACE INTO hiring_snapshots
+           (company_id, snapshot_date, total_roles, dept_counts, subcategory_counts,
+            seniority_counts, strategic_tag_counts, ai_ml_role_count,
+            growth_signal_ratio, top_skills, top_locations)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            company_id, today, stats["total_roles"],
+            json.dumps(stats["dept_counts"]),
+            json.dumps(stats["subcategory_counts"]),
+            json.dumps(stats["seniority_counts"]),
+            json.dumps(stats["strategic_tag_counts"]),
+            stats["ai_ml_role_count"],
+            stats["growth_signal_ratio"],
+            json.dumps(stats["top_skills"]),
+            json.dumps(stats["top_locations"]),
+        ),
+    )
+    conn.commit()
+
+
+def get_hiring_snapshots(conn, company_id, limit=10):
+    """Get recent hiring snapshots for a company, most recent first."""
+    rows = conn.execute(
+        """SELECT * FROM hiring_snapshots
+           WHERE company_id = ?
+           ORDER BY snapshot_date DESC LIMIT ?""",
+        (company_id, limit),
+    ).fetchall()
+    results = []
+    for r in rows:
+        d = dict(r)
+        for field in ("dept_counts", "subcategory_counts", "seniority_counts",
+                      "strategic_tag_counts", "top_skills", "top_locations"):
+            if d.get(field):
+                try:
+                    d[field] = json.loads(d[field])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        results.append(d)
+    return results
 
 
 def get_recent_changes(conn, dossier_id, limit=15):

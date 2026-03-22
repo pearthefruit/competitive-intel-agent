@@ -1,97 +1,30 @@
 """Agent: Intelligence Briefing Generator — consulting-ready dossier with Digital Maturity Score."""
 
 import json
-from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
 from agents.llm import generate_json
-from db import get_connection, get_dossier_by_company, get_latest_key_facts
+from db import (get_connection, get_dossier_by_company, get_latest_key_facts,
+                get_company_id, compute_hiring_stats, get_hiring_snapshots)
 from prompts.briefing import build_briefing_prompt
 
-
-def _get_hiring_stats(conn, company_name):
-    """Query aggregate hiring stats from classifications table.
-
-    Returns dict with dept_counts, seniority_counts, strategic_tag_counts,
-    ai_ml_role_count, total_roles, growth_signal_ratio — or None if no data.
-    """
-    # Find company in companies table
-    row = conn.execute(
-        "SELECT id FROM companies WHERE name = ? COLLATE NOCASE", (company_name,)
-    ).fetchone()
-    if not row:
-        return None
-
-    company_id = row["id"]
-
-    # Get all classified jobs
-    rows = conn.execute(
-        """SELECT c.department_category, c.department_subcategory, c.seniority_level,
-                  c.strategic_tags, c.growth_signal
-           FROM classifications c
-           JOIN jobs j ON c.job_id = j.id
-           WHERE j.company_id = ?""",
-        (company_id,),
-    ).fetchall()
-
-    if not rows:
-        return None
-
-    dept_counts = Counter()
-    seniority_counts = Counter()
-    strategic_tag_counts = Counter()
-    growth_counts = Counter()
-    ai_ml_count = 0
-
-    for r in rows:
-        dept = r["department_category"] or "Other"
-        dept_counts[dept] += 1
-
-        seniority_counts[r["seniority_level"] or "Unknown"] += 1
-
-        growth_counts[r["growth_signal"] or "unclear"] += 1
-
-        # Parse strategic tags
-        tags_raw = r["strategic_tags"]
-        if tags_raw:
-            try:
-                tags = json.loads(tags_raw)
-                for tag in tags:
-                    strategic_tag_counts[tag] += 1
-                    if "AI" in tag or "ML" in tag:
-                        ai_ml_count += 1
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        # Count AI/ML department roles
-        subcat = r["department_subcategory"] or ""
-        if "AI" in subcat or "ML" in subcat or "Machine Learning" in subcat:
-            ai_ml_count += 1
-
-    total = len(rows)
-    new_roles = growth_counts.get("likely new role", 0)
-    growth_ratio = f"{round(new_roles * 100 / total)}% new roles" if total else "unknown"
-
-    return {
-        "total_roles": total,
-        "dept_counts": dict(dept_counts),
-        "seniority_counts": dict(seniority_counts),
-        "strategic_tag_counts": dict(strategic_tag_counts),
-        "ai_ml_role_count": ai_ml_count,
-        "growth_signal_ratio": growth_ratio,
-    }
+# All possible analysis types for tracking what's missing
+ALL_ANALYSIS_TYPES = [
+    "hiring", "financial", "competitors", "sentiment", "patents",
+    "techstack", "seo", "pricing", "profile", "compare", "landscape",
+]
 
 
 def _get_report_summaries(analyses):
     """Read and truncate report files for each analysis type.
 
-    Returns dict of {analysis_type: truncated_text}. Caps total at ~15K chars.
+    Returns dict of {analysis_type: truncated_text}. Caps total at ~20K chars.
     """
     summaries = {}
     total_chars = 0
-    max_per_report = 1500
-    max_total = 15000
+    max_per_report = 2000
+    max_total = 20000
 
     # Group by type, take latest per type
     seen_types = set()
@@ -120,11 +53,66 @@ def _get_report_summaries(analyses):
     return summaries
 
 
+def _build_data_confidence(hiring_stats, analyses, company_name, conn):
+    """Build data confidence metadata for the briefing."""
+    analyses_available = list({a["analysis_type"] for a in analyses})
+    analyses_missing = [t for t in ALL_ANALYSIS_TYPES if t not in analyses_available]
+
+    jobs_analyzed = hiring_stats.get("total_roles", 0) if hiring_stats else 0
+
+    # Determine scrape coverage from company ATS type
+    scrape_coverage = "unknown"
+    company_id = get_company_id(conn, company_name)
+    if company_id:
+        row = conn.execute("SELECT ats_type FROM companies WHERE id = ?", (company_id,)).fetchone()
+        if row and row["ats_type"]:
+            ats = row["ats_type"]
+            if ats in ("greenhouse", "lever", "ashby"):
+                scrape_coverage = f"{ats.title()} API (full board — all open roles captured)"
+            elif ats == "linkedin":
+                scrape_coverage = "LinkedIn guest API (sample — up to 100 of total open roles)"
+            else:
+                scrape_coverage = f"{ats} (coverage unknown)"
+
+    # Confidence level
+    if jobs_analyzed >= 100 and len(analyses_available) >= 4:
+        confidence = "high"
+    elif jobs_analyzed >= 30 and len(analyses_available) >= 2:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    # Caveats
+    caveats = []
+    if jobs_analyzed < 30:
+        caveats.append(f"Only {jobs_analyzed} roles analyzed — hiring signals may not be representative")
+    if "techstack" not in analyses_available:
+        caveats.append("No tech stack analysis — Tech Modernity score relies on hiring data only")
+    if "financial" not in analyses_available:
+        caveats.append("No financial analysis — budget signals based on hiring volume and public info only")
+    if "patents" not in analyses_available:
+        caveats.append("No patent analysis — AI Readiness score excludes IP signals")
+    if "sentiment" not in analyses_available:
+        caveats.append("No sentiment analysis — Org Readiness score excludes employee sentiment")
+    if "linkedin" in scrape_coverage.lower():
+        caveats.append("LinkedIn sample may not capture all open roles — consider running ATS scrape if available")
+
+    return {
+        "jobs_analyzed": jobs_analyzed,
+        "scrape_coverage": scrape_coverage,
+        "analyses_available": sorted(analyses_available),
+        "analyses_missing": sorted(analyses_missing),
+        "overall_confidence": confidence,
+        "caveats": caveats,
+    }
+
+
 def generate_briefing(company_name, db_path="intel.db"):
     """Generate a consulting-ready intelligence briefing for a company.
 
-    Synthesizes all available dossier data (key facts, report summaries, hiring stats)
-    into a structured JSON briefing with Digital Maturity Score and engagement opportunities.
+    Synthesizes all available dossier data (key facts, report summaries, hiring stats,
+    temporal snapshots) into a structured JSON briefing with Digital Maturity Score,
+    citations, and engagement opportunities.
 
     Returns the briefing dict (also saved to dossiers.briefing_json), or None on failure.
     """
@@ -137,47 +125,84 @@ def generate_briefing(company_name, db_path="intel.db"):
     # Load dossier
     dossier = get_dossier_by_company(conn, company_name)
     if not dossier:
-        print(f"[briefing] No dossier found for {company_name}")
+        msg = f"No dossier found for {company_name}"
+        print(f"[briefing] {msg}")
         conn.close()
-        return None
+        raise ValueError(msg)
 
     analyses = dossier.get("analyses", [])
-    if len(analyses) < 2:
-        print(f"[briefing] Only {len(analyses)} analysis(es) — need at least 2 for a meaningful briefing")
+    analysis_types = {a["analysis_type"] for a in analyses}
+
+    # Guard rail: hiring data is mandatory for a meaningful briefing
+    if "hiring" not in analysis_types:
+        msg = (f"No hiring analysis found for {company_name}. "
+               "Run a hiring analysis first — the briefing requires classified job data "
+               "to score digital maturity and identify consulting opportunities.")
+        print(f"[briefing] {msg}")
         conn.close()
-        return None
+        raise ValueError(msg)
+
+    if len(analyses) < 2:
+        msg = f"Only {len(analyses)} analysis(es) for {company_name} — need at least 2 for a meaningful briefing"
+        print(f"[briefing] {msg}")
+        conn.close()
+        raise ValueError(msg)
 
     # 1. Gather all key facts by analysis type
     raw_facts = get_latest_key_facts(conn, dossier["id"])
-    # get_latest_key_facts returns {type: {"data": {...}, "as_of": ...}} — unwrap to {type: {...}}
     all_key_facts = {atype: info["data"] for atype, info in raw_facts.items() if info.get("data")}
     print(f"[briefing] Key facts available from: {list(all_key_facts.keys())}")
 
-    # 2. Get hiring stats
-    hiring_stats = _get_hiring_stats(conn, company_name)
+    # 2. Get hiring stats using shared function
+    company_id = get_company_id(conn, company_name)
+    hiring_stats = compute_hiring_stats(conn, company_id) if company_id else None
     if hiring_stats:
         print(f"[briefing] Hiring data: {hiring_stats['total_roles']} roles, "
               f"{hiring_stats['ai_ml_role_count']} AI/ML")
     else:
         print("[briefing] No hiring data available")
 
-    # 3. Get report summaries
+    # 3. Get hiring snapshots for temporal analysis
+    hiring_snapshots = None
+    if company_id:
+        hiring_snapshots = get_hiring_snapshots(conn, company_id, limit=10)
+        if hiring_snapshots and len(hiring_snapshots) > 1:
+            print(f"[briefing] Hiring snapshots: {len(hiring_snapshots)} data points "
+                  f"({hiring_snapshots[-1]['snapshot_date']} → {hiring_snapshots[0]['snapshot_date']})")
+        elif hiring_snapshots:
+            print(f"[briefing] Single hiring snapshot available ({hiring_snapshots[0]['snapshot_date']})")
+        else:
+            print("[briefing] No hiring snapshots available")
+
+    # 4. Get report summaries
     report_summaries = _get_report_summaries(analyses)
     print(f"[briefing] Report summaries from: {list(report_summaries.keys())}")
 
-    # 4. Build prompt and generate
+    # 5. Build data confidence
+    data_confidence = _build_data_confidence(hiring_stats, analyses, company_name, conn)
+    print(f"[briefing] Data confidence: {data_confidence['overall_confidence']} "
+          f"({len(data_confidence['analyses_available'])} analyses, "
+          f"{data_confidence['jobs_analyzed']} jobs)")
+
+    # 6. Build prompt and generate
     print("[briefing] Generating briefing via LLM (this may take 30-60 seconds)...")
-    prompt = build_briefing_prompt(company_name, all_key_facts, report_summaries, hiring_stats)
+    prompt = build_briefing_prompt(
+        company_name, all_key_facts, report_summaries,
+        hiring_stats=hiring_stats,
+        hiring_snapshots=hiring_snapshots,
+        data_confidence=data_confidence,
+    )
     briefing = generate_json(prompt, timeout=90)
 
     if not isinstance(briefing, dict):
-        print("[briefing] LLM did not return valid JSON — briefing generation failed")
+        msg = "LLM did not return valid JSON — all providers may be rate-limited or down"
+        print(f"[briefing] {msg}")
         conn.close()
-        return None
+        raise RuntimeError(msg)
 
-    # 5. Store on dossier
+    # 7. Store on dossier
     now = datetime.now(timezone.utc).isoformat()
-    model_used = "unknown"  # generate_json doesn't return model — could enhance later
+    model_used = "unknown"
     conn.execute(
         """UPDATE dossiers
            SET briefing_json = ?, briefing_generated_at = ?, briefing_model = ?, updated_at = ?
@@ -190,12 +215,20 @@ def generate_briefing(company_name, db_path="intel.db"):
     # Summary
     dm = briefing.get("digital_maturity", {})
     opps = briefing.get("engagement_opportunities", [])
+    conf = briefing.get("data_confidence", {})
     print(f"\n[briefing] Digital Maturity Score: {dm.get('overall_score', '?')}/100 "
           f"({dm.get('overall_label', '?')})")
+    print(f"[briefing] Confidence: {conf.get('overall_confidence', '?')}")
     print(f"[briefing] Engagement opportunities: {len(opps)}")
     for opp in opps[:3]:
+        sources = opp.get("source_analyses", [])
+        src_str = f" [{', '.join(sources)}]" if sources else ""
         print(f"[briefing]   [{opp.get('priority', '?').upper()}] {opp.get('service', '?')} "
-              f"— {opp.get('estimated_scope', '?')}")
+              f"— {opp.get('estimated_scope', '?')}{src_str}")
+
+    traj = briefing.get("hiring_trajectory")
+    if traj:
+        print(f"[briefing] Hiring trajectory: {traj.get('trend', '?')} ({traj.get('velocity', '')})")
 
     print(f"\n{'='*60}")
     print(f"  Briefing complete for {company_name}")

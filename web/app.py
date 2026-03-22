@@ -17,7 +17,8 @@ load_dotenv()
 
 from agents.chat import ChatLLM, _execute_tool, MAX_TOOL_RESULT_CHARS
 from prompts.chat import SYSTEM_PROMPT, TOOL_SCHEMAS
-from db import init_db, get_connection, get_all_dossiers, get_dossier_by_company, get_or_create_dossier, add_dossier_event
+from db import (init_db, get_connection, get_all_dossiers, get_dossier_by_company,
+                get_or_create_dossier, add_dossier_event, get_company_id, get_hiring_snapshots)
 
 
 # --- Helpers ---
@@ -153,6 +154,18 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True, "event_id": event_id})
 
+    @app.route("/api/dossiers/<company_name>/hiring-snapshots")
+    def get_company_snapshots(company_name):
+        """Get hiring snapshot history for a company."""
+        conn = get_connection(db_path)
+        company_id = get_company_id(conn, company_name)
+        if not company_id:
+            conn.close()
+            return jsonify({"error": "Company not found"}), 404
+        snapshots = get_hiring_snapshots(conn, company_id, limit=20)
+        conn.close()
+        return jsonify(snapshots)
+
     @app.route("/api/dossiers/<company_name>/briefing", methods=["POST"])
     def generate_briefing_api(company_name):
         """Generate or refresh the intelligence briefing for a company."""
@@ -160,9 +173,9 @@ def create_app(db_path="intel.db"):
 
         try:
             briefing = generate_briefing(company_name, db_path)
-            if briefing:
-                return jsonify({"ok": True, "briefing": briefing})
-            return jsonify({"error": "Briefing generation failed — ensure the company has at least 2 analyses in its dossier."}), 400
+            return jsonify({"ok": True, "briefing": briefing})
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
