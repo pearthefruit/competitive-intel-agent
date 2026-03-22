@@ -735,6 +735,106 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                 return summary
             return "Briefing generation failed — ensure the company has a dossier with at least 2 analyses."
 
+        elif name == "batch_company_analysis":
+            # Restore stdout so worker threads don't fight over it
+            sys.stdout = old_stdout
+            old_stdout = None
+
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            companies = args["companies"][:5]  # Hard cap at 5
+            framework = args.get("seniority_framework", "tech")
+            depth = args.get("depth", "standard")
+
+            if progress_callback:
+                progress_callback(f"Batch analysis ({depth}): {', '.join(companies)}")
+
+            results = {}
+
+            def _run_company(company_name):
+                """Run pipeline for a single company in a worker thread."""
+                try:
+                    result = {}
+
+                    if depth == "full":
+                        path = company_profile(company_name, None, db_path)
+                        result["profile_report"] = path
+                    else:
+                        # Hiring pipeline
+                        new, skipped = collect(company_name, None, db_path)
+                        if new == 0 and skipped == 0:
+                            return company_name, {"error": "No jobs found — check company name or provide ATS URL"}
+                        count = classify(company_name, db_path, seniority_framework=framework)
+                        path = analyze(company_name, db_path)
+                        result.update({"jobs_new": new, "classified": count, "report": path})
+
+                        if depth == "standard":
+                            comp_path = competitor_analysis(company_name)
+                            result["competitor_report"] = comp_path
+
+                    # Try briefing (needs 2+ analyses)
+                    try:
+                        from agents.briefing import generate_briefing as _gen_briefing
+                        briefing = _gen_briefing(company_name, db_path)
+                        dm = briefing.get("digital_maturity", {})
+                        result["dm_score"] = dm.get("overall_score", "N/A")
+                        result["dm_label"] = dm.get("overall_label", "")
+                        subs = dm.get("sub_scores", {})
+                        result["sub_scores"] = {k: v.get("score", "?") for k, v in subs.items()}
+                    except Exception as e:
+                        result["briefing_error"] = str(e)[:120]
+
+                    return company_name, result
+                except Exception as e:
+                    return company_name, {"error": str(e)[:200]}
+
+            # max_workers=2 to limit SQLite write contention and API rate limits
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = {executor.submit(_run_company, c): c for c in companies}
+                for future in as_completed(futures):
+                    company_name, result = future.result()
+                    results[company_name] = result
+                    if progress_callback:
+                        if isinstance(result, dict) and isinstance(result.get("dm_score"), (int, float)):
+                            progress_callback(f"Done: {company_name} — DM Score {result['dm_score']}/100 ({result['dm_label']})")
+                        elif isinstance(result, dict) and result.get("error"):
+                            progress_callback(f"Failed: {company_name} — {result['error'][:80]}")
+                        else:
+                            progress_callback(f"Done: {company_name}")
+
+            # Format summary — sorted by DM score (worst first for "who's behind" queries)
+            lines = [f"## Batch Analysis: {len(companies)} Companies ({depth} depth)\n"]
+
+            scored = [(c, r) for c, r in results.items()
+                      if isinstance(r, dict) and isinstance(r.get("dm_score"), (int, float))]
+            scored.sort(key=lambda x: x[1]["dm_score"])  # ascending = worst first
+            unscored = [(c, r) for c, r in results.items() if c not in dict(scored)]
+
+            for company_name, r in scored + unscored:
+                if isinstance(r, dict):
+                    if isinstance(r.get("dm_score"), (int, float)):
+                        lines.append(f"**{company_name}** — {r['dm_score']}/100 ({r['dm_label']})")
+                        if r.get("sub_scores"):
+                            for k, v in r["sub_scores"].items():
+                                lines.append(f"  - {k.replace('_', ' ').title()}: {v}/100")
+                    elif r.get("error"):
+                        lines.append(f"**{company_name}** — ERROR: {r['error']}")
+                    else:
+                        lines.append(f"**{company_name}** — Analysis complete")
+
+                    if r.get("jobs_new"):
+                        lines.append(f"  Jobs: {r['jobs_new']} collected, {r.get('classified', 0)} classified")
+                    if r.get("briefing_error"):
+                        lines.append(f"  Briefing: {r['briefing_error']}")
+                    reports = [v for k, v in r.items() if (k.endswith("_report") or k == "report") and v]
+                    if reports:
+                        lines.append(f"  Reports: {', '.join(str(p) for p in reports)}")
+                else:
+                    lines.append(f"**{company_name}** — {r}")
+                lines.append("")
+
+            return "\n".join(lines)
+
         else:
             return f"Unknown tool: {name}"
 

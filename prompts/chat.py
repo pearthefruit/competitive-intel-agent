@@ -106,7 +106,8 @@ SYSTEM_PROMPT = """You are SignalForge, an agentic competitive intelligence anal
   - **tech** (default): All software, tech, and startup companies, or when the industry is unclear
   Always pass the `seniority_framework` parameter when calling classify or full_pipeline. If the user specifies a framework, use that. If they describe custom leveling rules, pass `custom_seniority_rules`.
 - **Intelligence briefings**: Use `generate_briefing` after a company has multiple analyses (financial, competitors, hiring, techstack, etc.) to create a consulting-ready intelligence briefing with a Digital Maturity Score, engagement opportunity map, risk profile, and strategic assessment. The briefing is stored on the dossier and rendered in the right pane. **Hiring data is mandatory** — if the briefing fails due to missing hiring analysis, automatically run `full_pipeline` for the company, then retry `generate_briefing`.
-- **Website analyses and company linking**: When running `techstack_analysis`, `seo_audit`, or `pricing_analysis`, always pass the `company_name` parameter if you know which company owns the website. This links the analysis to the correct company dossier instead of creating a separate entry for the domain."""
+- **Website analyses and company linking**: When running `techstack_analysis`, `seo_audit`, or `pricing_analysis`, always pass the `company_name` parameter if you know which company owns the website. This links the analysis to the correct company dossier instead of creating a separate entry for the domain.
+- **Multi-company queries**: When the user asks about multiple companies (e.g., "which CPG companies are behind digitally?", "compare top 5 banks"), first identify the companies via `web_search`, then use `batch_company_analysis` to run pipelines in parallel instead of analyzing one-by-one. This is dramatically faster and avoids hitting the tool call limit. Max 5 companies per batch."""
 
 # Condensed system prompt for follow-up rounds — saves ~8K chars of context
 CONDENSED_SYSTEM_PROMPT = """You are SignalForge, a competitive intelligence analyst. Continue the conversation using your tools.
@@ -121,7 +122,7 @@ CORE_TOOL_NAMES = {
 
 FOLLOW_UP_TOOL_NAMES = CORE_TOOL_NAMES | {
     "search_financial_news", "reddit_search", "hn_search",
-    "generate_briefing", "full_pipeline",
+    "generate_briefing", "full_pipeline", "batch_company_analysis",
 }
 
 
@@ -615,6 +616,35 @@ TOOL_SCHEMAS = [
                     "company": {"type": "string", "description": "Company name (must have an existing dossier with at least 2 analyses)"}
                 },
                 "required": ["company"]
+            }
+        }
+    },
+    # --- Batch ---
+    {
+        "type": "function",
+        "function": {
+            "name": "batch_company_analysis",
+            "description": "Run analysis pipelines on multiple companies in parallel and return combined results with Digital Maturity Scores for comparison. Use when the user's question requires analyzing or comparing several companies (e.g., 'which CPG companies are most behind digitally?', 'compare top 5 banks'). Much faster than sequential analysis. Max 5 companies per batch.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "companies": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Company names to analyze (max 5)"
+                    },
+                    "seniority_framework": {
+                        "type": "string",
+                        "enum": ["tech", "banking", "consulting", "corporate"],
+                        "description": "Industry seniority framework for job classification"
+                    },
+                    "depth": {
+                        "type": "string",
+                        "enum": ["hiring", "standard", "full"],
+                        "description": "Analysis depth per company. 'hiring': job pipeline only (fastest). 'standard': hiring + competitors (enables DM scores). 'full': company_profile with all analyses (slowest). Default: standard."
+                    }
+                },
+                "required": ["companies"]
             }
         }
     },
