@@ -12,30 +12,45 @@ from scraper.web_search import search_web, format_search_results
 from prompts.patents import build_patent_prompt, build_patent_prompt_fallback
 
 
-def _discover_applicant_names(company):
-    """Use LLM to brainstorm legal entity names a company might file patents under.
+def _research_company_entities(company):
+    """Web search + LLM to discover all entity names a company might file patents under.
 
+    Searches the web first to gather real info, then asks LLM to synthesize
+    name variations from both its training data and the web results.
     Returns a list of USPTO search queries (with wildcards).
     """
+    # Step 1: Web search for corporate structure info
+    print(f"[patents] Researching corporate structure for \"{company}\"...")
+    web_results = search_web(f'"{company}" company subsidiary parent "also known as" OR "formerly" OR "acquired by" OR "operates as"', max_results=4)
+    web_results += search_web(f'"{company}" patent assignee USPTO', max_results=2)
+
+    web_context = ""
+    if web_results:
+        web_context = "\n\nWeb research results about this company:\n" + "\n".join(
+            f"- {r.get('title', '')}: {r.get('body', '')}" for r in web_results
+        )
+
+    # Step 2: LLM synthesizes name variations from training data + web results
     prompt = f"""A user is searching for US patents filed by "{company}". The USPTO search uses the applicant/assignee name field.
+{web_context}
 
-Companies often file patents under different legal entity names. Consider ALL of the following:
-- Legal entity variations: "Microsoft" → "Microsoft Corporation", "Microsoft Technology Licensing, LLC"
-- Parent companies: "Google" → "Alphabet Inc.", "YouTube" → "Google LLC"
-- Subsidiaries and acquired companies: "Syndigo" → "1WorldSync", "Riversand"; "Salesforce" → "Tableau", "MuleSoft"
-- Former/DBA names: "Meta" → "Facebook, Inc."; "Openbrand" might operate as "Gap Intelligence"
-- Research divisions: "Google" → "DeepMind Technologies"
+Based on both the web research above and your own knowledge, generate ALL possible entity names this company might file patents under. Consider:
+- Legal entity variations (Inc., LLC, Corp., etc.)
+- Parent or holding companies
+- Subsidiaries and acquired companies
+- Former names or DBAs ("also known as", "formerly known as", "operates as")
+- Research divisions or technology licensing arms
 
-Generate a JSON array of 5-10 applicant name search queries for "{company}" that I should try on the USPTO database. Include the company's own name variations PLUS any known parent companies, subsidiaries, acquired brands, or former names that might hold patents. Use wildcards (*) where helpful. Order from most likely to least likely.
+Generate a JSON array of 5-12 applicant name search queries. Use wildcards (*) where helpful. Order from most likely to least likely.
 
 Example output for "Google":
-["Google*", "Google LLC", "Alphabet*", "DeepMind*", "Waymo*", "Google Technology Holdings*"]
+["Google*", "Google LLC", "Alphabet*", "DeepMind*", "Waymo*"]
 
 Return ONLY a JSON array of strings, nothing else."""
 
     result = generate_json(prompt)
     if isinstance(result, list) and result:
-        return [str(q) for q in result[:10]]
+        return [str(q) for q in result[:12]]
 
     # Fallback: generate basic variations manually
     name = company.strip()
@@ -45,7 +60,6 @@ Return ONLY a JSON array of strings, nothing else."""
         f"{name} Inc*",
         f"{name} LLC",
         f"{name} Technology*",
-        f"{name} Licensing*",
     ]
     return variations
 
@@ -61,9 +75,9 @@ def _search_with_name_variations(company, max_results=25):
     if patents:
         return patents, total, source, company
 
-    # Step 2: LLM generates name variations
-    print(f"[patents] No results for \"{company}\" — asking LLM for name variations...")
-    variations = _discover_applicant_names(company)
+    # Step 2: Research company + LLM generates informed name variations
+    print(f"[patents] No results for \"{company}\" — researching entity names...")
+    variations = _research_company_entities(company)
     print(f"[patents] Trying {len(variations)} name variations: {variations[:5]}...")
 
     for name_query in variations:
@@ -77,42 +91,7 @@ def _search_with_name_variations(company, max_results=25):
             print(f"[patents] Found {total} patents under \"{name_query}\"")
             return patents, total, "USPTO ODP", name_query
 
-    # Step 3: Web search to discover the actual filing name or related entities
-    print(f"[patents] Name variations exhausted — searching web for related entities...")
-    web_results = search_web(f'"{company}" patent assignee USPTO filing entity name', max_results=3)
-    web_results += search_web(f'"{company}" subsidiary "also known as" OR "formerly" OR "parent company" OR "acquired"', max_results=3)
-
-    if web_results:
-        # Ask LLM to extract entity names from web results
-        web_text = "\n".join(
-            f"- {r.get('title', '')}: {r.get('body', '')}" for r in web_results
-        )
-        extract_prompt = f"""From these search results about "{company}", extract entity names that might hold patents.
-
-Look for:
-- Legal filing names (e.g., "Company Inc.", "Company Technology LLC")
-- Parent or holding companies
-- Subsidiaries or acquired companies
-- Former names or DBAs ("also known as", "formerly known as")
-
-{web_text}
-
-Return ONLY a JSON array of entity names found. Example: ["Company Inc.", "Parent Corp", "Acquired Subsidiary LLC"]
-If no specific names are found, return an empty array: []"""
-
-        names = generate_json(extract_prompt)
-        if isinstance(names, list) and names:
-            print(f"[patents] Web search found entity names: {names}")
-            for entity_name in names[:5]:
-                query = f"{entity_name}*" if not entity_name.endswith("*") else entity_name
-                print(f"[patents] Trying web-discovered name \"{query}\"...")
-                patents, total = search_patents_with_name(query, max_results)
-                if patents:
-                    print(f"[patents] Found {total} patents under \"{entity_name}\"")
-                    return patents, total, "USPTO ODP", entity_name
-
-    if not web_results:
-        print(f"[patents] Web search for filing entity names also returned nothing — company may not have US patents or may file through a parent/holding entity")
+    print(f"[patents] No patents found under any name variation")
 
     return [], 0, None, None
 
