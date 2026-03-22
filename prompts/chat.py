@@ -105,7 +105,7 @@ SYSTEM_PROMPT = """You are SignalForge, an agentic competitive intelligence anal
   - **corporate**: Walmart, Target, P&G, Unilever, Johnson & Johnson, General Motors, Boeing, Caterpillar, and other retail/manufacturing/CPG companies
   - **tech** (default): All software, tech, and startup companies, or when the industry is unclear
   Always pass the `seniority_framework` parameter when calling classify or full_pipeline. If the user specifies a framework, use that. If they describe custom leveling rules, pass `custom_seniority_rules`.
-- **Intelligence briefings**: Use `generate_briefing` after a company has multiple analyses (financial, competitors, hiring, techstack, etc.) to create a consulting-ready intelligence briefing with a Digital Maturity Score, engagement opportunity map, risk profile, and strategic assessment. The briefing is stored on the dossier and rendered in the right pane.
+- **Intelligence briefings**: Use `generate_briefing` after a company has multiple analyses (financial, competitors, hiring, techstack, etc.) to create a consulting-ready intelligence briefing with a Digital Maturity Score, engagement opportunity map, risk profile, and strategic assessment. The briefing is stored on the dossier and rendered in the right pane. **Hiring data is mandatory** — if the briefing fails due to missing hiring analysis, automatically run `full_pipeline` for the company, then retry `generate_briefing`.
 - **Website analyses and company linking**: When running `techstack_analysis`, `seo_audit`, or `pricing_analysis`, always pass the `company_name` parameter if you know which company owns the website. This links the analysis to the correct company dossier instead of creating a separate entry for the domain."""
 
 TOOL_SCHEMAS = [
@@ -575,7 +575,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "generate_briefing",
-            "description": "Generate a consulting-ready intelligence briefing for a company's dossier. Synthesizes all available analyses into a Digital Maturity Score (0-100), engagement opportunity map, budget signals, competitive pressure assessment, risk profile, and strategic assessment. The briefing is stored on the dossier and rendered in the right pane. Requires at least 2 completed analyses.",
+            "description": "Generate a consulting-ready intelligence briefing for a company's dossier. Synthesizes all available analyses into a Digital Maturity Score (0-100), engagement opportunity map, budget signals, competitive pressure assessment, risk profile, and strategic assessment. The briefing is stored on the dossier and rendered in the right pane. IMPORTANT: Requires hiring analysis (classified job data). If it fails because hiring data is missing, you MUST automatically run full_pipeline for the company first, then retry generate_briefing. Also requires at least 2 total analyses.",
             "parameters": {
                 "type": "object",
                 "properties": {

@@ -118,6 +118,27 @@ def _build_context_injection(company_name, db_path):
         return None
 
 
+def _compress_history(history):
+    """Compress old tool results in conversation history to prevent context overflow.
+
+    Keeps the last 2 tool results at full size. Older tool results get truncated
+    to a short summary. This prevents the conversation from ballooning after
+    multiple tool calls (company_profile, web_search, get_dossier, etc.).
+    """
+    TOOL_SUMMARY_LIMIT = 500
+    tool_indices = [i for i, m in enumerate(history) if m.get("role") == "tool"]
+    if len(tool_indices) <= 2:
+        return  # Nothing to compress
+
+    # Keep the last 2 tool results full, compress the rest
+    to_compress = tool_indices[:-2]
+    for idx in to_compress:
+        content = history[idx].get("content", "")
+        if len(content) > TOOL_SUMMARY_LIMIT:
+            # Keep first N chars as summary
+            history[idx]["content"] = content[:TOOL_SUMMARY_LIMIT] + "\n\n... (earlier result compressed)"
+
+
 # --- App Factory ---
 
 def create_app(db_path="intel.db"):
@@ -603,22 +624,41 @@ def create_app(db_path="intel.db"):
             max_rounds = 15
 
             for _ in range(max_rounds):
+                # Compress old tool results to prevent context overflow
+                _compress_history(history)
+
                 try:
                     response = llm.chat(history, tools=TOOL_SCHEMAS)
                 except RuntimeError as e:
                     error_msg = str(e).lower()
-                    if any(kw in error_msg for kw in ["token", "context", "length", "too long", "too large", "maximum", "reduce"]):
-                        history_trimmed = [history[0]] + history[-4:]
+                    print(f"[chat] LLM error: {e}")
+
+                    is_context = any(kw in error_msg for kw in [
+                        "token", "context", "length", "too long", "too large",
+                        "maximum", "reduce", "limit", "exceed",
+                    ])
+                    is_rate = any(kw in error_msg for kw in [
+                        "rate limit", "429", "quota", "resource_exhausted",
+                    ])
+
+                    if is_context or (not is_rate and len(str(history)) > 50000):
+                        # Trim: keep system + last user + last 2 tool exchanges
+                        history_trimmed = [history[0]] + history[-6:]
+                        # Also truncate long tool results in the trimmed history
+                        for msg in history_trimmed:
+                            if msg.get("role") == "tool" and len(msg.get("content", "")) > 2000:
+                                msg["content"] = msg["content"][:2000] + "\n\n... (trimmed for context)"
                         try:
                             response = llm.chat(history_trimmed, tools=TOOL_SCHEMAS)
-                        except RuntimeError:
-                            yield f"data: {json.dumps({'type': 'error', 'text': 'Sorry, I hit a temporary issue. Please try again.'})}\n\n"
+                        except RuntimeError as e2:
+                            print(f"[chat] Retry also failed: {e2}")
+                            yield f"data: {json.dumps({'type': 'error', 'text': 'Context too large — try starting a new chat.'})}\n\n"
                             return
-                    elif any(kw in error_msg for kw in ["rate limit", "429", "quota", "resource_exhausted"]):
+                    elif is_rate:
                         yield f"data: {json.dumps({'type': 'error', 'text': 'Rate limited — all AI providers are temporarily exhausted. Wait a minute and try again.'})}\n\n"
                         return
                     else:
-                        yield f"data: {json.dumps({'type': 'error', 'text': 'Sorry, I hit a temporary issue. Please try again.'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'error', 'text': f'LLM error: {str(e)[:200]}'})}\n\n"
                         return
 
                 tool_calls = response.get("tool_calls")
