@@ -30,7 +30,7 @@ from agents.compare import compare_companies, landscape_analysis
 from prompts.chat import SYSTEM_PROMPT, TOOL_SCHEMAS
 
 MAX_HISTORY = 20
-MAX_TOOL_RESULT_CHARS = 8000  # Increased for raw data tools
+MAX_TOOL_RESULT_CHARS = 4000  # Keep small — history compression handles the rest
 
 # Lock for sys.stdout swap — prevents concurrent tool executions from clobbering each other
 _stdout_lock = threading.Lock()

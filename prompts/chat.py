@@ -108,6 +108,39 @@ SYSTEM_PROMPT = """You are SignalForge, an agentic competitive intelligence anal
 - **Intelligence briefings**: Use `generate_briefing` after a company has multiple analyses (financial, competitors, hiring, techstack, etc.) to create a consulting-ready intelligence briefing with a Digital Maturity Score, engagement opportunity map, risk profile, and strategic assessment. The briefing is stored on the dossier and rendered in the right pane. **Hiring data is mandatory** — if the briefing fails due to missing hiring analysis, automatically run `full_pipeline` for the company, then retry `generate_briefing`.
 - **Website analyses and company linking**: When running `techstack_analysis`, `seo_audit`, or `pricing_analysis`, always pass the `company_name` parameter if you know which company owns the website. This links the analysis to the correct company dossier instead of creating a separate entry for the domain."""
 
+# Condensed system prompt for follow-up rounds — saves ~8K chars of context
+CONDENSED_SYSTEM_PROMPT = """You are SignalForge, a competitive intelligence analyst. Continue the conversation using your tools.
+
+Rules: Think before acting. Synthesize findings concisely — don't echo raw tool output. Check dossiers before new analyses. If briefing needs hiring data, run full_pipeline first. Save notable events to dossier timelines."""
+
+# Tool tiers for dynamic schema selection — reduces context overhead on follow-up rounds
+CORE_TOOL_NAMES = {
+    "think", "web_search", "query_db", "get_dossier",
+    "get_current_datetime", "save_dossier_event",
+}
+
+FOLLOW_UP_TOOL_NAMES = CORE_TOOL_NAMES | {
+    "search_financial_news", "reddit_search", "hn_search",
+    "generate_briefing", "full_pipeline",
+}
+
+
+def get_tool_schemas(tier="full"):
+    """Return tool schemas filtered by tier to reduce context overhead.
+
+    full: All tools (~17K chars) — first round of each user message
+    follow_up: Core + key tools (~6K chars) — subsequent tool-call rounds
+    minimal: Think + search (~1K chars) — context overflow recovery
+    """
+    if tier == "full":
+        return TOOL_SCHEMAS
+    if tier == "follow_up":
+        return [t for t in TOOL_SCHEMAS if t["function"]["name"] in FOLLOW_UP_TOOL_NAMES]
+    if tier == "minimal":
+        return [t for t in TOOL_SCHEMAS if t["function"]["name"] in {"think", "web_search", "get_current_datetime"}]
+    return TOOL_SCHEMAS
+
+
 TOOL_SCHEMAS = [
     # --- Reasoning ---
     {

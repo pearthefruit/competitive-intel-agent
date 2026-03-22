@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from agents.chat import ChatLLM, _execute_tool, MAX_TOOL_RESULT_CHARS
-from prompts.chat import SYSTEM_PROMPT, TOOL_SCHEMAS
+from prompts.chat import SYSTEM_PROMPT, CONDENSED_SYSTEM_PROMPT, TOOL_SCHEMAS, get_tool_schemas
 from db import (init_db, get_connection, get_all_dossiers, get_dossier_by_company,
                 get_or_create_dossier, add_dossier_event, get_company_id, get_hiring_snapshots,
                 get_latest_key_facts)
@@ -119,24 +119,66 @@ def _build_context_injection(company_name, db_path):
 
 
 def _compress_history(history):
-    """Compress old tool results in conversation history to prevent context overflow.
+    """Aggressively compress conversation history to prevent context overflow.
 
-    Keeps the last 2 tool results at full size. Older tool results get truncated
-    to a short summary. This prevents the conversation from ballooning after
-    multiple tool calls (company_profile, web_search, get_dossier, etc.).
+    Strategy:
+    1. Truncate ALL tool results older than the last 2 to 200 chars
+    2. If total history is still > 30K chars, drop middle messages entirely
+       (keep system prompt + first user message + last 4 messages)
+    3. Cap any single tool result at 4000 chars
     """
-    TOOL_SUMMARY_LIMIT = 500
-    tool_indices = [i for i, m in enumerate(history) if m.get("role") == "tool"]
-    if len(tool_indices) <= 2:
-        return  # Nothing to compress
+    if len(history) <= 3:
+        return
 
-    # Keep the last 2 tool results full, compress the rest
-    to_compress = tool_indices[:-2]
-    for idx in to_compress:
-        content = history[idx].get("content", "")
-        if len(content) > TOOL_SUMMARY_LIMIT:
-            # Keep first N chars as summary
-            history[idx]["content"] = content[:TOOL_SUMMARY_LIMIT] + "\n\n... (earlier result compressed)"
+    # Step 1: Cap all tool results at 4000 chars
+    for msg in history:
+        if msg.get("role") == "tool" and len(msg.get("content", "")) > 4000:
+            msg["content"] = msg["content"][:4000] + "\n\n... (truncated)"
+
+    # Step 2: Truncate old tool results aggressively
+    tool_indices = [i for i, m in enumerate(history) if m.get("role") == "tool"]
+    if len(tool_indices) > 2:
+        for idx in tool_indices[:-2]:
+            content = history[idx].get("content", "")
+            if len(content) > 200:
+                history[idx]["content"] = content[:200] + "\n... (compressed)"
+
+    # Step 3: If still too large, drop middle messages
+    total = sum(len(str(m.get("content", ""))) for m in history)
+    if total > 30000 and len(history) > 6:
+        # Keep: system[0] + last 4 messages
+        kept = [history[0]] + history[-4:]
+        history.clear()
+        history.extend(kept)
+
+
+def _summarize_tool_result(tool_name, raw_result):
+    """Use a fast LLM call to compress verbose tool results for conversation history.
+
+    Multi-step approach: spend a small, fast LLM call to summarize each tool result,
+    keeping the conversation history lean so the main chat LLM doesn't hit context limits.
+    The user still sees the full result in the UI — only the history gets compressed.
+    """
+    if len(raw_result) < 600:
+        return raw_result  # Already short — no need to summarize
+
+    from agents.llm import generate_text
+    prompt = (
+        f"Compress this {tool_name} tool result into a dense 2-3 sentence summary. "
+        f"Keep ALL key data points, numbers, company names, and actionable findings. "
+        f"Drop formatting, boilerplate, and redundancy.\n\n"
+        f"Result:\n{raw_result[:4000]}\n\nDense summary:"
+    )
+
+    try:
+        summary = generate_text(prompt, max_tokens=200)
+        if summary and len(summary.strip()) > 30:
+            return summary.strip()
+    except Exception as e:
+        print(f"[chat] Summarization failed ({e}), falling back to truncation")
+
+    # Fallback: simple truncation
+    return raw_result[:600] + "\n... (truncated)"
 
 
 # --- App Factory ---
@@ -622,13 +664,25 @@ def create_app(db_path="intel.db"):
                 return
 
             max_rounds = 15
+            # Build date suffix once for reuse in condensed prompt
+            date_suffix = f"\n\n[TODAY] The current date is {today}. Use {datetime.now().year} in searches."
 
-            for _ in range(max_rounds):
-                # Compress old tool results to prevent context overflow
+            for round_num in range(max_rounds):
+                # Dynamic tool selection: full tools on round 1, core tools after
+                # This drops from ~17K chars of schemas to ~6K on follow-up rounds
+                if round_num == 0:
+                    current_tools = TOOL_SCHEMAS
+                else:
+                    current_tools = get_tool_schemas("follow_up")
+                    # Swap to condensed system prompt to save ~8K chars
+                    if history and history[0].get("role") == "system":
+                        history[0]["content"] = CONDENSED_SYSTEM_PROMPT + date_suffix
+
+                # Compress old tool results as safety net
                 _compress_history(history)
 
                 try:
-                    response = llm.chat(history, tools=TOOL_SCHEMAS)
+                    response = llm.chat(history, tools=current_tools)
                 except RuntimeError as e:
                     error_msg = str(e).lower()
                     print(f"[chat] LLM error: {e}")
@@ -642,14 +696,20 @@ def create_app(db_path="intel.db"):
                     ])
 
                     if is_context or (not is_rate and len(str(history)) > 50000):
-                        # Trim: keep system + last user + last 2 tool exchanges
-                        history_trimmed = [history[0]] + history[-6:]
-                        # Also truncate long tool results in the trimmed history
-                        for msg in history_trimmed:
-                            if msg.get("role") == "tool" and len(msg.get("content", "")) > 2000:
-                                msg["content"] = msg["content"][:2000] + "\n\n... (trimmed for context)"
+                        # Nuclear trim: condensed system + last user message only, no tools
+                        last_user = None
+                        for msg in reversed(history):
+                            if msg.get("role") == "user":
+                                last_user = msg
+                                break
+                        if not last_user:
+                            last_user = {"role": "user", "content": "Please summarize what you found so far."}
+
+                        # Use condensed system prompt + no tools to minimize context
+                        condensed_sys = {"role": "system", "content": CONDENSED_SYSTEM_PROMPT + date_suffix}
+                        history_trimmed = [condensed_sys, last_user]
                         try:
-                            response = llm.chat(history_trimmed, tools=TOOL_SCHEMAS)
+                            response = llm.chat(history_trimmed, tools=None)
                         except RuntimeError as e2:
                             print(f"[chat] Retry also failed: {e2}")
                             yield f"data: {json.dumps({'type': 'error', 'text': 'Context too large — try starting a new chat.'})}\n\n"
@@ -725,10 +785,13 @@ def create_app(db_path="intel.db"):
 
                         yield f"data: {json.dumps({'type': 'tool_result', 'name': fn_name, 'result': result})}\n\n"
 
+                        # Summarize for history to keep context lean (multi-step LLM approach)
+                        # User sees full result above; only the summary goes into LLM context
+                        history_content = _summarize_tool_result(fn_name, result)
                         history.append({
                             "role": "tool",
                             "tool_call_id": tc["id"],
-                            "content": result,
+                            "content": history_content,
                         })
 
                     continue
