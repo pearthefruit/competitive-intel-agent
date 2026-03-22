@@ -19,16 +19,17 @@ def _discover_applicant_names(company):
     """
     prompt = f"""A user is searching for US patents filed by "{company}". The USPTO search uses the applicant/assignee name field.
 
-Companies often file patents under different legal entity names. For example:
-- "Microsoft" files under "Microsoft Corporation" and "Microsoft Technology Licensing, LLC"
-- "Google" files under "Google LLC" and "Alphabet Inc."
-- "Apple" files under "Apple Inc."
-- "Meta" files under "Meta Platforms, Inc." and formerly "Facebook, Inc."
+Companies often file patents under different legal entity names. Consider ALL of the following:
+- Legal entity variations: "Microsoft" → "Microsoft Corporation", "Microsoft Technology Licensing, LLC"
+- Parent companies: "Google" → "Alphabet Inc.", "YouTube" → "Google LLC"
+- Subsidiaries and acquired companies: "Syndigo" → "1WorldSync", "Riversand"; "Salesforce" → "Tableau", "MuleSoft"
+- Former/DBA names: "Meta" → "Facebook, Inc."; "Openbrand" might operate as "Gap Intelligence"
+- Research divisions: "Google" → "DeepMind Technologies"
 
-Generate a JSON array of 5-10 applicant name search queries for "{company}" that I should try on the USPTO database. Use wildcards (*) where helpful. Order from most likely to least likely.
+Generate a JSON array of 5-10 applicant name search queries for "{company}" that I should try on the USPTO database. Include the company's own name variations PLUS any known parent companies, subsidiaries, acquired brands, or former names that might hold patents. Use wildcards (*) where helpful. Order from most likely to least likely.
 
-Example output for "Microsoft":
-["Microsoft*", "Microsoft Corporation", "Microsoft Technology Licensing*"]
+Example output for "Google":
+["Google*", "Google LLC", "Alphabet*", "DeepMind*", "Waymo*", "Google Technology Holdings*"]
 
 Return ONLY a JSON array of strings, nothing else."""
 
@@ -76,20 +77,27 @@ def _search_with_name_variations(company, max_results=25):
             print(f"[patents] Found {total} patents under \"{name_query}\"")
             return patents, total, "USPTO ODP", name_query
 
-    # Step 3: Web search to discover the actual filing name
-    print(f"[patents] Name variations exhausted — searching web for filing names...")
-    web_results = search_web(f'"{company}" patent assignee USPTO filing entity name', max_results=5)
+    # Step 3: Web search to discover the actual filing name or related entities
+    print(f"[patents] Name variations exhausted — searching web for related entities...")
+    web_results = search_web(f'"{company}" patent assignee USPTO filing entity name', max_results=3)
+    web_results += search_web(f'"{company}" subsidiary "also known as" OR "formerly" OR "parent company" OR "acquired"', max_results=3)
 
     if web_results:
         # Ask LLM to extract entity names from web results
         web_text = "\n".join(
             f"- {r.get('title', '')}: {r.get('body', '')}" for r in web_results
         )
-        extract_prompt = f"""From these search results about "{company}" patents, extract the exact legal entity names used to file patents.
+        extract_prompt = f"""From these search results about "{company}", extract entity names that might hold patents.
+
+Look for:
+- Legal filing names (e.g., "Company Inc.", "Company Technology LLC")
+- Parent or holding companies
+- Subsidiaries or acquired companies
+- Former names or DBAs ("also known as", "formerly known as")
 
 {web_text}
 
-Return ONLY a JSON array of entity names found. Example: ["Company Inc.", "Company Technology LLC"]
+Return ONLY a JSON array of entity names found. Example: ["Company Inc.", "Parent Corp", "Acquired Subsidiary LLC"]
 If no specific names are found, return an empty array: []"""
 
         names = generate_json(extract_prompt)
