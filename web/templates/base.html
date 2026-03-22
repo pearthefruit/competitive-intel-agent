@@ -477,14 +477,14 @@
         }
         .score-advanced { color: #22c55e; }
         .score-maturing { color: #3b82f6; }
-        .score-developing { color: #eab308; }
-        .score-laggard { color: #eab308; }
-        .score-predigital { color: #ef4444; }
+        .score-developing { color: #f59e0b; }
+        .score-laggard { color: #ef4444; }
+        .score-atrisk { color: #dc2626; }
         .ring-advanced { stroke: #22c55e; }
         .ring-maturing { stroke: #3b82f6; }
-        .ring-developing { stroke: #eab308; }
-        .ring-laggard { stroke: #eab308; }
-        .ring-predigital { stroke: #ef4444; }
+        .ring-developing { stroke: #f59e0b; }
+        .ring-laggard { stroke: #ef4444; }
+        .ring-atrisk { stroke: #dc2626; }
 
         /* Citation source badges */
         .source-badge {
@@ -1797,7 +1797,8 @@ function _scoreColorClass(score) {
     if (score >= 80) return 'advanced';
     if (score >= 60) return 'maturing';
     if (score >= 40) return 'developing';
-    return 'predigital';
+    if (score >= 20) return 'laggard';
+    return 'atrisk';
 }
 
 // Global store for source key facts — populated when briefing is rendered
@@ -2862,34 +2863,58 @@ function closeRightPane() {
 }
 
 function printReport() {
-    if (!currentReportFilename) return;
-
     // Button feedback
     const btn = document.querySelector('.right-btn');
     const origText = btn ? btn.textContent : '';
     if (btn) { btn.textContent = 'Exporting...'; btn.disabled = true; }
     const resetBtn = () => { if (btn) { btn.textContent = origText; btn.disabled = false; } };
 
-    // Server-side PDF generation — just download
-    fetch(`/api/reports/${currentReportFilename}/pdf`)
-        .then(resp => {
-            if (!resp.ok) throw new Error('PDF export failed');
-            return resp.blob();
-        })
-        .then(blob => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = currentReportFilename.replace('.md', '.pdf');
-            a.click();
-            URL.revokeObjectURL(url);
-            resetBtn();
-        })
-        .catch(err => {
-            console.error('PDF export error:', err);
-            alert('PDF export failed — check console for details.');
-            resetBtn();
-        });
+    // Determine export type: report file or briefing/dossier
+    if (currentReportFilename) {
+        // Server-side PDF from markdown report
+        fetch(`/api/reports/${currentReportFilename}/pdf`)
+            .then(resp => {
+                if (!resp.ok) throw new Error('PDF export failed');
+                return resp.blob();
+            })
+            .then(blob => {
+                _downloadBlob(blob, currentReportFilename.replace('.md', '.pdf'));
+                resetBtn();
+            })
+            .catch(err => {
+                console.error('PDF export error:', err);
+                alert('PDF export failed — check console for details.');
+                resetBtn();
+            });
+    } else if (activeDossierName) {
+        // Server-side PDF from briefing/dossier
+        fetch(`/api/dossiers/${encodeURIComponent(activeDossierName)}/pdf`)
+            .then(resp => {
+                if (!resp.ok) throw new Error('Briefing PDF export failed');
+                return resp.blob();
+            })
+            .then(blob => {
+                const safeName = activeDossierName.toLowerCase().replace(/\s+/g, '_');
+                _downloadBlob(blob, `${safeName}_briefing.pdf`);
+                resetBtn();
+            })
+            .catch(err => {
+                console.error('PDF export error:', err);
+                alert('PDF export failed — check console for details.');
+                resetBtn();
+            });
+    } else {
+        resetBtn();
+    }
+}
+
+function _downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
 }
 
 async function deleteCurrentReport() {

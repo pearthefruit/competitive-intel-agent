@@ -378,6 +378,200 @@ def create_app(db_path="intel.db"):
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
+    @app.route("/api/dossiers/<company_name>/pdf")
+    def export_briefing_pdf(company_name):
+        """Export a company's intelligence briefing as a styled PDF."""
+        from xhtml2pdf import pisa
+        import io
+
+        conn = get_connection(db_path)
+        dossier = get_dossier_by_company(conn, company_name)
+        conn.close()
+
+        if not dossier or not dossier.get("briefing_json"):
+            return jsonify({"error": "No briefing found for this company"}), 404
+
+        briefing = dossier["briefing_json"]
+        if isinstance(briefing, str):
+            briefing = json.loads(briefing)
+
+        dm = briefing.get("digital_maturity", {})
+        overall = dm.get("overall_score", "N/A")
+        label = dm.get("overall_label", "")
+        score_val = overall if isinstance(overall, int) else 0
+        score_color = "#22c55e" if score_val >= 80 else "#3b82f6" if score_val >= 60 else "#f59e0b" if score_val >= 40 else "#ef4444" if score_val >= 20 else "#dc2626"
+        subs = dm.get("sub_scores", {})
+
+        # Build sub-scores table rows
+        sub_rows = ""
+        for key, name in [("tech_modernity", "Tech Modernity"), ("data_analytics", "Data & Analytics"),
+                          ("ai_readiness", "AI Readiness"), ("organizational_readiness", "Org Readiness")]:
+            s = subs.get(key, {})
+            sub_rows += f"<tr><td>{name}</td><td><strong>{s.get('score', 'N/A')}</strong>/100</td><td>{s.get('rationale', '')}</td></tr>"
+
+        # Engagement opportunities
+        opps_html = ""
+        for opp in briefing.get("engagement_opportunities", []):
+            priority = opp.get("priority", "medium").upper()
+            p_color = "#dc2626" if priority == "HIGH" else "#d97706" if priority == "MEDIUM" else "#16a34a"
+            opps_html += f"""
+            <div style="margin-bottom:14px;padding:10px 12px;border:1px solid #e5e7eb;border-radius:6px;border-left:3px solid {p_color}">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                    <strong>{opp.get('area', '')}</strong>
+                    <span style="font-size:9px;font-weight:600;color:{p_color};text-transform:uppercase">{priority}</span>
+                </div>
+                <div style="font-size:10px;color:#555;margin-bottom:4px">{opp.get('detail', '')}</div>
+                {f'<div style="font-size:10px;color:#3b82f6;font-style:italic">{opp.get("why_now", "")}</div>' if opp.get('why_now') else ''}
+            </div>"""
+
+        # Budget signals
+        budget = briefing.get("budget_signals", {})
+        budget_html = ""
+        if budget:
+            budget_html = f"""
+            <h2>Budget &amp; Appetite Signals</h2>
+            <table><tr><th>Signal</th><th>Detail</th></tr>
+            <tr><td>Estimated IT Spend</td><td>{budget.get('estimated_it_spend', 'N/A')}</td></tr>
+            <tr><td>Consulting Appetite</td><td>{budget.get('consulting_appetite', 'N/A')}</td></tr>
+            <tr><td>Evidence</td><td>{budget.get('evidence', '')}</td></tr>
+            </table>"""
+
+        # Risk profile
+        risks_html = ""
+        for risk in briefing.get("risk_profile", []):
+            sev = risk.get("severity", "medium")
+            sev_color = "#dc2626" if sev == "high" else "#d97706" if sev == "medium" else "#16a34a"
+            risks_html += f"<li><strong style='color:{sev_color}'>[{sev.upper()}]</strong> <strong>{risk.get('category', '')}</strong>: {risk.get('description', '')}</li>"
+
+        # Hiring trajectory
+        hiring = briefing.get("hiring_trajectory", {})
+        hiring_html = ""
+        if hiring:
+            hiring_html = f"""
+            <h2>Hiring Trajectory</h2>
+            <p><strong>Trend:</strong> {hiring.get('trend', 'N/A')} &mdash; <strong>Signal:</strong> {hiring.get('signal', '')}</p>
+            <p>{hiring.get('detail', '')}</p>"""
+
+        # Strategic assessment
+        strategic = briefing.get("strategic_assessment", "")
+
+        # Competitive pressure
+        comp = briefing.get("competitive_pressure", {})
+        comp_html = ""
+        if comp:
+            comp_html = f"""
+            <h2>Competitive Pressure</h2>
+            <p><strong>Level:</strong> {comp.get('level', 'N/A')}</p>
+            <p>{comp.get('detail', '')}</p>"""
+
+        generated_at = dossier.get("briefing_generated_at", "")[:10]
+
+        html_doc = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    @page {{
+        size: A4;
+        margin: 18mm 16mm 18mm 16mm;
+    }}
+    body {{
+        font-family: Helvetica, Arial, sans-serif;
+        font-size: 11px;
+        line-height: 1.6;
+        color: #1a1a1a;
+    }}
+    .header {{
+        border-bottom: 2px solid #3b82f6;
+        padding-bottom: 10px;
+        margin-bottom: 16px;
+    }}
+    .header-company {{ font-size: 22px; font-weight: bold; color: #111; }}
+    .header-meta {{ font-size: 10px; color: #666; margin-top: 4px; }}
+    .header-brand {{ font-size: 12px; font-weight: bold; color: #3b82f6; float: right; }}
+    .header-brand-sub {{ font-size: 8px; color: #999; }}
+    .score-box {{
+        text-align: center;
+        padding: 16px;
+        margin: 16px 0;
+        border: 2px solid #3b82f6;
+        border-radius: 8px;
+    }}
+    .score-number {{ font-size: 36px; font-weight: bold; color: {score_color}; }}
+    .score-label {{ font-size: 14px; font-weight: 600; color: {score_color}; margin-top: 4px; }}
+    h2 {{ font-size: 15px; font-weight: bold; margin: 18px 0 8px; color: #222; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }}
+    table {{ width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 10px; }}
+    th {{ text-align: left; padding: 6px 8px; background: #f3f4f6; border: 1px solid #d1d5db; font-weight: 600; }}
+    td {{ padding: 5px 8px; border: 1px solid #d1d5db; }}
+    ul {{ padding-left: 18px; }}
+    li {{ margin: 4px 0; }}
+    p {{ margin: 6px 0; }}
+    strong {{ color: #111; }}
+    .footer {{
+        margin-top: 20px;
+        padding-top: 6px;
+        border-top: 1px solid #ddd;
+        font-size: 8px;
+        color: #999;
+    }}
+</style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-brand">SignalForge<br><span class="header-brand-sub">Competitive Intelligence</span></div>
+        <div class="header-company">{company_name}</div>
+        <div class="header-meta">Intelligence Briefing &middot; {generated_at}</div>
+    </div>
+
+    <div class="score-box">
+        <div class="score-number">{overall}</div>
+        <div class="score-label">{label}</div>
+        <div style="font-size:9px;color:#666;margin-top:4px">Digital Maturity Score</div>
+    </div>
+
+    <h2>Sub-Scores</h2>
+    <table>
+        <tr><th>Dimension</th><th>Score</th><th>Rationale</th></tr>
+        {sub_rows}
+    </table>
+
+    <h2>Engagement Opportunities</h2>
+    {opps_html}
+
+    {budget_html}
+    {hiring_html}
+    {comp_html}
+
+    {'<h2>Risk Profile</h2><ul>' + risks_html + '</ul>' if risks_html else ''}
+
+    <h2>Strategic Assessment</h2>
+    <p>{strategic}</p>
+
+    <div class="footer">
+        Generated by SignalForge &middot; {generated_at}
+    </div>
+</body>
+</html>"""
+
+        pdf_buffer = io.BytesIO()
+        pisa_status = pisa.CreatePDF(html_doc, dest=pdf_buffer)
+
+        if pisa_status.err:
+            return jsonify({"error": "PDF generation failed"}), 500
+
+        pdf_buffer.seek(0)
+        safe_name = company_name.lower().replace(" ", "_")
+        pdf_filename = f"{safe_name}_briefing_{generated_at}.pdf"
+
+        return Response(
+            pdf_buffer.getvalue(),
+            mimetype="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename={pdf_filename}",
+                "Content-Type": "application/pdf",
+            },
+        )
+
     # --- Chat API ---
 
     @app.route("/api/chat", methods=["POST"])

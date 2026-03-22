@@ -17,7 +17,7 @@ _BRIEFING_SCHEMA = {
     },
     "digital_maturity": {
         "overall_score": "integer 0-100",
-        "overall_label": "Digitally Advanced | Digitally Maturing | Digitally Developing | Pre-Digital",
+        "overall_label": "Digital Leader | Digitally Maturing | Falling Behind | Digital Laggard | At Risk",
         "sub_scores": {
             "tech_modernity": {
                 "score": "integer 0-100",
@@ -329,12 +329,12 @@ Secondary signals: analytics tools detected on website (Segment, Amplitude, etc.
 
 **Overall score = weighted average (Tech×0.30 + Data×0.25 + AI×0.25 + Org×0.20). COMPUTE THIS PRECISELY — do the arithmetic, show your work mentally, and round to the nearest integer. The overall_score must equal the weighted average of sub-scores.**
 
-Labels (no bias — these are objective descriptors):
-- 80-100: "Digitally Advanced"
+Labels (direct, no sugarcoating — these should make a C-suite exec pay attention):
+- 80-100: "Digital Leader"
 - 60-79: "Digitally Maturing"
-- 40-59: "Digitally Developing"
-- 20-39: "Pre-Digital"
-- 0-19: "Not Assessed"
+- 40-59: "Falling Behind"
+- 20-39: "Digital Laggard"
+- 0-19: "At Risk"
 
 ---
 

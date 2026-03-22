@@ -139,7 +139,7 @@ LLM-scored 0-100 composite with 4 weighted sub-scores:
 - **AI Readiness (25%):** AI/ML hiring signals from classifications + patent portfolio
 - **Organizational Readiness (20%):** Hiring momentum, engineering ratio, strategic tags
 
-Score tiers: Digitally Advanced (80-100), Digitally Maturing (60-79), Digitally Developing (40-59), Pre-Digital (20-39), Not Assessed (0-19)
+Score tiers: Digital Leader (80-100), Digitally Maturing (60-79), Falling Behind (40-59), Digital Laggard (20-39), At Risk (0-19)
 
 ### LLM Provider Rotation
 
