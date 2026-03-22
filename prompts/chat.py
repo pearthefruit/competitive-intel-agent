@@ -176,7 +176,7 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query (e.g. 'Stripe Series I funding 2025', 'Microsoft Q4 earnings')"
+                        "description": "Search query (e.g. 'Stripe Series I funding 2026', 'Microsoft Q4 earnings')"
                     }
                 },
                 "required": ["query"]
@@ -582,6 +582,18 @@ TOOL_SCHEMAS = [
                     "company": {"type": "string", "description": "Company name (must have an existing dossier with at least 2 analyses)"}
                 },
                 "required": ["company"]
+            }
+        }
+    },
+    # --- Utility ---
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_datetime",
+            "description": "Get the current date and time. Use when answering questions about deadlines, 'today', 'this week', or when the user needs to know the current date/time.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
             }
         }
     },

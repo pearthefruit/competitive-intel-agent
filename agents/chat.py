@@ -193,24 +193,26 @@ def _gemini_response_to_openai(response):
 # --- Chat LLM with multi-provider support ---
 
 CHAT_PROVIDERS = [
-    {
-        "name": "groq",
-        "env_key": "GROQ_API_KEY",
-        "url": "https://api.groq.com/openai/v1/chat/completions",
-        "model": "llama-3.3-70b-versatile",
-    },
-    {
-        "name": "gemini",
-        "env_key": "GEMINI_API_KEYS",
-        "url": None,
-        "model": "gemini-2.5-flash",
-    },
-    {
-        "name": "mistral",
-        "env_key": "MISTRAL_API_KEY",
-        "url": "https://api.mistral.ai/v1/chat/completions",
-        "model": "mistral-small-latest",
-    },
+    # --- Gemini (primary — best quality, native function calling) ---
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash"},
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-3-flash-preview"},
+    # --- Groq (fast inference, OpenAI-compatible) ---
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "meta-llama/llama-4-scout-17b-16e-instruct"},
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "qwen/qwen3-32b"},
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "compound-beta"},
+    # --- Cerebras (fast inference) ---
+    {"name": "cerebras", "env_key": "CEREBRAS_API_KEY", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "llama-3.3-70b"},
+    # --- Mistral (direct API, free tier) ---
+    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
+    # --- OpenRouter (free models) ---
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "nousresearch/hermes-3-llama-3.1-405b:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "qwen/qwen3-next-80b-a3b-instruct:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "mistralai/mistral-small-3.1-24b-instruct:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "stepfun/step-3.5-flash:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "google/gemma-3-27b-it:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "nvidia/nemotron-3-nano-30b-a3b:free"},
 ]
 
 
@@ -221,13 +223,19 @@ class ChatLLM:
         self.http = httpx.Client(timeout=60, follow_redirects=True)
         self.providers = []
         for p in CHAT_PROVIDERS:
-            key = os.environ.get(p["env_key"], "").strip()
-            if key:
-                if "," in key:
-                    key = key.split(",")[0].strip()
-                self.providers.append({**p, "key": key})
+            raw_key = os.environ.get(p["env_key"], "").strip()
+            if not raw_key:
+                continue
+            # Gemini supports multiple comma-separated keys — rotate through them
+            if p["name"] == "gemini" and "," in raw_key:
+                for k in raw_key.split(","):
+                    k = k.strip()
+                    if k:
+                        self.providers.append({**p, "key": k})
+            else:
+                self.providers.append({**p, "key": raw_key})
         if not self.providers:
-            raise RuntimeError("No API keys found for chat (need GROQ_API_KEY, GEMINI_API_KEYS, or MISTRAL_API_KEY)")
+            raise RuntimeError("No API keys found for chat (need at least one of: GEMINI_API_KEYS, GROQ_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, OPENROUTER_API_KEY)")
 
     def chat(self, messages, tools=None):
         """Send chat completion request. Returns the assistant message dict."""
@@ -699,6 +707,11 @@ def _execute_tool(name, args, db_path, progress_callback=None):
         elif name == "refresh_key_facts":
             from agents.llm import reextract_all_key_facts
             return reextract_all_key_facts(args["company"], db_path)
+
+        elif name == "get_current_datetime":
+            from datetime import datetime
+            now = datetime.now()
+            return now.strftime("Current date and time: %A, %B %d, %Y at %I:%M %p")
 
         elif name == "generate_briefing":
             from agents.briefing import generate_briefing

@@ -227,9 +227,11 @@ def create_app(db_path="intel.db"):
         if not messages:
             return jsonify({"error": "No messages"}), 400
 
-        # Inject company context into system prompt if provided
+        # Inject current date + company context into system prompt
+        from datetime import datetime
+        today = datetime.now().strftime("%A, %B %d, %Y")
         context = data.get("context")
-        system_content = SYSTEM_PROMPT
+        system_content = SYSTEM_PROMPT + f"\n\n[TODAY] The current date is {today}. Always use the current year ({datetime.now().year}) in search queries and when referencing time. Never assume an older date."
         if context and context.get("company"):
             context_text = _build_context_injection(context["company"], db_path)
             if context_text:
@@ -258,6 +260,9 @@ def create_app(db_path="intel.db"):
                         except RuntimeError:
                             yield f"data: {json.dumps({'type': 'error', 'text': 'Sorry, I hit a temporary issue. Please try again.'})}\n\n"
                             return
+                    elif any(kw in error_msg for kw in ["rate limit", "429", "quota", "resource_exhausted"]):
+                        yield f"data: {json.dumps({'type': 'error', 'text': 'Rate limited — all AI providers are temporarily exhausted. Wait a minute and try again.'})}\n\n"
+                        return
                     else:
                         yield f"data: {json.dumps({'type': 'error', 'text': 'Sorry, I hit a temporary issue. Please try again.'})}\n\n"
                         return

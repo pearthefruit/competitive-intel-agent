@@ -135,7 +135,7 @@ def _analyze_private(company):
     queries = [
         f"{company} revenue earnings financial results",
         f"{company} funding valuation market cap",
-        f"{company} financial news 2024 2025",
+        f"{company} financial news {datetime.now().year - 1} {datetime.now().year}",
     ]
 
     all_results = []

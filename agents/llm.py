@@ -19,24 +19,51 @@ from db import (get_connection, get_or_create_dossier, add_dossier_analysis,
 
 
 REPORT_PROVIDERS = [
+    # --- Gemini (primary) ---
     {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash"},
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-3-flash-preview"},
+    # --- Groq ---
     {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "meta-llama/llama-4-scout-17b-16e-instruct"},
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "qwen/qwen3-32b"},
+    # --- Cerebras ---
+    {"name": "cerebras", "env_key": "CEREBRAS_API_KEY", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "llama-3.3-70b"},
+    # --- Mistral ---
     {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
+    # --- OpenRouter (free) ---
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "nousresearch/hermes-3-llama-3.1-405b:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "qwen/qwen3-next-80b-a3b-instruct:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "mistralai/mistral-small-3.1-24b-instruct:free"},
 ]
 
 
 def generate_text(prompt, timeout=60, providers=None):
-    """Try providers in order until one works. Returns (text, model_name)."""
+    """Try providers in order until one works. Returns (text, model_name).
+
+    Gemini entries with comma-separated keys in GEMINI_API_KEYS are expanded
+    so each key is tried before moving to the next provider/model.
+    """
     provider_list = providers or REPORT_PROVIDERS
     http = httpx.Client(timeout=timeout, follow_redirects=True)
 
+    # Expand Gemini entries with multiple keys
+    expanded = []
     for p in provider_list:
-        key = os.environ.get(p["env_key"], "").strip()
-        if not key:
+        raw_key = os.environ.get(p["env_key"], "").strip()
+        if not raw_key:
             continue
-        if "," in key:
-            key = key.split(",")[0].strip()
+        if p["name"] == "gemini" and "," in raw_key:
+            for k in raw_key.split(","):
+                k = k.strip()
+                if k:
+                    expanded.append({**p, "_key": k})
+        else:
+            expanded.append({**p, "_key": raw_key})
 
+    for p in expanded:
+        key = p["_key"]
         try:
             if p["name"] == "gemini":
                 with gemini_lock:
@@ -53,6 +80,9 @@ def generate_text(prompt, timeout=60, providers=None):
                     text = resp.json()["choices"][0]["message"]["content"]
                     http.close()
                     return text, f"{p['name']}/{p['model']}"
+                elif resp.status_code == 429:
+                    print(f"[llm] {p['name']}/{p['model']} rate limited (429)")
+                    continue
         except Exception as e:
             print(f"[llm] {p['name']}/{p['model']} failed: {e}")
             continue
