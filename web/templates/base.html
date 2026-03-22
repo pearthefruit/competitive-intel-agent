@@ -2520,7 +2520,19 @@ function renderMessages() {
 
     welcome.style.display = 'none';
 
+    // Remember which thinking/tool bubbles are expanded before re-render
+    const expandedSet = new Set();
+    container.querySelectorAll('.thinking-bubble.expanded').forEach(el => {
+        const idx = el.getAttribute('data-msg-idx');
+        if (idx) expandedSet.add('t' + idx);
+    });
+    container.querySelectorAll('.tool-call-bubble.expanded').forEach(el => {
+        const idx = el.getAttribute('data-msg-idx');
+        if (idx) expandedSet.add('c' + idx);
+    });
+
     let html = '';
+    let msgIdx = 0;
     chat.messages.forEach(m => {
         if (m.role === 'user') {
             html += `<div class="msg msg-user"><div class="msg-bubble">${escHtml(m.content)}</div></div>`;
@@ -2528,8 +2540,9 @@ function renderMessages() {
             html += `<div class="msg msg-assistant"><div class="msg-bubble">${marked.parse(m.content || '')}</div></div>`;
         } else if (m.role === 'thinking') {
             const preview = (m.content || '').slice(0, 100) + (m.content.length > 100 ? '...' : '');
+            const isExpanded = expandedSet.has('t' + msgIdx);
             html += `<div class="msg msg-thinking">
-                <div class="thinking-bubble" onclick="this.classList.toggle('expanded')">
+                <div class="thinking-bubble${isExpanded ? ' expanded' : ''}" data-msg-idx="${msgIdx}" onclick="this.classList.toggle('expanded')">
                     <div class="thinking-label">Reasoning</div>
                     <div class="thinking-preview">${escHtml(preview)}</div>
                     <div class="thinking-content">${escHtml(m.content)}</div>
@@ -2537,11 +2550,12 @@ function renderMessages() {
             </div>`;
         } else if (m.role === 'tool_call') {
             const hasResult = !!m.result;
+            const isExpanded = expandedSet.has('c' + msgIdx);
             const statusHtml = hasResult
                 ? `<div class="tool-call-status"><span class="tool-done-check">&#10003;</span> <span class="tool-status-text" style="color:var(--green)">Done</span></div>`
                 : `<div class="tool-call-status"><div class="tool-spinner"></div> <span class="tool-status-text">Running ${escHtml(m.name)}...</span></div>`;
             html += `<div class="msg msg-tool">
-                <div class="tool-call-bubble${hasResult ? '' : ' running'}" onclick="if(this.querySelector('.tool-result-content'))this.classList.toggle('expanded')">
+                <div class="tool-call-bubble${hasResult ? (isExpanded ? ' expanded' : '') : ' running'}" data-msg-idx="${msgIdx}" onclick="if(this.querySelector('.tool-result-content'))this.classList.toggle('expanded')">
                     <div><span class="tool-call-name">${escHtml(m.name)}</span></div>
                     <div class="tool-call-args">${escHtml(formatArgs(m.args))}</div>
                     ${statusHtml}
@@ -2550,6 +2564,7 @@ function renderMessages() {
                 ${m.reportFile ? `<div class="report-link" onclick="openReport('${m.reportFile}')">View Report &rarr;</div>` : ''}
             </div>`;
         }
+        msgIdx++;
     });
 
     // Keep welcome div hidden but in DOM
