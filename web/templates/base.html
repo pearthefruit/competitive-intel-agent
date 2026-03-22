@@ -528,6 +528,38 @@
             line-height: 1.8;
         }
 
+        /* Methodology info tooltips (reusable) */
+        .methodology-tip {
+            margin: 8px 0 4px;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            animation: popover-in 0.15s ease;
+            display: none;
+        }
+        .methodology-tip-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+        .methodology-tip-row {
+            margin: 3px 0;
+            padding-left: 8px;
+            border-left: 2px solid var(--border);
+        }
+        .methodology-tip-row strong { color: var(--text-primary); }
+        .methodology-tip-note {
+            margin-top: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
         /* Citation source badges */
         .source-badge {
             display: inline-block;
@@ -2104,6 +2136,11 @@ function toggleScoreTooltip(icon) {
     }
 }
 
+function toggleMethodologyTip(tipId) {
+    const tip = document.getElementById(tipId);
+    if (tip) tip.style.display = tip.style.display === 'none' ? 'block' : 'none';
+}
+
 function dismissSourcePopover() {
     const pop = document.getElementById('active-source-popover');
     if (pop) pop.remove();
@@ -2336,7 +2373,18 @@ function showBriefing(dossier, b) {
                 </div>
             </div>`;
         });
-        html += `<div style="padding:0 12px 12px"><div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Consulting Opportunities</div>${oppHtml}</div>`;
+        html += `<div style="padding:0 12px 12px">
+            <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Consulting Opportunities <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('scope-methodology')">&#9432;</span></div>
+            <div class="methodology-tip" id="scope-methodology">
+                <div class="methodology-tip-title">Scope Estimation Methodology</div>
+                Estimates based on typical Big 4 / MBB engagement structures (blended daily rate ~$3-5K/consultant):
+                <div class="methodology-tip-row"><strong>$500K-1M, 3-6 mo</strong> — Small team (2-3). Assessments, strategy design, POC, governance frameworks.</div>
+                <div class="methodology-tip-row"><strong>$1-3M, 6-12 mo</strong> — Medium team (4-6). Platform implementation, org redesign, single workstream.</div>
+                <div class="methodology-tip-row"><strong>$2-5M, 9-18 mo</strong> — Large team (6-10). Multi-workstream programs, enterprise rollout. $10B+ revenue companies.</div>
+                <div class="methodology-tip-row"><strong>$5M+, 12-24 mo</strong> — Full transformation (10+). Company-wide digital transformation. $50B+ companies only.</div>
+                <div class="methodology-tip-note">Scaled to company size using revenue, headcount, and hiring velocity. Conservative estimates preferred.</div>
+            </div>
+            ${oppHtml}</div>`;
     }
 
     // --- Budget & Appetite ---
@@ -2493,6 +2541,14 @@ function showBriefing(dossier, b) {
             conf.caveats.forEach(c => { confHtml += `<div style="margin-bottom:3px">⚠ ${escHtml(c)}</div>`; });
             confHtml += `</div>`;
         }
+        confHtml += `<div style="margin-top:6px"><span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('confidence-methodology')">&#9432;</span>
+            <div class="methodology-tip" id="confidence-methodology">
+                <div class="methodology-tip-title">Confidence Methodology</div>
+                <div class="methodology-tip-row"><strong>Jobs Analyzed</strong> — &gt;100 = high confidence, 30-100 = medium, &lt;30 = low for hiring signals</div>
+                <div class="methodology-tip-row"><strong>Scrape Coverage</strong> — Whether the scrape covered the full ATS board or a limited sample</div>
+                <div class="methodology-tip-row"><strong>Analysis Coverage</strong> — How many of the 12 analysis types have been completed</div>
+                <div class="methodology-tip-note">Missing analyses create blind spots in specific briefing dimensions. Scores for dimensions without supporting data default to 50.</div>
+            </div></div>`;
         html += _briefingSection('Data Confidence', confHtml, false);
     }
 

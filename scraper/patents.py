@@ -193,6 +193,71 @@ def search_google_patents(company_name, max_results=25):
         http.close()
 
 
+# --- Relevance filter ---
+
+def _normalize_for_match(name):
+    """Normalize a name for fuzzy assignee matching."""
+    if not name:
+        return ""
+    n = name.lower().strip()
+    # Strip common suffixes
+    for suffix in [" inc.", " inc", " llc", " ltd.", " ltd", " co.", " co",
+                   " corp.", " corp", " corporation", " gmbh", " ag",
+                   " s.a.", " plc", " limited", " technologies", " technology"]:
+        if n.endswith(suffix):
+            n = n[:-len(suffix)].strip()
+    # Remove punctuation and extra spaces
+    n = re.sub(r"[^a-z0-9 ]", "", n)
+    n = re.sub(r"\s+", " ", n).strip()
+    return n
+
+
+def _is_relevant_assignee(assignee, company_name):
+    """Check if a patent assignee is plausibly related to the target company."""
+    if not assignee:
+        return True  # No assignee data — keep it, let LLM decide
+    norm_assignee = _normalize_for_match(assignee)
+    norm_company = _normalize_for_match(company_name)
+    if not norm_company:
+        return True
+
+    # Exact or substring match (either direction)
+    if norm_company in norm_assignee or norm_assignee in norm_company:
+        return True
+
+    # Word overlap: all significant words of the company must appear in the assignee
+    company_words = set(norm_company.split())
+    # Drop very common short words that cause false matches
+    stop_words = {"the", "and", "of", "for", "a", "an", "in", "on", "at", "to", "by"}
+    company_words -= stop_words
+    if not company_words:
+        return True
+
+    assignee_words = set(norm_assignee.split())
+    # All company name words must be in the assignee (in any order)
+    if company_words.issubset(assignee_words):
+        return True
+
+    return False
+
+
+def filter_relevant_patents(patents, company_name):
+    """Filter patent list to only those with assignees plausibly matching the company.
+
+    Returns (filtered_patents, removed_count).
+    """
+    relevant = []
+    removed = 0
+    for p in patents:
+        if _is_relevant_assignee(p.get("assignee", ""), company_name):
+            relevant.append(p)
+        else:
+            removed += 1
+    if removed:
+        print(f"[patents] Filtered {removed} irrelevant patents (assignee mismatch)")
+    return relevant, removed
+
+
 # --- Public API: try USPTO ODP first, then Google Patents ---
 
 def search_patents(company_name, max_results=25):
@@ -204,13 +269,17 @@ def search_patents(company_name, max_results=25):
     query = f"{company_name}*"
     patents, total = search_uspto(query, max_results)
     if patents:
-        return patents, total, "USPTO ODP"
+        patents, removed = filter_relevant_patents(patents, company_name)
+        if patents:
+            return patents, total - removed, "USPTO ODP"
 
     # Secondary: Google Patents (no key needed)
     print("[patents] Trying Google Patents as fallback...")
     patents, total = search_google_patents(company_name, max_results)
     if patents:
-        return patents, total, "Google Patents"
+        patents, removed = filter_relevant_patents(patents, company_name)
+        if patents:
+            return patents, total - removed, "Google Patents"
 
     return [], 0, None
 
@@ -220,12 +289,19 @@ def search_patents_with_name(name_query, max_results=25):
 
     Returns (list of patent dicts, total_count).
     """
+    clean_name = name_query.rstrip("*").strip()
     patents, total = search_uspto(name_query, max_results)
     if patents:
-        return patents, total
+        patents, removed = filter_relevant_patents(patents, clean_name)
+        if patents:
+            return patents, total - removed
     # Try Google Patents with the raw name
-    patents, total = search_google_patents(name_query.replace("*", ""), max_results)
-    return patents, total
+    patents, total = search_google_patents(clean_name, max_results)
+    if patents:
+        patents, removed = filter_relevant_patents(patents, clean_name)
+        if patents:
+            return patents, total - removed
+    return [], 0
 
 
 def format_patents_for_prompt(patents, total_count):
