@@ -1379,6 +1379,56 @@
         }
         .right-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 
+        .right-btn-icon {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 4px 6px;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+        .right-btn-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .right-btn-icon svg { width: 14px; height: 14px; }
+
+        /* Overflow menu */
+        .right-actions { position: relative; }
+        .overflow-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 4px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            min-width: 160px;
+            padding: 4px;
+            z-index: 200;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+        .overflow-menu.open { display: block; }
+        .overflow-menu-item {
+            display: block;
+            width: 100%;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 12px;
+            padding: 8px 12px;
+            cursor: pointer;
+            text-align: left;
+            border-radius: 4px;
+            transition: background 0.1s;
+        }
+        .overflow-menu-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .overflow-menu-item.danger { color: var(--red); }
+        .overflow-menu-item.danger:hover { background: rgba(239,68,68,0.1); }
+
         .right-close {
             background: none;
             border: none;
@@ -1485,6 +1535,202 @@
         .dot-comparison { background: #f59e0b; }
         .dot-hiring { background: #8b5cf6; }
         .dot-briefing { background: #eab308; }
+
+        /* --- EXPANDED / FOCUS MODE --- */
+        .right-pane.expanded {
+            position: fixed;
+            top: 0;
+            left: var(--left-width);
+            right: 0;
+            bottom: 0;
+            width: auto !important;
+            min-width: 0 !important;
+            z-index: 100;
+            border-left: 1px solid var(--border);
+            transition: none;
+        }
+
+        .right-pane.expanded .right-body {
+            padding: 24px 32px;
+            font-size: 14px;
+        }
+        .right-pane.expanded .dash-card { font-size: 13px; }
+        .right-pane.expanded .dash-card .budget-row,
+        .right-pane.expanded .dash-card .opp-card,
+        .right-pane.expanded .dash-card .risk-card,
+        .right-pane.expanded .dash-card .metric-card { font-size: 13px; }
+
+        /* === DASHBOARD MODE === */
+
+        /* Combined hero row — left half: score+bars, right half: rationale */
+        .dash-hero-row {
+            display: flex;
+            gap: 0;
+            margin-bottom: 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .dash-hero-left {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            padding: 20px 24px;
+            flex: 0 0 auto;
+            width: 48%;
+            border-right: 1px solid var(--border);
+        }
+        .dash-hero-right {
+            flex: 1;
+            padding: 16px 20px;
+        }
+        .dash-hero-right-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .dash-hero-score {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 100px;
+        }
+        .dash-hero-label {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            margin-top: 6px;
+        }
+        .dash-hero-meta {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            text-align: center;
+        }
+        .dash-hero-bars {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .dash-hero-identity {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 140px;
+            border-right: 1px solid var(--border);
+            padding-right: 16px;
+        }
+        .dash-hero-company {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .dash-hero-sector {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .dash-hero-detail {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Standalone card between hero and grid */
+        .dash-hero-row + .dash-card { margin-bottom: 16px; }
+
+        /* Card grid */
+        .dash-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 14px;
+            align-items: start;
+        }
+        @media (min-width: 1600px) {
+            .dash-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+
+        .dash-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 20px;
+            overflow: hidden;
+        }
+        .dash-card-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 10px;
+        }
+        .dash-card.card-wide { grid-column: 1 / -1; }
+        .dash-card .budget-row { font-size: 12px; }
+        .dash-card .sub-score-row { margin-bottom: 2px; }
+        .dash-card .opp-card { font-size: 12px; }
+        .dash-card .risk-card { font-size: 12px; margin-bottom: 6px; }
+        .dash-card .metric-card { font-size: 12px; }
+
+        /* Consulting opps 2-col grid inside wide card */
+        .opp-inner-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        @media (max-width: 1200px) {
+            .opp-inner-grid { grid-template-columns: 1fr; }
+        }
+        /* Risk items 2-col inside wide card */
+        .risk-inner-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        @media (max-width: 1200px) {
+            .risk-inner-grid { grid-template-columns: 1fr; }
+        }
+        /* (strat-layout removed — strategic assessment now renders as paragraphs) */
+
+        /* Markdown report card grid (non-briefing) */
+        .report-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 14px;
+            align-items: start;
+        }
+        @media (min-width: 1600px) {
+            .report-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+        .report-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 20px;
+            overflow: hidden;
+        }
+        .report-card h2 {
+            margin-top: 0 !important;
+            font-size: 12px !important;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 10px !important;
+        }
+        .report-card.card-wide { grid-column: 1 / -1; }
+        .report-card table { font-size: 11.5px; }
+        .report-card p, .report-card li { font-size: 12.5px; }
+
+        /* Expand button active state */
+        .right-pane.expanded .right-btn-icon.expand-btn { background: var(--bg-hover); color: var(--text-primary); }
 
         /* Print */
         @media print {
@@ -1623,8 +1869,19 @@
                 </div>
             </div>
             <button class="right-btn" onclick="printReport()">Export PDF</button>
-            <button class="right-btn" onclick="deleteCurrentReport()" style="color:var(--red)">Delete</button>
-            <button class="right-close" onclick="closeRightPane()">&times;</button>
+            <button class="right-btn-icon expand-btn" id="expand-btn" onclick="toggleExpandReport()" title="Focus mode">
+                <svg id="expand-icon-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                <svg id="expand-icon-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            </button>
+            <div class="right-actions">
+                <button class="right-btn-icon" onclick="toggleOverflowMenu(event)" title="More actions">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+                </button>
+                <div class="overflow-menu" id="overflow-menu">
+                    <button class="overflow-menu-item danger" onclick="confirmDeleteReport()">Delete report</button>
+                </div>
+            </div>
+            <button class="right-close" onclick="closeRightPane()" title="Close">&times;</button>
         </div>
         <div class="right-body">
             <div class="md-content" id="right-content"></div>
@@ -1681,7 +1938,7 @@ let messageQueue = [];
 let currentReportFilename = null;
 let allReports = [];
 let allCompanies = [];
-let activeCompanyName = null;
+let openCompanies = new Set();
 
 // Context pill state
 let activeContext = null;       // { company, type, label }
@@ -1823,6 +2080,11 @@ function newChat() {
 }
 
 function loadChat(id) {
+    // Collapse expanded/focus mode so chat is visible
+    const rp = document.getElementById('right-pane');
+    if (rp && rp.classList.contains('expanded')) {
+        collapseReport();
+    }
     activeChatId = id;
     renderChatList();
     renderMessages();
@@ -1867,7 +2129,8 @@ function refreshSidebar() {
 }
 
 function toggleCompany(name) {
-    activeCompanyName = activeCompanyName === name ? null : name;
+    if (openCompanies.has(name)) openCompanies.delete(name);
+    else openCompanies.add(name);
     renderCompanyList();
 }
 
@@ -1888,7 +2151,7 @@ function renderCompanyList() {
     }
 
     list.innerHTML = filtered.map(company => {
-        const isOpen = activeCompanyName === company.name;
+        const isOpen = openCompanies.has(company.name);
         const chevron = '&#9654;';
         const starHtml = company.has_briefing ? '<span class="company-briefing-star" title="Has intelligence briefing">&#9733;</span>' : '';
         const sectorHtml = company.sector ? `<span class="company-sector">${escHtml(company.sector)}</span>` : '';
@@ -1947,7 +2210,7 @@ async function openDossier(companyName) {
         if (!resp.ok) return;
         const dossier = await resp.json();
         activeDossierName = companyName;
-        activeCompanyName = companyName;
+        openCompanies.add(companyName);
         currentReportFilename = null;
         const dLabel = dossier.briefing_json ? 'intelligence briefing' : 'dossier';
         setContext(companyName, dossier.briefing_json ? 'briefing' : 'dossier', dLabel);
@@ -1986,6 +2249,9 @@ function _scoreColorClass(score) {
 // Global store for source key facts — populated when briefing is rendered
 let _sourceKeyFacts = {};
 let _sourceAnalysisExists = {};
+// Global store for active briefing data — used by dashboard expand mode
+let _activeBriefingData = null;
+let _activeDossierData = null;
 
 const _VALID_SOURCES = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis'];
 
@@ -2130,7 +2396,9 @@ function _popoverOutsideClick(e) {
 }
 
 function toggleScoreTooltip(icon) {
-    const tooltip = icon.closest('.maturity-label').nextElementSibling;
+    const parent = icon.closest('.maturity-label') || icon.closest('.dash-hero-label');
+    if (!parent) return;
+    const tooltip = parent.nextElementSibling;
     if (tooltip && tooltip.classList.contains('score-tooltip')) {
         tooltip.style.display = tooltip.style.display === 'none' ? 'block' : 'none';
     }
@@ -2147,6 +2415,23 @@ function dismissSourcePopover() {
 }
 
 function scrollToSourceReport(type) {
+    // If in dashboard/expanded mode, restore original briefing first
+    const rp = document.getElementById('right-pane');
+    if (rp && rp.classList.contains('expanded') && _originalReportHTML) {
+        _restoreOriginalReport();
+        rp.classList.remove('expanded');
+        document.getElementById('expand-icon-open').style.display = '';
+        document.getElementById('expand-icon-close').style.display = 'none';
+        document.getElementById('expand-btn').title = 'Focus mode';
+        if (savedRightWidth) {
+            rp.style.width = savedRightWidth + 'px';
+            rp.style.minWidth = savedRightWidth + 'px';
+        } else {
+            rp.style.width = '';
+            rp.style.minWidth = '';
+        }
+    }
+
     const sections = document.querySelectorAll('.briefing-section');
     for (const sec of sections) {
         const title = sec.querySelector('.briefing-section-title');
@@ -2199,6 +2484,8 @@ function _briefingSection(title, body, open) {
 }
 
 function showBriefing(dossier, b) {
+    _activeBriefingData = b;
+    _activeDossierData = dossier;
     const rp = document.getElementById('right-pane');
     const identity = b.subject_identity || {};
     document.getElementById('right-company').textContent = identity.name || dossier.company_name;
@@ -2305,7 +2592,7 @@ function showBriefing(dossier, b) {
         if (sub.rationale) {
             const sources = _extractSources(sub.rationale);
             const badges = sources.map(s =>
-                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')">${s}</span>`
+                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
             ).join(' ');
             html += `<div style="margin-bottom:6px"><span style="font-size:13px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:13px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
         }
@@ -2355,7 +2642,7 @@ function showBriefing(dossier, b) {
             const inlineSources = _extractSources((opp.evidence || '') + ' ' + (opp.detail || ''));
             const allSources = [...new Set([...explicitSources, ...inlineSources])];
             const sourceBadges = allSources.map(s =>
-                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')">${s}</span>`
+                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
             ).join(' ');
             oppHtml += `<div class="opp-card" onclick="this.classList.toggle('expanded')">
                 <div class="opp-card-header">
@@ -2582,6 +2869,11 @@ function showBriefing(dossier, b) {
 
     document.getElementById('right-content').innerHTML = html;
     openRightPane();
+
+    // If already in expanded/focus mode, rebuild the dashboard view
+    if (rp.classList.contains('expanded')) {
+        _buildCardGrid(rp);
+    }
 }
 
 async function generateBriefing(companyName) {
@@ -3117,13 +3409,15 @@ async function openReport(filename) {
         const data = await resp.json();
         currentReportFilename = filename;
         activeDossierName = null;
+        _activeBriefingData = null;
+        _activeDossierData = null;
 
         // Track active company for sidebar highlighting
         const ownerCompany = allCompanies.find(c =>
             (c.analyses || []).some(a => a.report_file === filename) ||
             (c.orphan_reports || []).includes(filename)
         );
-        if (ownerCompany) activeCompanyName = ownerCompany.name;
+        if (ownerCompany) openCompanies.add(ownerCompany.name);
 
         // Set header
         document.getElementById('right-company').textContent = data.company || '';
@@ -3169,6 +3463,12 @@ async function openReport(filename) {
         openRightPane();
         setContext(data.company || '', 'report', (data.type || 'report') + ' report');
         renderCompanyList();
+
+        // If in expanded/focus mode, rebuild card grid for this report
+        const rp = document.getElementById('right-pane');
+        if (rp.classList.contains('expanded')) {
+            _buildCardGrid(rp);
+        }
     } catch (e) {
         console.error('Failed to load report:', e);
     }
@@ -3176,6 +3476,464 @@ async function openReport(filename) {
 
 function openRightPane() {
     const rp = document.getElementById('right-pane');
+    // Don't reset width if in expanded/focus mode
+    if (!rp.classList.contains('expanded')) {
+        if (savedRightWidth) {
+            rp.style.width = savedRightWidth + 'px';
+            rp.style.minWidth = savedRightWidth + 'px';
+        } else {
+            rp.style.width = '';
+            rp.style.minWidth = '';
+        }
+    }
+    rp.classList.add('open');
+}
+
+function closeRightPane() {
+    const rp = document.getElementById('right-pane');
+    if (rp.classList.contains('expanded')) collapseReport();
+    rp.classList.remove('open');
+    rp.style.width = '';
+    rp.style.minWidth = '';
+    currentReportFilename = null;
+    activeDossierName = null;
+    _activeBriefingData = null;
+    _activeDossierData = null;
+    openCompanies.clear();
+    clearContextFull();
+    renderCompanyList();
+}
+
+// --- Expand / Focus Mode ---
+let _originalReportHTML = null;
+
+// Sections with tables or source lists should span full width
+const WIDE_KEYWORDS = ['profile', 'comparison', 'side-by-side', 'head-to-head', 'source', 'individual report'];
+
+function _sectionIsWide(heading, content) {
+    const h = heading.toLowerCase();
+    if (WIDE_KEYWORDS.some(kw => h.includes(kw))) return true;
+    if (content.querySelector('table')) return true;
+    return false;
+}
+
+function _buildCardGrid(container) {
+    const content = container.querySelector('#right-content');
+    if (!content) return;
+
+    // Save original HTML for restore
+    _originalReportHTML = content.innerHTML;
+
+    // If we have briefing data, build a proper dashboard
+    if (_activeBriefingData) {
+        _buildBriefingDashboard(content);
+        return;
+    }
+
+    // --- Markdown report: split by H2 ---
+    const children = Array.from(content.children);
+    if (!children.length) return;
+
+    const sections = [];
+    let current = null;
+
+    for (const el of children) {
+        if (el.tagName === 'H2') {
+            if (current) sections.push(current);
+            current = { heading: el.textContent, elements: [el] };
+        } else if (el.tagName === 'H1') {
+            if (current) sections.push(current);
+            current = null;
+            if (!sections.length) {
+                sections.push({ heading: '__intro__', elements: [el] });
+            }
+        } else if (el.tagName === 'HR') {
+            continue;
+        } else {
+            if (current) {
+                current.elements.push(el);
+            } else {
+                if (sections.length && sections[0].heading === '__intro__') {
+                    sections[0].elements.push(el);
+                } else {
+                    sections.unshift({ heading: '__intro__', elements: [el] });
+                }
+            }
+        }
+    }
+    if (current) sections.push(current);
+
+    if (sections.filter(s => s.heading !== '__intro__').length < 2) return;
+
+    const grid = document.createElement('div');
+    grid.className = 'report-grid';
+
+    for (const section of sections) {
+        if (section.heading === '__intro__') continue;
+
+        const card = document.createElement('div');
+        card.className = 'report-card';
+
+        const tempDiv = document.createElement('div');
+        section.elements.forEach(el => tempDiv.appendChild(el.cloneNode(true)));
+
+        if (_sectionIsWide(section.heading, tempDiv)) {
+            card.classList.add('card-wide');
+        }
+
+        section.elements.forEach(el => card.appendChild(el.cloneNode(true)));
+        grid.appendChild(card);
+    }
+
+    content.innerHTML = '';
+    const intro = sections.find(s => s.heading === '__intro__');
+    if (intro) {
+        intro.elements.forEach(el => content.appendChild(el.cloneNode(true)));
+    }
+    content.appendChild(grid);
+}
+
+function _dashCard(title, bodyHtml, wide) {
+    return `<div class="dash-card${wide ? ' card-wide' : ''}">
+        <div class="dash-card-title">${escHtml(title)}</div>
+        ${bodyHtml}
+    </div>`;
+}
+
+function _buildBriefingDashboard(content) {
+    const b = _activeBriefingData;
+    const dossier = _activeDossierData;
+    if (!b) return;
+
+    const identity = b.subject_identity || {};
+    const dm = b.digital_maturity || {};
+    const score = dm.overall_score || 0;
+    const label = dm.overall_label || '';
+    const subs = dm.sub_scores || {};
+    const conf = b.data_confidence || {};
+    const subLabels = { tech_modernity: 'Tech Modernity', data_analytics: 'Data & Analytics', ai_readiness: 'AI Readiness', organizational_readiness: 'Org Readiness' };
+
+    let html = '';
+
+    // --- Hero strip: identity | donut | sub-scores ---
+    let metaParts = [];
+    if (identity.hq_location) metaParts.push(identity.hq_location);
+    if (identity.founded) metaParts.push('Est. ' + identity.founded);
+    if (identity.headcount) metaParts.push(identity.headcount + ' employees');
+
+    let barsHtml = '';
+    Object.entries(subLabels).forEach(([key, lbl]) => {
+        const sub = subs[key] || {};
+        barsHtml += renderSubScore(lbl, sub.score || 0);
+    });
+
+    let confLine = '';
+    if (conf.overall_confidence) confLine += conf.overall_confidence.toUpperCase();
+    if (conf.jobs_analyzed) confLine += ` · ${conf.jobs_analyzed} roles`;
+    const avail = conf.analyses_available || [];
+    if (avail.length) confLine += ` · ${avail.length} analyses`;
+
+    // Build rationale HTML for the right half of the hero row
+    let rationaleHtml = '';
+    Object.entries(subLabels).forEach(([key, lbl]) => {
+        const sub = subs[key] || {};
+        if (sub.rationale) {
+            const sources = _extractSources(sub.rationale);
+            const badges = sources.map(s =>
+                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
+            ).join(' ');
+            rationaleHtml += `<div style="margin-bottom:8px"><span style="font-size:13px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:13px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
+        }
+    });
+
+    html += `<div class="dash-hero-row">
+        <div class="dash-hero-left">
+            <div class="dash-hero-identity">
+                <div class="dash-hero-company">${escHtml(identity.name || dossier.company_name)}</div>
+                ${identity.sector ? `<div class="dash-hero-sector">${escHtml(identity.sector)}</div>` : ''}
+                <div class="dash-hero-detail">${escHtml(metaParts.join(' · '))}</div>
+            </div>
+            <div class="dash-hero-score">
+                ${renderScoreRing(score, 100)}
+                <div class="dash-hero-label score-${_scoreColorClass(score)}">${escHtml(label)} <span class="score-info-icon" onclick="event.stopPropagation();toggleScoreTooltip(this)">&#9432;</span></div>
+                <div class="score-tooltip" style="display:none">
+                    <div class="score-tooltip-title">Digital Maturity Score</div>
+                    <div class="score-tooltip-body">
+                        Measures a company's actual digital and technological capability across four dimensions, weighted by strategic importance:
+                        <div class="score-tooltip-dims">
+                            <div><strong>Tech Modernity (30%)</strong> — Engineering stack, cloud infrastructure, CI/CD practices, modern frameworks</div>
+                            <div><strong>Data & Analytics (25%)</strong> — Data platform investment, analytics tooling, experimentation culture</div>
+                            <div><strong>AI Readiness (25%)</strong> — AI/ML hiring, patents, product integration, dedicated AI roles</div>
+                            <div><strong>Org Readiness (20%)</strong> — Hiring momentum, engineering ratio, strategic investment signals, sentiment</div>
+                        </div>
+                        <div class="score-tooltip-tiers">
+                            <span class="score-vanguard">&#9679;</span> 80-100 Digital Vanguard &nbsp;
+                            <span class="score-contender">&#9679;</span> 60-79 Digital Contender &nbsp;
+                            <span class="score-exposed">&#9679;</span> 40-59 Digitally Exposed &nbsp;
+                            <span class="score-laggard">&#9679;</span> 20-39 Digital Laggard &nbsp;
+                            <span class="score-liability">&#9679;</span> 0-19 Digital Liability
+                        </div>
+                    </div>
+                </div>
+                ${confLine ? `<div class="dash-hero-meta">${escHtml(confLine)}</div>` : ''}
+            </div>
+            <div class="dash-hero-bars">${barsHtml}</div>
+        </div>
+        <div class="dash-hero-right">
+            <div class="dash-hero-right-title">Score Rationale</div>
+            ${rationaleHtml}
+        </div>
+    </div>`;
+
+    // --- Consulting Opportunities (right after hero, before card grid) ---
+    const opps = b.engagement_opportunities || [];
+    if (opps.length) {
+        let oppHtml = '<div class="opp-inner-grid">';
+        opps.forEach(opp => {
+            const pClass = `opp-priority-${opp.priority || 'medium'}`;
+            oppHtml += `<div class="opp-card" onclick="this.classList.toggle('expanded')">
+                <div class="opp-card-header"><span class="opp-service">${escHtml(opp.service || '')}</span><span class="opp-priority ${pClass}">${escHtml(opp.priority || '')}</span></div>
+                <div class="opp-evidence">${_stripCitations(opp.evidence || '')}</div>
+                <div class="opp-meta"><span>${escHtml(opp.estimated_scope || '')}</span></div>
+                <div class="opp-detail">${opp.detail ? `<div class="opp-detail-text">${_stripCitations(opp.detail)}</div>` : ''}</div>
+            </div>`;
+        });
+        oppHtml += '</div>';
+        const oppTitle = `Consulting Opportunities <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('dash-scope-methodology')">&#9432;</span>
+            <div class="methodology-tip" id="dash-scope-methodology" style="display:none">
+                <div class="methodology-tip-title">Scope Estimation Methodology</div>
+                Estimates based on typical Big 4 / MBB engagement structures (blended daily rate ~$3-5K/consultant):
+                <div class="methodology-tip-row"><strong>$500K-1M, 3-6 mo</strong> — Small team (2-3). Assessments, strategy design, POC, governance frameworks.</div>
+                <div class="methodology-tip-row"><strong>$1-3M, 6-12 mo</strong> — Medium team (4-6). Platform implementation, org redesign, single workstream.</div>
+                <div class="methodology-tip-row"><strong>$2-5M, 9-18 mo</strong> — Large team (6-10). Multi-workstream programs, enterprise rollout. $10B+ revenue companies.</div>
+                <div class="methodology-tip-row"><strong>$5M+, 12-24 mo</strong> — Full transformation (10+). Company-wide digital transformation. $50B+ companies only.</div>
+                <div class="methodology-tip-note">Scaled to company size using revenue, headcount, and hiring velocity. Conservative estimates preferred.</div>
+            </div>`;
+        html += `<div class="dash-card" style="margin-bottom:16px">
+            <div class="dash-card-title">${oppTitle}</div>
+            ${oppHtml}
+        </div>`;
+    }
+
+    // --- Card grid ---
+    let cards = '';
+
+    // Hiring Trajectory
+    const traj = b.hiring_trajectory;
+    if (traj && traj.trend) {
+        let trajHtml = '';
+        if (traj.velocity) {
+            const trendUp = ['accelerating','growing'].includes(traj.trend);
+            const trendDown = ['decelerating','shrinking'].includes(traj.trend);
+            const arrowClass = trendUp ? 'trajectory-up' : trendDown ? 'trajectory-down' : 'trajectory-stable';
+            const arrow = trendUp ? '&#9650;' : trendDown ? '&#9660;' : '&#8226;';
+            trajHtml += `<div class="trajectory-row"><span class="trajectory-arrow ${arrowClass}">${arrow}</span><span style="color:var(--text-primary);font-weight:600">${escHtml(traj.velocity)}</span> <span style="color:var(--text-muted)">· ${escHtml(traj.trend)}</span></div>`;
+        }
+        if (traj.department_shifts && traj.department_shifts.length) {
+            traj.department_shifts.forEach(shift => {
+                const arrow = shift.direction === 'up' ? '↑' : shift.direction === 'down' ? '↓' : '→';
+                const arrowClass = shift.direction === 'up' ? 'trajectory-up' : shift.direction === 'down' ? 'trajectory-down' : 'trajectory-stable';
+                trajHtml += `<div class="trajectory-row"><span class="trajectory-arrow ${arrowClass}">${arrow}</span><span style="color:var(--text-secondary);font-size:12px">${escHtml(shift.department || '')}</span> <span style="color:var(--text-muted);font-size:11px">${escHtml(shift.detail || '')}</span></div>`;
+            });
+        }
+        if (traj.interpretation) trajHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_stripCitations(traj.interpretation)}</div>`;
+        cards += _dashCard('Hiring Trajectory', trajHtml, false);
+    }
+
+    // Budget & Appetite
+    const budget = b.budget_signals || {};
+    if (Object.keys(budget).length) {
+        let bHtml = '';
+        const confClass = `confidence-${budget.confidence || 'medium'}`;
+        bHtml += `<div class="budget-row"><span class="budget-label">Can Afford</span><span class="budget-value">${budget.can_afford ? 'Yes' : 'Unlikely'}</span> <span class="confidence-badge ${confClass}">${escHtml(budget.confidence || '')} conf.</span></div>`;
+        if (budget.revenue_trend) bHtml += `<div class="budget-row"><span class="budget-label">Revenue</span><span class="budget-value">${escHtml(budget.revenue_trend)}</span></div>`;
+        if (budget.hiring_trend) bHtml += `<div class="budget-row"><span class="budget-label">Hiring</span><span class="budget-value">${escHtml(budget.hiring_trend)}</span></div>`;
+        if (budget.investment_areas && budget.investment_areas.length) bHtml += `<div class="budget-row"><span class="budget-label">Investing In</span><span class="budget-value">${budget.investment_areas.map(a => escHtml(a)).join(', ')}</span></div>`;
+        if (budget.evidence) bHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px">${_renderCitedText(budget.evidence)}</div>`;
+        cards += _dashCard('Budget & Appetite', bHtml, false);
+    }
+
+    // Competitive Pressure
+    const comp = b.competitive_pressure || {};
+    if (Object.keys(comp).length) {
+        let cHtml = '';
+        if (comp.urgency) {
+            const urgClass = comp.urgency === 'high' ? 'confidence-high' : comp.urgency === 'medium' ? 'confidence-medium' : 'confidence-low';
+            cHtml += `<div style="margin-bottom:6px">Urgency: <span class="confidence-badge ${urgClass}">${escHtml(comp.urgency)}</span></div>`;
+        }
+        (comp.competitors || []).forEach(c => {
+            cHtml += `<div class="competitor-row"><span class="competitor-name">${escHtml(c.name || '')}</span><span class="competitor-maturity">${escHtml(c.digital_maturity_estimate || '')}</span><span class="competitor-threat">${escHtml(c.threat || '')}</span></div>`;
+        });
+        cards += _dashCard('Competitive Pressure', cHtml, false);
+    }
+
+    // Financial Position
+    const fin = b.financial_position || {};
+    if (Object.keys(fin).length) {
+        let fHtml = '';
+        if (fin.metrics && fin.metrics.length) {
+            fHtml += '<div class="metric-grid">';
+            fin.metrics.forEach(m => {
+                fHtml += `<div class="metric-card"><div class="metric-card-label">${escHtml(m.label || '')}</div><div class="metric-card-value">${_renderCitedText(m.value || '')}</div></div>`;
+            });
+            fHtml += '</div>';
+        }
+        if (fin.summary) fHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_stripCitations(fin.summary)}</div>`;
+        cards += _dashCard('Financial Position', fHtml, false);
+    }
+
+    // Innovation & IP
+    const ip = b.innovation_ip || {};
+    if (Object.keys(ip).length) {
+        let ipHtml = '';
+        if (ip.patent_count !== undefined) {
+            const pd = ip.patent_count === -1 ? 'N/A' : ip.patent_count;
+            ipHtml += `<div class="budget-row"><span class="budget-label">Patents</span><span class="budget-value">${pd}</span></div>`;
+        }
+        if (ip.rd_intensity) ipHtml += `<div class="budget-row"><span class="budget-label">R&D</span><span class="budget-value">${escHtml(ip.rd_intensity)}</span></div>`;
+        if (ip.top_areas && ip.top_areas.length) ipHtml += `<div class="budget-row"><span class="budget-label">Focus</span><span class="budget-value">${ip.top_areas.map(a => escHtml(a)).join(', ')}</span></div>`;
+        if (ip.assessment) ipHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_stripCitations(ip.assessment)}</div>`;
+        cards += _dashCard('Innovation & IP', ipHtml, false);
+    }
+
+    // Talent & Culture
+    const talent = b.talent_culture || {};
+    if (Object.keys(talent).length) {
+        let tHtml = '';
+        if (talent.sentiment) tHtml += `<div class="budget-row"><span class="budget-label">Sentiment</span><span class="budget-value">${escHtml(talent.sentiment)}</span></div>`;
+        const deptFocus = talent.department_focus || {};
+        if (Object.keys(deptFocus).length) {
+            const sorted = Object.entries(deptFocus).sort((a, b) => b[1] - a[1]);
+            sorted.forEach(([dept, pct]) => {
+                tHtml += `<div class="sub-score-row"><span class="sub-score-label">${escHtml(dept)}</span><div class="sub-score-bar"><div class="sub-score-fill" style="width:${pct}%;background:var(--accent)"></div></div><span class="sub-score-value" style="color:var(--text-secondary)">${pct}%</span></div>`;
+            });
+        }
+        if (talent.top_skills && talent.top_skills.length) tHtml += `<div class="skill-tags" style="margin-top:6px">${talent.top_skills.map(s => `<span class="skill-tag">${escHtml(s)}</span>`).join('')}</div>`;
+        if (talent.assessment) tHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_stripCitations(talent.assessment)}</div>`;
+        cards += _dashCard('Talent & Culture', tHtml, false);
+    }
+
+    // Risk Profile (wide with 2-col inner grid)
+    const risks = b.risk_profile || [];
+    if (risks.length) {
+        let rHtml = '<div class="risk-inner-grid">';
+        risks.forEach(r => {
+            const sev = r.severity || 'medium';
+            rHtml += `<div class="risk-card risk-${sev}"><div class="risk-category">${escHtml(r.category || '')} - ${escHtml(sev)}</div><div class="risk-desc">${_stripCitations(r.description || '')}</div></div>`;
+        });
+        rHtml += '</div>';
+        cards += _dashCard('Risk Profile', rHtml, true);
+    }
+
+    // Strategic Assessment (wide, paragraph blocks matching report view)
+    if (b.strategic_assessment) {
+        // Split on double newlines, or fall back to sentence groups if no double newlines
+        let paras = b.strategic_assessment.split(/\n\s*\n/).filter(p => p.trim());
+        if (paras.length <= 1) {
+            // No double newlines — split on single newlines
+            paras = b.strategic_assessment.split(/\n/).filter(p => p.trim());
+        }
+        if (paras.length <= 1) {
+            // Still one block — split into ~4 chunks by sentences
+            const sentences = b.strategic_assessment.split(/(?<=[.!?])\s+/).filter(s => s.trim());
+            const chunkSize = Math.ceil(sentences.length / 4);
+            paras = [];
+            for (let i = 0; i < sentences.length; i += chunkSize) {
+                paras.push(sentences.slice(i, i + chunkSize).join(' '));
+            }
+        }
+        const stratHtml = paras.map(p => `<p style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin:0 0 14px 0">${_stripCitations(p.trim())}</p>`).join('');
+        cards += _dashCard('Strategic Assessment', stratHtml, true);
+    }
+
+    // Data Confidence
+    if (conf && (conf.caveats && conf.caveats.length || conf.analyses_missing && conf.analyses_missing.length)) {
+        let dcHtml = '';
+        if (conf.overall_confidence) {
+            const confClass = `confidence-${conf.overall_confidence}`;
+            dcHtml += `<div class="budget-row"><span class="budget-label">Confidence</span><span class="confidence-badge ${confClass}">${escHtml(conf.overall_confidence.toUpperCase())}</span></div>`;
+        }
+        if (conf.scrape_coverage) dcHtml += `<div class="budget-row"><span class="budget-label">Scrape Coverage</span><span class="budget-value">${escHtml(conf.scrape_coverage)}</span></div>`;
+        if (conf.jobs_analyzed) dcHtml += `<div class="budget-row"><span class="budget-label">Jobs Analyzed</span><span class="budget-value">${conf.jobs_analyzed}</span></div>`;
+        if (conf.analyses_available && conf.analyses_available.length) {
+            dcHtml += `<div class="budget-row"><span class="budget-label">Completed</span><span class="budget-value">${conf.analyses_available.map(a => `<span class="source-badge source-${a}" title="${a} analysis">${a}</span>`).join(' ')}</span></div>`;
+        }
+        if (conf.analyses_missing && conf.analyses_missing.length) {
+            dcHtml += `<div class="budget-row"><span class="budget-label">Missing</span><span class="budget-value" style="color:var(--text-muted)">${conf.analyses_missing.join(', ')}</span></div>`;
+        }
+        if (conf.caveats && conf.caveats.length) {
+            dcHtml += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted)">`;
+            conf.caveats.forEach(c => { dcHtml += `<div style="margin-bottom:3px">⚠ ${escHtml(c)}</div>`; });
+            dcHtml += `</div>`;
+        }
+        cards += _dashCard('Data Confidence', dcHtml, false);
+    }
+
+    // Source Reports
+    if (dossier && dossier.analyses && dossier.analyses.length) {
+        let srcHtml = '';
+        const byType = {};
+        dossier.analyses.forEach(a => {
+            if (!byType[a.analysis_type]) byType[a.analysis_type] = [];
+            byType[a.analysis_type].push(a);
+        });
+        const now = new Date();
+        Object.entries(byType).forEach(([type, runs]) => {
+            const latest = runs[0];
+            const lastDate = new Date(latest.created_at);
+            const days = Math.floor((now - lastDate) / (1000 * 60 * 60 * 24));
+            let freshness = 'fresh', flabel = 'Fresh';
+            if (days >= 90) { freshness = 'very-stale'; flabel = `${days}d ago`; }
+            else if (days >= 30) { freshness = 'stale'; flabel = `${days}d ago`; }
+            else if (days >= 7) { freshness = 'recent'; flabel = `${days}d ago`; }
+            else { flabel = days === 0 ? 'Today' : `${days}d ago`; }
+            srcHtml += `<div class="staleness-row" data-source-type="${escHtml(type)}">
+                <span style="color:var(--text-primary);font-weight:500;min-width:80px">${escHtml(type)}</span>
+                <span class="staleness-badge staleness-${freshness}">${flabel}</span>
+                <span style="font-size:10px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
+                ${latest.report_file ? `<span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
+            </div>`;
+        });
+        cards += _dashCard('Source Reports', srcHtml, false);
+    }
+
+    html += `<div class="dash-grid">${cards}</div>`;
+    content.innerHTML = html;
+}
+
+function _restoreOriginalReport() {
+    if (!_originalReportHTML) return;
+    const content = document.getElementById('right-content');
+    if (content) content.innerHTML = _originalReportHTML;
+    _originalReportHTML = null;
+}
+
+function toggleExpandReport() {
+    const rp = document.getElementById('right-pane');
+    if (rp.classList.contains('expanded')) {
+        collapseReport();
+    } else {
+        expandReport();
+    }
+}
+
+function expandReport() {
+    const rp = document.getElementById('right-pane');
+    rp.classList.add('expanded');
+    document.getElementById('expand-icon-open').style.display = 'none';
+    document.getElementById('expand-icon-close').style.display = '';
+    document.getElementById('expand-btn').title = 'Exit focus mode (Esc)';
+    _buildCardGrid(rp);
+}
+
+function collapseReport() {
+    const rp = document.getElementById('right-pane');
+    rp.classList.remove('expanded');
+    document.getElementById('expand-icon-open').style.display = '';
+    document.getElementById('expand-icon-close').style.display = 'none';
+    document.getElementById('expand-btn').title = 'Focus mode';
+    _restoreOriginalReport();
+    // Restore saved width
     if (savedRightWidth) {
         rp.style.width = savedRightWidth + 'px';
         rp.style.minWidth = savedRightWidth + 'px';
@@ -3183,20 +3941,47 @@ function openRightPane() {
         rp.style.width = '';
         rp.style.minWidth = '';
     }
-    rp.classList.add('open');
 }
 
-function closeRightPane() {
-    const rp = document.getElementById('right-pane');
-    rp.classList.remove('open');
-    rp.style.width = '';
-    rp.style.minWidth = '';
-    currentReportFilename = null;
-    activeDossierName = null;
-    activeCompanyName = null;
-    clearContextFull();
-    renderCompanyList();
+// --- Overflow menu & delete confirmation ---
+function toggleOverflowMenu(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('overflow-menu');
+    menu.classList.toggle('open');
 }
+
+function confirmDeleteReport() {
+    document.getElementById('overflow-menu').classList.remove('open');
+    const name = currentReportFilename || activeDossierName || 'this item';
+    if (confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) {
+        deleteCurrentReport();
+    }
+}
+
+// Close overflow menu when clicking elsewhere
+document.addEventListener('click', function(e) {
+    const menu = document.getElementById('overflow-menu');
+    if (menu && !e.target.closest('.right-actions')) {
+        menu.classList.remove('open');
+    }
+});
+
+// Esc key to exit focus mode (or close overflow menu)
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        const menu = document.getElementById('overflow-menu');
+        if (menu && menu.classList.contains('open')) {
+            menu.classList.remove('open');
+            e.preventDefault();
+            return;
+        }
+        const rp = document.getElementById('right-pane');
+        if (rp && rp.classList.contains('expanded')) {
+            collapseReport();
+            e.preventDefault();
+        }
+    }
+});
 
 function printReport() {
     // Button feedback

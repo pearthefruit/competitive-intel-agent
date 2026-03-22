@@ -132,16 +132,50 @@ At the end, list all numbered sources:
 ...and so on for each unique source used."""
 
 
-def build_extract_competitors_prompt(company, search_results):
-    """Build a short prompt to extract competitor names from search results."""
-    return f"""From the search results below, identify the top direct competitors of {company}.
+def build_profile_lookup_prompt(company, search_results):
+    """Build a short prompt to summarize what a company does from search results."""
+    return f"""From the search results below, write a brief profile of {company}.
 
+{search_results}
+
+Return ONLY a JSON object with these fields, nothing else:
+{{
+  "description": "1-2 sentence summary of what the company does",
+  "industry": "specific industry/sector (e.g. 'social media marketing agency', 'enterprise SaaS', 'fintech payments')",
+  "services": ["list", "of", "core", "services/products"],
+  "scale": "estimated size — startup, mid-market, or enterprise/large",
+  "client_type": "who they serve (e.g. 'Fortune 500 brands', 'SMBs', 'consumers')"
+}}
+
+Be specific about what makes this company distinct. Do not use vague terms like "technology company" or "digital marketing" — drill into their actual specialty."""
+
+
+def build_extract_competitors_prompt(company, search_results, company_profile=None):
+    """Build a prompt to extract competitor names that truly match the company's profile."""
+    profile_block = ""
+    if company_profile:
+        profile_block = f"""
+COMPANY PROFILE (use this to find TRUE competitors):
+- Description: {company_profile.get('description', 'Unknown')}
+- Industry: {company_profile.get('industry', 'Unknown')}
+- Core services: {', '.join(company_profile.get('services', []))}
+- Scale: {company_profile.get('scale', 'Unknown')}
+- Client type: {company_profile.get('client_type', 'Unknown')}
+
+"""
+
+    return f"""From the search results below, identify the top direct competitors of {company}.
+{profile_block}
+SEARCH RESULTS:
 {search_results}
 
 Return ONLY a JSON array of company names, nothing else. Example: ["Company A", "Company B", "Company C"]
 
 Rules:
-- Only include direct competitors (companies in the same market/industry)
-- Do not include {company} itself
+- Only include companies that ACTUALLY COMPETE with {company} — same core service, similar scale, overlapping client base
+- Do NOT include companies that merely share a broad industry label (e.g. two companies are not competitors just because both do "digital marketing")
+- Competitors must offer similar SPECIFIC services (e.g. if {company} is a social media agency, competitors should also focus on social, not SEO or media buying)
+- Competitors should be in a similar size tier — don't match a 10-person local shop against a global agency, or vice versa
+- Do not include {company} itself, its parent company, or its subsidiaries
 - Maximum 5 companies
 - Use the most common/official company name (e.g. "Stripe" not "Stripe Inc.")"""

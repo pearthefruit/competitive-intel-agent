@@ -196,6 +196,7 @@ def seo_audit(url, max_pages=10, company_name=None):
         url = "https://" + url
 
     print(f"[seo] Starting SEO & AEO audit for {url}")
+    domain = urlparse(url).netloc
 
     # Crawl the site
     pages = crawl_site(url, max_pages=max_pages)
@@ -233,7 +234,6 @@ def seo_audit(url, max_pages=10, company_name=None):
         model_used = "none"
 
     # Assemble report
-    domain = urlparse(url).netloc
     today = datetime.now().strftime("%Y-%m-%d")
 
     report = f"""# SEO & AEO Audit: {domain}

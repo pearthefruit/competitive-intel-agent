@@ -10,7 +10,7 @@ from agents.competitors import competitor_analysis
 from agents.sentiment import sentiment_analysis
 from agents.patents import patent_analysis
 from scraper.web_search import search_web, format_search_results
-from prompts.compare import build_comparison_prompt, build_landscape_prompt, build_extract_competitors_prompt
+from prompts.compare import build_comparison_prompt, build_landscape_prompt, build_extract_competitors_prompt, build_profile_lookup_prompt
 
 DEFAULT_ANALYSES = ["financial", "sentiment", "competitors", "patents"]
 
@@ -139,27 +139,82 @@ def compare_companies(company_a, company_b, analyses=None):
     return str(filename)
 
 
+def _parse_json_response(text):
+    """Parse a JSON response from LLM, handling markdown code blocks."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        text = text.rsplit("```", 1)[0]
+    return text.strip()
+
+
+def _profile_lookup(company):
+    """Quick web search + LLM to understand what a company does. Returns profile dict or None."""
+    print(f"[landscape] Looking up profile for {company}...")
+
+    results = search_web(f"{company} company what they do services", max_results=5)
+    if not results:
+        print(f"[landscape] No search results for {company} profile lookup")
+        return None
+
+    search_text = format_search_results(results)
+    prompt = build_profile_lookup_prompt(company, search_text)
+    text, _ = generate_text(prompt, timeout=30)
+
+    text = _parse_json_response(text)
+    try:
+        profile = json.loads(text)
+        if isinstance(profile, dict):
+            print(f"[landscape] Profile: {profile.get('industry', '?')} | {profile.get('scale', '?')} | serves {profile.get('client_type', '?')}")
+            return profile
+    except json.JSONDecodeError:
+        print(f"[landscape] Could not parse profile response")
+
+    return None
+
+
 def _extract_competitor_names(company, top_n=3):
-    """Use web search + LLM to find competitor names. Returns list of strings."""
+    """Profile-aware competitor discovery. Looks up what the company does first,
+    then searches for competitors matching service focus, scale, and client type."""
     print(f"[landscape] Discovering competitors for {company}...")
 
-    results = search_web(f"{company} competitors alternatives", max_results=8)
-    if not results:
+    # Step 1: Profile lookup — understand what this company actually does
+    profile = _profile_lookup(company)
+
+    # Step 2: Build targeted search queries using profile context
+    queries = [f"{company} top competitors"]
+    if profile:
+        industry = profile.get("industry", "")
+        services = profile.get("services", [])
+        if industry:
+            queries.append(f"{company} competitors {industry}")
+        if services:
+            top_service = services[0] if services else ""
+            if top_service:
+                queries.append(f"top {industry or top_service} companies like {company}")
+
+    # Run searches and deduplicate results
+    all_results = []
+    seen_urls = set()
+    for query in queries:
+        results = search_web(query, max_results=6)
+        for r in (results or []):
+            url = r.get("url") or r.get("href", "")
+            if url not in seen_urls:
+                seen_urls.add(url)
+                all_results.append(r)
+
+    if not all_results:
         print("[landscape] No search results for competitor discovery — company may be too niche or use a generic name that confuses search")
         return []
 
-    search_text = format_search_results(results)
-    prompt = build_extract_competitors_prompt(company, search_text)
+    search_text = format_search_results(all_results)
+    prompt = build_extract_competitors_prompt(company, search_text, company_profile=profile)
 
     text, _ = generate_text(prompt, timeout=30)
 
     # Parse JSON from response
-    text = text.strip()
-    # Handle markdown code blocks
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        text = text.rsplit("```", 1)[0]
-    text = text.strip()
+    text = _parse_json_response(text)
 
     try:
         names = json.loads(text)
