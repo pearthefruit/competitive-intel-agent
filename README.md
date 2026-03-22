@@ -1,8 +1,8 @@
 # Competitive Intelligence Agent
 
-A CLI-powered competitive intelligence platform that scrapes job boards, analyzes financials, maps competitors, and generates strategic reports — all from your terminal.
+A competitive intelligence platform that scrapes job boards, analyzes financials, maps competitors, and generates consulting-ready intelligence briefings — from the terminal or a three-pane web dashboard.
 
-Built with Python, free LLM APIs (Groq, Mistral, Gemini), and public data sources (SEC EDGAR, PatentsView, DuckDuckGo).
+Built with Python, Flask, and free LLM APIs (Gemini, Groq, Cerebras, Mistral, OpenRouter) with public data sources (SEC EDGAR, PatentsView, DuckDuckGo, Reddit, HackerNews, YouTube).
 
 ## Features
 
@@ -22,40 +22,61 @@ Built with Python, free LLM APIs (Groq, Mistral, Gemini), and public data source
 | `seo` | Site crawl + LLM | On-page SEO signals, structured data, AI-readiness |
 | `techstack` | Site crawl + fingerprinting | Frontend frameworks, analytics, CDN, CMS, marketing tools |
 
+### Company Dossiers
+- **Accumulating intelligence** -- all analyses are saved to a per-company dossier with extracted key facts
+- **Change detection** -- automatically detects changes between analysis runs (revenue shifts, new competitors, sentiment changes)
+- **Timeline events** -- track acquisitions, product launches, leadership changes, funding rounds
+- **Intelligence briefings** -- consulting-ready documents with Digital Maturity Score (0-100), engagement opportunity map, budget signals, and competitive pressure assessment
+
+### Web Dashboard
+- **Three-pane SPA** -- reports list, chat interface, and report/dossier viewer
+- **Context-aware chat** -- automatically scopes conversations to the company you're viewing
+- **PDF export** -- server-side styled PDF generation for any report
+- **Source popovers** -- priority-ordered key facts displayed on briefing cards
+
 ### Utilities
-- **Interactive chat** — natural language interface with tool-calling (ask anything)
-- **SQL queries** — query the job database directly
-- **Web search** — search the web for any company context
+- **Interactive chat** -- natural language interface with tool-calling and 30+ tools (ask anything)
+- **SQL queries** -- query the job database directly
+- **Web search** -- search the web, Reddit, Hacker News, and YouTube for company context
 
 ## Architecture
 
 ```
 competitive-intel-agent/
 ├── main.py                 # CLI entry point (Click)
-├── db.py                   # SQLite setup + helpers
+├── db.py                   # SQLite schema, migrations, all DB helpers
 ├── agents/                 # Agent modules (one per tool)
-│   ├── collect.py          # Job scraping
-│   ├── classify.py         # LLM classification
-│   ├── analyze.py          # Strategic report generation
-│   ├── chat.py             # Interactive chat with tool-calling
-│   ├── financial.py        # SEC EDGAR + private company analysis
+│   ├── llm.py              # LLM provider rotation, generate_text/generate_json, key facts extraction, change detection, save_to_dossier
+│   ├── chat.py             # Agentic chat with multi-provider function calling (ChatLLM class)
+│   ├── briefing.py         # Intelligence briefing generator (Digital Maturity Score)
+│   ├── collect.py          # Job scraping from ATS boards
+│   ├── classify.py         # Job classification (department, seniority, strategic tags)
+│   ├── analyze.py          # Strategic hiring analysis report
+│   ├── financial.py        # SEC EDGAR / web search financial analysis
 │   ├── competitors.py      # Competitive landscape mapping
 │   ├── sentiment.py        # Employee sentiment analysis
 │   ├── patents.py          # Patent portfolio analysis
 │   ├── pricing.py          # Pricing strategy analysis
 │   ├── seo.py              # SEO & AEO audit
-│   └── techstack.py        # Technology stack detection
+│   ├── techstack.py        # Technology stack detection
+│   ├── profile.py          # Full company profile (runs financial + competitors + sentiment + patents)
+│   └── compare.py          # Head-to-head comparison + landscape analysis
 ├── scraper/                # Data collection modules
 │   ├── ats_api.py          # Greenhouse, Lever, Ashby APIs
 │   ├── detect.py           # ATS type auto-detection
 │   ├── linkedin.py         # LinkedIn guest API scraper
 │   ├── sec_edgar.py        # SEC EDGAR XBRL API client
-│   ├── patents.py          # PatentsView API client
-│   ├── site_crawler.py     # Generic website crawler
+│   ├── stock_data.py       # Stock price data via yfinance
+│   ├── patents.py          # USPTO PatentsView + Google Patents
+│   ├── site_crawler.py     # Generic website crawler (httpx + BS4)
 │   ├── tech_detect.py      # Technology fingerprinting
-│   └── web_search.py       # DuckDuckGo search wrapper
+│   ├── web_search.py       # DuckDuckGo search wrapper (news, web, reddit, youtube)
+│   ├── reddit_rss.py       # Reddit RSS feed scraper (direct, bypasses DDG)
+│   ├── hackernews.py       # HackerNews Algolia API search + comments
+│   └── youtube.py          # YouTube search + transcript extraction
 ├── prompts/                # LLM prompt templates
-│   ├── chat.py             # System prompt + tool schemas
+│   ├── chat.py             # System prompt + tool schemas for chat agent
+│   ├── briefing.py         # Briefing prompt with Digital Maturity scoring rubric
 │   ├── classify.py         # Job classification prompt
 │   ├── analyze.py          # Strategic report prompt
 │   ├── financial.py        # Financial analysis prompts
@@ -64,12 +85,18 @@ competitive-intel-agent/
 │   ├── patents.py          # Patent analysis prompt
 │   ├── pricing.py          # Pricing analysis prompt
 │   ├── seo.py              # SEO audit prompt
-│   └── techstack.py        # Tech stack prompt
-├── reports/                # Generated markdown reports
-└── intel.db                # SQLite database
+│   ├── techstack.py        # Tech stack prompt
+│   ├── compare.py          # Comparison prompt
+│   └── profile.py          # Executive profile prompt
+├── web/
+│   ├── app.py              # Flask app factory, API routes, SSE chat endpoint
+│   └── templates/
+│       └── base.html       # Entire SPA — HTML + CSS + JS in one file (~3000 lines)
+├── reports/                # Generated markdown reports (gitignored)
+└── intel.db                # SQLite database (gitignored)
 ```
 
-**LLM Provider Rotation:** Each agent tries Groq → Mistral → Gemini in order, falling back automatically if one fails. The chat interface uses Groq and Mistral (which support OpenAI-compatible function calling).
+**LLM Provider Rotation:** 5 providers with 17+ model fallbacks. Report generation uses Gemini (primary, multi-key rotation) -> Groq -> Cerebras -> Mistral -> OpenRouter (free models). The chat interface uses Gemini (primary, native function calling) -> Groq -> Cerebras -> Mistral -> OpenRouter, with automatic rate-limit fallback through the chain.
 
 ## Setup
 
@@ -90,14 +117,14 @@ cp .env.example .env
 
 | Key | Required | Free? | Get it at |
 |-----|----------|-------|-----------|
-| `GROQ_API_KEY` | Yes (for chat) | Yes | [console.groq.com](https://console.groq.com) |
-| `GEMINI_API_KEYS` | Recommended | Yes | [aistudio.google.com](https://aistudio.google.com) |
-| `MISTRAL_API_KEY` | Optional | Yes | [console.mistral.ai](https://console.mistral.ai) |
-| `PATENTSVIEW_API_KEY` | For patents | Yes | [patentsview.org/apis/keyrequest](https://patentsview.org/apis/keyrequest) |
+| `GEMINI_API_KEYS` | Recommended (primary) | Yes | [aistudio.google.com](https://aistudio.google.com) |
+| `GROQ_API_KEY` | Recommended | Yes | [console.groq.com](https://console.groq.com) |
 | `CEREBRAS_API_KEY` | Optional | Yes | [cloud.cerebras.ai](https://cloud.cerebras.ai) |
+| `MISTRAL_API_KEY` | Optional | Yes | [console.mistral.ai](https://console.mistral.ai) |
 | `OPENROUTER_API_KEY` | Optional | Free tier | [openrouter.ai](https://openrouter.ai) |
+| `USPTO_API_KEY` | For patents | Yes | [patentsview.org/apis/keyrequest](https://patentsview.org/apis/keyrequest) |
 
-You need **at least one** of Groq, Mistral, or Gemini for the analysis tools to work. Groq is recommended for the chat interface (best function-calling support).
+`GEMINI_API_KEYS` supports comma-separated values for multi-key rotation. You need **at least one** of Gemini, Groq, Cerebras, Mistral, or OpenRouter. Gemini is recommended as the primary provider (best quality for reports, native function calling for chat).
 
 ## Usage
 
@@ -224,10 +251,18 @@ Reports work great with [Obsidian](https://obsidian.md) — just point a vault a
 
 ## Database
 
-Job data is stored in SQLite (`intel.db`) with three tables:
-- **companies** — company metadata and ATS info
-- **jobs** — scraped job postings (title, department, location, description, salary)
-- **classifications** — LLM-generated labels (department category, seniority, skills, strategic signals)
+All data is stored in SQLite (`intel.db`) with 7 tables:
+
+**Job Intelligence:**
+- **companies** -- company metadata, ATS info, seniority framework
+- **jobs** -- scraped job postings (title, department, location, description, salary)
+- **classifications** -- LLM-generated labels (department category/subcategory, seniority, skills, strategic signals/tags)
+
+**Company Dossiers:**
+- **dossiers** -- one row per company (company_name UNIQUE NOCASE), accumulates intelligence, stores briefing JSON
+- **dossier_analyses** -- one row per analysis run (links to dossier, stores report_file + key_facts_json + model_used)
+- **dossier_events** -- timeline events (change_detected, manual notes, acquisitions, etc.)
+- **hiring_snapshots** -- periodic captures of hiring stats for temporal trend analysis
 
 Query the database directly:
 ```bash
