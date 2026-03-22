@@ -2393,7 +2393,7 @@ function showBriefing(dossier, b) {
         let budgetHtml = '';
         const confClass = `confidence-${budget.confidence || 'medium'}`;
         budgetHtml += `<div class="budget-row"><span class="budget-label">Can Afford</span><span class="budget-value">${budget.can_afford ? 'Yes' : 'Unlikely'}</span> <span class="confidence-badge ${confClass}">${escHtml(budget.confidence || '')} confidence</span></div>`;
-        if (budget.evidence) budgetHtml += `<div style="font-size:13px;color:var(--text-muted);margin:4px 0 8px">${_stripCitations(budget.evidence)}</div>`;
+        if (budget.evidence) budgetHtml += `<div style="font-size:13px;color:var(--text-muted);margin:4px 0 8px">${_renderCitedText(budget.evidence)}</div>`;
         if (budget.revenue_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Revenue Trend</span><span class="budget-value">${escHtml(budget.revenue_trend)}</span></div>`;
         if (budget.hiring_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Hiring Trend</span><span class="budget-value">${escHtml(budget.hiring_trend)}</span></div>`;
         if (budget.investment_areas && budget.investment_areas.length) {
@@ -2418,7 +2418,7 @@ function showBriefing(dossier, b) {
             </div>`;
         });
         if (comp.urgency_drivers && comp.urgency_drivers.length) {
-            compHtml += `<div style="margin-top:8px;font-size:13px;color:var(--text-muted)"><strong>Drivers:</strong> ${comp.urgency_drivers.map(d => escHtml(d)).join(' | ')}</div>`;
+            compHtml += `<div style="margin-top:8px;font-size:13px;color:var(--text-muted)"><strong>Drivers:</strong> ${comp.urgency_drivers.map(d => _renderCitedText(d)).join(' | ')}</div>`;
         }
         html += _briefingSection('Competitive Pressure', compHtml, false);
     }
@@ -2427,11 +2427,11 @@ function showBriefing(dossier, b) {
     const fin = b.financial_position || {};
     if (Object.keys(fin).length) {
         let finHtml = '';
-        if (fin.summary) finHtml += `<div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${escHtml(fin.summary)}</div>`;
+        if (fin.summary) finHtml += `<div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${_renderCitedText(fin.summary)}</div>`;
         if (fin.metrics && fin.metrics.length) {
             finHtml += '<div class="metric-grid">';
             fin.metrics.forEach(m => {
-                finHtml += `<div class="metric-card"><div class="metric-card-label">${escHtml(m.label || '')}</div><div class="metric-card-value">${escHtml(m.value || '')}</div></div>`;
+                finHtml += `<div class="metric-card"><div class="metric-card-label">${escHtml(m.label || '')}</div><div class="metric-card-value">${_renderCitedText(m.value || '')}</div></div>`;
             });
             finHtml += '</div>';
         }
@@ -2450,7 +2450,7 @@ function showBriefing(dossier, b) {
         if (ip.top_areas && ip.top_areas.length) {
             ipHtml += `<div class="budget-row"><span class="budget-label">Top Areas</span><span class="budget-value">${ip.top_areas.map(a => escHtml(a)).join(', ')}</span></div>`;
         }
-        if (ip.assessment) ipHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:8px;line-height:1.5">${escHtml(ip.assessment)}</div>`;
+        if (ip.assessment) ipHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(ip.assessment)}</div>`;
         html += _briefingSection('Innovation & IP', ipHtml, false);
     }
 
@@ -2459,7 +2459,7 @@ function showBriefing(dossier, b) {
     if (Object.keys(talent).length) {
         let talHtml = '';
         if (talent.sentiment) talHtml += `<div class="budget-row"><span class="budget-label">Sentiment</span><span class="budget-value">${escHtml(talent.sentiment)}</span></div>`;
-        if (talent.hiring_momentum) talHtml += `<div style="font-size:13px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.5">${escHtml(talent.hiring_momentum)}</div>`;
+        if (talent.hiring_momentum) talHtml += `<div style="font-size:13px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.5">${_renderCitedText(talent.hiring_momentum)}</div>`;
         // Department focus as mini bars
         const deptFocus = talent.department_focus || {};
         if (Object.keys(deptFocus).length) {
@@ -2473,7 +2473,7 @@ function showBriefing(dossier, b) {
         if (talent.top_skills && talent.top_skills.length) {
             talHtml += `<div class="skill-tags">${talent.top_skills.map(s => `<span class="skill-tag">${escHtml(s)}</span>`).join('')}</div>`;
         }
-        if (talent.assessment) talHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:8px;line-height:1.5">${escHtml(talent.assessment)}</div>`;
+        if (talent.assessment) talHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(talent.assessment)}</div>`;
         html += _briefingSection('Talent & Culture', talHtml, false);
     }
 
@@ -2485,7 +2485,7 @@ function showBriefing(dossier, b) {
             const sev = r.severity || 'medium';
             riskHtml += `<div class="risk-card risk-${sev}">
                 <div class="risk-category">${escHtml(r.category || '')} - ${escHtml(sev)}</div>
-                <div class="risk-desc">${escHtml(r.description || '')}</div>
+                <div class="risk-desc">${_renderCitedText(r.description || '')}</div>
             </div>`;
         });
         html += _briefingSection('Risk Profile', riskHtml, false);
@@ -2493,7 +2493,7 @@ function showBriefing(dossier, b) {
 
     // --- Strategic Assessment ---
     if (b.strategic_assessment) {
-        html += _briefingSection('Strategic Assessment', `<div style="font-size:14px;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap">${escHtml(b.strategic_assessment)}</div>`, false);
+        html += _briefingSection('Strategic Assessment', `<div style="font-size:14px;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap">${_renderCitedText(b.strategic_assessment)}</div>`, false);
     }
 
     // --- Intelligence Timeline (from dossier events) ---
