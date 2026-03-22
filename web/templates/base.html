@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SignalForge</title>
+    <title>SignalVault</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -19,8 +19,8 @@
             --bg-active: #27272a;
             --border: rgba(255,255,255,0.08);
             --border-strong: rgba(255,255,255,0.14);
-            --text-primary: #e4e4e7;
-            --text-secondary: #a1a1aa;
+            --text-primary: #f4f4f5;
+            --text-secondary: #c4c4cc;
             --text-muted: #71717a;
             --accent: #3b82f6;
             --accent-dim: rgba(59,130,246,0.15);
@@ -180,9 +180,6 @@
         .chat-item:hover .chat-item-delete { opacity: 1; }
         .chat-item-delete:hover { color: var(--red); }
 
-        /* Report list */
-        .report-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
-
         .company-group { margin-bottom: 2px; }
         .company-group-header {
             display: flex;
@@ -232,34 +229,34 @@
         }
         .report-date { margin-left: auto; font-size: 10px; color: var(--text-muted); }
 
-        /* --- DOSSIER LIST --- */
-        .dossier-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
-        .dossier-item {
-            padding: 10px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            margin-bottom: 2px;
-            transition: background 0.1s;
+        /* --- COMPANY LIST (unified) --- */
+        .company-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+        .company-briefing-star { color: var(--yellow); font-size: 11px; margin-left: 3px; flex-shrink: 0; }
+        .company-sector { font-size: 9px; color: var(--text-muted); font-weight: 400; margin-left: auto; margin-right: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60px; }
+        .company-briefing-link {
+            display: flex; align-items: center; gap: 6px;
+            padding: 5px 10px; border-radius: 5px; cursor: pointer;
+            font-size: 11px; font-weight: 600; color: var(--yellow); transition: all 0.1s;
         }
-        .dossier-item:hover { background: var(--bg-hover); }
-        .dossier-item.active { background: var(--accent-dim); }
-        .dossier-item-name {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 2px;
+        .company-briefing-link:hover { background: rgba(234,179,8,0.1); }
+        .company-briefing-link.active { background: rgba(234,179,8,0.15); }
+        .company-gen-briefing-btn {
+            display: block; width: calc(100% - 16px); margin: 4px 8px; padding: 4px 8px;
+            background: var(--accent-dim); border: 1px solid rgba(59,130,246,0.2);
+            border-radius: 4px; color: var(--accent); font-size: 10px; cursor: pointer; text-align: center;
         }
-        .dossier-item-meta {
-            display: flex;
-            gap: 8px;
-            font-size: 10px;
-            color: var(--text-muted);
+        .company-gen-briefing-btn:hover { background: rgba(59,130,246,0.22); }
+        .report-item.no-report { opacity: 0.5; cursor: default; }
+        .report-item.no-report:hover { background: none; color: var(--text-secondary); }
+        .report-breadcrumb {
+            display: flex; align-items: center; gap: 6px;
+            padding: 8px 0 12px; margin-bottom: 8px;
+            border-bottom: 1px solid var(--border); font-size: 12px;
         }
-        .dossier-item-stat {
-            display: flex;
-            align-items: center;
-            gap: 3px;
-        }
+        .breadcrumb-company { color: var(--accent); cursor: pointer; font-weight: 500; }
+        .breadcrumb-company:hover { text-decoration: underline; }
+        .breadcrumb-sep { color: var(--text-muted); }
+        .breadcrumb-current { color: var(--text-secondary); }
         .dossier-detail-section {
             margin-bottom: 20px;
         }
@@ -312,17 +309,17 @@
             gap: 10px;
             padding: 6px 0;
             border-bottom: 1px solid var(--border);
-            font-size: 12px;
+            font-size: 13px;
         }
         .timeline-event:last-child { border-bottom: none; }
         .timeline-date {
             color: var(--text-muted);
-            font-size: 10px;
+            font-size: 11px;
             min-width: 70px;
             flex-shrink: 0;
         }
         .timeline-type {
-            font-size: 10px;
+            font-size: 11px;
             padding: 1px 5px;
             border-radius: 3px;
             background: var(--bg-tertiary);
@@ -335,7 +332,7 @@
         }
         .timeline-desc {
             color: var(--text-muted);
-            font-size: 11px;
+            font-size: 12px;
             margin-top: 2px;
         }
 
@@ -346,20 +343,20 @@
             gap: 8px;
             padding: 5px 0;
             border-bottom: 1px solid var(--border);
-            font-size: 12px;
+            font-size: 13px;
         }
         .change-row:last-child { border-bottom: none; }
         .change-field {
             font-weight: 500;
             color: var(--text-primary);
             min-width: 90px;
-            font-size: 11px;
+            font-size: 12px;
         }
         .change-arrow {
             display: flex;
             align-items: center;
             gap: 4px;
-            font-size: 11px;
+            font-size: 12px;
         }
         .change-old {
             color: var(--text-muted);
@@ -370,7 +367,7 @@
         .change-negative .change-new { color: var(--red); }
         .change-neutral .change-new { color: var(--accent); }
         .change-pct {
-            font-size: 10px;
+            font-size: 11px;
             padding: 1px 5px;
             border-radius: 3px;
             font-weight: 600;
@@ -378,7 +375,7 @@
         .change-pct-up { background: rgba(34,197,94,0.15); color: var(--green); }
         .change-pct-down { background: rgba(239,68,68,0.15); color: var(--red); }
         .change-source {
-            font-size: 10px;
+            font-size: 11px;
             color: var(--text-muted);
             margin-left: auto;
         }
@@ -391,19 +388,19 @@
             margin-bottom: 12px;
         }
         .briefing-header-title {
-            font-size: 11px;
+            font-size: 12px;
             text-transform: uppercase;
             letter-spacing: 1.5px;
             color: var(--text-muted);
             margin-bottom: 4px;
         }
         .briefing-header-company {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 700;
             color: var(--text-primary);
         }
         .briefing-header-sector {
-            font-size: 11px;
+            font-size: 13px;
             color: var(--text-secondary);
             margin-top: 2px;
         }
@@ -412,7 +409,7 @@
             justify-content: center;
             gap: 12px;
             margin-top: 8px;
-            font-size: 10px;
+            font-size: 11px;
             color: var(--text-muted);
         }
         .briefing-actions {
@@ -422,7 +419,7 @@
             margin-top: 10px;
         }
         .briefing-btn {
-            font-size: 11px;
+            font-size: 12px;
             padding: 5px 14px;
             border-radius: 5px;
             border: 1px solid var(--border);
@@ -469,22 +466,67 @@
         }
         .maturity-label {
             text-align: center;
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 1px;
             margin-bottom: 12px;
         }
-        .score-advanced { color: #22c55e; }
-        .score-maturing { color: #3b82f6; }
-        .score-developing { color: #f59e0b; }
+        .score-vanguard { color: #22c55e; }
+        .score-contender { color: #3b82f6; }
+        .score-exposed { color: #f59e0b; }
         .score-laggard { color: #ef4444; }
-        .score-atrisk { color: #dc2626; }
-        .ring-advanced { stroke: #22c55e; }
-        .ring-maturing { stroke: #3b82f6; }
-        .ring-developing { stroke: #f59e0b; }
+        .score-liability { color: #dc2626; }
+        .ring-vanguard { stroke: #22c55e; }
+        .ring-contender { stroke: #3b82f6; }
+        .ring-exposed { stroke: #f59e0b; }
         .ring-laggard { stroke: #ef4444; }
-        .ring-atrisk { stroke: #dc2626; }
+        .ring-liability { stroke: #dc2626; }
+
+        /* Score info tooltip */
+        .score-info-icon {
+            font-size: 14px;
+            cursor: pointer;
+            opacity: 0.5;
+            vertical-align: middle;
+            transition: opacity 0.15s;
+        }
+        .score-info-icon:hover { opacity: 1; }
+        .score-tooltip {
+            margin: 8px 0 4px;
+            padding: 12px 14px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            text-align: left;
+            animation: popover-in 0.15s ease;
+        }
+        .score-tooltip-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 6px;
+        }
+        .score-tooltip-body {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        .score-tooltip-dims {
+            margin: 8px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 12px;
+        }
+        .score-tooltip-dims strong { color: var(--text-primary); }
+        .score-tooltip-tiers {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border);
+            font-size: 11px;
+            line-height: 1.8;
+        }
 
         /* Citation source badges */
         .source-badge {
@@ -523,7 +565,7 @@
             border: 1px solid var(--border-hover);
             border-radius: 8px;
             box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-            font-size: 11px;
+            font-size: 13px;
             line-height: 1.5;
             color: var(--text-secondary);
             animation: popover-in 0.12s ease;
@@ -539,7 +581,7 @@
             margin-bottom: 6px;
             font-weight: 600;
             color: var(--text-primary);
-            font-size: 11px;
+            font-size: 13px;
         }
         .source-popover-fact {
             margin-bottom: 4px;
@@ -566,11 +608,11 @@
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
             border-radius: 6px;
-            font-size: 10px;
+            font-size: 11px;
             color: var(--text-muted);
         }
         .data-confidence-bar .conf-badge {
-            font-size: 9px;
+            font-size: 10px;
             font-weight: 600;
             padding: 1px 5px;
             border-radius: 3px;
@@ -585,11 +627,11 @@
             display: flex;
             align-items: center;
             gap: 6px;
-            font-size: 11px;
+            font-size: 13px;
             margin-bottom: 4px;
         }
         .trajectory-arrow {
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 700;
         }
         .trajectory-up { color: #22c55e; }
@@ -604,7 +646,7 @@
             margin-bottom: 8px;
         }
         .sub-score-label {
-            font-size: 11px;
+            font-size: 13px;
             color: var(--text-secondary);
             min-width: 130px;
             flex-shrink: 0;
@@ -622,7 +664,7 @@
             transition: width 0.8s ease;
         }
         .sub-score-value {
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 600;
             min-width: 28px;
             text-align: right;
@@ -646,7 +688,7 @@
             margin-bottom: 4px;
         }
         .opp-service {
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 600;
             color: var(--text-primary);
         }
@@ -658,7 +700,7 @@
         }
         .opp-card.expanded .opp-detail { display: block; }
         .opp-detail-text {
-            font-size: 11px;
+            font-size: 13px;
             color: var(--text-secondary);
             line-height: 1.5;
             margin-bottom: 8px;
@@ -670,7 +712,7 @@
             margin-top: 6px;
         }
         .opp-priority {
-            font-size: 10px;
+            font-size: 11px;
             padding: 1px 6px;
             border-radius: 3px;
             font-weight: 600;
@@ -680,7 +722,7 @@
         .opp-priority-medium { background: rgba(234,179,8,0.15); color: var(--yellow); }
         .opp-priority-low { background: rgba(59,130,246,0.15); color: var(--accent); }
         .opp-evidence {
-            font-size: 11px;
+            font-size: 13px;
             color: var(--text-muted);
             margin-bottom: 6px;
             line-height: 1.4;
@@ -688,11 +730,11 @@
         .opp-meta {
             display: flex;
             justify-content: space-between;
-            font-size: 10px;
+            font-size: 11px;
             color: var(--text-secondary);
         }
         .opp-why-now {
-            font-size: 10px;
+            font-size: 12px;
             color: var(--accent);
             font-style: italic;
             margin-top: 4px;
@@ -717,12 +759,12 @@
         }
         .briefing-section-header:hover { background: var(--bg-hover); }
         .briefing-section-title {
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 600;
             color: var(--text-primary);
         }
         .briefing-section-chevron {
-            font-size: 10px;
+            font-size: 12px;
             color: var(--text-muted);
             transition: transform 0.2s;
         }
@@ -746,13 +788,13 @@
             border: 1px solid var(--border);
         }
         .metric-card-label {
-            font-size: 10px;
+            font-size: 11px;
             color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
         .metric-card-value {
-            font-size: 16px;
+            font-size: 18px;
             font-weight: 700;
             color: var(--text-primary);
             margin-top: 2px;
@@ -770,7 +812,7 @@
         .risk-medium { border-left-color: var(--yellow); }
         .risk-low { border-left-color: var(--green); }
         .risk-category {
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -780,7 +822,7 @@
         .risk-medium .risk-category { color: var(--yellow); }
         .risk-low .risk-category { color: var(--green); }
         .risk-desc {
-            font-size: 11px;
+            font-size: 13px;
             color: var(--text-secondary);
             line-height: 1.4;
         }
@@ -791,11 +833,11 @@
             align-items: center;
             gap: 8px;
             padding: 5px 0;
-            font-size: 12px;
+            font-size: 13px;
         }
         .budget-label {
             color: var(--text-muted);
-            font-size: 10px;
+            font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             min-width: 100px;
@@ -805,7 +847,7 @@
             font-weight: 500;
         }
         .confidence-badge {
-            font-size: 10px;
+            font-size: 11px;
             padding: 1px 6px;
             border-radius: 3px;
             font-weight: 600;
@@ -816,30 +858,32 @@
 
         /* Competitor row in briefing */
         .competitor-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 5px 0;
+            display: grid;
+            grid-template-columns: minmax(100px, 1fr) minmax(150px, 2fr) minmax(150px, 3fr);
+            gap: 12px;
+            padding: 10px 0;
             border-bottom: 1px solid var(--border);
-            font-size: 12px;
+            font-size: 13px;
+            align-items: start;
         }
         .competitor-row:last-child { border-bottom: none; }
         .competitor-name {
-            font-weight: 500;
+            font-weight: 600;
             color: var(--text-primary);
-            min-width: 100px;
         }
         .competitor-maturity {
-            font-size: 10px;
-            padding: 1px 6px;
+            font-size: 11px;
+            padding: 2px 8px;
             border-radius: 3px;
             background: var(--bg-tertiary);
             color: var(--text-secondary);
+            display: inline-block;
+            line-height: 1.4;
         }
         .competitor-threat {
-            font-size: 11px;
+            font-size: 13px;
             color: var(--text-muted);
-            flex: 1;
+            line-height: 1.5;
         }
 
         /* Skill tags */
@@ -850,7 +894,7 @@
             margin-top: 6px;
         }
         .skill-tag {
-            font-size: 10px;
+            font-size: 11px;
             padding: 2px 7px;
             border-radius: 3px;
             background: rgba(59,130,246,0.12);
@@ -870,6 +914,11 @@
             flex: 1;
             overflow-y: auto;
             padding: 20px 24px;
+        }
+        .chat-col {
+            max-width: 820px;
+            margin: 0 auto;
+            min-height: 100%;
         }
 
         /* Welcome */
@@ -912,6 +961,43 @@
         }
         .quick-action:hover { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-primary); }
         .quick-action span { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+        /* Prompt Modal */
+        .prompt-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10000; animation: fadeIn 0.15s ease-out;
+        }
+        .prompt-modal {
+            background: var(--bg-secondary); border: 1px solid var(--border-strong);
+            border-radius: 12px; padding: 24px; width: 380px; max-width: 90vw;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        .prompt-modal-title {
+            font-size: 15px; font-weight: 600; color: var(--text-primary); margin-bottom: 14px;
+        }
+        .prompt-modal-input {
+            width: 100%; padding: 10px 12px; background: var(--bg-primary);
+            border: 1px solid var(--border); border-radius: 8px;
+            color: var(--text-primary); font-size: 14px; outline: none;
+            font-family: 'Inter', sans-serif; box-sizing: border-box;
+        }
+        .prompt-modal-input:focus { border-color: var(--accent); }
+        .prompt-modal-buttons {
+            display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;
+        }
+        .prompt-modal-btn {
+            padding: 8px 18px; border-radius: 8px; font-size: 13px;
+            font-weight: 500; cursor: pointer; border: none; font-family: 'Inter', sans-serif;
+        }
+        .prompt-modal-btn.cancel {
+            background: var(--bg-tertiary); color: var(--text-secondary);
+        }
+        .prompt-modal-btn.cancel:hover { background: var(--bg-hover); }
+        .prompt-modal-btn.confirm {
+            background: var(--accent); color: #fff;
+        }
+        .prompt-modal-btn.confirm:hover { filter: brightness(1.15); }
 
         /* Messages */
         .msg { margin-bottom: 16px; max-width: 85%; animation: fadeIn 0.2s ease-out; }
@@ -1042,11 +1128,15 @@
             border-top: 1px solid var(--border);
             flex-shrink: 0;
             background: var(--bg-primary);
+            display: flex;
+            justify-content: center;
         }
         .chat-input-wrap {
             display: flex;
             gap: 8px;
             align-items: flex-end;
+            width: 100%;
+            max-width: 820px;
         }
         .chat-input {
             flex: 1;
@@ -1276,10 +1366,10 @@
 
         /* Markdown */
         .md-content h1 { font-size: 20px; font-weight: 700; margin: 20px 0 10px; }
-        .md-content h2 { font-size: 16px; font-weight: 700; margin: 18px 0 8px; color: var(--text-primary); }
-        .md-content h3 { font-size: 14px; font-weight: 600; margin: 14px 0 6px; color: var(--text-secondary); }
-        .md-content p { margin: 8px 0; color: var(--text-secondary); font-size: 13px; }
-        .md-content ul, .md-content ol { padding-left: 20px; margin: 8px 0; color: var(--text-secondary); font-size: 13px; }
+        .md-content h2 { font-size: 17px; font-weight: 700; margin: 18px 0 8px; color: var(--text-primary); }
+        .md-content h3 { font-size: 15px; font-weight: 600; margin: 14px 0 6px; color: var(--text-secondary); }
+        .md-content p { margin: 8px 0; color: var(--text-secondary); font-size: 14px; }
+        .md-content ul, .md-content ol { padding-left: 20px; margin: 8px 0; color: var(--text-secondary); font-size: 14px; }
         .md-content li { margin: 4px 0; }
         .md-content strong { color: var(--text-primary); font-weight: 600; }
         .md-content a { color: var(--accent); text-decoration: none; }
@@ -1361,6 +1451,8 @@
         .dot-report { background: #6b7280; }
         .dot-landscape { background: #14b8a6; }
         .dot-comparison { background: #f59e0b; }
+        .dot-hiring { background: #8b5cf6; }
+        .dot-briefing { background: #eab308; }
 
         /* Print */
         @media print {
@@ -1383,19 +1475,41 @@
             .md-content blockquote { border-color: #999 !important; color: #555 !important; }
             body { background: white !important; }
         }
+
+        /* Toast notifications */
+        .toast-container {
+            position: fixed; top: 16px; right: 16px; z-index: 10000;
+            display: flex; flex-direction: column; gap: 8px;
+            pointer-events: none;
+        }
+        .toast {
+            pointer-events: auto;
+            padding: 12px 16px; border-radius: 8px;
+            font-size: 13px; line-height: 1.4;
+            max-width: 420px; box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            animation: toastIn 0.25s ease-out;
+            display: flex; gap: 10px; align-items: flex-start;
+        }
+        .toast-error { background: #1c1012; border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; }
+        .toast-warning { background: #1a1608; border: 1px solid rgba(234,179,8,0.3); color: #fde68a; }
+        .toast-success { background: #0a1610; border: 1px solid rgba(34,197,94,0.3); color: #86efac; }
+        .toast-info { background: #0c1220; border: 1px solid rgba(59,130,246,0.3); color: #93c5fd; }
+        .toast-close { background: none; border: none; color: inherit; cursor: pointer; opacity: 0.6; font-size: 16px; line-height: 1; flex-shrink: 0; }
+        .toast-close:hover { opacity: 1; }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
     </style>
 </head>
 <body>
+<div class="toast-container" id="toast-container"></div>
 <div class="app">
     <!-- LEFT PANE -->
     <div class="left-pane">
         <div class="left-header">
-            <div class="left-logo">SignalForge</div>
+            <div class="left-logo">SignalVault</div>
         </div>
         <div class="left-tabs">
             <button class="left-tab active" onclick="switchLeftTab('chats')">Chats</button>
-            <button class="left-tab" onclick="switchLeftTab('reports')">Reports</button>
-            <button class="left-tab" onclick="switchLeftTab('dossiers')">Dossiers</button>
+            <button class="left-tab" onclick="switchLeftTab('companies')">Companies</button>
         </div>
         <div class="left-content">
             <div id="panel-chats" class="left-panel active">
@@ -1405,17 +1519,11 @@
                 </div>
                 <div class="chat-list" id="chat-list"></div>
             </div>
-            <div id="panel-reports" class="left-panel">
+            <div id="panel-companies" class="left-panel">
                 <div class="filter-wrap">
-                    <input type="text" class="filter-input" id="report-filter" placeholder="Search reports..." oninput="renderReportList()">
+                    <input type="text" class="filter-input" id="company-filter" placeholder="Search companies..." oninput="renderCompanyList()">
                 </div>
-                <div class="report-list" id="report-list"></div>
-            </div>
-            <div id="panel-dossiers" class="left-panel">
-                <div class="filter-wrap">
-                    <input type="text" class="filter-input" id="dossier-filter" placeholder="Search dossiers..." oninput="renderDossierList()">
-                </div>
-                <div class="dossier-list" id="dossier-list"></div>
+                <div class="company-list" id="company-list"></div>
             </div>
         </div>
     </div>
@@ -1423,12 +1531,13 @@
     <!-- CENTER PANE -->
     <div class="center-pane">
         <div class="chat-messages" id="chat-messages">
+          <div class="chat-col">
             <div class="welcome" id="welcome">
-                <div class="welcome-title">Signal Forge</div>
+                <div class="welcome-title">Signal Vault</div>
                 <div class="welcome-sub">Ask about any company — financials, competitors, patents, sentiment, hiring, and more.</div>
                 <div class="quick-actions">
-                    <div class="quick-action" onclick="quickAction('company_profile', 'Run a full company profile on ')">
-                        Company Profile
+                    <div class="quick-action" onclick="quickAction('full_analysis', 'Run a full analysis on ')">
+                        Full Analysis
                         <span>Financial, competitors, patents, sentiment</span>
                     </div>
                     <div class="quick-action" onclick="quickAction('compare', 'Compare ', ' and ')">
@@ -1445,6 +1554,7 @@
                     </div>
                 </div>
             </div>
+          </div>
         </div>
         <div class="context-pill-bar" id="context-pill-bar" style="display:none">
             <div class="context-pill" id="context-pill">
@@ -1496,31 +1606,50 @@
 // Superscript citation links (¹²³...) get styled like Perplexity
 const renderer = new marked.Renderer();
 const SUPERSCRIPT_RE = /^[¹²³⁴⁵⁶⁷⁸⁹⁰]+$/;
-const origLinkRenderer = renderer.link.bind(renderer);
-renderer.link = function({ href, title, text }) {
-    // Internal report links handled by click interception
-    if (href && href.match(/reports[\\\/].+\.md$/)) {
-        return origLinkRenderer({ href, title, text });
+renderer.link = function({ href, title, tokens }) {
+    try {
+        const h = href || '';
+        const text = this.parser.parseInline(tokens);
+        // Internal report links handled by click interception
+        if (h.match(/reports[\\\/].+\.md$/)) {
+            const titleAttr = title ? ` title="${title}"` : '';
+            return `<a href="${h}"${titleAttr}>${text}</a>`;
+        }
+        const titleAttr = title ? ` title="${title}"` : '';
+        // Superscript citation links → styled badge that opens in new tab
+        const plainText = text.replace(/<[^>]+>/g, '').trim();
+        if (SUPERSCRIPT_RE.test(plainText)) {
+            return `<a href="${h}" class="citation"${titleAttr} target="_blank" rel="noopener noreferrer">${plainText}</a>`;
+        }
+        // Regular external links → new tab
+        return `<a href="${h}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+    } catch (e) {
+        // Fallback: render a basic link so parsing never breaks
+        return `<a href="${href || '#'}" target="_blank" rel="noopener noreferrer">${href || 'link'}</a>`;
     }
-    const titleAttr = title ? ` title="${title}"` : '';
-    // Superscript citation links → styled badge that opens in new tab
-    const plainText = text.replace(/<[^>]+>/g, '').trim();
-    if (SUPERSCRIPT_RE.test(plainText)) {
-        return `<a href="${href}" class="citation"${titleAttr} target="_blank" rel="noopener noreferrer">${plainText}</a>`;
-    }
-    // Regular external links → new tab
-    return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
 };
 marked.setOptions({ renderer });
 
+// ===================== TOAST =====================
+function showToast(message, type = 'info', duration = 6000) {
+    const container = document.getElementById('toast-container');
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.innerHTML = `<span>${message}</span><button class="toast-close" onclick="this.parentElement.remove()">&times;</button>`;
+    container.appendChild(el);
+    if (duration > 0) setTimeout(() => { if (el.parentElement) el.remove(); }, duration);
+}
+
 // ===================== STATE =====================
-const STORAGE_KEY = 'signalforge_chats';
+const STORAGE_KEY = 'signalvault_chats';
 let chats = [];
 let activeChatId = null;
 let sendingChats = new Set();  // track which chats are currently processing
 let messageQueue = [];
 let currentReportFilename = null;
 let allReports = [];
+let allCompanies = [];
+let activeCompanyName = null;
 
 // Context pill state
 let activeContext = null;       // { company, type, label }
@@ -1627,10 +1756,10 @@ function getActiveChat() {
 function switchLeftTab(tab) {
     document.querySelectorAll('.left-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.left-panel').forEach(p => p.classList.remove('active'));
-    const idx = tab === 'chats' ? 1 : tab === 'reports' ? 2 : 3;
+    const idx = tab === 'chats' ? 1 : 2;
     document.querySelector(`.left-tab:nth-child(${idx})`).classList.add('active');
     document.getElementById(`panel-${tab}`).classList.add('active');
-    if (tab === 'dossiers') loadDossiers();
+    if (tab === 'companies') loadCompanies();
 }
 
 // ===================== CHAT LIST =====================
@@ -1678,87 +1807,106 @@ function deleteChat(id) {
     }
 }
 
-// ===================== REPORT LIST =====================
+// ===================== REPORT LIST (kept for openReport compat) =====================
 async function loadReports() {
     try {
         const resp = await fetch('/api/reports');
         allReports = await resp.json();
     } catch { allReports = []; }
-    renderReportList();
 }
 
-function renderReportList() {
-    const filter = (document.getElementById('report-filter').value || '').toLowerCase();
-    const list = document.getElementById('report-list');
-
-    const grouped = {};
-    allReports.forEach(r => {
-        if (!filter || r.company.toLowerCase().includes(filter) || r.type.toLowerCase().includes(filter)) {
-            if (!grouped[r.company]) grouped[r.company] = [];
-            grouped[r.company].push(r);
-        }
-    });
-
-    list.innerHTML = Object.entries(grouped).map(([company, reports]) => `
-        <div class="company-group open">
-            <div class="company-group-header" onclick="this.parentElement.classList.toggle('open')">
-                <span class="company-group-chevron">&#9654;</span>
-                ${escHtml(company)}
-                <span class="company-group-count">${reports.length}</span>
-            </div>
-            <div class="company-group-items">
-                ${reports.map(r => `
-                    <div class="report-item ${currentReportFilename === r.filename ? 'active' : ''}"
-                         onclick="openReport('${r.filename}')">
-                        <span class="report-type-dot dot-${r.type}"></span>
-                        ${escHtml(r.type)}
-                        <span class="report-date">${r.date}</span>
-                    </div>
-                `).join('')}
-            </div>
-        </div>
-    `).join('');
-
-    if (!Object.keys(grouped).length) {
-        list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">No reports yet. Start a chat to generate intelligence.</div>';
-    }
-}
-
-// ===================== DOSSIER LIST =====================
-let allDossiers = [];
+// ===================== COMPANY LIST (unified sidebar) =====================
 let activeDossierName = null;
 
-async function loadDossiers() {
+async function loadCompanies() {
     try {
-        const resp = await fetch('/api/dossiers');
-        allDossiers = await resp.json();
-    } catch { allDossiers = []; }
-    renderDossierList();
+        const resp = await fetch('/api/companies');
+        if (!resp.ok) { console.error('Companies API error:', resp.status); allCompanies = []; }
+        else { allCompanies = await resp.json(); }
+    } catch (e) { console.error('loadCompanies failed:', e); allCompanies = []; }
+    renderCompanyList();
 }
 
-function renderDossierList() {
-    const filter = (document.getElementById('dossier-filter').value || '').toLowerCase();
-    const list = document.getElementById('dossier-list');
-    const filtered = allDossiers.filter(d =>
-        !filter || d.company_name.toLowerCase().includes(filter) || (d.sector || '').toLowerCase().includes(filter)
+function refreshSidebar() {
+    // Reload companies panel if visible, and always refresh allReports for openReport compat
+    loadReports();
+    const panel = document.getElementById('panel-companies');
+    if (panel && panel.classList.contains('active')) loadCompanies();
+}
+
+function toggleCompany(name) {
+    activeCompanyName = activeCompanyName === name ? null : name;
+    renderCompanyList();
+}
+
+function renderCompanyList() {
+    const filter = (document.getElementById('company-filter').value || '').toLowerCase();
+    const list = document.getElementById('company-list');
+
+    const filtered = allCompanies.filter(c =>
+        !filter
+        || c.name.toLowerCase().includes(filter)
+        || (c.sector || '').toLowerCase().includes(filter)
+        || (c.analyses || []).some(a => a.type.toLowerCase().includes(filter))
     );
 
     if (!filtered.length) {
-        list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">No dossiers yet. Run analyses on companies to build dossiers automatically.</div>';
+        list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">No companies yet. Start a chat to generate intelligence.</div>';
         return;
     }
 
-    list.innerHTML = filtered.map(d => `
-        <div class="dossier-item ${activeDossierName === d.company_name ? 'active' : ''}"
-             onclick="openDossier('${escHtml(d.company_name)}')">
-            <div class="dossier-item-name">${escHtml(d.company_name)}</div>
-            <div class="dossier-item-meta">
-                ${d.sector ? `<span class="dossier-item-stat">${escHtml(d.sector)}</span>` : ''}
-                <span class="dossier-item-stat">${d.analysis_count || 0} analyses</span>
-                <span class="dossier-item-stat">${d.event_count || 0} events</span>
+    list.innerHTML = filtered.map(company => {
+        const isOpen = activeCompanyName === company.name;
+        const chevron = '&#9654;';
+        const starHtml = company.has_briefing ? '<span class="company-briefing-star" title="Has intelligence briefing">&#9733;</span>' : '';
+        const sectorHtml = company.sector ? `<span class="company-sector">${escHtml(company.sector)}</span>` : '';
+
+        let itemsHtml = '';
+        if (isOpen) {
+            // Briefing link
+            if (company.has_briefing) {
+                const briefActive = activeDossierName === company.name ? ' active' : '';
+                itemsHtml += `<div class="company-briefing-link${briefActive}" onclick="openDossier('${escHtml(company.name)}')">&#9733; Intelligence Briefing</div>`;
+            }
+
+            // Analysis items
+            (company.analyses || []).forEach(a => {
+                const isActive = currentReportFilename === a.report_file ? ' active' : '';
+                const noReport = !a.has_report ? ' no-report' : '';
+                const dateStr = a.date ? a.date.slice(5) : '';
+                if (a.has_report) {
+                    itemsHtml += `<div class="report-item${isActive}${noReport}" onclick="openReport('${escHtml(a.report_file)}')">
+                        <span class="report-type-dot dot-${a.type}"></span>${escHtml(a.type)}<span class="report-date">${dateStr}</span></div>`;
+                } else {
+                    itemsHtml += `<div class="report-item${noReport}">
+                        <span class="report-type-dot dot-${a.type}"></span>${escHtml(a.type)}<span class="report-date">${dateStr}</span></div>`;
+                }
+            });
+
+            // Orphan reports (files not linked to any dossier_analyses row)
+            (company.orphan_reports || []).forEach(fn => {
+                const isActive = currentReportFilename === fn ? ' active' : '';
+                itemsHtml += `<div class="report-item${isActive}" onclick="openReport('${escHtml(fn)}')">
+                    <span class="report-type-dot"></span>${escHtml(fn.replace(/\.md$/, ''))}<span class="report-date"></span></div>`;
+            });
+
+            // Generate briefing button
+            if (!company.has_briefing && company.analysis_count >= 2) {
+                itemsHtml += `<div style="padding:4px 8px 8px"><button class="company-gen-briefing-btn" onclick="event.stopPropagation();generateBriefing('${escHtml(company.name)}')">Generate Briefing</button></div>`;
+            }
+        }
+
+        return `<div class="company-group${isOpen ? ' open' : ''}">
+            <div class="company-group-header" onclick="toggleCompany('${escHtml(company.name)}')">
+                <span class="company-group-chevron">${chevron}</span>
+                ${escHtml(company.name)}
+                ${starHtml}
+                ${sectorHtml}
+                <span class="company-group-count">${company.analysis_count || 0}</span>
             </div>
-        </div>
-    `).join('');
+            ${isOpen ? `<div class="company-group-items">${itemsHtml}</div>` : ''}
+        </div>`;
+    }).join('');
 }
 
 async function openDossier(companyName) {
@@ -1767,9 +1915,11 @@ async function openDossier(companyName) {
         if (!resp.ok) return;
         const dossier = await resp.json();
         activeDossierName = companyName;
+        activeCompanyName = companyName;
+        currentReportFilename = null;
         const dLabel = dossier.briefing_json ? 'intelligence briefing' : 'dossier';
         setContext(companyName, dossier.briefing_json ? 'briefing' : 'dossier', dLabel);
-        renderDossierList();
+        renderCompanyList();
         showDossierDetail(dossier);
     } catch (e) {
         console.error('Failed to load dossier:', e);
@@ -1794,15 +1944,16 @@ function showDossierDetail(d) {
 }
 
 function _scoreColorClass(score) {
-    if (score >= 80) return 'advanced';
-    if (score >= 60) return 'maturing';
-    if (score >= 40) return 'developing';
+    if (score >= 80) return 'vanguard';
+    if (score >= 60) return 'contender';
+    if (score >= 40) return 'exposed';
     if (score >= 20) return 'laggard';
-    return 'atrisk';
+    return 'liability';
 }
 
 // Global store for source key facts — populated when briefing is rendered
 let _sourceKeyFacts = {};
+let _sourceAnalysisExists = {};
 
 const _VALID_SOURCES = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis'];
 
@@ -1908,6 +2059,8 @@ function showSourcePopover(event, type) {
         if (sorted.length > 5) {
             html += `<div class="source-popover-fact" style="color:var(--text-muted);font-style:italic">+ ${sorted.length - 5} more facts</div>`;
         }
+    } else if (_sourceAnalysisExists[type]) {
+        html += `<div class="source-popover-fact" style="font-style:italic">Facts are being extracted. Reopen the briefing in a moment.</div>`;
     } else {
         html += `<div class="source-popover-fact" style="font-style:italic">No structured facts extracted yet. Run this analysis to populate.</div>`;
     }
@@ -1941,6 +2094,13 @@ function _popoverOutsideClick(e) {
         setTimeout(() => {
             document.addEventListener('click', _popoverOutsideClick, { once: true });
         }, 10);
+    }
+}
+
+function toggleScoreTooltip(icon) {
+    const tooltip = icon.closest('.maturity-label').nextElementSibling;
+    if (tooltip && tooltip.classList.contains('score-tooltip')) {
+        tooltip.style.display = tooltip.style.display === 'none' ? 'block' : 'none';
     }
 }
 
@@ -1986,7 +2146,7 @@ function renderSubScore(label, score) {
     const cc = _scoreColorClass(score);
     return `<div class="sub-score-row">
         <span class="sub-score-label">${escHtml(label)}</span>
-        <div class="sub-score-bar"><div class="sub-score-fill" style="width:${score}%;background:var(--${cc === 'advanced' ? 'green' : cc === 'maturing' ? 'accent' : cc === 'laggard' ? 'yellow' : 'red'})"></div></div>
+        <div class="sub-score-bar"><div class="sub-score-fill" style="width:${score}%;background:var(--${cc === 'vanguard' ? 'green' : cc === 'contender' ? 'accent' : cc === 'exposed' ? 'yellow' : 'red'})"></div></div>
         <span class="sub-score-value score-${cc}">${score}</span>
     </div>`;
 }
@@ -2010,7 +2170,9 @@ function showBriefing(dossier, b) {
 
     // Populate source key facts for popover references (no LLM needed)
     _sourceKeyFacts = {};
+    _sourceAnalysisExists = {};
     (dossier.analyses || []).forEach(a => {
+        _sourceAnalysisExists[a.analysis_type] = true;
         if (a.key_facts_json && !_sourceKeyFacts[a.analysis_type]) {
             try {
                 _sourceKeyFacts[a.analysis_type] = JSON.parse(a.key_facts_json);
@@ -2057,7 +2219,26 @@ function showBriefing(dossier, b) {
 
     html += `<div style="padding:16px 12px">`;
     html += renderScoreRing(score, 120);
-    html += `<div class="maturity-label score-${_scoreColorClass(score)}">${escHtml(label)}</div>`;
+    html += `<div class="maturity-label score-${_scoreColorClass(score)}">${escHtml(label)} <span class="score-info-icon" onclick="event.stopPropagation();toggleScoreTooltip(this)">&#9432;</span></div>
+    <div class="score-tooltip" style="display:none">
+        <div class="score-tooltip-title">Digital Maturity Score</div>
+        <div class="score-tooltip-body">
+            Measures a company's actual digital and technological capability across four dimensions, weighted by strategic importance:
+            <div class="score-tooltip-dims">
+                <div><strong>Tech Modernity (30%)</strong> — Engineering stack, cloud infrastructure, CI/CD practices, modern frameworks</div>
+                <div><strong>Data & Analytics (25%)</strong> — Data platform investment, analytics tooling, experimentation culture</div>
+                <div><strong>AI Readiness (25%)</strong> — AI/ML hiring, patents, product integration, dedicated AI roles</div>
+                <div><strong>Org Readiness (20%)</strong> — Hiring momentum, engineering ratio, strategic investment signals, sentiment</div>
+            </div>
+            <div class="score-tooltip-tiers">
+                <span class="score-vanguard">&#9679;</span> 80-100 Digital Vanguard &nbsp;
+                <span class="score-contender">&#9679;</span> 60-79 Digital Contender &nbsp;
+                <span class="score-exposed">&#9679;</span> 40-59 Digitally Exposed &nbsp;
+                <span class="score-laggard">&#9679;</span> 20-39 Digital Laggard &nbsp;
+                <span class="score-liability">&#9679;</span> 0-19 Digital Liability
+            </div>
+        </div>
+    </div>`;
 
     // Data confidence indicator
     const conf = b.data_confidence || {};
@@ -2069,6 +2250,7 @@ function showBriefing(dossier, b) {
         if (conf.scrape_coverage) html += `<span>· ${escHtml(conf.scrape_coverage.split('(')[0].trim())}</span>`;
         const avail = conf.analyses_available || [];
         html += `<span>· ${avail.length} analyses</span>`;
+        if (conf.classification_mode === 'fast') html += `<span>· heuristic</span>`;
         html += `</div>`;
     }
 
@@ -2088,7 +2270,7 @@ function showBriefing(dossier, b) {
             const badges = sources.map(s =>
                 `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')">${s}</span>`
             ).join(' ');
-            html += `<div style="margin-bottom:6px"><span style="font-size:10px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:10px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
+            html += `<div style="margin-bottom:6px"><span style="font-size:13px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:13px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
         }
     });
     html += `</div></div>`;
@@ -2115,12 +2297,12 @@ function showBriefing(dossier, b) {
                 trajHtml += `<div class="trajectory-row">
                     <span class="trajectory-arrow ${arrowClass}">${arrow}</span>
                     <span style="color:var(--text-secondary)">${escHtml(shift.department || '')}</span>
-                    <span style="color:var(--text-muted);font-size:10px">${escHtml(shift.detail || '')}</span>
+                    <span style="color:var(--text-muted);font-size:12px">${escHtml(shift.detail || '')}</span>
                 </div>`;
             });
         }
         if (traj.interpretation) {
-            trajHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_stripCitations(traj.interpretation)}</div>`;
+            trajHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_stripCitations(traj.interpretation)}</div>`;
         }
         html += _briefingSection('Hiring Trajectory', trajHtml, true);
     }
@@ -2150,11 +2332,11 @@ function showBriefing(dossier, b) {
                 ${opp.why_now ? `<div class="opp-why-now">${escHtml(opp.why_now)}</div>` : ''}
                 <div class="opp-detail">
                     ${opp.detail ? `<div class="opp-detail-text">${_stripCitations(opp.detail)}</div>` : ''}
-                    ${allSources.length ? `<div class="opp-source-links"><span style="font-size:9px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
+                    ${allSources.length ? `<div class="opp-source-links"><span style="font-size:10px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
                 </div>
             </div>`;
         });
-        html += `<div style="padding:0 12px 12px"><div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Consulting Opportunities</div>${oppHtml}</div>`;
+        html += `<div style="padding:0 12px 12px"><div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Consulting Opportunities</div>${oppHtml}</div>`;
     }
 
     // --- Budget & Appetite ---
@@ -2163,7 +2345,7 @@ function showBriefing(dossier, b) {
         let budgetHtml = '';
         const confClass = `confidence-${budget.confidence || 'medium'}`;
         budgetHtml += `<div class="budget-row"><span class="budget-label">Can Afford</span><span class="budget-value">${budget.can_afford ? 'Yes' : 'Unlikely'}</span> <span class="confidence-badge ${confClass}">${escHtml(budget.confidence || '')} confidence</span></div>`;
-        if (budget.evidence) budgetHtml += `<div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px">${_stripCitations(budget.evidence)}</div>`;
+        if (budget.evidence) budgetHtml += `<div style="font-size:13px;color:var(--text-muted);margin:4px 0 8px">${_stripCitations(budget.evidence)}</div>`;
         if (budget.revenue_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Revenue Trend</span><span class="budget-value">${escHtml(budget.revenue_trend)}</span></div>`;
         if (budget.hiring_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Hiring Trend</span><span class="budget-value">${escHtml(budget.hiring_trend)}</span></div>`;
         if (budget.investment_areas && budget.investment_areas.length) {
@@ -2188,7 +2370,7 @@ function showBriefing(dossier, b) {
             </div>`;
         });
         if (comp.urgency_drivers && comp.urgency_drivers.length) {
-            compHtml += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted)"><strong>Drivers:</strong> ${comp.urgency_drivers.map(d => escHtml(d)).join(' | ')}</div>`;
+            compHtml += `<div style="margin-top:8px;font-size:13px;color:var(--text-muted)"><strong>Drivers:</strong> ${comp.urgency_drivers.map(d => escHtml(d)).join(' | ')}</div>`;
         }
         html += _briefingSection('Competitive Pressure', compHtml, false);
     }
@@ -2197,7 +2379,7 @@ function showBriefing(dossier, b) {
     const fin = b.financial_position || {};
     if (Object.keys(fin).length) {
         let finHtml = '';
-        if (fin.summary) finHtml += `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${escHtml(fin.summary)}</div>`;
+        if (fin.summary) finHtml += `<div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${escHtml(fin.summary)}</div>`;
         if (fin.metrics && fin.metrics.length) {
             finHtml += '<div class="metric-grid">';
             fin.metrics.forEach(m => {
@@ -2212,12 +2394,15 @@ function showBriefing(dossier, b) {
     const ip = b.innovation_ip || {};
     if (Object.keys(ip).length) {
         let ipHtml = '';
-        if (ip.patent_count !== undefined) ipHtml += `<div class="budget-row"><span class="budget-label">Patents</span><span class="budget-value">${ip.patent_count}</span></div>`;
+        if (ip.patent_count !== undefined) {
+            const patentDisplay = ip.patent_count === -1 ? 'Not analyzed' : ip.patent_count;
+            ipHtml += `<div class="budget-row"><span class="budget-label">Patents</span><span class="budget-value">${patentDisplay}</span></div>`;
+        }
         if (ip.rd_intensity) ipHtml += `<div class="budget-row"><span class="budget-label">R&D Intensity</span><span class="budget-value">${escHtml(ip.rd_intensity)}</span></div>`;
         if (ip.top_areas && ip.top_areas.length) {
             ipHtml += `<div class="budget-row"><span class="budget-label">Top Areas</span><span class="budget-value">${ip.top_areas.map(a => escHtml(a)).join(', ')}</span></div>`;
         }
-        if (ip.assessment) ipHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5">${escHtml(ip.assessment)}</div>`;
+        if (ip.assessment) ipHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:8px;line-height:1.5">${escHtml(ip.assessment)}</div>`;
         html += _briefingSection('Innovation & IP', ipHtml, false);
     }
 
@@ -2226,7 +2411,7 @@ function showBriefing(dossier, b) {
     if (Object.keys(talent).length) {
         let talHtml = '';
         if (talent.sentiment) talHtml += `<div class="budget-row"><span class="budget-label">Sentiment</span><span class="budget-value">${escHtml(talent.sentiment)}</span></div>`;
-        if (talent.hiring_momentum) talHtml += `<div style="font-size:11px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.5">${escHtml(talent.hiring_momentum)}</div>`;
+        if (talent.hiring_momentum) talHtml += `<div style="font-size:13px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.5">${escHtml(talent.hiring_momentum)}</div>`;
         // Department focus as mini bars
         const deptFocus = talent.department_focus || {};
         if (Object.keys(deptFocus).length) {
@@ -2240,7 +2425,7 @@ function showBriefing(dossier, b) {
         if (talent.top_skills && talent.top_skills.length) {
             talHtml += `<div class="skill-tags">${talent.top_skills.map(s => `<span class="skill-tag">${escHtml(s)}</span>`).join('')}</div>`;
         }
-        if (talent.assessment) talHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.5">${escHtml(talent.assessment)}</div>`;
+        if (talent.assessment) talHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:8px;line-height:1.5">${escHtml(talent.assessment)}</div>`;
         html += _briefingSection('Talent & Culture', talHtml, false);
     }
 
@@ -2260,7 +2445,7 @@ function showBriefing(dossier, b) {
 
     // --- Strategic Assessment ---
     if (b.strategic_assessment) {
-        html += _briefingSection('Strategic Assessment', `<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap">${escHtml(b.strategic_assessment)}</div>`, false);
+        html += _briefingSection('Strategic Assessment', `<div style="font-size:14px;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap">${escHtml(b.strategic_assessment)}</div>`, false);
     }
 
     // --- Intelligence Timeline (from dossier events) ---
@@ -2304,7 +2489,7 @@ function showBriefing(dossier, b) {
             confHtml += `<div class="budget-row"><span class="budget-label">Missing</span><span class="budget-value" style="color:var(--text-muted)">${conf.analyses_missing.join(', ')}</span></div>`;
         }
         if (conf.caveats && conf.caveats.length) {
-            confHtml += `<div style="margin-top:8px;font-size:10px;color:var(--text-muted)">`;
+            confHtml += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted)">`;
             conf.caveats.forEach(c => { confHtml += `<div style="margin-bottom:3px">⚠ ${escHtml(c)}</div>`; });
             confHtml += `</div>`;
         }
@@ -2340,7 +2525,7 @@ function showBriefing(dossier, b) {
     }
 
     document.getElementById('right-content').innerHTML = html;
-    rp.classList.add('open');
+    openRightPane();
 }
 
 async function generateBriefing(companyName) {
@@ -2351,14 +2536,15 @@ async function generateBriefing(companyName) {
         const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/briefing`, { method: 'POST' });
         const data = await resp.json();
         if (data.ok) {
-            // Reload the dossier to get the updated briefing
+            // Reload companies data so star appears, then open the briefing
+            await loadCompanies();
             await openDossier(companyName);
         } else {
-            alert(data.error || 'Briefing generation failed');
+            showToast(data.error || 'Briefing generation failed', 'error', 8000);
             if (btn) { btn.disabled = false; btn.textContent = 'Refresh Briefing'; }
         }
     } catch (e) {
-        alert('Error generating briefing: ' + e.message);
+        showToast('Error generating briefing: ' + e.message, 'error');
         if (btn) { btn.disabled = false; btn.textContent = 'Refresh Briefing'; }
     }
 }
@@ -2502,10 +2688,15 @@ function showLegacyDossierDetail(d) {
     }
 
     document.getElementById('right-content').innerHTML = html;
-    rp.classList.add('open');
+    openRightPane();
 }
 
 // ===================== MESSAGES =====================
+function getChatCol() {
+    const c = document.getElementById('chat-messages');
+    return c.querySelector('.chat-col') || c;
+}
+
 function renderMessages() {
     const chat = getActiveChat();
     const container = document.getElementById('chat-messages');
@@ -2567,17 +2758,17 @@ function renderMessages() {
         msgIdx++;
     });
 
-    // Keep welcome div hidden but in DOM
-    container.innerHTML = `<div id="welcome" class="welcome" style="display:none">
-        <div class="welcome-title">Signal Forge</div>
+    // Keep welcome div hidden but in DOM, wrap everything in centered inner container
+    container.innerHTML = `<div class="chat-col"><div id="welcome" class="welcome" style="display:none">
+        <div class="welcome-title">Signal Vault</div>
         <div class="welcome-sub">Ask about any company.</div>
         <div class="quick-actions">
-            <div class="quick-action" onclick="quickAction('company_profile', 'Run a full company profile on ')">Company Profile<span>Financial, competitors, patents, sentiment</span></div>
+            <div class="quick-action" onclick="quickAction('full_analysis', 'Run a full analysis on ')">Full Analysis<span>Financial, competitors, patents, sentiment</span></div>
             <div class="quick-action" onclick="quickAction('compare', 'Compare ', ' and ')">Compare Companies<span>Side-by-side competitive analysis</span></div>
             <div class="quick-action" onclick="quickAction('landscape', 'Run a landscape analysis on ')">Landscape Analysis<span>Discover competitors automatically</span></div>
             <div class="quick-action" onclick="quickAction('freeform')">Ask Anything<span>Free-form research question</span></div>
         </div>
-    </div>` + html;
+    </div>` + html + `</div>`;
     container.scrollTop = container.scrollHeight;
 }
 
@@ -2645,11 +2836,12 @@ async function processChat(chat) {
 
     // Typing indicator
     const container = document.getElementById('chat-messages');
+    const col = getChatCol();
     const typingEl = document.createElement('div');
     typingEl.className = 'msg msg-assistant';
     typingEl.id = 'typing';
     typingEl.innerHTML = '<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
-    container.appendChild(typingEl);
+    col.appendChild(typingEl);
     container.scrollTop = container.scrollHeight;
 
     // API messages (only user + assistant)
@@ -2699,7 +2891,7 @@ async function processChat(chat) {
     saveChats();
     renderMessages();
     renderChatList();
-    loadReports();
+    refreshSidebar();
 
     // Check if this chat has queued follow-up messages
     const idx = messageQueue.indexOf(chat.id);
@@ -2738,13 +2930,15 @@ function handleSSE(event, chat) {
         saveChats();
         renderMessages();
         // Re-add typing indicator — agent is still working
-        const container = document.getElementById('chat-messages');
-        const typingEl = document.createElement('div');
-        typingEl.className = 'msg msg-assistant';
-        typingEl.id = 'typing';
-        typingEl.innerHTML = '<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
-        container.appendChild(typingEl);
-        container.scrollTop = container.scrollHeight;
+        {
+            const container = document.getElementById('chat-messages');
+            const typingEl = document.createElement('div');
+            typingEl.className = 'msg msg-assistant';
+            typingEl.id = 'typing';
+            typingEl.innerHTML = '<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
+            getChatCol().appendChild(typingEl);
+            container.scrollTop = container.scrollHeight;
+        }
 
     } else if (event.type === 'tool_call') {
         // Remove typing indicator — the tool call bubble with spinner replaces it
@@ -2788,13 +2982,15 @@ function handleSSE(event, chat) {
         saveChats();
         renderMessages();
         // Re-add typing indicator — LLM is still processing the tool result
-        const container = document.getElementById('chat-messages');
-        const typingEl = document.createElement('div');
-        typingEl.className = 'msg msg-assistant';
-        typingEl.id = 'typing';
-        typingEl.innerHTML = '<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
-        container.appendChild(typingEl);
-        container.scrollTop = container.scrollHeight;
+        {
+            const container = document.getElementById('chat-messages');
+            const typingEl = document.createElement('div');
+            typingEl.className = 'msg msg-assistant';
+            typingEl.id = 'typing';
+            typingEl.innerHTML = '<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
+            getChatCol().appendChild(typingEl);
+            container.scrollTop = container.scrollHeight;
+        }
 
     } else if (event.type === 'message') {
         const t = document.getElementById('typing');
@@ -2813,17 +3009,44 @@ function handleSSE(event, chat) {
 }
 
 // ===================== QUICK ACTIONS =====================
-function quickAction(type, prefix, joiner) {
+function showPromptModal(label) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'prompt-overlay';
+        overlay.innerHTML = `
+            <div class="prompt-modal">
+                <div class="prompt-modal-title">${label}</div>
+                <input class="prompt-modal-input" type="text" autofocus />
+                <div class="prompt-modal-buttons">
+                    <button class="prompt-modal-btn cancel">Cancel</button>
+                    <button class="prompt-modal-btn confirm">OK</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const inp = overlay.querySelector('.prompt-modal-input');
+        const close = (val) => { overlay.remove(); resolve(val); };
+        overlay.querySelector('.cancel').onclick = () => close(null);
+        overlay.querySelector('.confirm').onclick = () => close(inp.value.trim() || null);
+        inp.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') close(inp.value.trim() || null);
+            if (e.key === 'Escape') close(null);
+        });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+        setTimeout(() => inp.focus(), 50);
+    });
+}
+
+async function quickAction(type, prefix, joiner) {
     const input = document.getElementById('chat-input');
     if (type === 'freeform') { input.focus(); return; }
     if (type === 'compare') {
-        const a = prompt('First company:');
+        const a = await showPromptModal('First company:');
         if (!a) return;
-        const b = prompt('Second company:');
+        const b = await showPromptModal('Second company:');
         if (!b) return;
         input.value = `${prefix}${a}${joiner}${b}`;
     } else {
-        const name = prompt('Company name:');
+        const name = await showPromptModal('Company name:');
         if (!name) return;
         input.value = `${prefix}${name}`;
     }
@@ -2833,23 +3056,52 @@ function quickAction(type, prefix, joiner) {
 // ===================== RIGHT PANE =====================
 async function openReport(filename) {
     try {
-        const resp = await fetch(`/api/reports/${filename}/content`);
-        if (!resp.ok) return;
+        const resp = await fetch(`/api/reports/${encodeURIComponent(filename)}/content`);
+        if (!resp.ok) { console.error('Report API error:', resp.status, filename); return; }
         const data = await resp.json();
         currentReportFilename = filename;
+        activeDossierName = null;
+
+        // Track active company for sidebar highlighting
+        const ownerCompany = allCompanies.find(c =>
+            (c.analyses || []).some(a => a.report_file === filename) ||
+            (c.orphan_reports || []).includes(filename)
+        );
+        if (ownerCompany) activeCompanyName = ownerCompany.name;
+
+        // Set header
         document.getElementById('right-company').textContent = data.company || '';
         document.getElementById('right-type').textContent = data.type || '';
         document.getElementById('right-date').textContent = data.date || '';
-        const contentEl = document.getElementById('right-content');
-        contentEl.innerHTML = marked.parse(data.content || '');
 
-        // Intercept clicks on report file links (e.g. reports\company_financial_2026-03-21.md)
+        // Parse and set content (catch separately so pane always opens)
+        const contentEl = document.getElementById('right-content');
+        let parsedHtml = '';
+        try {
+            parsedHtml = marked.parse(data.content || '');
+        } catch (parseErr) {
+            console.error('Markdown parse error:', parseErr);
+            parsedHtml = '<pre style="white-space:pre-wrap;color:var(--text-secondary)">' + escHtml(data.content || '') + '</pre>';
+        }
+
+        // Add breadcrumb if company is known
+        let breadcrumbHtml = '';
+        if (data.company && ownerCompany) {
+            breadcrumbHtml = `<div class="report-breadcrumb">
+                <span class="breadcrumb-company" onclick="openDossier('${escHtml(data.company)}')">${escHtml(data.company)}</span>
+                <span class="breadcrumb-sep">›</span>
+                <span class="breadcrumb-current">${escHtml(data.type || 'report')} report</span>
+            </div>`;
+        }
+        contentEl.innerHTML = breadcrumbHtml + parsedHtml;
+        contentEl.parentElement.scrollTop = 0;
+
+        // Intercept clicks on report file links
         contentEl.querySelectorAll('a').forEach(link => {
             const href = link.getAttribute('href') || '';
             if (href.match(/reports[\\\/].+\.md$/)) {
                 link.addEventListener('click', (e) => {
                     e.preventDefault();
-                    // Extract just the filename from the path
                     const fn = href.replace(/^reports[\\\/]/, '');
                     openReport(fn);
                 });
@@ -2857,12 +3109,25 @@ async function openReport(filename) {
             }
         });
 
-        document.getElementById('right-pane').classList.add('open');
+        // Always open the pane
+        openRightPane();
         setContext(data.company || '', 'report', (data.type || 'report') + ' report');
-        renderReportList();
+        renderCompanyList();
     } catch (e) {
         console.error('Failed to load report:', e);
     }
+}
+
+function openRightPane() {
+    const rp = document.getElementById('right-pane');
+    if (savedRightWidth) {
+        rp.style.width = savedRightWidth + 'px';
+        rp.style.minWidth = savedRightWidth + 'px';
+    } else {
+        rp.style.width = '';
+        rp.style.minWidth = '';
+    }
+    rp.classList.add('open');
 }
 
 function closeRightPane() {
@@ -2872,9 +3137,9 @@ function closeRightPane() {
     rp.style.minWidth = '';
     currentReportFilename = null;
     activeDossierName = null;
+    activeCompanyName = null;
     clearContextFull();
-    renderReportList();
-    renderDossierList();
+    renderCompanyList();
 }
 
 function printReport() {
@@ -2898,7 +3163,7 @@ function printReport() {
             })
             .catch(err => {
                 console.error('PDF export error:', err);
-                alert('PDF export failed — check console for details.');
+                showToast('PDF export failed — check console for details.', 'error');
                 resetBtn();
             });
     } else if (activeDossierName) {
@@ -2915,7 +3180,7 @@ function printReport() {
             })
             .catch(err => {
                 console.error('PDF export error:', err);
-                alert('PDF export failed — check console for details.');
+                showToast('PDF export failed — check console for details.', 'error');
                 resetBtn();
             });
     } else {
@@ -2937,7 +3202,7 @@ async function deleteCurrentReport() {
     try {
         await fetch(`/api/reports/${currentReportFilename}`, { method: 'DELETE' });
         closeRightPane();
-        loadReports();
+        refreshSidebar();
     } catch {}
 }
 
@@ -2982,6 +3247,7 @@ document.addEventListener('keydown', e => {
 });
 
 // ===================== RESIZE HANDLE =====================
+let savedRightWidth = null;
 (function() {
     const handle = document.getElementById('resize-handle');
     const rightPane = document.getElementById('right-pane');
@@ -3016,6 +3282,8 @@ document.addEventListener('keydown', e => {
         rightPane.classList.remove('resizing');
         document.body.style.cursor = '';
         document.body.style.userSelect = '';
+        // Remember the resized width for subsequent report/briefing opens
+        savedRightWidth = rightPane.offsetWidth;
     });
 })();
 </script>

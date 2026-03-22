@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier
+from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from agents.financial import financial_analysis
 from agents.competitors import competitor_analysis
 from agents.sentiment import sentiment_analysis
@@ -98,6 +98,7 @@ def compare_companies(company_a, company_b, analyses=None):
     # Generate comparison
     print(f"\n[compare] Generating comparison report...")
     prompt = build_comparison_prompt(company_a, company_b, reports_a, reports_b)
+    prompt += get_temporal_context(company_a, "comparison")
     text, model = generate_text(prompt)
 
     # Save
@@ -206,6 +207,7 @@ def landscape_analysis(company, top_n=3):
     # Step 3: Generate landscape report
     print(f"\n[landscape] Generating landscape report...")
     prompt = build_landscape_prompt(company, competitors, all_reports)
+    prompt += get_temporal_context(company, "landscape")
     text, model = generate_text(prompt)
 
     # Save

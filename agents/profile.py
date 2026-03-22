@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier
+from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from agents.financial import financial_analysis
 from agents.competitors import competitor_analysis
 from agents.sentiment import sentiment_analysis
@@ -41,13 +41,10 @@ def company_profile(company, url=None, db_path="intel.db"):
         "patents": lambda: patent_analysis(company),
     }
 
-    if url:
-        tasks["hiring"] = lambda: _run_job_pipeline(company, url, db_path)
+    tasks["hiring"] = lambda: _run_job_pipeline(company, url, db_path)
 
     task_names = list(tasks.keys())
     print(f"[profile] Planning {len(task_names)} analyses: {', '.join(task_names)}")
-    if not url:
-        print("[profile] No careers URL provided — skipping hiring analysis (pass url= to include it)")
 
     # Run sequentially to avoid nested ThreadPoolExecutor issues
     # (ddgs web search uses threading internally, nesting pools causes crashes)
@@ -91,6 +88,7 @@ def company_profile(company, url=None, db_path="intel.db"):
 
     # Generate executive summary
     prompt = build_profile_prompt(company, report_contents)
+    prompt += get_temporal_context(company, "profile", db_path=db_path)
     text, model = generate_text(prompt)
 
     # Save

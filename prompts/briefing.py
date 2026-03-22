@@ -17,7 +17,7 @@ _BRIEFING_SCHEMA = {
     },
     "digital_maturity": {
         "overall_score": "integer 0-100",
-        "overall_label": "Digital Leader | Digitally Maturing | Falling Behind | Digital Laggard | At Risk",
+        "overall_label": "Digital Vanguard | Digital Contender | Digitally Exposed | Digital Laggard | Digital Liability",
         "sub_scores": {
             "tech_modernity": {
                 "score": "integer 0-100",
@@ -330,11 +330,11 @@ Secondary signals: analytics tools detected on website (Segment, Amplitude, etc.
 **Overall score = weighted average (Tech×0.30 + Data×0.25 + AI×0.25 + Org×0.20). COMPUTE THIS PRECISELY — do the arithmetic, show your work mentally, and round to the nearest integer. The overall_score must equal the weighted average of sub-scores.**
 
 Labels (direct, no sugarcoating — these should make a C-suite exec pay attention):
-- 80-100: "Digital Leader"
-- 60-79: "Digitally Maturing"
-- 40-59: "Falling Behind"
+- 80-100: "Digital Vanguard"
+- 60-79: "Digital Contender"
+- 40-59: "Digitally Exposed"
 - 20-39: "Digital Laggard"
-- 0-19: "At Risk"
+- 0-19: "Digital Liability"
 
 ---
 
@@ -381,9 +381,19 @@ Generate 3-5 prioritized consulting engagement opportunities. Use real consultin
 For each opportunity, provide:
 - Specific evidence from the intelligence data WITH [source] tags (not generic observations)
 - A "detail" field: 2-3 sentences expanding on WHY this is a real need, what the engagement would look like, and what outcomes the client should expect. This is the deeper explanation a partner would want when clicking into the opportunity.
-- Estimated scope: "$500K-1M" (small), "$1-3M" (medium), "$2-5M" (large), "$5M+" (transformation)
+- Estimated scope using the METHODOLOGY below (not a guess — show your reasoning via the evidence)
 - A "why_now" field: 1-2 sentences explaining the company-specific timing trigger — why THIS company needs this NOW. Reference specific recent events, data points, or inflection points. Examples: "Post-$30B Series G with 99% new roles — the org is scaling faster than its processes can support." or "Revenue grew 29% but sentiment is declining — cultural debt is accumulating during hypergrowth." Make it specific enough that it couldn't apply to a random company.
 - source_analyses: list of which analysis types support this opportunity
+
+SCOPE ESTIMATION METHODOLOGY — these must be defensible to a consulting partner:
+
+Estimates are based on typical Big 4 / MBB engagement structures (blended daily rate ~$3-5K/consultant):
+- **$500K-1M, 3-6 months**: Small team (2-3 consultants). Assessments, strategy design, POC, governance framework. Example: AI readiness assessment for a company with <$5B revenue.
+- **$1-3M, 6-12 months**: Medium team (4-6 consultants). Platform implementation, org redesign, single workstream transformation. Scale to company size — a 5,000-person company's org redesign costs less than a 50,000-person company's.
+- **$2-5M, 9-18 months**: Large team (6-10 consultants). Multi-workstream programs, enterprise-wide platform rollout, M&A integration. Appropriate for $10B+ revenue companies with complex operations.
+- **$5M+, 12-24 months**: Full transformation team (10+ consultants). Company-wide digital transformation, multi-geography rollout. Only appropriate for $50B+ companies with evidence of large-scale transformation need.
+
+CRITICAL: Scale the estimate to the company's size and complexity. A $2B company does NOT get a $5M engagement. Use revenue, headcount, and hiring velocity as sizing inputs. If in doubt, estimate conservatively — an overstated scope destroys credibility faster than an understated one.
 
 ---
 
@@ -420,4 +430,10 @@ IMPORTANT:
 - The strategic_assessment should be the most opinionated section — give a clear recommendation on whether to pursue this company and why.
 - For engagement_opportunities, identify REAL needs from the evidence. A company that builds AI doesn't need AI strategy, data modernization, OR AI governance — they are experts in all of those. Focus on their non-core pain points: org design for hypergrowth, sales operations, compliance in new jurisdictions, M&A integration.
 - For risk_profile, include both business risks to the target company AND engagement risks for the consulting firm (e.g., "long procurement cycles", "recent leadership change may delay decisions").
-- COMPUTE the overall_score as the exact weighted average. Do not round sub-scores to produce a convenient overall number."""
+- COMPUTE the overall_score as the exact weighted average. Do not round sub-scores to produce a convenient overall number.
+
+MISSING DATA HANDLING — critical for credibility:
+- If patent analysis was NOT run (patents not in analyses_available), set innovation_ip.patent_count to -1 and assessment to "Patent analysis not conducted — run patent_analysis to assess IP portfolio." Do NOT report 0 patents for a Fortune 500 company without evidence.
+- If financial analysis was NOT run, say "Financial data not analyzed" in financial_position.summary — do not fabricate revenue or market cap.
+- If any analysis is missing, note it explicitly rather than inferring or defaulting to zero. A wrong number is worse than admitting incomplete data.
+- In the data_confidence section, clearly list which analyses are missing and how that affects specific scores."""

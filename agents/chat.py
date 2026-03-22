@@ -196,6 +196,9 @@ CHAT_PROVIDERS = [
     # --- Gemini (primary — best quality, native function calling) ---
     {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash"},
     {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-3-flash-preview"},
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-pro"},
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-3.1-pro-preview"},
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
     # --- Groq (fast inference, OpenAI-compatible) ---
     {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
     {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "meta-llama/llama-4-scout-17b-16e-instruct"},
@@ -237,29 +240,55 @@ class ChatLLM:
         if not self.providers:
             raise RuntimeError("No API keys found for chat (need at least one of: GEMINI_API_KEYS, GROQ_API_KEY, CEREBRAS_API_KEY, MISTRAL_API_KEY, OPENROUTER_API_KEY)")
 
-    def chat(self, messages, tools=None):
-        """Send chat completion request. Returns the assistant message dict."""
+    def chat(self, messages, tools=None, force_tools=False):
+        """Send chat completion request. Returns the assistant message dict.
+
+        Args:
+            force_tools: If True and tools are provided, force the model to call
+                at least one tool (tool_choice='required'). Use on round 0 to
+                ensure the model reasons with tools instead of answering from
+                general knowledge.
+        """
         errors = []
         for p in self.providers:
             try:
+                print(f"[chat] Trying {p['name']}/{p['model']}...")
                 if p["name"] == "gemini":
-                    return self._chat_gemini(p, messages, tools)
+                    result = self._chat_gemini(p, messages, tools, force_tools=force_tools)
                 else:
-                    return self._chat_openai(p, messages, tools)
+                    result = self._chat_openai(p, messages, tools, force_tools=force_tools)
+                tc_count = len(result.get("tool_calls") or [])
+                print(f"[chat] OK {p['name']}/{p['model']}"
+                      + (f" → {tc_count} tool call(s)" if tc_count else " → text response"))
+                return result
             except Exception as e:
                 error_str = str(e)
-                errors.append(f"{p['name']}: {error_str}")
-                # On rate limit, try next provider
-                if "429" in error_str or "rate limit" in error_str.lower():
+                error_lower = error_str.lower()
+                errors.append(f"{p['name']}/{p['model']}: {error_str[:120]}")
+                print(f"[chat] FAIL {p['name']}/{p['model']}: {error_str[:120]}")
+
+                # Rate limit detection (check FIRST — TPM/RPM errors contain
+                # "token" and "limit" which would false-match context overflow)
+                is_rate = ("429" in error_str
+                           or "rate limit" in error_lower
+                           or "tokens per minute" in error_lower
+                           or "requests per minute" in error_lower
+                           or "tpm" in error_lower
+                           or "rpm" in error_lower
+                           or "resource_exhausted" in error_lower
+                           or "413" in error_str)
+                if is_rate:
                     continue
-                # On context overflow, propagate so caller can trim
-                if any(kw in error_str.lower() for kw in ["token", "context", "length", "too long", "maximum"]):
+
+                # Context overflow — propagate so caller can trim
+                if any(kw in error_lower for kw in ["context", "length", "too long", "maximum"]):
                     raise
+
                 continue
 
         raise RuntimeError("All chat providers failed:\n  " + "\n  ".join(errors))
 
-    def _chat_openai(self, provider, messages, tools=None):
+    def _chat_openai(self, provider, messages, tools=None, force_tools=False):
         """OpenAI-compatible chat completion (Groq, Mistral)."""
         body = {
             "model": provider["model"],
@@ -268,7 +297,7 @@ class ChatLLM:
         }
         if tools:
             body["tools"] = tools
-            body["tool_choice"] = "auto"
+            body["tool_choice"] = "required" if force_tools else "auto"
 
         headers = {
             "Authorization": f"Bearer {provider['key']}",
@@ -276,8 +305,8 @@ class ChatLLM:
         }
         resp = self.http.post(provider["url"], json=body, headers=headers)
 
-        if resp.status_code == 429:
-            raise RuntimeError(f"rate limited (429)")
+        if resp.status_code in (429, 413):
+            raise RuntimeError(f"rate limited ({resp.status_code})")
         if resp.status_code != 200:
             try:
                 err_detail = resp.json().get("error", {}).get("message", resp.text[:200])
@@ -287,16 +316,25 @@ class ChatLLM:
 
         return resp.json()["choices"][0]["message"]
 
-    def _chat_gemini(self, provider, messages, tools=None):
+    def _chat_gemini(self, provider, messages, tools=None, force_tools=False):
         """Gemini native chat completion with function calling."""
         with gemini_lock:
             genai.configure(api_key=provider["key"])
 
             # Build tool config
             gemini_tools = None
+            gemini_tool_config = None
             if tools:
                 declarations = _openai_tools_to_gemini(tools)
                 gemini_tools = [genai.protos.Tool(function_declarations=declarations)]
+                if force_tools:
+                    # Force the model to call at least one tool (prevents
+                    # answering from general knowledge on the first round)
+                    gemini_tool_config = genai.protos.ToolConfig(
+                        function_calling_config=genai.protos.FunctionCallingConfig(
+                            mode=genai.protos.FunctionCallingConfig.Mode.ANY
+                        )
+                    )
 
             # Convert messages
             system_instruction, contents = _openai_messages_to_gemini(messages)
@@ -310,6 +348,7 @@ class ChatLLM:
             response = model.generate_content(
                 contents,
                 tools=gemini_tools,
+                tool_config=gemini_tool_config,
             )
 
         # Convert back to OpenAI format (no lock needed for pure data conversion)
@@ -526,8 +565,10 @@ def _execute_tool(name, args, db_path, progress_callback=None):
         elif name == "classify":
             count = classify(args["company"], db_path,
                             seniority_framework=args.get("seniority_framework"),
-                            custom_seniority_rules=args.get("custom_seniority_rules"))
-            return f"Classified {count} jobs."
+                            custom_seniority_rules=args.get("custom_seniority_rules"),
+                            mode=args.get("mode", "comprehensive"))
+            mode_label = args.get("mode", "comprehensive")
+            return f"Classified {count} jobs ({mode_label} mode)."
 
         elif name == "reclassify":
             from db import get_connection, get_company_id, clear_classifications
@@ -552,18 +593,22 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                 return f"Strategic intelligence report saved to: {path}"
             return "Analysis failed — no data available. Make sure jobs have been collected and classified first."
 
-        elif name == "full_pipeline":
+        elif name == "hiring_pipeline":
             new, skipped = collect(args["company"], args.get("url"), db_path)
             if new == 0 and skipped == 0:
                 return "Pipeline stopped: no jobs collected. Check the company name or provide a direct URL."
 
+            cls_mode = args.get("classification_mode", "comprehensive")
             count = classify(args["company"], db_path,
                             seniority_framework=args.get("seniority_framework"),
-                            custom_seniority_rules=args.get("custom_seniority_rules"))
+                            custom_seniority_rules=args.get("custom_seniority_rules"),
+                            mode=cls_mode)
             path = analyze(args["company"], db_path)
-            summary = f"Pipeline complete: {new} new jobs collected, {count} classified."
+            summary = f"Pipeline complete: {new} new jobs collected, {count} classified ({cls_mode} mode)."
             if path:
                 summary += f" Report saved to: {path}"
+            else:
+                summary += " Warning: hiring report generation failed — no classified jobs found or analysis error."
             return summary
 
         # --- Analysis Reports ---
@@ -610,11 +655,11 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             return "Pricing analysis failed — could not crawl the site."
 
         # --- Multi-Company ---
-        elif name == "company_profile":
+        elif name == "full_analysis":
             path = company_profile(args["company"], args.get("url"), db_path)
             if path:
-                return f"Company profile saved to: {path}"
-            return "Company profile failed — no analyses completed."
+                return f"Full analysis saved to: {path}"
+            return "Full analysis failed — no analyses completed."
 
         elif name == "compare_companies":
             path = compare_companies(args["company_a"], args["company_b"])
@@ -764,9 +809,12 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                         new, skipped = collect(company_name, None, db_path)
                         if new == 0 and skipped == 0:
                             return company_name, {"error": "No jobs found — check company name or provide ATS URL"}
-                        count = classify(company_name, db_path, seniority_framework=framework)
+                        # standard depth → fast (heuristic) classification, deep → comprehensive (LLM)
+                        cls_mode = "fast" if depth == "standard" else "comprehensive"
+                        count = classify(company_name, db_path, seniority_framework=framework, mode=cls_mode)
                         path = analyze(company_name, db_path)
-                        result.update({"jobs_new": new, "classified": count, "report": path})
+                        result.update({"jobs_new": new, "classified": count, "report": path,
+                                       "classification_mode": cls_mode})
 
                         if depth == "standard":
                             comp_path = competitor_analysis(company_name)
@@ -858,7 +906,7 @@ def chat_repl(db_path="intel.db"):
     init_db(db_path)
 
     print("=" * 60)
-    print("  Signal Forge Chat")
+    print("  Signal Vault Chat")
     print("  Type a question or command. 'exit' to quit.")
     print("=" * 60)
     print()

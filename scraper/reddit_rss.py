@@ -20,7 +20,7 @@ SUBREDDITS = {
 }
 
 _NS = {"atom": "http://www.w3.org/2005/Atom"}
-_HEADERS = {"User-Agent": "SignalForge/1.0 (competitive intelligence research tool)"}
+_HEADERS = {"User-Agent": "SignalVault/1.0 (competitive intelligence research tool)"}
 
 
 def _fetch_rss(url, timeout=15):

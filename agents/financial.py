@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier
+from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, get_recent_filings, format_financials_for_prompt
 from scraper.stock_data import get_stock_data, format_stock_data_for_prompt
 from scraper.web_search import search_web, search_news, format_search_results
@@ -99,6 +99,7 @@ def _analyze_public(company, cik_info):
 
     # Generate report
     prompt = build_financial_prompt(company, ticker, financials_text)
+    prompt += get_temporal_context(company, "financial")
 
     print("[financial] Generating report...")
     text, model = generate_text(prompt)
@@ -174,6 +175,7 @@ def _analyze_private(company):
 
     # Generate report
     prompt = build_financial_prompt_private(company, search_text)
+    prompt += get_temporal_context(company, "financial")
 
     print("[financial] Generating report...")
     text, model = generate_text(prompt)

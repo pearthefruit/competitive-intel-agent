@@ -10,7 +10,7 @@ from html import unescape
 import httpx
 
 _BASE = "https://hn.algolia.com/api/v1"
-_HEADERS = {"User-Agent": "SignalForge/1.0 (competitive intelligence research tool)"}
+_HEADERS = {"User-Agent": "SignalVault/1.0 (competitive intelligence research tool)"}
 
 
 def _clean_html(text):

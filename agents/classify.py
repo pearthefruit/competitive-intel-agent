@@ -59,7 +59,7 @@ _SENIORITY_RULES = {
         (r'\b(Chief|CTO|CFO|CEO|COO|CRO|CMO|CIO|CISO|CPO)\b', "C-Suite"),
         (r'\b(VP|Vice President|Head of)\b', "VP"),
         (r'\bDirector\b', "Director"),
-        (r'\b(Staff|Principal)\b', "Staff"),
+        (r'\b(Staff|Principal)\b', "Sr. Manager"),
         (r'\b(Senior|Sr\.?|Lead)\b', "Senior"),
         (r'\b(II|III)\b', "Senior"),
     ],
@@ -71,7 +71,7 @@ _SENIORITY_RULES = {
         (r'\b(Chief|CEO|CFO|CRO|CIO|Partner)\b', "C-Suite"),
         (r'\b(Managing Director|MD)\b', "VP"),
         (r'\b(Group Head|Division Head|Global Head)\b', "VP"),
-        (r'\b(SVP|Senior Vice President|Executive Director)\b', "Staff"),
+        (r'\b(SVP|Senior Vice President|Executive Director)\b', "Sr. Manager"),
         (r'\bDirector\b(?!.*Managing)', "Director"),
         (r'\b(VP|Vice President)\b', "Senior"),  # Banking VP = tech Senior
     ],
@@ -82,7 +82,7 @@ _SENIORITY_RULES = {
         (r'\b(Chief|CEO|Global Lead|Chairman)\b', "C-Suite"),
         (r'\b(Partner|Managing Partner|Equity Partner|Managing Director)\b', "VP"),
         (r'\b(Director|Principal|Of Counsel)\b', "Director"),
-        (r'\b(Senior Manager|Associate Director|Counsel)\b', "Staff"),
+        (r'\b(Senior Manager|Associate Director|Counsel)\b', "Sr. Manager"),
         (r'\b(Manager|Engagement Manager)\b', "Senior"),
     ],
     "corporate": [
@@ -91,7 +91,7 @@ _SENIORITY_RULES = {
         (r'\b(Chief|CEO|CFO|COO|CTO|President)\b', "C-Suite"),
         (r'\b(VP|Vice President|SVP|EVP|Head of)\b', "VP"),
         (r'\b(Director|Senior Director|Group Director)\b', "Director"),
-        (r'\b(Senior Manager|Associate Director)\b', "Staff"),
+        (r'\b(Senior Manager|Associate Director)\b', "Sr. Manager"),
         (r'\b(Manager|Team Lead)\b', "Senior"),
         (r'\bSenior (Specialist|Analyst)\b', "Mid"),
     ],
@@ -111,9 +111,9 @@ _BACKFILL_KW = re.compile(
 )
 
 
-def _heuristic_seniority(title, framework="tech"):
+def _heuristic_seniority(title, framework="corporate"):
     """Determine seniority from title using rule-based matching. Returns level or None."""
-    rules = _SENIORITY_RULES.get(framework, _SENIORITY_RULES["tech"])
+    rules = _SENIORITY_RULES.get(framework, _SENIORITY_RULES["corporate"])
     for pattern, level in rules:
         if re.search(pattern, title, re.IGNORECASE):
             return level
@@ -319,12 +319,45 @@ class MultiProviderLLM:
         self.http.close()
 
 
-def classify(company_name, db_path="intel.db", seniority_framework=None, custom_seniority_rules=None,
-             max_jobs=None):
-    """Classify unclassified jobs in batches, rotating across providers.
+def _fast_classify(valid_jobs, conn, seniority_framework):
+    """Heuristic-only classification — zero API calls.
 
-    Samples up to MAX_CLASSIFY_JOBS (200) by default to save API calls while
-    maintaining statistically representative department/seniority distributions.
+    Uses regex rules for department, seniority, and growth signal.
+    Strategic fields (subcategory, skills, signals, tags) get defaults.
+    Produces the same DB rows as comprehensive mode, just without LLM enrichment.
+    """
+    fw = seniority_framework or "corporate"
+    classified = 0
+
+    for j in valid_jobs:
+        h = heuristic_preclassify(j, framework=fw)
+
+        result = {
+            "job_id": j["id"],
+            "seniority_level": h.get("seniority_level", "Mid"),
+            "department_category": h.get("department_category", "Other"),
+            "department_subcategory": "General",
+            "growth_signal": h.get("growth_signal", "unclear"),
+            "key_skills": "",
+            "strategic_signals": "",
+            "strategic_tags": [],
+        }
+
+        insert_classification(conn, j["id"], result, "heuristic")
+        classified += 1
+
+    return classified
+
+
+def classify(company_name, db_path="intel.db", seniority_framework=None, custom_seniority_rules=None,
+             max_jobs=None, mode="comprehensive"):
+    """Classify unclassified jobs for a company.
+
+    mode:
+      - "fast": Heuristic-only (regex rules). Zero API calls, classifies ALL jobs instantly.
+                Produces dept/seniority/growth signal — enough for hiring stats and briefings.
+      - "comprehensive": Heuristic + LLM. Adds strategic fields (subcategory, skills, signals, tags).
+                Samples up to MAX_CLASSIFY_JOBS (200), batches through multi-provider LLM rotation.
 
     seniority_framework: "tech", "banking", "consulting", "corporate" (auto-detected if None)
     custom_seniority_rules: user-defined rules string (overrides framework)
@@ -340,7 +373,7 @@ def classify(company_name, db_path="intel.db", seniority_framework=None, custom_
         conn.close()
         return 0
 
-    # Resolve seniority framework: explicit param > stored on company > default "tech"
+    # Resolve seniority framework: explicit param > stored on company > default "corporate"
     if seniority_framework and seniority_framework in SENIORITY_FRAMEWORKS:
         set_company_seniority_framework(conn, company_id, seniority_framework)
         print(f"[classify] Using {SENIORITY_FRAMEWORKS[seniority_framework]['name']} seniority framework")
@@ -350,8 +383,8 @@ def classify(company_name, db_path="intel.db", seniority_framework=None, custom_
             seniority_framework = stored
             print(f"[classify] Using stored {SENIORITY_FRAMEWORKS[stored]['name']} seniority framework")
         else:
-            seniority_framework = "tech"
-            print(f"[classify] Using default Tech seniority framework")
+            seniority_framework = "corporate"
+            print(f"[classify] Using default Corporate seniority framework")
 
     if custom_seniority_rules:
         print(f"[classify] Using custom seniority rules provided by user")
@@ -364,14 +397,33 @@ def classify(company_name, db_path="intel.db", seniority_framework=None, custom_
 
     valid_jobs = [j for j in jobs if j["description"]]
 
+    # --- Fast mode: heuristic-only, no sampling needed ---
+    if mode == "fast":
+        print(f"[classify] Fast mode: classifying {len(valid_jobs)} jobs via heuristics (no API calls)...")
+        classified = _fast_classify(valid_jobs, conn, seniority_framework)
+
+        # Save hiring snapshot
+        if classified > 0:
+            stats = compute_hiring_stats(conn, company_id)
+            if stats:
+                save_hiring_snapshot(conn, company_id, stats)
+                print(f"[classify] Saved hiring snapshot: {stats['total_roles']} total roles, "
+                      f"{stats['ai_ml_role_count']} AI/ML")
+
+        conn.close()
+        print(f"[classify] Done (fast): {classified} classified, 0 errors")
+        return classified
+
+    # --- Comprehensive mode: heuristic + LLM ---
+
     # Sample cap: avoid burning through rate limits on companies with 500+ jobs
     cap = max_jobs if max_jobs is not None else MAX_CLASSIFY_JOBS
     if len(valid_jobs) > cap:
         print(f"[classify] {len(valid_jobs)} unclassified jobs found — sampling {cap} for representative coverage")
         valid_jobs = random.sample(valid_jobs, cap)
 
-    # --- Phase 1: Heuristic pre-classification (instant, no API calls) ---
-    fw = seniority_framework or "tech"
+    # Phase 1: Heuristic pre-classification (instant, no API calls)
+    fw = seniority_framework or "corporate"
     heuristic_cache = {}  # job_id -> {seniority_level, department_category, growth_signal}
     h_seniority_hits = 0
     h_dept_hits = 0
@@ -387,7 +439,7 @@ def classify(company_name, db_path="intel.db", seniority_framework=None, custom_
     print(f"[classify] Heuristic pre-classification: seniority {h_seniority_hits}/{len(valid_jobs)}, "
           f"department {h_dept_hits}/{len(valid_jobs)}")
 
-    # --- Phase 2: LLM classification for strategic fields ---
+    # Phase 2: LLM classification for strategic fields
     llm = MultiProviderLLM()
 
     total_batches = (len(valid_jobs) + BATCH_SIZE - 1) // BATCH_SIZE

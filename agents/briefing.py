@@ -6,7 +6,8 @@ from pathlib import Path
 
 from agents.llm import generate_json
 from db import (get_connection, get_dossier_by_company, get_latest_key_facts,
-                get_company_id, compute_hiring_stats, get_hiring_snapshots)
+                get_company_id, compute_hiring_stats, get_hiring_snapshots,
+                get_recent_changes)
 from prompts.briefing import build_briefing_prompt
 
 # All possible analysis types for tracking what's missing
@@ -67,7 +68,7 @@ def _build_data_confidence(hiring_stats, analyses, company_name, conn):
         row = conn.execute("SELECT ats_type FROM companies WHERE id = ?", (company_id,)).fetchone()
         if row and row["ats_type"]:
             ats = row["ats_type"]
-            if ats in ("greenhouse", "lever", "ashby"):
+            if ats in ("greenhouse", "lever", "ashby", "workday"):
                 scrape_coverage = f"{ats.title()} API (full board — all open roles captured)"
             elif ats == "linkedin":
                 scrape_coverage = "LinkedIn guest API (sample — up to 100 of total open roles)"
@@ -86,6 +87,8 @@ def _build_data_confidence(hiring_stats, analyses, company_name, conn):
     caveats = []
     if jobs_analyzed < 30:
         caveats.append(f"Only {jobs_analyzed} roles analyzed — hiring signals may not be representative")
+    if "hiring" not in analyses_available:
+        caveats.append("No hiring analysis — Digital Maturity Score and hiring trajectory based on public signals only. Run a hiring analysis with an ATS URL for richer insights.")
     if "techstack" not in analyses_available:
         caveats.append("No tech stack analysis — Tech Modernity score relies on hiring data only")
     if "financial" not in analyses_available:
@@ -97,9 +100,30 @@ def _build_data_confidence(hiring_stats, analyses, company_name, conn):
     if "linkedin" in scrape_coverage.lower():
         caveats.append("LinkedIn sample may not capture all open roles — consider running ATS scrape if available")
 
+    # Check if classification used heuristic-only (fast mode)
+    classification_mode = "comprehensive"
+    if company_id:
+        heuristic_row = conn.execute(
+            """SELECT COUNT(*) as cnt FROM classifications c
+               JOIN jobs j ON c.job_id = j.id
+               WHERE j.company_id = ? AND c.model_used = 'heuristic'""",
+            (company_id,),
+        ).fetchone()
+        total_cls_row = conn.execute(
+            """SELECT COUNT(*) as cnt FROM classifications c
+               JOIN jobs j ON c.job_id = j.id
+               WHERE j.company_id = ?""",
+            (company_id,),
+        ).fetchone()
+        if heuristic_row and total_cls_row and total_cls_row["cnt"] > 0:
+            if heuristic_row["cnt"] == total_cls_row["cnt"]:
+                classification_mode = "fast"
+                caveats.append("Fast (heuristic) classification — department subcategories, skills, and strategic tags not available. Run comprehensive classification for richer insights.")
+
     return {
         "jobs_analyzed": jobs_analyzed,
         "scrape_coverage": scrape_coverage,
+        "classification_mode": classification_mode,
         "analyses_available": sorted(analyses_available),
         "analyses_missing": sorted(analyses_missing),
         "overall_confidence": confidence,
@@ -132,15 +156,6 @@ def generate_briefing(company_name, db_path="intel.db"):
 
     analyses = dossier.get("analyses", [])
     analysis_types = {a["analysis_type"] for a in analyses}
-
-    # Guard rail: hiring data is mandatory for a meaningful briefing
-    if "hiring" not in analysis_types:
-        msg = (f"No hiring analysis found for {company_name}. "
-               "Run a hiring analysis first — the briefing requires classified job data "
-               "to score digital maturity and identify consulting opportunities.")
-        print(f"[briefing] {msg}")
-        conn.close()
-        raise ValueError(msg)
 
     if len(analyses) < 2:
         msg = f"Only {len(analyses)} analysis(es) for {company_name} — need at least 2 for a meaningful briefing"
@@ -184,7 +199,12 @@ def generate_briefing(company_name, db_path="intel.db"):
           f"({len(data_confidence['analyses_available'])} analyses, "
           f"{data_confidence['jobs_analyzed']} jobs)")
 
-    # 6. Build prompt and generate
+    # 6. Get recent change events for temporal context
+    recent_changes = get_recent_changes(conn, dossier["id"], limit=15)
+    if recent_changes:
+        print(f"[briefing] {len(recent_changes)} recent change events to incorporate")
+
+    # 7. Build prompt and generate
     print("[briefing] Generating briefing via LLM (this may take 30-60 seconds)...")
     prompt = build_briefing_prompt(
         company_name, all_key_facts, report_summaries,
@@ -192,6 +212,16 @@ def generate_briefing(company_name, db_path="intel.db"):
         hiring_snapshots=hiring_snapshots,
         data_confidence=data_confidence,
     )
+    if recent_changes:
+        changes_text = "\n".join([
+            f"- [{c['event_date']}] {c['title']}: {c['description']}"
+            for c in recent_changes
+        ])
+        prompt += (
+            f"\n\n## Recent Changes Detected Between Analysis Runs\n{changes_text}\n\n"
+            f"Incorporate these trends into your Strategic Outlook and Key Opportunities sections. "
+            f"Highlight which changes are most strategically significant."
+        )
     briefing = generate_json(prompt, timeout=90)
 
     if not isinstance(briefing, dict):

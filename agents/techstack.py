@@ -4,7 +4,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier
+from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from scraper.site_crawler import crawl_site
 from scraper.tech_detect import detect_technologies, format_tech_for_prompt
 from prompts.techstack import build_techstack_prompt
@@ -45,6 +45,7 @@ def techstack_analysis(url, max_pages=5, company_name=None):
 
     # Generate report
     prompt = build_techstack_prompt(url, tech_summary, len(pages))
+    prompt += get_temporal_context(company_name or domain, "techstack")
 
     print("[techstack] Generating report...")
     text, model = generate_text(prompt)

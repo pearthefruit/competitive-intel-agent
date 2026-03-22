@@ -1,4 +1,4 @@
-# SignalForge — Competitive Intelligence Agent
+# SignalVault — Competitive Intelligence Agent
 
 ## What This Is
 
@@ -62,7 +62,7 @@ competitive-intel-agent/
 │   ├── compare.py           # Head-to-head comparison + landscape analysis
 │   └── profile.py           # Full company profile (runs financial + competitors + sentiment + patents)
 ├── prompts/
-│   ├── chat.py              # System prompt + tool schemas for chat agent
+│   ├── chat.py              # System prompt, condensed prompt, tool schemas + tiered selection for chat agent
 │   ├── briefing.py          # Briefing prompt with Digital Maturity scoring rubric
 │   ├── analyze.py           # Hiring analysis prompt
 │   ├── classify.py          # Job classification prompt
@@ -89,7 +89,7 @@ competitive-intel-agent/
 │   ├── hackernews.py        # HackerNews Algolia API search + comments
 │   └── youtube.py           # YouTube search + transcript extraction
 ├── web/
-│   ├── app.py               # Flask app factory, API routes, SSE chat endpoint
+│   ├── app.py               # Flask app factory, API routes, SSE chat endpoint, tool result summarization
 │   └── templates/
 │       └── base.html         # Entire SPA — HTML + CSS + JS in one file (~3000 lines)
 ├── reports/                  # Generated markdown reports (gitignored)
@@ -139,7 +139,7 @@ LLM-scored 0-100 composite with 4 weighted sub-scores:
 - **AI Readiness (25%):** AI/ML hiring signals from classifications + patent portfolio
 - **Organizational Readiness (20%):** Hiring momentum, engineering ratio, strategic tags
 
-Score tiers: Digital Leader (80-100), Digitally Maturing (60-79), Falling Behind (40-59), Digital Laggard (20-39), At Risk (0-19)
+Score tiers: Digital Vanguard (80-100), Digital Contender (60-79), Digitally Exposed (40-59), Digital Laggard (20-39), Digital Liability (0-19)
 
 ### LLM Provider Rotation
 
@@ -165,9 +165,9 @@ Defined in `prompts/chat.py`, executed in `agents/chat.py`:
 
 - **Reasoning:** think
 - **Raw Data:** search_sec_edgar, search_patents_raw, search_financial_news
-- **Job Intelligence:** full_pipeline, collect, classify, reclassify, analyze
+- **Job Intelligence:** hiring_pipeline, collect, classify, reclassify, analyze
 - **Analysis Reports:** financial_analysis, patent_analysis, competitor_analysis, sentiment_analysis, seo_audit, techstack_analysis, pricing_analysis
-- **Multi-Company:** company_profile, compare_companies, landscape_analysis
+- **Multi-Company:** full_analysis, compare_companies, landscape_analysis
 - **Search:** web_search, reddit_search, reddit_deep_search, hn_search, youtube_search, youtube_transcript
 - **Database:** query_db
 - **Dossiers:** get_dossier, save_dossier_event, refresh_key_facts, generate_briefing
@@ -180,11 +180,31 @@ Defined in `prompts/chat.py`, executed in `agents/chat.py`:
 - Current date/time injected into system prompt so search queries use the correct year
 - Company-scoped chats with context pill shown above the chat input in the UI
 
+### Chat Context Management (Multi-Step LLM)
+
+The chat system uses a three-pronged approach to prevent context overflow errors, especially on smaller models where the fixed overhead (system prompt ~9K chars + 31 tool schemas ~17K chars = ~26K chars) would leave barely any room for conversation.
+
+**1. Tool Result Summarization** — After each tool executes, the raw result is compressed via a secondary LLM call (`generate_text()` from `agents/llm.py`) before being added to conversation history. The user still sees the full result in the UI; only the LLM's context gets the summary. Results under 600 chars are kept as-is; longer results are summarized to ~200-300 chars. Falls back to simple truncation if the summarization call fails. Implementation: `_summarize_tool_result()` in `web/app.py`.
+
+**2. Dynamic Tool Schema Selection** — Round 1 of each user message sends all 31 tools (~17K chars). Rounds 2+ send only 11 "follow-up" tools (~6K chars). Tool tiers defined in `prompts/chat.py`:
+- `CORE_TOOL_NAMES` (6 tools): think, web_search, query_db, get_dossier, get_current_datetime, save_dossier_event
+- `FOLLOW_UP_TOOL_NAMES` (11 tools): core + search_financial_news, reddit_search, hn_search, generate_briefing, hiring_pipeline
+- `get_tool_schemas(tier)` function: accepts "full" (all tools), "follow_up" (core + key), "minimal" (think + web_search + datetime)
+
+**3. Condensed System Prompt** — Full system prompt (~9K chars) used only on round 1. Rounds 2+ swap to `CONDENSED_SYSTEM_PROMPT` (~400 chars) that keeps essential behavioral rules only. The nuclear trim fallback (context overflow recovery) also uses condensed prompt + no tools.
+
+**Net effect on context overhead:**
+- Round 1: ~26K chars (unchanged — LLM needs full context for initial decision)
+- Rounds 2+: ~4K chars (saves ~22K chars)
+- Each tool result: ~200-300 chars in history instead of 2000-4000 chars
+
+This is the same multi-step LLM pattern used in Crucible (JobDiscovery) — spending small, fast LLM calls to manage context for the main chat LLM.
+
 ### PDF Export
 
 - Server-side PDF generation using `xhtml2pdf` + `markdown` libraries
 - Route: `GET /api/reports/<filename>/pdf`
-- Light-theme styled output with SignalForge header/footer
+- Light-theme styled output with SignalVault header/footer
 - Replaces the old broken html2pdf.js client-side approach
 
 ### Hiring Snapshots
@@ -223,7 +243,8 @@ Three-pane SPA layout:
 | POST | `/api/dossiers/<name>/events` | Add timeline event |
 | GET | `/api/dossiers/<name>/hiring-snapshots` | Get hiring snapshot history for temporal trends |
 | POST | `/api/dossiers/<name>/briefing` | Generate intelligence briefing |
-| POST | `/api/chat` | SSE chat endpoint (with context injection + company scoping) |
+| GET | `/api/dossiers/<name>/pdf` | Export intelligence briefing as styled PDF |
+| POST | `/api/chat` | SSE chat endpoint (with context injection + company scoping + dynamic tool selection) |
 
 ## Code Conventions
 
@@ -232,7 +253,7 @@ Three-pane SPA layout:
 - Every analysis agent calls `save_to_dossier()` at the end to persist results
 - Reports saved as markdown to `reports/` directory
 - All prompts live in `prompts/` — one file per analysis type
-- Chat tool schemas defined in `prompts/chat.py`, tool execution in `agents/chat.py`
+- Chat tool schemas defined in `prompts/chat.py` (with tiered selection via `get_tool_schemas()`), tool execution in `agents/chat.py`
 - Citation format: Perplexity-style clickable superscript links `[¹](url)` across all report prompts
 - `company_name` parameter on techstack/seo/pricing agents links site analyses to company dossiers (instead of using domain name)
 - Flask server runs with `use_reloader=False` — must restart to pick up code changes
@@ -265,4 +286,10 @@ USPTO_API_KEY       # USPTO PatentsView API key (falls back to PATENTSVIEW_API_K
 
 ## Current State (March 2026)
 
-Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat, server-side PDF export, and intelligence briefing with Digital Maturity Score. The briefing is the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization.
+Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat with multi-step context management (tool result summarization, dynamic tool schema selection, condensed system prompts), server-side PDF export (reports + briefings), and intelligence briefing with Digital Maturity Score. The briefing is the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization.
+
+## Planned Improvements
+
+- **Temporal analysis smarts**: Currently `get_previous_key_facts()` compares against the immediately prior run regardless of date. Same-day re-runs produce noise (spurious "changes" from LLM extraction variance, or no-op comparisons). Improvements: skip temporal injection if previous analysis is from the same day; compare against the oldest/first analysis to show long-term trends; add a minimum time gap (e.g. 24h) before flagging changes as significant.
+- **Multi-source job collection**: Primary ATS + LinkedIn supplement is implemented, but could expand to scrape multiple ATS boards if a company uses more than one (e.g. Greenhouse for engineering + Workday for corporate).
+- **Briefing diff view**: Side-by-side comparison of two briefings for the same company to visually highlight what changed between analysis runs.

@@ -1,10 +1,11 @@
 """Auto-detect a company's ATS board by probing known URL patterns.
-Falls back to LinkedIn search when no dedicated ATS board is found."""
+Falls back to Workday probing, then LinkedIn search when no dedicated ATS board is found."""
 
 import re
 import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urlencode
+from scraper.workday import detect_workday
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -114,8 +115,15 @@ def detect_ats_board(company_name):
             except Exception:
                 continue
 
-    # Fallback: search LinkedIn for the company's jobs
-    print(f"[detect] No ATS board found, trying LinkedIn...")
+    # Fallback 1: probe Workday API (many large companies use Workday)
+    print(f"[detect] No ATS board found, trying Workday...")
+    wd_url, wd_count = detect_workday(company_name)
+    if wd_url and wd_count > 0:
+        http.close()
+        return "workday", wd_url, wd_count
+
+    # Fallback 2: search LinkedIn for the company's jobs
+    print(f"[detect] No Workday found, trying LinkedIn...")
     linkedin_result = _probe_linkedin(company_name, http)
     http.close()
 

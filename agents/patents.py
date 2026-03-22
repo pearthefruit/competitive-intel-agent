@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, generate_json, save_to_dossier
+from agents.llm import generate_text, generate_json, save_to_dossier, get_temporal_context
 from scraper.patents import (
     search_patents, search_patents_with_name,
     format_patents_for_prompt,
@@ -137,6 +137,7 @@ def patent_analysis(company):
         source = "Web Search"
 
     # Generate report
+    prompt += get_temporal_context(company, "patents")
     print("[patents] Generating report...")
     text, model = generate_text(prompt)
 

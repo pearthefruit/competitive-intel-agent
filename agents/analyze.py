@@ -5,7 +5,7 @@ from datetime import datetime
 from collections import Counter
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier
+from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from db import init_db, get_connection, get_company_id, get_all_classified_jobs, get_company_info
 from prompts.analyze import build_analyze_prompt
 from scraper.web_search import search_news, format_news_for_prompt
@@ -174,6 +174,7 @@ def analyze(company_name, db_path="intel.db"):
 
     # Generate narrative via LLM
     prompt = build_analyze_prompt(company_name, total, stats_summary, classifications_json, news_context)
+    prompt += get_temporal_context(company_name, "hiring", db_path=db_path)
 
     try:
         narrative, model_used = generate_text(prompt)

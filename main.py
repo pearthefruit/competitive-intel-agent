@@ -38,9 +38,11 @@ def collect_cmd(company, url, db):
 @cli.command("classify")
 @click.option("--company", required=True, help="Company name")
 @click.option("--db", default="intel.db", help="SQLite database path")
-def classify_cmd(company, db):
+@click.option("--mode", default="comprehensive", type=click.Choice(["fast", "comprehensive"]),
+              help="fast=heuristic only (no API calls), comprehensive=heuristic+LLM (default)")
+def classify_cmd(company, db, mode):
     """Classify all unclassified jobs for a company."""
-    classify(company, db)
+    classify(company, db, mode=mode)
 
 
 @cli.command("analyze")
@@ -168,7 +170,7 @@ def web_cmd(port, db):
     """Launch the web dashboard."""
     from web.app import create_app
     app = create_app(db)
-    print(f"\n  SignalForge: http://localhost:{port}")
+    print(f"\n  SignalVault: http://localhost:{port}")
     print(f"  Press Ctrl+C to quit\n")
     # use_reloader=False prevents the reloader from killing background analysis threads
     app.run(debug=True, port=port, threaded=True, use_reloader=False)

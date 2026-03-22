@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier
+from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from scraper.web_search import search_web, search_news, search_reddit, search_youtube, format_search_results
 from scraper.hackernews import search_hackernews
 from prompts.competitors import build_competitor_prompt
@@ -67,6 +67,7 @@ def competitor_analysis(company):
 
     # Generate report
     prompt = build_competitor_prompt(company, search_text)
+    prompt += get_temporal_context(company, "competitors")
 
     print("[competitors] Generating report...")
     text, model = generate_text(prompt)

@@ -522,6 +522,43 @@ def _detect_changes(old_facts, new_facts):
     return changes
 
 
+def get_temporal_context(company, analysis_type, db_path="intel.db"):
+    """Return a prompt section with previous key facts for temporal comparison.
+    Returns empty string if no prior analysis exists."""
+    from db import get_connection, get_dossier_by_company, get_previous_key_facts
+    try:
+        conn = get_connection(db_path)
+        dossier = get_dossier_by_company(conn, company)
+        if not dossier:
+            conn.close()
+            return ""
+        prev = get_previous_key_facts(conn, dossier["id"], analysis_type)
+        if not prev:
+            conn.close()
+            return ""
+        row = conn.execute(
+            """SELECT created_at FROM dossier_analyses
+               WHERE dossier_id = ? AND analysis_type = ?
+               ORDER BY created_at DESC LIMIT 1""",
+            (dossier["id"], analysis_type)
+        ).fetchone()
+        conn.close()
+        prev_date = (row["created_at"] or "")[:10] if row else "unknown"
+        facts_json = json.dumps(prev, indent=2)
+        return (
+            f"\n\n## Previous Analysis ({prev_date})\n"
+            f"We previously analyzed this company's {analysis_type} data. "
+            f"Key findings from that analysis:\n{facts_json}\n\n"
+            f"IMPORTANT: Compare your current findings against these previous values. "
+            f"When you find a significant change, explicitly call it out "
+            f"(e.g., 'Revenue increased from $48B to $52B, representing 8.3% growth "
+            f"since {prev_date}'). Highlight what changed, what stayed the same, "
+            f"and what the trend implies."
+        )
+    except Exception:
+        return ""
+
+
 def save_to_dossier(company, analysis_type, report_file=None, report_text=None,
                     model_used=None, db_path="intel.db"):
     """Save an analysis to the company dossier with extracted key facts.

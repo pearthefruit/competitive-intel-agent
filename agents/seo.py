@@ -4,7 +4,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier
+from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from scraper.site_crawler import crawl_site
 from prompts.seo import build_seo_prompt
 
@@ -222,6 +222,7 @@ def seo_audit(url, max_pages=10, company_name=None):
 
     # Generate LLM narrative
     prompt = build_seo_prompt(url, len(pages), seo_summary, aeo_summary, page_details)
+    prompt += get_temporal_context(company_name or domain, "seo")
 
     try:
         narrative, model_used = generate_text(prompt)

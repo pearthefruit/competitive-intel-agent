@@ -51,6 +51,8 @@ def detect_ats_type(url):
         return 'lever'
     if 'ashbyhq.com' in url_lower:
         return 'ashby'
+    if 'myworkdayjobs.com' in url_lower or '/wday/cxs/' in url_lower:
+        return 'workday'
     return None
 
 

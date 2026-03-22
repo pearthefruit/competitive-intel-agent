@@ -35,7 +35,7 @@ Built with Python, Flask, and free LLM APIs (Gemini, Groq, Cerebras, Mistral, Op
 - **Source popovers** -- priority-ordered key facts displayed on briefing cards
 
 ### Utilities
-- **Interactive chat** -- natural language interface with tool-calling and 30+ tools (ask anything)
+- **Interactive chat** -- natural language interface with tool-calling and 31 tools (ask anything)
 - **SQL queries** -- query the job database directly
 - **Web search** -- search the web, Reddit, Hacker News, and YouTube for company context
 
@@ -75,7 +75,7 @@ competitive-intel-agent/
 │   ├── hackernews.py       # HackerNews Algolia API search + comments
 │   └── youtube.py          # YouTube search + transcript extraction
 ├── prompts/                # LLM prompt templates
-│   ├── chat.py             # System prompt + tool schemas for chat agent
+│   ├── chat.py             # System prompt, condensed prompt, tool schemas + tiered selection for chat agent
 │   ├── briefing.py         # Briefing prompt with Digital Maturity scoring rubric
 │   ├── classify.py         # Job classification prompt
 │   ├── analyze.py          # Strategic report prompt
@@ -89,7 +89,7 @@ competitive-intel-agent/
 │   ├── compare.py          # Comparison prompt
 │   └── profile.py          # Executive profile prompt
 ├── web/
-│   ├── app.py              # Flask app factory, API routes, SSE chat endpoint
+│   ├── app.py              # Flask app factory, API routes, SSE chat endpoint, tool result summarization
 │   └── templates/
 │       └── base.html       # Entire SPA — HTML + CSS + JS in one file (~3000 lines)
 ├── reports/                # Generated markdown reports (gitignored)
@@ -97,6 +97,8 @@ competitive-intel-agent/
 ```
 
 **LLM Provider Rotation:** 5 providers with 17+ model fallbacks. Report generation uses Gemini (primary, multi-key rotation) -> Groq -> Cerebras -> Mistral -> OpenRouter (free models). The chat interface uses Gemini (primary, native function calling) -> Groq -> Cerebras -> Mistral -> OpenRouter, with automatic rate-limit fallback through the chain.
+
+**Chat Context Management:** The chat system uses a multi-step LLM approach to prevent context overflow on smaller models. Tool results are compressed via secondary LLM calls before entering conversation history (user still sees full results). Dynamic tool schema selection drops from 31 tools (~17K chars) on round 1 to 11 follow-up tools (~6K chars) on subsequent rounds. The system prompt swaps from the full version (~9K chars) to a condensed version (~400 chars) after round 1. Net effect: rounds 2+ use ~4K chars of fixed overhead instead of ~26K.
 
 ## Setup
 

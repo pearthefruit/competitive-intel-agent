@@ -54,7 +54,7 @@ DEPARTMENT_SUBCATEGORIES = {
 }
 
 SENIORITY_LEVELS = [
-    "Entry", "Mid", "Senior", "Staff", "Director", "VP", "C-Suite",
+    "Entry", "Mid", "Senior", "Sr. Manager", "Director", "VP", "C-Suite",
 ]
 
 GROWTH_SIGNALS = ["likely new role", "unclear", "possible backfill"]
@@ -75,7 +75,7 @@ SENIORITY_FRAMEWORKS = {
         "rules": """seniority_level — check these signals in order:
 1. Title contains "Intern", "Co-op" → Entry
 2. Title contains "Junior", "Associate", "New Grad", "I" (as in "Engineer I") → Entry
-3. Title contains "Staff", "Principal" → Staff
+3. Title contains "Staff", "Principal" → Sr. Manager
 4. Title contains "Director" → Director
 5. Title contains "VP", "Vice President", "Head of" → VP
 6. Title contains "Chief", "CTO", "CFO", "CEO", "CRO", "CMO" → C-Suite
@@ -95,12 +95,12 @@ In banking, "VP" is mid-career (NOT executive). "Associate" is mid-level (NOT en
 3. Title contains "Associate" (without "Senior") → Mid (in banking, Associate ≈ tech Mid)
 4. Title contains "Senior Associate" → Senior
 5. Title contains "VP", "Vice President" → Senior (in banking, VP ≈ tech Senior, it is mid-career)
-6. Title contains "SVP", "Senior Vice President", "Executive Director" → Staff
+6. Title contains "SVP", "Senior Vice President", "Executive Director" → Sr. Manager
 7. Title contains "Director" (without "Managing"), "First VP" → Director
 8. Title contains "Managing Director", "MD" → VP (in banking, MD ≈ tech VP/exec)
 9. Title contains "Group Head", "Division Head", "Global Head" → VP
 10. Title contains "Chief", "CEO", "CFO", "CRO", "CIO", "Partner" (PE/VC) → C-Suite
-11. JD mentions "2-4 years" → Entry/Mid; "5-8 years" → Senior; "10+ years" → Staff+
+11. JD mentions "2-4 years" → Entry/Mid; "5-8 years" → Senior; "10+ years" → Sr. Manager+
 12. No clear signals → Mid
 CRITICAL: Do not treat "VP" as executive-level at a bank. It is equivalent to "Senior" in tech.""",
     },
@@ -112,11 +112,11 @@ In consulting, "Associate" is entry-level (NOT mid). "Manager" is senior. "Partn
 2. Title contains "Associate", "Consultant" (without "Senior" prefix) → Entry (in consulting, Associate IS entry-level)
 3. Title contains "Senior Associate", "Senior Consultant" → Mid
 4. Title contains "Manager", "Engagement Manager" → Senior
-5. Title contains "Senior Manager", "Associate Director", "Counsel" (law) → Staff
+5. Title contains "Senior Manager", "Associate Director", "Counsel" (law) → Sr. Manager
 6. Title contains "Director", "Principal" (non-equity), "Of Counsel" → Director
 7. Title contains "Partner", "Managing Partner", "Equity Partner", "Managing Director" → VP
 8. Title contains "Senior Partner", "CEO", "Global Lead", "Chairman" → C-Suite
-9. JD mentions "2-4 years" → Entry/Mid; "6-8 years" → Senior; "10+ years" → Staff+
+9. JD mentions "2-4 years" → Entry/Mid; "6-8 years" → Senior; "10+ years" → Sr. Manager+
 10. No clear signals → Mid
 CRITICAL: "Associate" at consulting/law/audit firms is ENTRY level, not mid-level.""",
     },
@@ -128,11 +128,11 @@ In corporate settings, "Manager" can be an individual contributor. VP is higher 
 2. Title contains "Associate", "Coordinator", "Specialist", "Clerk" (without "Senior") → Entry
 3. Title contains "Senior Specialist", "Analyst", no seniority prefix → Mid
 4. Title contains "Manager", "Team Lead" → Senior (note: "Manager" can still be IC at some companies)
-5. Title contains "Senior Manager", "Associate Director" → Staff
+5. Title contains "Senior Manager", "Associate Director" → Sr. Manager
 6. Title contains "Director", "Senior Director", "Group Director" → Director
 7. Title contains "VP", "Vice President", "SVP", "EVP", "Head of" → VP
 8. Title contains "Chief", "CEO", "CFO", "COO", "CTO", "President" → C-Suite
-9. JD mentions "3-5 years" → Mid; "7+ years" → Senior; "10+ years" → Staff+
+9. JD mentions "3-5 years" → Mid; "7+ years" → Senior; "10+ years" → Sr. Manager+
 10. No clear signals → Mid
 NOTE: At companies like Walmart, "Manager" may be an individual contributor. Use JD context.""",
     },
@@ -207,8 +207,8 @@ def build_batch_classify_prompt(jobs, seniority_framework="tech", custom_seniori
         seniority_rules = SENIORITY_FRAMEWORKS[seniority_framework]["rules"]
         framework_note = f"Using {SENIORITY_FRAMEWORKS[seniority_framework]['name']} seniority framework"
     else:
-        seniority_rules = SENIORITY_FRAMEWORKS["tech"]["rules"]
-        framework_note = "Using Tech / Startup seniority framework (default)"
+        seniority_rules = SENIORITY_FRAMEWORKS["corporate"]["rules"]
+        framework_note = "Using Corporate seniority framework (default)"
 
     return f"""You are a hiring analyst performing competitive intelligence classification. Classify each job posting below with precision.
 

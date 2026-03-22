@@ -5,7 +5,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier
+from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from scraper.site_crawler import crawl_site
 from prompts.pricing import build_pricing_prompt
 
@@ -90,6 +90,7 @@ def pricing_analysis(url, company_name=None):
 
     # Generate report
     prompt = build_pricing_prompt(url, pricing_text, site_summary)
+    prompt += get_temporal_context(company_name or domain, "pricing")
 
     print("[pricing] Generating report...")
     text, model = generate_text(prompt)

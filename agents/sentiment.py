@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier
+from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from scraper.web_search import search_web, search_news, search_reddit, format_search_results
 from scraper.hackernews import search_hackernews
 from prompts.sentiment import build_sentiment_prompt
@@ -66,6 +66,7 @@ def sentiment_analysis(company):
 
     # Generate report
     prompt = build_sentiment_prompt(company, search_text)
+    prompt += get_temporal_context(company, "sentiment")
 
     print("[sentiment] Generating report...")
     text, model = generate_text(prompt)
