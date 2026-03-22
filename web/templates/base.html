@@ -2029,10 +2029,15 @@ function showBriefing(dossier, b) {
     if (identity.headcount) html += `<span>${escHtml(String(identity.headcount))} employees</span>`;
     html += `</div>`;
 
-    // Staleness check
+    // Staleness check — normalize timestamps to UTC for comparison
     if (dossier.briefing_generated_at && dossier.analyses && dossier.analyses.length) {
         const briefingDate = new Date(dossier.briefing_generated_at);
-        const latestAnalysis = new Date(dossier.analyses[0].created_at);
+        // Analysis timestamps may lack timezone — append Z to treat as UTC
+        let latestTs = dossier.analyses[0].created_at;
+        if (latestTs && !latestTs.includes('+') && !latestTs.endsWith('Z')) {
+            latestTs = latestTs.replace(' ', 'T') + 'Z';
+        }
+        const latestAnalysis = new Date(latestTs);
         if (latestAnalysis > briefingDate) {
             html += `<div class="briefing-stale-badge">Briefing outdated - new analyses available</div>`;
         }

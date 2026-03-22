@@ -318,10 +318,11 @@ def get_or_create_dossier(conn, company_name, sector=None, description=None):
 def add_dossier_analysis(conn, dossier_id, analysis_type, report_file=None,
                          key_facts_json=None, model_used=None):
     """Record a completed analysis run for a dossier."""
+    now = datetime.now(timezone.utc).isoformat()
     cur = conn.execute(
-        """INSERT INTO dossier_analyses (dossier_id, analysis_type, report_file, key_facts_json, model_used)
-           VALUES (?, ?, ?, ?, ?)""",
-        (dossier_id, analysis_type, report_file, key_facts_json, model_used),
+        """INSERT INTO dossier_analyses (dossier_id, analysis_type, report_file, key_facts_json, model_used, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (dossier_id, analysis_type, report_file, key_facts_json, model_used, now),
     )
     conn.execute(
         "UPDATE dossiers SET updated_at = ? WHERE id = ?",

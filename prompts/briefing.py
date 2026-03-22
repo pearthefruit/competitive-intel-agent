@@ -418,6 +418,6 @@ IMPORTANT:
 - EVERY factual claim must have a [source] tag. Unsourced claims destroy credibility.
 - If a dimension has no data, score it 50 and note "insufficient data — [analysis type] recommended" in the rationale.
 - The strategic_assessment should be the most opinionated section — give a clear recommendation on whether to pursue this company and why.
-- For engagement_opportunities, identify REAL needs from the evidence. A company that builds AI doesn't need "AI Strategy basics" — they might need AI governance, responsible AI, or org design to scale their AI workforce.
+- For engagement_opportunities, identify REAL needs from the evidence. A company that builds AI doesn't need AI strategy, data modernization, OR AI governance — they are experts in all of those. Focus on their non-core pain points: org design for hypergrowth, sales operations, compliance in new jurisdictions, M&A integration.
 - For risk_profile, include both business risks to the target company AND engagement risks for the consulting firm (e.g., "long procurement cycles", "recent leadership change may delay decisions").
 - COMPUTE the overall_score as the exact weighted average. Do not round sub-scores to produce a convenient overall number."""
