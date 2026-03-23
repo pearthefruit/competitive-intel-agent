@@ -1,4 +1,4 @@
-"""CLI entry point for the Competitive Intelligence Agent."""
+"""CLI entry point for SignalVault."""
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -22,7 +22,7 @@ from agents.compare import compare_companies, landscape_analysis
 
 @click.group()
 def cli():
-    """Competitive Intelligence Agent — scrape, classify, and analyze job postings."""
+    """SignalVault — research, analyze, and assess digital transformation readiness."""
     pass
 
 
