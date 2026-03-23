@@ -1446,6 +1446,130 @@
             padding: 20px;
         }
 
+        /* --- SPLIT VIEW --- */
+        .right-pane { position: relative; }
+        .split-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            min-height: 0;
+        }
+        .split-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 0;
+        }
+        .split-panel + .split-divider + .split-panel {
+            border-left: none;
+        }
+        .split-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+            background: var(--bg-tertiary);
+        }
+        .split-panel-title {
+            flex: 1;
+            min-width: 0;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: var(--text-secondary);
+        }
+        .split-panel-badge {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 9999px;
+            background: rgba(59,130,246,0.15);
+            color: #60a5fa;
+            flex-shrink: 0;
+        }
+        .split-panel-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 14px;
+            cursor: pointer;
+            padding: 0 4px;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+        .split-panel-close:hover { color: var(--text-primary); }
+        .split-panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+        .split-divider {
+            width: 4px;
+            flex-shrink: 0;
+            cursor: col-resize;
+            background: var(--border);
+            transition: background 0.15s;
+        }
+        .split-divider:hover,
+        .split-divider.dragging {
+            background: var(--accent);
+        }
+        .right-pane.split-active .right-body { display: none; }
+        .right-pane.split-active {
+            position: fixed;
+            top: 0;
+            left: var(--left-width);
+            right: 0;
+            bottom: 0;
+            width: auto !important;
+            min-width: 0 !important;
+            z-index: 100;
+            border-left: 1px solid var(--border);
+        }
+        .split-panel.focused .split-panel-header {
+            border-bottom: 2px solid var(--accent);
+        }
+
+        /* Draggable sidebar items */
+        .report-item.can-drag,
+        .company-briefing-link {
+            cursor: grab;
+        }
+
+        /* Drop zone overlay (created dynamically at body level) */
+        .drop-zone-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 9999;
+            background: rgba(0,0,0,0.4);
+        }
+        .drop-zone-overlay.visible {
+            display: flex;
+        }
+        .drop-zone {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.5);
+            transition: all 0.15s;
+            border: 2px dashed rgba(255,255,255,0.2);
+            margin: 12px;
+            border-radius: 12px;
+        }
+        .drop-zone.drag-over {
+            background: rgba(59,130,246,0.15);
+            border-color: var(--accent);
+            color: #60a5fa;
+        }
+
         /* Markdown */
         .md-content h1 { font-size: 20px; font-weight: 700; margin: 20px 0 10px; }
         .md-content h2 { font-size: 17px; font-weight: 700; margin: 18px 0 8px; color: var(--text-primary); }
@@ -1945,6 +2069,23 @@ let activeContext = null;       // { company, type, label }
 let contextDismissed = false;
 let resumePromptShown = false;
 
+// ===================== SPLIT VIEW STATE =====================
+let _splitActive = false;
+let _splitFocusedSide = 'left';
+let _wasExpandedBeforeSplit = false;
+const _emptyPanel = () => ({ type: null, reportFilename: null, dossierName: null, briefingData: null, dossierData: null, company: null, analysisType: null, date: null });
+let _splitPanels = { left: _emptyPanel(), right: _emptyPanel() };
+
+function _isInSplitPanel(filename, dossierName) {
+    if (!_splitActive) return false;
+    for (const side of ['left', 'right']) {
+        const p = _splitPanels[side];
+        if (filename && p.reportFilename === filename) return side;
+        if (dossierName && p.dossierName === dossierName) return side;
+    }
+    return false;
+}
+
 function setContext(company, type, label) {
     activeContext = { company: company, type: type, label: label };
     contextDismissed = false;
@@ -2161,7 +2302,7 @@ function renderCompanyList() {
             // Briefing link
             if (company.has_briefing) {
                 const briefActive = activeDossierName === company.name ? ' active' : '';
-                itemsHtml += `<div class="company-briefing-link${briefActive}" onclick="openDossier('${escHtml(company.name)}')">&#9733; Intelligence Briefing</div>`;
+                itemsHtml += `<div class="company-briefing-link${briefActive}" onclick="openDossier('${escHtml(company.name)}')" onmousedown="handleSidebarMouseDown(event,'briefing',null,'${escHtml(company.name)}')">&#9733; Intelligence Briefing</div>`;
             }
 
             // Analysis items
@@ -2170,7 +2311,7 @@ function renderCompanyList() {
                 const noReport = !a.has_report ? ' no-report' : '';
                 const dateStr = a.date ? a.date.slice(5) : '';
                 if (a.has_report) {
-                    itemsHtml += `<div class="report-item${isActive}${noReport}" onclick="openReport('${escHtml(a.report_file)}')">
+                    itemsHtml += `<div class="report-item can-drag${isActive}${noReport}" onclick="openReport('${escHtml(a.report_file)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(a.report_file)}','${escHtml(company.name)}')">
                         <span class="report-type-dot dot-${a.type}"></span>${escHtml(a.type)}<span class="report-date">${dateStr}</span></div>`;
                 } else {
                     itemsHtml += `<div class="report-item${noReport}">
@@ -2181,7 +2322,7 @@ function renderCompanyList() {
             // Orphan reports (files not linked to any dossier_analyses row)
             (company.orphan_reports || []).forEach(fn => {
                 const isActive = currentReportFilename === fn ? ' active' : '';
-                itemsHtml += `<div class="report-item${isActive}" onclick="openReport('${escHtml(fn)}')">
+                itemsHtml += `<div class="report-item can-drag${isActive}" onclick="openReport('${escHtml(fn)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(fn)}','${escHtml(company.name)}')">
                     <span class="report-type-dot"></span>${escHtml(fn.replace(/\.md$/, ''))}<span class="report-date"></span></div>`;
             });
 
@@ -2206,6 +2347,13 @@ function renderCompanyList() {
 
 async function openDossier(companyName) {
     try {
+        // If split view is active, load into focused panel
+        if (_splitActive) {
+            await _loadIntoSplitPanel(_splitFocusedSide, 'briefing', companyName);
+            renderCompanyList();
+            return;
+        }
+
         const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}`);
         if (!resp.ok) return;
         const dossier = await resp.json();
@@ -2483,14 +2631,25 @@ function _briefingSection(title, body, open) {
     </div>`;
 }
 
-function showBriefing(dossier, b) {
-    _activeBriefingData = b;
-    _activeDossierData = dossier;
+// Render briefing HTML into a target element (for split panels).
+// Does NOT set global state or update header.
+function _renderBriefingInto(dossier, b, targetEl) {
+    showBriefing(dossier, b, targetEl);
+}
+
+function showBriefing(dossier, b, _targetEl) {
+    const isSplitTarget = !!_targetEl;
+    if (!isSplitTarget) {
+        _activeBriefingData = b;
+        _activeDossierData = dossier;
+    }
     const rp = document.getElementById('right-pane');
     const identity = b.subject_identity || {};
-    document.getElementById('right-company').textContent = identity.name || dossier.company_name;
-    document.getElementById('right-type').textContent = '';
-    document.getElementById('right-date').textContent = '';
+    if (!isSplitTarget) {
+        document.getElementById('right-company').textContent = identity.name || dossier.company_name;
+        document.getElementById('right-type').textContent = '';
+        document.getElementById('right-date').textContent = '';
+    }
 
     // Populate source key facts for popover references (no LLM needed)
     _sourceKeyFacts = {};
@@ -2867,12 +3026,15 @@ function showBriefing(dossier, b) {
         html += _briefingSection('Source Reports', srcHtml, false);
     }
 
-    document.getElementById('right-content').innerHTML = html;
-    openRightPane();
+    const writeTarget = _targetEl || document.getElementById('right-content');
+    writeTarget.innerHTML = html;
 
-    // If already in expanded/focus mode, rebuild the dashboard view
-    if (rp.classList.contains('expanded')) {
-        _buildCardGrid(rp);
+    if (!isSplitTarget) {
+        openRightPane();
+        // If already in expanded/focus mode, rebuild the dashboard view
+        if (rp.classList.contains('expanded')) {
+            _buildCardGrid(rp);
+        }
     }
 }
 
@@ -3343,9 +3505,11 @@ function handleSSE(event, chat) {
     } else if (event.type === 'message') {
         const t = document.getElementById('typing');
         if (t) t.remove();
-        chat.messages.push({ role: 'assistant', content: event.text });
-        saveChats();
-        renderMessages();
+        if (event.text && event.text.trim()) {
+            chat.messages.push({ role: 'assistant', content: event.text });
+            saveChats();
+            renderMessages();
+        }
 
     } else if (event.type === 'error') {
         const t = document.getElementById('typing');
@@ -3402,11 +3566,52 @@ async function quickAction(type, prefix, joiner) {
 }
 
 // ===================== RIGHT PANE =====================
+// Renders a report into a target container. Returns { company, type, date } or null.
+async function _renderReportInto(filename, targetEl) {
+    const resp = await fetch(`/api/reports/${encodeURIComponent(filename)}/content`);
+    if (!resp.ok) { console.error('Report API error:', resp.status, filename); return null; }
+    const data = await resp.json();
+
+    let parsedHtml = '';
+    try {
+        parsedHtml = marked.parse(data.content || '');
+    } catch (parseErr) {
+        console.error('Markdown parse error:', parseErr);
+        parsedHtml = '<pre style="white-space:pre-wrap;color:var(--text-secondary)">' + escHtml(data.content || '') + '</pre>';
+    }
+
+    targetEl.innerHTML = parsedHtml;
+    targetEl.parentElement.scrollTop = 0;
+
+    // Intercept clicks on report file links
+    targetEl.querySelectorAll('a').forEach(link => {
+        const href = link.getAttribute('href') || '';
+        if (href.match(/reports[\\\/].+\.md$/)) {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const fn = href.replace(/^reports[\\\/]/, '');
+                openReport(fn);
+            });
+            link.style.cursor = 'pointer';
+        }
+    });
+
+    return { company: data.company || '', type: data.type || '', date: data.date || '' };
+}
+
 async function openReport(filename) {
     try {
-        const resp = await fetch(`/api/reports/${encodeURIComponent(filename)}/content`);
-        if (!resp.ok) { console.error('Report API error:', resp.status, filename); return; }
-        const data = await resp.json();
+        // If split view is active, load into focused panel
+        if (_splitActive) {
+            await _loadIntoSplitPanel(_splitFocusedSide, 'report', filename);
+            renderCompanyList();
+            return;
+        }
+
+        const contentEl = document.getElementById('right-content');
+        const meta = await _renderReportInto(filename, contentEl);
+        if (!meta) return;
+
         currentReportFilename = filename;
         activeDossierName = null;
         _activeBriefingData = null;
@@ -3419,49 +3624,23 @@ async function openReport(filename) {
         );
         if (ownerCompany) openCompanies.add(ownerCompany.name);
 
-        // Set header
-        document.getElementById('right-company').textContent = data.company || '';
-        document.getElementById('right-type').textContent = data.type || '';
-        document.getElementById('right-date').textContent = data.date || '';
-
-        // Parse and set content (catch separately so pane always opens)
-        const contentEl = document.getElementById('right-content');
-        let parsedHtml = '';
-        try {
-            parsedHtml = marked.parse(data.content || '');
-        } catch (parseErr) {
-            console.error('Markdown parse error:', parseErr);
-            parsedHtml = '<pre style="white-space:pre-wrap;color:var(--text-secondary)">' + escHtml(data.content || '') + '</pre>';
-        }
-
         // Add breadcrumb if company is known
-        let breadcrumbHtml = '';
-        if (data.company && ownerCompany) {
-            breadcrumbHtml = `<div class="report-breadcrumb">
-                <span class="breadcrumb-company" onclick="openDossier('${escHtml(data.company)}')">${escHtml(data.company)}</span>
+        if (meta.company && ownerCompany) {
+            const breadcrumbHtml = `<div class="report-breadcrumb">
+                <span class="breadcrumb-company" onclick="openDossier('${escHtml(meta.company)}')">${escHtml(meta.company)}</span>
                 <span class="breadcrumb-sep">›</span>
-                <span class="breadcrumb-current">${escHtml(data.type || 'report')} report</span>
+                <span class="breadcrumb-current">${escHtml(meta.type || 'report')} report</span>
             </div>`;
+            contentEl.innerHTML = breadcrumbHtml + contentEl.innerHTML;
         }
-        contentEl.innerHTML = breadcrumbHtml + parsedHtml;
-        contentEl.parentElement.scrollTop = 0;
 
-        // Intercept clicks on report file links
-        contentEl.querySelectorAll('a').forEach(link => {
-            const href = link.getAttribute('href') || '';
-            if (href.match(/reports[\\\/].+\.md$/)) {
-                link.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const fn = href.replace(/^reports[\\\/]/, '');
-                    openReport(fn);
-                });
-                link.style.cursor = 'pointer';
-            }
-        });
+        // Set header
+        document.getElementById('right-company').textContent = meta.company;
+        document.getElementById('right-type').textContent = meta.type;
+        document.getElementById('right-date').textContent = meta.date;
 
-        // Always open the pane
         openRightPane();
-        setContext(data.company || '', 'report', (data.type || 'report') + ' report');
+        setContext(meta.company, 'report', (meta.type || 'report') + ' report');
         renderCompanyList();
 
         // If in expanded/focus mode, rebuild card grid for this report
@@ -3491,6 +3670,10 @@ function openRightPane() {
 
 function closeRightPane() {
     const rp = document.getElementById('right-pane');
+    if (_splitActive) {
+        _wasExpandedBeforeSplit = false; // don't restore expanded on close
+        _exitSplitView();
+    }
     if (rp.classList.contains('expanded')) collapseReport();
     rp.classList.remove('open');
     rp.style.width = '';
@@ -3910,6 +4093,17 @@ function _restoreOriginalReport() {
 
 function toggleExpandReport() {
     const rp = document.getElementById('right-pane');
+    // If split is active, the expand button acts as "exit split"
+    if (_splitActive) {
+        const remaining = _splitPanels[_splitFocusedSide];
+        _exitSplitView();
+        if (remaining.type === 'report' && remaining.reportFilename) {
+            openReport(remaining.reportFilename);
+        } else if (remaining.type === 'briefing' && remaining.dossierName) {
+            openDossier(remaining.dossierName);
+        }
+        return;
+    }
     if (rp.classList.contains('expanded')) {
         collapseReport();
     } else {
@@ -3923,7 +4117,7 @@ function expandReport() {
     document.getElementById('expand-icon-open').style.display = 'none';
     document.getElementById('expand-icon-close').style.display = '';
     document.getElementById('expand-btn').title = 'Exit focus mode (Esc)';
-    _buildCardGrid(rp);
+    if (!_splitActive) _buildCardGrid(rp);
 }
 
 function collapseReport() {
@@ -3932,7 +4126,7 @@ function collapseReport() {
     document.getElementById('expand-icon-open').style.display = '';
     document.getElementById('expand-icon-close').style.display = 'none';
     document.getElementById('expand-btn').title = 'Focus mode';
-    _restoreOriginalReport();
+    if (!_splitActive) _restoreOriginalReport();
     // Restore saved width
     if (savedRightWidth) {
         rp.style.width = savedRightWidth + 'px';
@@ -3972,6 +4166,12 @@ document.addEventListener('keydown', function(e) {
         const menu = document.getElementById('overflow-menu');
         if (menu && menu.classList.contains('open')) {
             menu.classList.remove('open');
+            e.preventDefault();
+            return;
+        }
+        // Exit split view first if active
+        if (_splitActive) {
+            toggleExpandReport(); // reuses the "exit split" logic
             e.preventDefault();
             return;
         }
@@ -4086,6 +4286,331 @@ document.addEventListener('keydown', e => {
         document.getElementById('chat-input').focus();
     }
 });
+
+// ===================== SPLIT VIEW =====================
+
+function _enterSplitView() {
+    if (_splitActive) return;
+    _splitActive = true;
+    _splitFocusedSide = 'left';
+    const rp = document.getElementById('right-pane');
+
+    // Track if user was already in expanded/focus mode
+    _wasExpandedBeforeSplit = rp.classList.contains('expanded');
+    // If in expanded mode, remove it (split-active has its own fullscreen)
+    if (_wasExpandedBeforeSplit) {
+        rp.classList.remove('expanded');
+        if (_originalReportHTML) { _originalReportHTML = null; }
+    }
+
+    rp.classList.add('split-active');
+
+    // Update expand button to "Exit split view"
+    document.getElementById('expand-icon-open').style.display = 'none';
+    document.getElementById('expand-icon-close').style.display = '';
+    document.getElementById('expand-btn').title = 'Exit split view (Esc)';
+
+    const rightBody = rp.querySelector('.right-body');
+    const container = document.createElement('div');
+    container.className = 'split-container';
+    container.id = 'split-container';
+    container.innerHTML = `
+        <div class="split-panel focused" id="split-panel-left">
+            <div class="split-panel-header" onclick="_focusSplitPanel('left')">
+                <span class="split-panel-title" id="split-title-left"></span>
+                <span class="split-panel-badge" id="split-badge-left"></span>
+                <button class="split-panel-close" onclick="event.stopPropagation(); closeSplitPanel('left')" title="Close">&times;</button>
+            </div>
+            <div class="split-panel-body" onclick="_focusSplitPanel('left')">
+                <div class="md-content" id="split-content-left"></div>
+            </div>
+        </div>
+        <div class="split-divider" id="split-divider"></div>
+        <div class="split-panel" id="split-panel-right">
+            <div class="split-panel-header" onclick="_focusSplitPanel('right')">
+                <span class="split-panel-title" id="split-title-right"></span>
+                <span class="split-panel-badge" id="split-badge-right"></span>
+                <button class="split-panel-close" onclick="event.stopPropagation(); closeSplitPanel('right')" title="Close">&times;</button>
+            </div>
+            <div class="split-panel-body" onclick="_focusSplitPanel('right')">
+                <div class="md-content" id="split-content-right"></div>
+            </div>
+        </div>`;
+    rightBody.after(container);
+    _initSplitDivider();
+}
+
+function _focusSplitPanel(side) {
+    _splitFocusedSide = side;
+    const left = document.getElementById('split-panel-left');
+    const right = document.getElementById('split-panel-right');
+    if (left) left.classList.toggle('focused', side === 'left');
+    if (right) right.classList.toggle('focused', side === 'right');
+}
+
+function _exitSplitView() {
+    if (!_splitActive) return;
+    _splitActive = false;
+    const rp = document.getElementById('right-pane');
+    rp.classList.remove('split-active');
+
+    // Restore expand button
+    document.getElementById('expand-icon-open').style.display = '';
+    document.getElementById('expand-icon-close').style.display = 'none';
+    document.getElementById('expand-btn').title = 'Focus mode';
+
+    // If user was in expanded mode before split, restore it
+    if (_wasExpandedBeforeSplit) {
+        rp.classList.add('expanded');
+        document.getElementById('expand-icon-open').style.display = 'none';
+        document.getElementById('expand-icon-close').style.display = '';
+        document.getElementById('expand-btn').title = 'Exit focus mode (Esc)';
+    } else {
+        // Restore saved width
+        if (savedRightWidth) {
+            rp.style.width = savedRightWidth + 'px';
+            rp.style.minWidth = savedRightWidth + 'px';
+        } else {
+            rp.style.width = '';
+            rp.style.minWidth = '';
+        }
+    }
+    _wasExpandedBeforeSplit = false;
+
+    const container = document.getElementById('split-container');
+    if (container) container.remove();
+    _splitPanels.left = _emptyPanel();
+    _splitPanels.right = _emptyPanel();
+}
+
+async function _loadIntoSplitPanel(side, type, identifier) {
+    const contentEl = document.getElementById('split-content-' + side);
+    const titleEl = document.getElementById('split-title-' + side);
+    const badgeEl = document.getElementById('split-badge-' + side);
+    if (!contentEl) return;
+
+    if (type === 'report') {
+        const meta = await _renderReportInto(identifier, contentEl);
+        if (!meta) return;
+        titleEl.textContent = meta.company;
+        badgeEl.textContent = meta.type;
+        _splitPanels[side] = {
+            type: 'report', reportFilename: identifier, dossierName: null,
+            briefingData: null, dossierData: null,
+            company: meta.company, analysisType: meta.type, date: meta.date,
+        };
+    } else if (type === 'briefing') {
+        try {
+            const resp = await fetch('/api/dossiers/' + encodeURIComponent(identifier));
+            if (!resp.ok) return;
+            const dossier = await resp.json();
+            if (dossier.briefing_json) {
+                const briefing = typeof dossier.briefing_json === 'string'
+                    ? JSON.parse(dossier.briefing_json) : dossier.briefing_json;
+                _renderBriefingInto(dossier, briefing, contentEl);
+                titleEl.textContent = dossier.company_name;
+                badgeEl.textContent = 'briefing';
+                _splitPanels[side] = {
+                    type: 'briefing', reportFilename: null, dossierName: identifier,
+                    briefingData: briefing, dossierData: dossier,
+                    company: dossier.company_name, analysisType: 'briefing', date: '',
+                };
+            }
+        } catch (e) { console.error('Failed to load briefing for split:', e); }
+    }
+}
+
+async function _moveCurrentToSplitPanel(side) {
+    if (currentReportFilename) {
+        await _loadIntoSplitPanel(side, 'report', currentReportFilename);
+    } else if (activeDossierName) {
+        await _loadIntoSplitPanel(side, 'briefing', activeDossierName);
+    }
+}
+
+function closeSplitPanel(side) {
+    const otherSide = side === 'left' ? 'right' : 'left';
+    const remaining = _splitPanels[otherSide];
+    _exitSplitView();
+    if (remaining.type === 'report' && remaining.reportFilename) {
+        openReport(remaining.reportFilename);
+    } else if (remaining.type === 'briefing' && remaining.dossierName) {
+        openDossier(remaining.dossierName);
+    }
+}
+
+function _initSplitDivider() {
+    const divider = document.getElementById('split-divider');
+    const container = document.getElementById('split-container');
+    const leftPanel = document.getElementById('split-panel-left');
+    const rightPanel = document.getElementById('split-panel-right');
+    if (!divider || !container || !leftPanel) return;
+
+    let dragging = false;
+    let startX, startLeftWidth;
+
+    divider.addEventListener('mousedown', e => {
+        e.preventDefault();
+        dragging = true;
+        startX = e.clientX;
+        startLeftWidth = leftPanel.offsetWidth;
+        divider.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', function _splitMove(e) {
+        if (!dragging) return;
+        const delta = e.clientX - startX;
+        const cw = container.offsetWidth;
+        const newLeft = Math.max(200, Math.min(startLeftWidth + delta, cw - 200));
+        const pct = (newLeft / cw) * 100;
+        leftPanel.style.flex = '0 0 ' + pct + '%';
+        rightPanel.style.flex = '0 0 ' + (100 - pct) + '%';
+    });
+
+    document.addEventListener('mouseup', function _splitUp() {
+        if (!dragging) return;
+        dragging = false;
+        divider.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    });
+}
+
+// Drop zone show/hide
+// ===================== CUSTOM DRAG FOR SPLIT VIEW =====================
+// Uses mouse events instead of HTML5 DnD for cross-browser reliability
+let _dragState = null;
+
+function _ensureDropOverlay() {
+    let overlay = document.getElementById('drop-zone-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'drop-zone-overlay';
+        overlay.id = 'drop-zone-overlay';
+        overlay.innerHTML = '<div class="drop-zone" data-side="left">\u25C0 Left panel</div>'
+            + '<div class="drop-zone" data-side="right">Right panel \u25B6</div>';
+        document.body.appendChild(overlay);
+    }
+    return overlay;
+}
+
+function _showDropZones() {
+    _ensureDropOverlay().classList.add('visible');
+}
+
+function _hideDropZones() {
+    const overlay = document.getElementById('drop-zone-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('visible');
+    overlay.querySelectorAll('.drop-zone').forEach(z => z.classList.remove('drag-over'));
+}
+
+function handleSidebarMouseDown(e, type, filename, company) {
+    if (e.button !== 0) return;
+    _dragState = {
+        type: type,
+        filename: filename,
+        dossier: type === 'briefing' ? company : null,
+        company: company,
+        startX: e.clientX,
+        startY: e.clientY,
+        active: false,
+    };
+    document.addEventListener('mousemove', _onDragMouseMove);
+    document.addEventListener('mouseup', _onDragMouseUp);
+}
+
+function _onDragMouseMove(e) {
+    if (!_dragState) return;
+
+    if (!_dragState.active) {
+        const dx = Math.abs(e.clientX - _dragState.startX);
+        const dy = Math.abs(e.clientY - _dragState.startY);
+        if (dx < 6 && dy < 6) return;
+        _dragState.active = true;
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'grabbing';
+        _showDropZones();
+    }
+
+    // Highlight the zone under cursor
+    const overlay = document.getElementById('drop-zone-overlay');
+    if (overlay) {
+        overlay.querySelectorAll('.drop-zone').forEach(zone => {
+            const r = zone.getBoundingClientRect();
+            zone.classList.toggle('drag-over',
+                e.clientX >= r.left && e.clientX <= r.right &&
+                e.clientY >= r.top && e.clientY <= r.bottom);
+        });
+    }
+}
+
+function _onDragMouseUp(e) {
+    document.removeEventListener('mousemove', _onDragMouseMove);
+    document.removeEventListener('mouseup', _onDragMouseUp);
+    if (!_dragState) return;
+
+    const wasActive = _dragState.active;
+    const payload = { ..._dragState };
+
+    if (wasActive) {
+        // Find which zone the cursor is over BEFORE hiding
+        let droppedSide = null;
+        const overlay = document.getElementById('drop-zone-overlay');
+        if (overlay) {
+            overlay.querySelectorAll('.drop-zone').forEach(zone => {
+                const r = zone.getBoundingClientRect();
+                if (e.clientX >= r.left && e.clientX <= r.right &&
+                    e.clientY >= r.top && e.clientY <= r.bottom) {
+                    droppedSide = zone.dataset.side;
+                }
+            });
+        }
+
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        _hideDropZones();
+
+        // Eat the click event that follows mouseup so onclick doesn't fire
+        document.addEventListener('click', function _eatClick(ev) {
+            ev.stopPropagation();
+            ev.preventDefault();
+            document.removeEventListener('click', _eatClick, true);
+        }, true);
+
+        if (droppedSide) {
+            _handleSplitDrop(droppedSide, payload);
+        }
+    }
+    // If !wasActive, the mouseup is a normal click — onclick handler fires naturally
+
+    _dragState = null;
+}
+
+async function _handleSplitDrop(side, payload) {
+    const otherSide = side === 'left' ? 'right' : 'left';
+
+    const existing = _isInSplitPanel(payload.filename, payload.dossier);
+    if (existing) {
+        showToast('Already open in the other panel', 'warning');
+        return;
+    }
+
+    if (!_splitActive) {
+        const rp = document.getElementById('right-pane');
+        if (!rp.classList.contains('open')) openRightPane();
+        _enterSplitView();
+        await _moveCurrentToSplitPanel(otherSide);
+    }
+
+    if (payload.type === 'report' && payload.filename) {
+        await _loadIntoSplitPanel(side, 'report', payload.filename);
+    } else if (payload.type === 'briefing' && payload.dossier) {
+        await _loadIntoSplitPanel(side, 'briefing', payload.dossier);
+    }
+}
 
 // ===================== RESIZE HANDLE =====================
 let savedRightWidth = null;
