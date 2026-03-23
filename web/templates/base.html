@@ -28,8 +28,8 @@
             --green: #22c55e;
             --yellow: #eab308;
             --red: #ef4444;
-            --left-width: 260px;
-            --right-width: 540px;
+            --left-width: 290px;
+            --right-width: 580px;
         }
 
         html, body {
@@ -37,7 +37,7 @@
             font-family: 'Inter', -apple-system, system-ui, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
-            font-size: 14px;
+            font-size: 16px;
             line-height: 1.5;
             overflow: hidden;
         }
@@ -66,7 +66,7 @@
         }
 
         .left-logo {
-            font-size: 15px;
+            font-size: 18px;
             font-weight: 700;
             letter-spacing: -0.3px;
             background: linear-gradient(135deg, var(--accent), var(--purple));
@@ -85,9 +85,9 @@
 
         .left-tab {
             flex: 1;
-            padding: 8px 0;
+            padding: 10px 0;
             text-align: center;
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 500;
             color: var(--text-muted);
             cursor: pointer;
@@ -110,12 +110,12 @@
 
         .filter-input {
             width: 100%;
-            padding: 7px 10px;
+            padding: 8px 12px;
             background: var(--bg-primary);
             border: 1px solid var(--border);
             border-radius: 6px;
             color: var(--text-primary);
-            font-size: 12px;
+            font-size: 14px;
             outline: none;
         }
         .filter-input:focus { border-color: var(--accent); }
@@ -127,8 +127,8 @@
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
             color: var(--text-muted);
-            font-size: 11px;
-            padding: 5px 8px;
+            font-size: 13px;
+            padding: 6px 10px;
             border-radius: 6px;
             cursor: pointer;
             white-space: nowrap;
@@ -152,7 +152,7 @@
             border: 1px solid rgba(59,130,246,0.25);
             border-radius: 6px;
             color: var(--accent);
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.15s;
@@ -160,7 +160,7 @@
         .new-chat-btn:hover { background: rgba(59,130,246,0.22); }
 
         .chat-item {
-            padding: 8px 10px;
+            padding: 9px 12px;
             border-radius: 6px;
             cursor: pointer;
             transition: background 0.1s;
@@ -169,7 +169,7 @@
         .chat-item:hover { background: var(--bg-hover); }
         .chat-item.active { background: var(--bg-active); }
         .chat-item-title {
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 500;
             color: var(--text-primary);
             white-space: nowrap;
@@ -177,7 +177,7 @@
             text-overflow: ellipsis;
         }
         .chat-item-date {
-            font-size: 10px;
+            font-size: 12px;
             color: var(--text-muted);
             margin-top: 2px;
         }
@@ -187,7 +187,7 @@
             border: none;
             color: var(--text-muted);
             cursor: pointer;
-            font-size: 13px;
+            font-size: 15px;
             padding: 0 2px;
             opacity: 0;
             transition: opacity 0.1s;
@@ -199,24 +199,24 @@
         .company-group-header {
             display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 6px 10px;
+            gap: 8px;
+            padding: 8px 12px;
             cursor: pointer;
             border-radius: 6px;
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 600;
             color: var(--text-primary);
             transition: background 0.1s;
         }
         .company-group-header:hover { background: var(--bg-hover); }
         .company-group-chevron {
-            font-size: 9px;
+            font-size: 11px;
             color: var(--text-muted);
             transition: transform 0.15s;
         }
         .company-group.open .company-group-chevron { transform: rotate(90deg); }
         .company-group-count {
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 400;
             color: var(--text-muted);
             margin-left: auto;
@@ -227,38 +227,38 @@
         .report-item {
             display: flex;
             align-items: center;
-            gap: 6px;
-            padding: 5px 10px;
+            gap: 8px;
+            padding: 6px 12px;
             border-radius: 5px;
             cursor: pointer;
-            font-size: 11px;
+            font-size: 13px;
             color: var(--text-secondary);
             transition: all 0.1s;
         }
         .report-item:hover { background: var(--bg-hover); color: var(--text-primary); }
         .report-item.active { background: var(--accent-dim); color: var(--accent); }
         .report-type-dot {
-            width: 6px; height: 6px;
+            width: 8px; height: 8px;
             border-radius: 50%;
             flex-shrink: 0;
         }
-        .report-date { margin-left: auto; font-size: 10px; color: var(--text-muted); }
+        .report-date { margin-left: auto; font-size: 12px; color: var(--text-muted); }
 
         /* --- COMPANY LIST (unified) --- */
         .company-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
-        .company-briefing-star { color: var(--yellow); font-size: 11px; margin-left: 3px; flex-shrink: 0; }
-        .company-sector { font-size: 9px; color: var(--text-muted); font-weight: 400; margin-left: auto; margin-right: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60px; }
+        .company-briefing-star { color: var(--yellow); font-size: 13px; margin-left: 3px; flex-shrink: 0; }
+        .company-sector { font-size: 11px; color: var(--text-muted); font-weight: 400; margin-left: auto; margin-right: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80px; }
         .company-briefing-link {
-            display: flex; align-items: center; gap: 6px;
-            padding: 5px 10px; border-radius: 5px; cursor: pointer;
-            font-size: 11px; font-weight: 600; color: var(--yellow); transition: all 0.1s;
+            display: flex; align-items: center; gap: 8px;
+            padding: 6px 12px; border-radius: 5px; cursor: pointer;
+            font-size: 13px; font-weight: 600; color: var(--yellow); transition: all 0.1s;
         }
         .company-briefing-link:hover { background: rgba(234,179,8,0.1); }
         .company-briefing-link.active { background: rgba(234,179,8,0.15); }
         .company-gen-briefing-btn {
             display: block; width: calc(100% - 16px); margin: 4px 8px; padding: 4px 8px;
             background: var(--accent-dim); border: 1px solid rgba(59,130,246,0.2);
-            border-radius: 4px; color: var(--accent); font-size: 10px; cursor: pointer; text-align: center;
+            border-radius: 4px; color: var(--accent); font-size: 12px; cursor: pointer; text-align: center;
         }
         .company-gen-briefing-btn:hover { background: rgba(59,130,246,0.22); }
         .report-item.no-report { opacity: 0.5; cursor: default; }
@@ -266,7 +266,7 @@
         .report-breadcrumb {
             display: flex; align-items: center; gap: 6px;
             padding: 8px 0 12px; margin-bottom: 8px;
-            border-bottom: 1px solid var(--border); font-size: 12px;
+            border-bottom: 1px solid var(--border); font-size: 14px;
         }
         .breadcrumb-company { color: var(--accent); cursor: pointer; font-weight: 500; }
         .breadcrumb-company:hover { text-decoration: underline; }
@@ -276,7 +276,7 @@
             margin-bottom: 20px;
         }
         .dossier-detail-section h3 {
-            font-size: 13px;
+            font-size: 15px;
             font-weight: 600;
             color: var(--text-primary);
             margin-bottom: 8px;
@@ -289,12 +289,12 @@
             gap: 6px 12px;
         }
         .fact-item {
-            font-size: 12px;
+            font-size: 14px;
             padding: 4px 0;
         }
         .fact-label {
             color: var(--text-muted);
-            font-size: 10px;
+            font-size: 12px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
@@ -307,11 +307,11 @@
             align-items: center;
             gap: 8px;
             padding: 4px 0;
-            font-size: 12px;
+            font-size: 14px;
         }
         .staleness-badge {
-            font-size: 10px;
-            padding: 1px 6px;
+            font-size: 12px;
+            padding: 2px 8px;
             border-radius: 3px;
             font-weight: 500;
         }
@@ -403,19 +403,19 @@
             margin-bottom: 12px;
         }
         .briefing-header-title {
-            font-size: 12px;
+            font-size: 14px;
             text-transform: uppercase;
             letter-spacing: 1.5px;
             color: var(--text-muted);
             margin-bottom: 4px;
         }
         .briefing-header-company {
-            font-size: 20px;
+            font-size: 24px;
             font-weight: 700;
             color: var(--text-primary);
         }
         .briefing-header-sector {
-            font-size: 13px;
+            font-size: 15px;
             color: var(--text-secondary);
             margin-top: 2px;
         }
@@ -424,7 +424,7 @@
             justify-content: center;
             gap: 12px;
             margin-top: 8px;
-            font-size: 11px;
+            font-size: 13px;
             color: var(--text-muted);
         }
         .briefing-actions {
@@ -434,8 +434,8 @@
             margin-top: 10px;
         }
         .briefing-btn {
-            font-size: 12px;
-            padding: 5px 14px;
+            font-size: 14px;
+            padding: 7px 16px;
             border-radius: 5px;
             border: 1px solid var(--border);
             background: var(--bg-tertiary);
@@ -452,7 +452,7 @@
         .briefing-btn-primary:hover { opacity: 0.85; }
         .briefing-stale-badge {
             display: inline-block;
-            font-size: 10px;
+            font-size: 12px;
             padding: 2px 8px;
             border-radius: 3px;
             background: rgba(234,179,8,0.15);
@@ -462,8 +462,8 @@
 
         /* Score ring */
         .maturity-ring {
-            width: 120px;
-            height: 120px;
+            width: 140px;
+            height: 140px;
             position: relative;
             margin: 0 auto 8px;
         }
@@ -476,12 +476,12 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            font-size: 28px;
+            font-size: 32px;
             font-weight: 700;
         }
         .maturity-label {
             text-align: center;
-            font-size: 13px;
+            font-size: 15px;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 1px;
@@ -578,9 +578,9 @@
         /* Citation source badges */
         .source-badge {
             display: inline-block;
-            font-size: 9px;
+            font-size: 11px;
             font-weight: 600;
-            padding: 1px 5px;
+            padding: 2px 6px;
             border-radius: 3px;
             margin: 0 1px;
             cursor: pointer;
@@ -673,12 +673,12 @@
         .trajectory-row {
             display: flex;
             align-items: center;
-            gap: 6px;
-            font-size: 13px;
+            gap: 8px;
+            font-size: 15px;
             margin-bottom: 4px;
         }
         .trajectory-arrow {
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 700;
         }
         .trajectory-up { color: #22c55e; }
@@ -693,14 +693,14 @@
             margin-bottom: 8px;
         }
         .sub-score-label {
-            font-size: 13px;
+            font-size: 15px;
             color: var(--text-secondary);
             min-width: 130px;
             flex-shrink: 0;
         }
         .sub-score-bar {
             flex: 1;
-            height: 6px;
+            height: 8px;
             background: rgba(255,255,255,0.06);
             border-radius: 3px;
             overflow: hidden;
@@ -711,7 +711,7 @@
             transition: width 0.8s ease;
         }
         .sub-score-value {
-            font-size: 14px;
+            font-size: 16px;
             font-weight: 600;
             min-width: 28px;
             text-align: right;
@@ -735,7 +735,7 @@
             margin-bottom: 4px;
         }
         .opp-service {
-            font-size: 14px;
+            font-size: 16px;
             font-weight: 600;
             color: var(--text-primary);
         }
@@ -747,7 +747,7 @@
         }
         .opp-card.expanded .opp-detail { display: block; }
         .opp-detail-text {
-            font-size: 13px;
+            font-size: 15px;
             color: var(--text-secondary);
             line-height: 1.5;
             margin-bottom: 8px;
@@ -759,8 +759,8 @@
             margin-top: 6px;
         }
         .opp-priority {
-            font-size: 11px;
-            padding: 1px 6px;
+            font-size: 13px;
+            padding: 2px 8px;
             border-radius: 3px;
             font-weight: 600;
             text-transform: uppercase;
@@ -769,7 +769,7 @@
         .opp-priority-medium { background: rgba(234,179,8,0.15); color: var(--yellow); }
         .opp-priority-low { background: rgba(59,130,246,0.15); color: var(--accent); }
         .opp-evidence {
-            font-size: 13px;
+            font-size: 15px;
             color: var(--text-muted);
             margin-bottom: 6px;
             line-height: 1.4;
@@ -777,11 +777,11 @@
         .opp-meta {
             display: flex;
             justify-content: space-between;
-            font-size: 11px;
+            font-size: 13px;
             color: var(--text-secondary);
         }
         .opp-why-now {
-            font-size: 12px;
+            font-size: 14px;
             color: var(--accent);
             font-style: italic;
             margin-top: 4px;
@@ -835,13 +835,13 @@
             border: 1px solid var(--border);
         }
         .metric-card-label {
-            font-size: 11px;
+            font-size: 13px;
             color: var(--text-muted);
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
         .metric-card-value {
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 700;
             color: var(--text-primary);
             margin-top: 2px;
@@ -859,7 +859,7 @@
         .risk-medium { border-left-color: var(--yellow); }
         .risk-low { border-left-color: var(--green); }
         .risk-category {
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -869,7 +869,7 @@
         .risk-medium .risk-category { color: var(--yellow); }
         .risk-low .risk-category { color: var(--green); }
         .risk-desc {
-            font-size: 13px;
+            font-size: 15px;
             color: var(--text-secondary);
             line-height: 1.4;
         }
@@ -878,13 +878,13 @@
         .budget-row {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 5px 0;
-            font-size: 13px;
+            gap: 10px;
+            padding: 6px 0;
+            font-size: 15px;
         }
         .budget-label {
             color: var(--text-muted);
-            font-size: 11px;
+            font-size: 13px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             min-width: 100px;
@@ -894,8 +894,8 @@
             font-weight: 500;
         }
         .confidence-badge {
-            font-size: 11px;
-            padding: 1px 6px;
+            font-size: 13px;
+            padding: 2px 8px;
             border-radius: 3px;
             font-weight: 600;
         }
@@ -910,7 +910,7 @@
             gap: 12px;
             padding: 10px 0;
             border-bottom: 1px solid var(--border);
-            font-size: 13px;
+            font-size: 15px;
             align-items: start;
         }
         .competitor-row:last-child { border-bottom: none; }
@@ -919,7 +919,7 @@
             color: var(--text-primary);
         }
         .competitor-maturity {
-            font-size: 11px;
+            font-size: 13px;
             padding: 2px 8px;
             border-radius: 3px;
             background: var(--bg-tertiary);
@@ -928,7 +928,7 @@
             line-height: 1.4;
         }
         .competitor-threat {
-            font-size: 13px;
+            font-size: 15px;
             color: var(--text-muted);
             line-height: 1.5;
         }
@@ -941,8 +941,8 @@
             margin-top: 6px;
         }
         .skill-tag {
-            font-size: 11px;
-            padding: 2px 7px;
+            font-size: 13px;
+            padding: 3px 9px;
             border-radius: 3px;
             background: rgba(59,130,246,0.12);
             color: var(--accent);
@@ -979,14 +979,14 @@
             gap: 24px;
         }
         .welcome-title {
-            font-size: 22px;
+            font-size: 28px;
             font-weight: 700;
             background: linear-gradient(135deg, var(--accent), var(--purple));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
         .welcome-sub {
-            font-size: 13px;
+            font-size: 15px;
             color: var(--text-muted);
             max-width: 400px;
         }
@@ -1002,12 +1002,12 @@
             border: 1px solid var(--border);
             border-radius: 8px;
             color: var(--text-secondary);
-            font-size: 12px;
+            font-size: 14px;
             cursor: pointer;
             transition: all 0.15s;
         }
         .quick-action:hover { background: var(--bg-hover); border-color: var(--border-strong); color: var(--text-primary); }
-        .quick-action span { display: block; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+        .quick-action span { display: block; font-size: 13px; color: var(--text-muted); margin-top: 2px; }
 
         /* Prompt Modal */
         .prompt-overlay {
@@ -1052,9 +1052,9 @@
         .msg-assistant { margin-right: auto; }
 
         .msg-bubble {
-            padding: 10px 14px;
+            padding: 12px 16px;
             border-radius: 12px;
-            font-size: 13px;
+            font-size: 15px;
             line-height: 1.6;
         }
         .msg-user .msg-bubble {
@@ -1070,33 +1070,33 @@
 
         .msg-tool { margin-right: auto; max-width: 90%; }
         .tool-call-bubble {
-            padding: 6px 10px;
+            padding: 8px 12px;
             background: rgba(168,85,247,0.08);
             border: 1px solid rgba(168,85,247,0.2);
             border-radius: 8px;
-            font-size: 11px;
+            font-size: 13px;
             color: var(--purple);
             cursor: pointer;
         }
         .tool-call-bubble:hover { background: rgba(168,85,247,0.14); }
         .tool-call-name { font-weight: 600; }
-        .tool-call-args { color: var(--text-muted); font-size: 10px; margin-top: 2px; }
+        .tool-call-args { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
         .tool-call-status {
             display: flex;
             align-items: center;
             gap: 6px;
             margin-top: 4px;
-            font-size: 10px;
+            font-size: 12px;
         }
         .tool-spinner {
-            width: 10px; height: 10px;
+            width: 12px; height: 12px;
             border: 1.5px solid rgba(168,85,247,0.3);
             border-top-color: var(--purple);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
         .tool-status-text { color: var(--purple); opacity: 0.7; }
-        .tool-done-check { color: var(--green); font-size: 12px; }
+        .tool-done-check { color: var(--green); font-size: 14px; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .tool-result-content {
             display: none;
@@ -1104,7 +1104,7 @@
             padding: 8px;
             background: var(--bg-primary);
             border-radius: 6px;
-            font-size: 10px;
+            font-size: 12px;
             color: var(--text-muted);
             max-height: 120px;
             overflow-y: auto;
@@ -1116,11 +1116,11 @@
         /* Thinking bubble — agent reasoning */
         .msg-thinking { margin-right: auto; max-width: 90%; }
         .thinking-bubble {
-            padding: 6px 10px;
+            padding: 8px 12px;
             background: rgba(168,85,247,0.05);
             border: 1px dashed rgba(168,85,247,0.15);
             border-radius: 8px;
-            font-size: 11px;
+            font-size: 13px;
             font-style: italic;
             color: var(--text-muted);
             cursor: pointer;
@@ -1128,7 +1128,7 @@
         }
         .thinking-bubble:hover { background: rgba(168,85,247,0.1); }
         .thinking-label {
-            font-size: 9px;
+            font-size: 11px;
             font-weight: 600;
             color: var(--purple);
             text-transform: uppercase;
@@ -1162,7 +1162,7 @@
             border: 1px solid rgba(34,197,94,0.25);
             border-radius: 6px;
             color: var(--green);
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.15s;
@@ -1187,12 +1187,12 @@
         }
         .chat-input {
             flex: 1;
-            padding: 10px 14px;
+            padding: 12px 16px;
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
             border-radius: 10px;
             color: var(--text-primary);
-            font-size: 13px;
+            font-size: 15px;
             font-family: inherit;
             outline: none;
             resize: none;
@@ -1203,12 +1203,12 @@
         .chat-input::placeholder { color: var(--text-muted); }
 
         .send-btn {
-            padding: 10px 16px;
+            padding: 12px 20px;
             background: var(--accent);
             border: none;
             border-radius: 10px;
             color: white;
-            font-size: 13px;
+            font-size: 15px;
             font-weight: 600;
             cursor: pointer;
             transition: opacity 0.15s;
@@ -1231,7 +1231,7 @@
             background: rgba(59,130,246,0.08);
             border: 1px solid rgba(59,130,246,0.25);
             border-radius: 16px;
-            font-size: 11px;
+            font-size: 13px;
             color: var(--accent);
             max-width: 100%;
         }
@@ -1260,14 +1260,14 @@
             padding: 8px 24px;
             background: var(--bg-tertiary);
             border-top: 1px solid var(--border);
-            font-size: 12px;
+            font-size: 14px;
             color: var(--text-secondary);
             animation: fadeIn 0.15s ease;
         }
         .resume-btn {
-            padding: 4px 12px;
+            padding: 6px 14px;
             border-radius: 6px;
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 500;
             cursor: pointer;
             border: 1px solid var(--border);
@@ -1291,7 +1291,7 @@
             margin-top: 2px;
         }
         .chat-item-company {
-            font-size: 10px;
+            font-size: 12px;
             color: var(--accent);
             background: rgba(59,130,246,0.08);
             padding: 1px 6px;
@@ -1356,7 +1356,7 @@
         }
         .right-title { flex: 1; min-width: 0; }
         .right-company {
-            font-size: 13px;
+            font-size: 15px;
             font-weight: 600;
             white-space: nowrap;
             overflow: hidden;
@@ -1371,9 +1371,9 @@
 
         .badge {
             display: inline-block;
-            padding: 1px 7px;
+            padding: 2px 8px;
             border-radius: 9999px;
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 500;
         }
         .badge-blue { background: rgba(59,130,246,0.15); color: #60a5fa; }
@@ -1386,8 +1386,8 @@
             border: 1px solid var(--border);
             border-radius: 6px;
             color: var(--text-secondary);
-            font-size: 11px;
-            padding: 4px 10px;
+            font-size: 13px;
+            padding: 6px 12px;
             cursor: pointer;
             transition: all 0.15s;
             white-space: nowrap;
@@ -1408,7 +1408,7 @@
             transition: all 0.15s;
         }
         .right-btn-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
-        .right-btn-icon svg { width: 14px; height: 14px; }
+        .right-btn-icon svg { width: 16px; height: 16px; }
 
         /* Overflow menu */
         .right-actions { position: relative; }
@@ -1433,8 +1433,8 @@
             background: none;
             border: none;
             color: var(--text-secondary);
-            font-size: 12px;
-            padding: 8px 12px;
+            font-size: 14px;
+            padding: 10px 14px;
             cursor: pointer;
             text-align: left;
             border-radius: 4px;
@@ -1448,7 +1448,7 @@
             background: none;
             border: none;
             color: var(--text-muted);
-            font-size: 18px;
+            font-size: 20px;
             cursor: pointer;
             padding: 2px 6px;
             line-height: 1;
@@ -1491,7 +1491,7 @@
         .split-panel-title {
             flex: 1;
             min-width: 0;
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 600;
             white-space: nowrap;
             overflow: hidden;
@@ -1499,8 +1499,8 @@
             color: var(--text-secondary);
         }
         .split-panel-badge {
-            font-size: 10px;
-            padding: 1px 6px;
+            font-size: 12px;
+            padding: 2px 8px;
             border-radius: 9999px;
             background: rgba(59,130,246,0.15);
             color: #60a5fa;
@@ -1510,7 +1510,7 @@
             background: none;
             border: none;
             color: var(--text-muted);
-            font-size: 14px;
+            font-size: 16px;
             cursor: pointer;
             padding: 0 4px;
             flex-shrink: 0;
@@ -1586,12 +1586,12 @@
         }
 
         /* Markdown */
-        .md-content h1 { font-size: 20px; font-weight: 700; margin: 20px 0 10px; }
-        .md-content h2 { font-size: 17px; font-weight: 700; margin: 18px 0 8px; color: var(--text-primary); }
-        .md-content h3 { font-size: 15px; font-weight: 600; margin: 14px 0 6px; color: var(--text-secondary); }
-        .md-content p { margin: 8px 0; color: var(--text-secondary); font-size: 14px; }
-        .md-content ul, .md-content ol { padding-left: 20px; margin: 8px 0; color: var(--text-secondary); font-size: 14px; }
-        .md-content li { margin: 4px 0; }
+        .md-content h1 { font-size: 24px; font-weight: 700; margin: 24px 0 12px; }
+        .md-content h2 { font-size: 20px; font-weight: 700; margin: 22px 0 10px; color: var(--text-primary); }
+        .md-content h3 { font-size: 17px; font-weight: 600; margin: 16px 0 8px; color: var(--text-secondary); }
+        .md-content p { margin: 10px 0; color: var(--text-secondary); font-size: 16px; line-height: 1.7; }
+        .md-content ul, .md-content ol { padding-left: 24px; margin: 10px 0; color: var(--text-secondary); font-size: 16px; line-height: 1.7; }
+        .md-content li { margin: 5px 0; }
         .md-content strong { color: var(--text-primary); font-weight: 600; }
         .md-content a { color: var(--accent); text-decoration: none; }
         .md-content a:hover { text-decoration: underline; }
@@ -1615,22 +1615,22 @@
         }
         .md-content hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
         .md-content blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--text-muted); margin: 8px 0; }
-        .md-content table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
-        .md-content th { text-align: left; padding: 6px 10px; background: var(--bg-tertiary); border: 1px solid var(--border); font-weight: 600; }
-        .md-content td { padding: 6px 10px; border: 1px solid var(--border); color: var(--text-secondary); }
-        .md-content code { background: var(--bg-tertiary); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
-        .md-content pre { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; padding: 12px; overflow-x: auto; font-size: 12px; margin: 10px 0; }
+        .md-content table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+        .md-content th { text-align: left; padding: 8px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); font-weight: 600; }
+        .md-content td { padding: 8px 12px; border: 1px solid var(--border); color: var(--text-secondary); }
+        .md-content code { background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px; font-size: 14px; }
+        .md-content pre { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; padding: 14px; overflow-x: auto; font-size: 14px; margin: 12px 0; }
         .md-content pre code { background: none; padding: 0; }
 
         /* Inline markdown in chat bubbles */
         .msg-assistant .msg-bubble h1, .msg-assistant .msg-bubble h2, .msg-assistant .msg-bubble h3 { margin-top: 10px; }
-        .msg-assistant .msg-bubble h1 { font-size: 15px; }
-        .msg-assistant .msg-bubble h2 { font-size: 14px; }
-        .msg-assistant .msg-bubble h3 { font-size: 13px; }
-        .msg-assistant .msg-bubble p { margin: 4px 0; }
-        .msg-assistant .msg-bubble ul, .msg-assistant .msg-bubble ol { padding-left: 18px; margin: 4px 0; }
-        .msg-assistant .msg-bubble table { font-size: 11px; }
-        .msg-assistant .msg-bubble th, .msg-assistant .msg-bubble td { padding: 4px 8px; }
+        .msg-assistant .msg-bubble h1 { font-size: 17px; }
+        .msg-assistant .msg-bubble h2 { font-size: 16px; }
+        .msg-assistant .msg-bubble h3 { font-size: 15px; }
+        .msg-assistant .msg-bubble p { margin: 5px 0; }
+        .msg-assistant .msg-bubble ul, .msg-assistant .msg-bubble ol { padding-left: 20px; margin: 5px 0; }
+        .msg-assistant .msg-bubble table { font-size: 13px; }
+        .msg-assistant .msg-bubble th, .msg-assistant .msg-bubble td { padding: 5px 10px; }
         .msg-assistant .msg-bubble a { color: #60a5fa; text-decoration: underline; text-decoration-color: rgba(96,165,250,0.4); }
         .msg-assistant .msg-bubble a:hover { color: #93c5fd; text-decoration-color: rgba(147,197,253,0.6); }
 
@@ -1693,11 +1693,11 @@
             padding: 24px 32px;
             font-size: 14px;
         }
-        .right-pane.expanded .dash-card { font-size: 13px; }
+        .right-pane.expanded .dash-card { font-size: 15px; }
         .right-pane.expanded .dash-card .budget-row,
         .right-pane.expanded .dash-card .opp-card,
         .right-pane.expanded .dash-card .risk-card,
-        .right-pane.expanded .dash-card .metric-card { font-size: 13px; }
+        .right-pane.expanded .dash-card .metric-card { font-size: 15px; }
 
         /* === DASHBOARD MODE === */
 
@@ -1818,7 +1818,7 @@
             overflow: hidden;
         }
         .dash-card-title {
-            font-size: 12px;
+            font-size: 14px;
             font-weight: 600;
             color: var(--text-secondary);
             text-transform: uppercase;
@@ -1828,11 +1828,11 @@
             margin-bottom: 10px;
         }
         .dash-card.card-wide { grid-column: 1 / -1; }
-        .dash-card .budget-row { font-size: 12px; }
-        .dash-card .sub-score-row { margin-bottom: 2px; }
-        .dash-card .opp-card { font-size: 12px; }
-        .dash-card .risk-card { font-size: 12px; margin-bottom: 6px; }
-        .dash-card .metric-card { font-size: 12px; }
+        .dash-card .budget-row { font-size: 14px; }
+        .dash-card .sub-score-row { margin-bottom: 3px; }
+        .dash-card .opp-card { font-size: 14px; }
+        .dash-card .risk-card { font-size: 14px; margin-bottom: 6px; }
+        .dash-card .metric-card { font-size: 14px; }
 
         /* Consulting opps 2-col grid inside wide card */
         .opp-inner-grid {
@@ -1873,7 +1873,7 @@
         }
         .report-card h2 {
             margin-top: 0 !important;
-            font-size: 12px !important;
+            font-size: 14px !important;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -1882,8 +1882,8 @@
             margin-bottom: 10px !important;
         }
         .report-card.card-wide { grid-column: 1 / -1; }
-        .report-card table { font-size: 11.5px; }
-        .report-card p, .report-card li { font-size: 12.5px; }
+        .report-card table { font-size: 13px; }
+        .report-card p, .report-card li { font-size: 14px; }
 
         /* Expand button active state */
         .right-pane.expanded .right-btn-icon.expand-btn { background: var(--bg-hover); color: var(--text-primary); }
@@ -2024,7 +2024,7 @@
                 <div class="right-company" id="right-company"></div>
                 <div class="right-meta">
                     <span class="badge badge-blue" id="right-type"></span>
-                    <span style="font-size:10px;color:var(--text-muted)" id="right-date"></span>
+                    <span style="font-size:14px;color:var(--text-muted)" id="right-date"></span>
                 </div>
             </div>
             <button class="right-btn" onclick="printReport()">Export PDF</button>
@@ -2813,7 +2813,7 @@ function showBriefing(dossier, b, _targetEl) {
             const badges = sources.map(s =>
                 `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
             ).join(' ');
-            html += `<div style="margin-bottom:6px"><span style="font-size:13px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:13px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
+            html += `<div style="margin-bottom:6px"><span style="font-size:15px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:15px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
         }
     });
     html += `</div></div>`;
@@ -2845,7 +2845,7 @@ function showBriefing(dossier, b, _targetEl) {
             });
         }
         if (traj.interpretation) {
-            trajHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(traj.interpretation)}</div>`;
+            trajHtml += `<div style="font-size:15px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(traj.interpretation)}</div>`;
         }
         html += _briefingSection('Hiring Trajectory', trajHtml, true);
     }
@@ -2875,7 +2875,7 @@ function showBriefing(dossier, b, _targetEl) {
                 ${opp.why_now ? `<div class="opp-why-now">${_renderCitedText(opp.why_now)}</div>` : ''}
                 <div class="opp-detail">
                     ${opp.detail ? `<div class="opp-detail-text">${_renderCitedText(opp.detail)}</div>` : ''}
-                    ${allSources.length ? `<div class="opp-source-links"><span style="font-size:10px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
+                    ${allSources.length ? `<div class="opp-source-links"><span style="font-size:14px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
                 </div>
             </div>`;
         });
@@ -2899,7 +2899,7 @@ function showBriefing(dossier, b, _targetEl) {
         let budgetHtml = '';
         const confClass = `confidence-${budget.confidence || 'medium'}`;
         budgetHtml += `<div class="budget-row"><span class="budget-label">Can Afford</span><span class="budget-value">${budget.can_afford ? 'Yes' : 'Unlikely'}</span> <span class="confidence-badge ${confClass}">${escHtml(budget.confidence || '')} confidence</span></div>`;
-        if (budget.evidence) budgetHtml += `<div style="font-size:13px;color:var(--text-muted);margin:4px 0 8px">${_renderCitedText(budget.evidence)}</div>`;
+        if (budget.evidence) budgetHtml += `<div style="font-size:15px;color:var(--text-muted);margin:4px 0 8px">${_renderCitedText(budget.evidence)}</div>`;
         if (budget.revenue_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Revenue Trend</span><span class="budget-value">${escHtml(budget.revenue_trend)}</span></div>`;
         if (budget.hiring_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Hiring Trend</span><span class="budget-value">${escHtml(budget.hiring_trend)}</span></div>`;
         if (budget.investment_areas && budget.investment_areas.length) {
@@ -2924,7 +2924,7 @@ function showBriefing(dossier, b, _targetEl) {
             </div>`;
         });
         if (comp.urgency_drivers && comp.urgency_drivers.length) {
-            compHtml += `<div style="margin-top:8px;font-size:13px;color:var(--text-muted)"><strong>Drivers:</strong> ${comp.urgency_drivers.map(d => _renderCitedText(d)).join(' | ')}</div>`;
+            compHtml += `<div style="margin-top:8px;font-size:15px;color:var(--text-muted)"><strong>Drivers:</strong> ${comp.urgency_drivers.map(d => _renderCitedText(d)).join(' | ')}</div>`;
         }
         html += _briefingSection('Competitive Pressure', compHtml, false);
     }
@@ -2933,7 +2933,7 @@ function showBriefing(dossier, b, _targetEl) {
     const fin = b.financial_position || {};
     if (Object.keys(fin).length) {
         let finHtml = '';
-        if (fin.summary) finHtml += `<div style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${_renderCitedText(fin.summary)}</div>`;
+        if (fin.summary) finHtml += `<div style="font-size:15px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${_renderCitedText(fin.summary)}</div>`;
         if (fin.metrics && fin.metrics.length) {
             finHtml += '<div class="metric-grid">';
             fin.metrics.forEach(m => {
@@ -2956,7 +2956,7 @@ function showBriefing(dossier, b, _targetEl) {
         if (ip.top_areas && ip.top_areas.length) {
             ipHtml += `<div class="budget-row"><span class="budget-label">Top Areas</span><span class="budget-value">${ip.top_areas.map(a => escHtml(a)).join(', ')}</span></div>`;
         }
-        if (ip.assessment) ipHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(ip.assessment)}</div>`;
+        if (ip.assessment) ipHtml += `<div style="font-size:15px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(ip.assessment)}</div>`;
         html += _briefingSection('Innovation & IP', ipHtml, false);
     }
 
@@ -2965,7 +2965,7 @@ function showBriefing(dossier, b, _targetEl) {
     if (Object.keys(talent).length) {
         let talHtml = '';
         if (talent.sentiment) talHtml += `<div class="budget-row"><span class="budget-label">Sentiment</span><span class="budget-value">${escHtml(talent.sentiment)}</span></div>`;
-        if (talent.hiring_momentum) talHtml += `<div style="font-size:13px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.5">${_renderCitedText(talent.hiring_momentum)}</div>`;
+        if (talent.hiring_momentum) talHtml += `<div style="font-size:15px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.5">${_renderCitedText(talent.hiring_momentum)}</div>`;
         // Department focus as mini bars
         const deptFocus = talent.department_focus || {};
         if (Object.keys(deptFocus).length) {
@@ -2979,7 +2979,7 @@ function showBriefing(dossier, b, _targetEl) {
         if (talent.top_skills && talent.top_skills.length) {
             talHtml += `<div class="skill-tags">${talent.top_skills.map(s => `<span class="skill-tag">${escHtml(s)}</span>`).join('')}</div>`;
         }
-        if (talent.assessment) talHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(talent.assessment)}</div>`;
+        if (talent.assessment) talHtml += `<div style="font-size:15px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(talent.assessment)}</div>`;
         html += _briefingSection('Talent & Culture', talHtml, false);
     }
 
@@ -3043,7 +3043,7 @@ function showBriefing(dossier, b, _targetEl) {
             confHtml += `<div class="budget-row"><span class="budget-label">Missing</span><span class="budget-value" style="color:var(--text-muted)">${conf.analyses_missing.join(', ')}</span></div>`;
         }
         if (conf.caveats && conf.caveats.length) {
-            confHtml += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted)">`;
+            confHtml += `<div style="margin-top:8px;font-size:15px;color:var(--text-muted)">`;
             conf.caveats.forEach(c => { confHtml += `<div style="margin-bottom:3px">⚠ ${escHtml(c)}</div>`; });
             confHtml += `</div>`;
         }
@@ -3079,8 +3079,8 @@ function showBriefing(dossier, b, _targetEl) {
             srcHtml += `<div class="staleness-row" data-source-type="${escHtml(type)}">
                 <span style="color:var(--text-primary);font-weight:500;min-width:80px">${escHtml(type)}</span>
                 <span class="staleness-badge staleness-${freshness}">${flabel}</span>
-                <span style="font-size:10px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
-                ${latest.report_file ? `<span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
+                <span style="font-size:14px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
+                ${latest.report_file ? `<span style="font-size:12px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
             </div>`;
         });
         html += _briefingSection('Source Reports', srcHtml, false);
@@ -3131,7 +3131,7 @@ function showLegacyDossierDetail(d) {
     // Generate Briefing button
     html += `<div style="padding:12px;text-align:center;border-bottom:1px solid var(--border);margin-bottom:12px">
         <button class="briefing-btn briefing-btn-primary" onclick="generateBriefing('${escHtml(d.company_name)}')">Generate Intelligence Briefing</button>
-        <div style="font-size:10px;color:var(--text-muted);margin-top:4px">Requires at least 2 analyses</div>
+        <div style="font-size:14px;color:var(--text-muted);margin-top:4px">Requires at least 2 analyses</div>
     </div>`;
 
     // Key facts section
@@ -3229,8 +3229,8 @@ function showLegacyDossierDetail(d) {
             html += `<div class="staleness-row">
                 <span style="color:var(--text-primary);font-weight:500;min-width:80px">${escHtml(type)}</span>
                 <span class="staleness-badge staleness-${freshness}">${label}</span>
-                <span style="font-size:10px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
-                ${latest.report_file ? `<span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
+                <span style="font-size:14px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
+                ${latest.report_file ? `<span style="font-size:12px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
             </div>`;
         });
         html += '</div>';
@@ -3885,7 +3885,7 @@ function _buildBriefingDashboard(content) {
             const badges = sources.map(s =>
                 `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
             ).join(' ');
-            rationaleHtml += `<div style="margin-bottom:8px"><span style="font-size:13px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:13px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
+            rationaleHtml += `<div style="margin-bottom:8px"><span style="font-size:15px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:15px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
         }
     });
 
@@ -3948,7 +3948,7 @@ function _buildBriefingDashboard(content) {
                 ${opp.why_now ? `<div class="opp-why-now">${_renderCitedText(opp.why_now)}</div>` : ''}
                 <div class="opp-detail">
                     ${opp.detail ? `<div class="opp-detail-text">${_renderCitedText(opp.detail)}</div>` : ''}
-                    ${allSources.length ? `<div class="opp-source-links"><span style="font-size:10px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
+                    ${allSources.length ? `<div class="opp-source-links"><span style="font-size:14px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
                 </div>
             </div>`;
         });
@@ -3987,10 +3987,10 @@ function _buildBriefingDashboard(content) {
             traj.department_shifts.forEach(shift => {
                 const arrow = shift.direction === 'up' ? '↑' : shift.direction === 'down' ? '↓' : '→';
                 const arrowClass = shift.direction === 'up' ? 'trajectory-up' : shift.direction === 'down' ? 'trajectory-down' : 'trajectory-stable';
-                trajHtml += `<div class="trajectory-row"><span class="trajectory-arrow ${arrowClass}">${arrow}</span><span style="color:var(--text-secondary);font-size:12px">${escHtml(shift.department || '')}</span> <span style="color:var(--text-muted);font-size:11px">${escHtml(shift.detail || '')}</span></div>`;
+                trajHtml += `<div class="trajectory-row"><span class="trajectory-arrow ${arrowClass}">${arrow}</span><span style="color:var(--text-secondary);font-size:14px">${escHtml(shift.department || '')}</span> <span style="color:var(--text-muted);font-size:11px">${escHtml(shift.detail || '')}</span></div>`;
             });
         }
-        if (traj.interpretation) trajHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(traj.interpretation)}</div>`;
+        if (traj.interpretation) trajHtml += `<div style="font-size:14px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(traj.interpretation)}</div>`;
         cards += _dashCard('Hiring Trajectory', trajHtml, false);
     }
 
@@ -4003,7 +4003,7 @@ function _buildBriefingDashboard(content) {
         if (budget.revenue_trend) bHtml += `<div class="budget-row"><span class="budget-label">Revenue</span><span class="budget-value">${_renderCitedText(budget.revenue_trend)}</span></div>`;
         if (budget.hiring_trend) bHtml += `<div class="budget-row"><span class="budget-label">Hiring</span><span class="budget-value">${_renderCitedText(budget.hiring_trend)}</span></div>`;
         if (budget.investment_areas && budget.investment_areas.length) bHtml += `<div class="budget-row"><span class="budget-label">Investing In</span><span class="budget-value">${budget.investment_areas.map(a => _renderCitedText(a)).join(', ')}</span></div>`;
-        if (budget.evidence) bHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px">${_renderCitedText(budget.evidence)}</div>`;
+        if (budget.evidence) bHtml += `<div style="font-size:15px;color:var(--text-muted);margin-top:6px">${_renderCitedText(budget.evidence)}</div>`;
         cards += _dashCard('Budget & Appetite', bHtml, false);
     }
 
@@ -4032,7 +4032,7 @@ function _buildBriefingDashboard(content) {
             });
             fHtml += '</div>';
         }
-        if (fin.summary) fHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(fin.summary)}</div>`;
+        if (fin.summary) fHtml += `<div style="font-size:14px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(fin.summary)}</div>`;
         cards += _dashCard('Financial Position', fHtml, false);
     }
 
@@ -4046,7 +4046,7 @@ function _buildBriefingDashboard(content) {
         }
         if (ip.rd_intensity) ipHtml += `<div class="budget-row"><span class="budget-label">R&D</span><span class="budget-value">${escHtml(ip.rd_intensity)}</span></div>`;
         if (ip.top_areas && ip.top_areas.length) ipHtml += `<div class="budget-row"><span class="budget-label">Focus</span><span class="budget-value">${ip.top_areas.map(a => _renderCitedText(a)).join(', ')}</span></div>`;
-        if (ip.assessment) ipHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(ip.assessment)}</div>`;
+        if (ip.assessment) ipHtml += `<div style="font-size:15px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(ip.assessment)}</div>`;
         cards += _dashCard('Innovation & IP', ipHtml, false);
     }
 
@@ -4063,7 +4063,7 @@ function _buildBriefingDashboard(content) {
             });
         }
         if (talent.top_skills && talent.top_skills.length) tHtml += `<div class="skill-tags" style="margin-top:6px">${talent.top_skills.map(s => `<span class="skill-tag">${escHtml(s)}</span>`).join('')}</div>`;
-        if (talent.assessment) tHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(talent.assessment)}</div>`;
+        if (talent.assessment) tHtml += `<div style="font-size:14px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(talent.assessment)}</div>`;
         cards += _dashCard('Talent & Culture', tHtml, false);
     }
 
@@ -4096,7 +4096,7 @@ function _buildBriefingDashboard(content) {
                 paras.push(sentences.slice(i, i + chunkSize).join(' '));
             }
         }
-        const stratHtml = paras.map(p => `<p style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin:0 0 14px 0">${_renderCitedText(p.trim())}</p>`).join('');
+        const stratHtml = paras.map(p => `<p style="font-size:15px;color:var(--text-secondary);line-height:1.7;margin:0 0 14px 0">${_renderCitedText(p.trim())}</p>`).join('');
         cards += _dashCard('Strategic Assessment', stratHtml, true);
     }
 
@@ -4116,7 +4116,7 @@ function _buildBriefingDashboard(content) {
             dcHtml += `<div class="budget-row"><span class="budget-label">Missing</span><span class="budget-value" style="color:var(--text-muted)">${conf.analyses_missing.join(', ')}</span></div>`;
         }
         if (conf.caveats && conf.caveats.length) {
-            dcHtml += `<div style="margin-top:8px;font-size:11px;color:var(--text-muted)">`;
+            dcHtml += `<div style="margin-top:8px;font-size:15px;color:var(--text-muted)">`;
             conf.caveats.forEach(c => { dcHtml += `<div style="margin-bottom:3px">⚠ ${escHtml(c)}</div>`; });
             dcHtml += `</div>`;
         }
@@ -4144,8 +4144,8 @@ function _buildBriefingDashboard(content) {
             srcHtml += `<div class="staleness-row" data-source-type="${escHtml(type)}">
                 <span style="color:var(--text-primary);font-weight:500;min-width:80px">${escHtml(type)}</span>
                 <span class="staleness-badge staleness-${freshness}">${flabel}</span>
-                <span style="font-size:10px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
-                ${latest.report_file ? `<span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
+                <span style="font-size:14px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
+                ${latest.report_file ? `<span style="font-size:12px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
             </div>`;
         });
         cards += _dashCard('Source Reports', srcHtml, false);
