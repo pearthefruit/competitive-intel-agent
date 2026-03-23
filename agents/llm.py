@@ -18,24 +18,34 @@ from db import (get_connection, get_or_create_dossier, add_dossier_analysis,
                 add_dossier_event, get_previous_key_facts)
 
 
+# Default chain for regular analyses — saves Gemini quota for briefings
 REPORT_PROVIDERS = [
-    # --- Gemini (primary) ---
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash"},
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-3-flash-preview"},
-    # --- Groq ---
+    # --- Groq (fast, generous limits) ---
     {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
     {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "meta-llama/llama-4-scout-17b-16e-instruct"},
     {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "qwen/qwen3-32b"},
-    # --- Cerebras ---
+    # --- Cerebras (1M tokens/day) ---
     {"name": "cerebras", "env_key": "CEREBRAS_API_KEY", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "llama-3.3-70b"},
-    # --- Mistral ---
+    # --- Mistral (unlimited daily, slow 2 RPM) ---
     {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
-    # --- OpenRouter (free) ---
+    # --- Gemini (fallback — prefer saving quota for briefings) ---
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
+    # --- OpenRouter (low daily quota, last resort) ---
     {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "nousresearch/hermes-3-llama-3.1-405b:free"},
     {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "meta-llama/llama-3.3-70b-instruct:free"},
     {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "qwen/qwen3-next-80b-a3b-instruct:free"},
     {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "mistralai/mistral-small-3.1-24b-instruct:free"},
+]
+
+# Gemini-first chain reserved for intelligence briefings
+BRIEFING_PROVIDERS = [
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash"},
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-3-flash-preview"},
+    # Fallbacks if Gemini is exhausted
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
+    {"name": "cerebras", "env_key": "CEREBRAS_API_KEY", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "llama-3.3-70b"},
+    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
 ]
 
 
@@ -108,10 +118,10 @@ def generate_text(prompt, timeout=60, providers=None):
     raise RuntimeError("All LLM providers failed for text generation")
 
 
-def generate_json(prompt, timeout=60):
+def generate_json(prompt, timeout=60, providers=None):
     """Generate text and parse as JSON. Returns parsed dict/list or None."""
     try:
-        text, _ = generate_text(prompt, timeout=timeout)
+        text, _ = generate_text(prompt, timeout=timeout, providers=providers)
         # Strip markdown code fences if present
         text = text.strip()
         if text.startswith("```"):

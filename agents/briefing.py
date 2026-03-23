@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agents.llm import generate_json
+from agents.llm import generate_json, BRIEFING_PROVIDERS
 from db import (get_connection, get_dossier_by_company, get_latest_key_facts,
                 get_company_id, compute_hiring_stats, get_hiring_snapshots,
                 get_recent_changes)
@@ -222,7 +222,7 @@ def generate_briefing(company_name, db_path="intel.db"):
             f"Incorporate these trends into your Strategic Outlook and Key Opportunities sections. "
             f"Highlight which changes are most strategically significant."
         )
-    briefing = generate_json(prompt, timeout=90)
+    briefing = generate_json(prompt, timeout=90, providers=BRIEFING_PROVIDERS)
 
     if not isinstance(briefing, dict):
         msg = "LLM did not return valid JSON — all providers may be rate-limited or down"
