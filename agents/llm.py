@@ -80,6 +80,7 @@ def generate_text(prompt, timeout=60, providers=None):
                     model = genai.GenerativeModel(p["model"])
                     response = model.generate_content(prompt)
                 http.close()
+                print(f"[llm] ✓ {model_id}")
                 return response.text, model_id
             else:
                 headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
@@ -88,6 +89,7 @@ def generate_text(prompt, timeout=60, providers=None):
                 if resp.status_code == 200:
                     text = resp.json()["choices"][0]["message"]["content"]
                     http.close()
+                    print(f"[llm] ✓ {model_id}")
                     return text, model_id
                 elif resp.status_code == 429:
                     print(f"[llm] {model_id} rate limited — skipping remaining keys for this model")
