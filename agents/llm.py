@@ -72,16 +72,11 @@ def generate_text(prompt, timeout=60, providers=None):
         else:
             expanded.append({**p, "_key": raw_key})
 
-    # Track models that have been rate-limited so we skip remaining keys for same model
-    rate_limited_models = set()
-
     for p in expanded:
         key = p["_key"]
         model_id = f"{p['name']}/{p['model']}"
-
-        # Skip if this model already hit a rate limit
-        if model_id in rate_limited_models:
-            continue
+        # Show truncated key suffix so you can tell which account was used
+        key_hint = key[-4:] if len(key) >= 4 else '****'
 
         try:
             if p["name"] == "gemini":
@@ -90,7 +85,7 @@ def generate_text(prompt, timeout=60, providers=None):
                     model = genai.GenerativeModel(p["model"])
                     response = model.generate_content(prompt)
                 http.close()
-                print(f"[llm] ✓ {model_id}")
+                print(f"[llm] ✓ {model_id} (key …{key_hint})")
                 return response.text, model_id
             else:
                 headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
@@ -99,19 +94,17 @@ def generate_text(prompt, timeout=60, providers=None):
                 if resp.status_code == 200:
                     text = resp.json()["choices"][0]["message"]["content"]
                     http.close()
-                    print(f"[llm] ✓ {model_id}")
+                    print(f"[llm] ✓ {model_id} (key …{key_hint})")
                     return text, model_id
                 elif resp.status_code == 429:
-                    print(f"[llm] {model_id} rate limited — skipping remaining keys for this model")
-                    rate_limited_models.add(model_id)
+                    print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
                     continue
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
-                print(f"[llm] {model_id} rate limited — skipping remaining keys for this model")
-                rate_limited_models.add(model_id)
+                print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
             else:
-                print(f"[llm] {model_id} failed: {e}")
+                print(f"[llm] {model_id} (key …{key_hint}) failed: {e}")
             continue
 
     http.close()
