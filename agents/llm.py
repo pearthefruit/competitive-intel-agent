@@ -58,13 +58,13 @@ def generate_text(prompt, timeout=60, providers=None):
     provider_list = providers or REPORT_PROVIDERS
     http = httpx.Client(timeout=timeout, follow_redirects=True)
 
-    # Expand Gemini entries with multiple keys
+    # Expand comma-separated keys (works for all providers)
     expanded = []
     for p in provider_list:
         raw_key = os.environ.get(p["env_key"], "").strip()
         if not raw_key:
             continue
-        if p["name"] == "gemini" and "," in raw_key:
+        if "," in raw_key:
             for k in raw_key.split(","):
                 k = k.strip()
                 if k:
