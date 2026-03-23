@@ -3,7 +3,7 @@
 
 def build_financial_prompt(company, ticker, financials_text, is_public=True):
     """Build prompt for LLM-generated financial analysis of a public company."""
-    return f"""You are a financial analyst specializing in competitive intelligence. Analyze the following SEC EDGAR financial data and live market data for {company} (ticker: {ticker}) and write a strategic financial intelligence report.
+    return f"""You are a financial analyst specializing in competitive intelligence for consulting firms. Analyze the following SEC EDGAR financial data, live market data, analyst estimates, and news for {company} (ticker: {ticker}) and write a strategic financial intelligence report.
 
 FINANCIAL DATA (SEC EDGAR XBRL filings + Yahoo Finance live market data):
 {financials_text}
@@ -28,8 +28,11 @@ R&D spending levels and as % of revenue (if calculable). What does this signal a
 ## Balance Sheet Strength
 Cash position, total assets vs liabilities. Is the company well-capitalized?
 
-## Strategic Implications
-What do these financials tell us about the company's strategy? Connect financial trends to business decisions (e.g., high R&D = building new products, growing cash = preparing for acquisition, high market cap = market confidence).
+## Market Sentiment & Analyst Outlook
+If analyst estimates, price targets, upgrades/downgrades, or news are provided, summarize what the market expects. What do forward revenue estimates and analyst actions signal about the company's trajectory?
+
+## Strategic Implications & Consulting Opportunities
+What do these financials tell us about the company's strategy? Connect financial trends to business decisions. Identify potential consulting engagement opportunities — e.g., margin compression → operational efficiency, flat R&D → innovation strategy, revenue decline → restructuring/transformation, rapid growth → scaling challenges, high capex → digital transformation.
 
 ## Key Risks
 2-3 financial risks or red flags visible in the data.
@@ -66,19 +69,72 @@ At the end, list all numbered sources:
 """
 
 
-def build_financial_prompt_private(company, search_results):
+def build_financial_prompt_private(company, search_results, has_statements=False):
     """Build prompt for financial analysis when company is not in SEC EDGAR (private or foreign-listed)."""
-    return f"""You are a financial analyst specializing in competitive intelligence. The company "{company}" was not found in SEC EDGAR. It may be a private company, or it may be publicly traded on a non-US exchange (e.g., London Stock Exchange, Euronext, SIX Swiss Exchange, Tokyo Stock Exchange, etc.). Based on the following search results, write what is publicly known about their financial position.
+
+    if has_statements:
+        # Foreign-listed company with full financial data from Yahoo Finance
+        return f"""You are a financial analyst specializing in competitive intelligence for consulting firms. The company "{company}" is publicly traded on a non-US exchange. Full financial statements from Yahoo Finance are provided below alongside web search results.
+
+DATA (Yahoo Finance financial statements + market data + analyst estimates + news + web search):
+{search_results}
+
+Write a strategic financial intelligence report (700-900 words) with these sections:
+
+## Executive Summary
+2-3 sentence overview: financial health, market position, trajectory. Note the stock exchange and market cap.
+
+## Revenue & Growth Trajectory
+Multi-year revenue trends from the financial statements. Calculate YoY growth rates. Is growth accelerating or decelerating? What do analyst consensus estimates project for the next 1-2 years?
+
+## Profitability & Operational Efficiency
+Gross margin, operating margin, and net margin trends over time. Is the company getting more or less efficient? Where is margin pressure coming from (COGS, operating expenses, R&D)?
+
+## Balance Sheet & Capital Allocation
+Cash position vs debt levels. How is the company deploying capital — R&D, capex, acquisitions, buybacks? Is free cash flow healthy?
+
+## Market Sentiment & Forward Outlook
+Analyst price targets, revenue estimates, recent upgrades/downgrades. What is the market pricing in? Use recent news to contextualize — restructuring announcements, M&A, leadership changes, strategic pivots.
+
+## Consulting Engagement Opportunities
+Based on the financial signals, identify 2-3 specific consulting opportunities a firm like McKinsey, EY, or Deloitte might pursue. Be specific — connect each opportunity to a financial trend:
+- Margin compression → operational transformation / cost optimization
+- Flat/declining revenue → growth strategy / market entry / digital channels
+- Rising R&D with no revenue lift → innovation strategy / R&D effectiveness
+- High debt or cash burn → financial restructuring / working capital optimization
+- Rapid growth → scaling operations / org design / tech modernization
+- Strategic pivot visible in news → change management / integration (M&A)
+
+Rules:
+- Use actual numbers from the financial statements. Do not fabricate figures.
+- Calculate margins and growth rates from the data provided.
+- Be direct and analytical — this is for competitive intelligence, not investor relations.
+- If data for a section is missing, note it briefly and move on.
+
+CITATION FORMAT (like Perplexity — clickable numbered links):
+- Assign each unique source URL a number (1, 2, 3...).
+- Every time you reference a specific number or claim, add a clickable superscript citation right after it using this exact markdown format: `[¹](url)`, `[²](url)`, etc.
+- Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
+- NEVER present a number or factual claim without a clickable citation link.
+- Yahoo Finance data should cite: https://finance.yahoo.com/quote/TICKER/
+
+## Sources
+At the end, list all numbered sources:
+1. [Source Title](url)
+2. [Yahoo Finance - TICKER](url)
+...and so on for each unique source used.
+"""
+    else:
+        # Truly private company or no financial data available
+        return f"""You are a financial analyst specializing in competitive intelligence. The company "{company}" was not found in SEC EDGAR and no structured financial data is available from Yahoo Finance. It is likely a private company. Based on the following search results, write what is publicly known about their financial position.
 
 SEARCH RESULTS:
 {search_results}
 
-IMPORTANT: First determine whether this company is publicly traded on a non-US exchange, or truly private. This distinction matters for the report framing.
-
 Write a concise financial intelligence report (400-600 words) with these sections:
 
 ## Executive Summary
-What is publicly known about this company's financial position. Note where the company is listed if it's publicly traded.
+What is publicly known about this company's financial position.
 
 ## Revenue & Growth
 Reported or estimated revenue figures, growth rates, recent earnings.
@@ -87,8 +143,7 @@ Reported or estimated revenue figures, growth rates, recent earnings.
 Margins, profits, cash position, debt — whatever is available from public reporting or estimates.
 
 ## Funding & Valuation
-For private companies: known funding rounds, investors, and valuation estimates.
-For public companies: market cap, recent stock performance, major shareholders.
+Known funding rounds, investors, and valuation estimates.
 
 ## Business Model
 How the company makes money, based on available information.
@@ -98,7 +153,6 @@ What the financial signals suggest about the company's strategy and trajectory.
 
 Rules:
 - Only state what the search results support. Clearly note when information is estimated or unconfirmed.
-- Do NOT assume the company is private just because it's not in SEC EDGAR — many large companies are listed on non-US exchanges.
 - Be direct and analytical.
 - If very little is known, say so — do not speculate extensively.
 
@@ -108,11 +162,8 @@ CITATION FORMAT (like Perplexity — clickable numbered links):
 - Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
 - NEVER present a number or factual claim without a clickable citation link.
 
-Example: "Revenue reached $32B in 2024 [¹](https://reuters.com/...). Market cap stands at KRW 1,333T [²](https://finance.yahoo.com/quote/005930.KS/)."
-
 ## Sources
 At the end, list all numbered sources:
 1. [Source Title](url)
-2. [Yahoo Finance - TICKER](https://finance.yahoo.com/quote/TICKER/)
 ...and so on for each unique source used.
 """

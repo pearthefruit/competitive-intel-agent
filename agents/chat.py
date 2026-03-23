@@ -509,10 +509,22 @@ def _execute_tool(name, args, db_path, progress_callback=None):
         # --- Raw Data Tools ---
         elif name == "search_sec_edgar":
             from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, format_financials_for_prompt, get_recent_filings
-            from scraper.stock_data import get_stock_data, format_stock_data_for_prompt
+            from scraper.stock_data import get_stock_data, format_stock_data_for_prompt, lookup_ticker, get_extended_financials, format_extended_financials_for_prompt
             company = args["company"]
             cik_result = lookup_cik(company)
             if not cik_result:
+                # Try Yahoo Finance for foreign-listed companies
+                ticker = lookup_ticker(company)
+                if ticker:
+                    stock_data = get_stock_data(ticker)
+                    extended = get_extended_financials(ticker)
+                    text = f"Not in SEC EDGAR, but found on Yahoo Finance as {ticker}.\n"
+                    if stock_data:
+                        text += format_stock_data_for_prompt(stock_data)
+                    if extended:
+                        currency = stock_data.get("currency", "") if stock_data else ""
+                        text += "\n" + format_extended_financials_for_prompt(extended, currency=currency, include_statements=True)
+                    return text
                 return (
                     f"No SEC EDGAR data found for '{company}'. "
                     f"This likely means the company is private, foreign-listed, or files under a different entity name. "
@@ -530,10 +542,14 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             financials = extract_financials(facts)
             filings = get_recent_filings(cik)
             text = format_financials_for_prompt(financials, filings)
-            # Append live market data
+            # Append live market data + analyst estimates + news
             stock_data = get_stock_data(ticker)
             if stock_data:
                 text += "\n" + format_stock_data_for_prompt(stock_data)
+            extended = get_extended_financials(ticker)
+            if extended:
+                currency = stock_data.get("currency", "USD") if stock_data else "USD"
+                text += "\n" + format_extended_financials_for_prompt(extended, currency=currency, include_statements=False)
             return f"SEC EDGAR data for {company_name} (ticker: {ticker}, CIK: {cik}):\n\n{text}"
 
         elif name == "search_patents_raw":

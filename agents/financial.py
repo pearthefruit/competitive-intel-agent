@@ -1,11 +1,11 @@
-"""Agent: Financial Analysis — SEC EDGAR for public companies, web search for private."""
+"""Agent: Financial Analysis — SEC EDGAR for US-listed, Yahoo Finance for foreign-listed, web search for private."""
 
 from datetime import datetime
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, get_recent_filings, format_financials_for_prompt
-from scraper.stock_data import get_stock_data, format_stock_data_for_prompt
+from scraper.stock_data import get_stock_data, format_stock_data_for_prompt, get_extended_financials, format_extended_financials_for_prompt
 from scraper.web_search import search_web, search_news, format_search_results
 from prompts.financial import build_financial_prompt, build_financial_prompt_private
 
@@ -29,7 +29,7 @@ def financial_analysis(company):
             idx = int(choice) - 1
             if idx < 0:
                 print(f"[financial] Using web search instead")
-                return _analyze_private(company)
+                return _analyze_non_sec(company)
             cik_info = cik_result[idx]
         except (ValueError, IndexError, EOFError):
             # Default to first match
@@ -49,7 +49,7 @@ def financial_analysis(company):
                 try:
                     confirm = input("  Use this match? (y/n): ").strip().lower()
                     if confirm != "y":
-                        return _analyze_private(company)
+                        return _analyze_non_sec(company)
                 except (EOFError, KeyboardInterrupt):
                     pass
         return _analyze_public(company, cik_result)
@@ -57,7 +57,7 @@ def financial_analysis(company):
         print(f"[financial] {company} not found in SEC EDGAR — could be private, foreign-listed, or filed under a different entity name")
         print(f"[financial] Falling back to web search — financial data will be less precise without official SEC filings")
         print(f"[financial] For better data, try checking Bloomberg, PitchBook, or the company's investor relations page directly")
-        return _analyze_private(company)
+        return _analyze_non_sec(company)
 
 
 def _analyze_public(company, cik_info):
@@ -73,14 +73,14 @@ def _analyze_public(company, cik_info):
     if not facts:
         print("[financial] Could not fetch XBRL company facts — SEC EDGAR API may be rate-limited or this entity hasn't filed in XBRL format")
         print("[financial] Falling back to web search — results will lack the precision of structured SEC data")
-        return _analyze_private(company)
+        return _analyze_non_sec(company)
 
     financials = extract_financials(facts)
     if not financials:
         print("[financial] XBRL data exists but no standard financial metrics (revenue, net income, etc.) could be extracted")
         print("[financial] This sometimes happens with holding companies or entities that file non-standard XBRL taxonomies")
         print("[financial] Falling back to web search for financial data")
-        return _analyze_private(company)
+        return _analyze_non_sec(company)
 
     filings = get_recent_filings(cik)
     financials_text = format_financials_for_prompt(financials, filings)
@@ -96,6 +96,16 @@ def _analyze_public(company, cik_info):
         print(f"[financial] Could not fetch live market data for {ticker} — report will use SEC data only")
 
     print(f"[financial] Extracted {len(financials)} financial metrics, {len(filings)} recent filings")
+
+    # Fetch extended data (analyst estimates, upgrades, news — not statements since SEC has those)
+    print(f"[financial] Fetching analyst estimates and news for {ticker}...")
+    extended = get_extended_financials(ticker)
+    if extended:
+        currency = stock_data.get("currency", "USD") if stock_data else "USD"
+        ext_text = format_extended_financials_for_prompt(extended, currency=currency, include_statements=False)
+        if ext_text:
+            financials_text += "\n" + ext_text
+            print(f"[financial] Added analyst estimates and news")
 
     # Generate report
     prompt = build_financial_prompt(company, ticker, financials_text)
@@ -128,8 +138,8 @@ def _analyze_public(company, cik_info):
     return str(filename)
 
 
-def _analyze_private(company):
-    """Analyze a private company using web search results."""
+def _analyze_non_sec(company):
+    """Analyze a company not in SEC EDGAR (foreign-listed or private) using Yahoo Finance + web search."""
     print(f"[financial] Searching for financial data on {company}...")
 
     # Multiple targeted searches (cover both private and foreign-listed companies)
@@ -165,6 +175,7 @@ def _analyze_private(company):
     # Try to find a ticker and get live market data (works for foreign-listed companies)
     from scraper.stock_data import lookup_ticker
     ticker = lookup_ticker(company)
+    has_statements = False
     if ticker:
         print(f"[financial] Found ticker {ticker} for {company} — fetching live market data...")
         stock_data = get_stock_data(ticker)
@@ -173,8 +184,20 @@ def _analyze_private(company):
             search_text += f"\n\nLIVE MARKET DATA (from Yahoo Finance, ticker: {ticker}):\n{market_text}"
             print(f"[financial] Got market data: price={stock_data.get('price')}, market_cap={stock_data.get('market_cap')}")
 
+        # Fetch full financial statements + analyst data + news
+        print(f"[financial] Fetching financial statements and analyst data for {ticker}...")
+        extended = get_extended_financials(ticker)
+        if extended:
+            currency = stock_data.get("currency", "") if stock_data else ""
+            ext_text = format_extended_financials_for_prompt(extended, currency=currency, include_statements=True)
+            if ext_text:
+                search_text += "\n" + ext_text
+                has_statements = "income_stmt" in extended
+                if has_statements:
+                    print(f"[financial] Got full financial statements — this company has structured data comparable to SEC filers")
+
     # Generate report
-    prompt = build_financial_prompt_private(company, search_text)
+    prompt = build_financial_prompt_private(company, search_text, has_statements=has_statements)
     prompt += get_temporal_context(company, "financial")
 
     print("[financial] Generating report...")
@@ -184,10 +207,12 @@ def _analyze_private(company):
     today = datetime.now().strftime("%Y-%m-%d")
     safe_name = company.lower().replace(" ", "_").replace(".", "_")
 
+    ticker_info = f" | **Ticker:** {ticker}" if ticker else ""
+    source = "Web Search + Yahoo Finance" if ticker else "Web Search"
     header = f"""# Financial Analysis: {company}
 
-**Status:** Not in SEC EDGAR (private or foreign-listed) | **Date:** {today}
-**Source:** Web Search | **Model:** {model}
+**Status:** Not in SEC EDGAR (foreign-listed or private){ticker_info} | **Date:** {today}
+**Source:** {source} | **Model:** {model}
 
 ---
 
