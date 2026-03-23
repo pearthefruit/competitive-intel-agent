@@ -121,6 +121,21 @@
         .filter-input:focus { border-color: var(--accent); }
         .filter-input::placeholder { color: var(--text-muted); }
         .filter-wrap { padding: 10px 12px 6px; flex-shrink: 0; }
+        .filter-row { display: flex; gap: 6px; align-items: center; }
+        .filter-row .filter-input { flex: 1; }
+        .sort-toggle {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 11px;
+            padding: 5px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.15s;
+            flex-shrink: 0;
+        }
+        .sort-toggle:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.2); }
 
         /* Chat list */
         .chat-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
@@ -1754,6 +1769,23 @@
             font-weight: 700;
             color: var(--text-primary);
         }
+        .dash-refresh-btn {
+            background: linear-gradient(135deg, rgba(59,130,246,0.15), rgba(168,85,247,0.15));
+            border: 1px solid rgba(59,130,246,0.3);
+            color: #60a5fa;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 6px 14px;
+            border-radius: 6px;
+            margin-top: 8px;
+            transition: all 0.15s;
+        }
+        .dash-refresh-btn:hover {
+            background: linear-gradient(135deg, rgba(59,130,246,0.25), rgba(168,85,247,0.25));
+            border-color: rgba(59,130,246,0.5);
+            color: #93bbfc;
+        }
         .dash-hero-sector {
             font-size: 11px;
             color: var(--text-muted);
@@ -1772,7 +1804,7 @@
             display: grid;
             grid-template-columns: repeat(2, 1fr);
             gap: 14px;
-            align-items: start;
+            align-items: stretch;
         }
         @media (min-width: 1600px) {
             .dash-grid { grid-template-columns: repeat(3, 1fr); }
@@ -1923,7 +1955,10 @@
             </div>
             <div id="panel-companies" class="left-panel">
                 <div class="filter-wrap">
-                    <input type="text" class="filter-input" id="company-filter" placeholder="Search companies..." oninput="renderCompanyList()">
+                    <div class="filter-row">
+                        <input type="text" class="filter-input" id="company-filter" placeholder="Search companies..." oninput="renderCompanyList()">
+                        <button class="sort-toggle" id="company-sort-btn" onclick="toggleCompanySort()" title="Sorted by recent">New</button>
+                    </div>
                 </div>
                 <div class="company-list" id="company-list"></div>
             </div>
@@ -2063,6 +2098,7 @@ let currentReportFilename = null;
 let allReports = [];
 let allCompanies = [];
 let openCompanies = new Set();
+let companySortMode = 'recent'; // 'recent' or 'alpha'
 
 // Context pill state
 let activeContext = null;       // { company, type, label }
@@ -2221,7 +2257,16 @@ function newChat() {
 }
 
 function loadChat(id) {
-    // Collapse expanded/focus mode so chat is visible
+    // Exit split view or focus mode so chat is visible
+    if (_splitActive) {
+        const remaining = _splitPanels[_splitFocusedSide];
+        _exitSplitView();
+        if (remaining.type === 'report' && remaining.reportFilename) {
+            openReport(remaining.reportFilename);
+        } else if (remaining.type === 'briefing' && remaining.dossierName) {
+            openDossier(remaining.dossierName);
+        }
+    }
     const rp = document.getElementById('right-pane');
     if (rp && rp.classList.contains('expanded')) {
         collapseReport();
@@ -2269,6 +2314,16 @@ function refreshSidebar() {
     if (panel && panel.classList.contains('active')) loadCompanies();
 }
 
+function toggleCompanySort() {
+    companySortMode = companySortMode === 'recent' ? 'alpha' : 'recent';
+    const btn = document.getElementById('company-sort-btn');
+    if (btn) {
+        btn.textContent = companySortMode === 'recent' ? 'New' : 'A-Z';
+        btn.title = companySortMode === 'recent' ? 'Sorted by recent' : 'Sorted alphabetically';
+    }
+    renderCompanyList();
+}
+
 function toggleCompany(name) {
     if (openCompanies.has(name)) openCompanies.delete(name);
     else openCompanies.add(name);
@@ -2279,12 +2334,17 @@ function renderCompanyList() {
     const filter = (document.getElementById('company-filter').value || '').toLowerCase();
     const list = document.getElementById('company-list');
 
-    const filtered = allCompanies.filter(c =>
+    let filtered = allCompanies.filter(c =>
         !filter
         || c.name.toLowerCase().includes(filter)
         || (c.sector || '').toLowerCase().includes(filter)
         || (c.analyses || []).some(a => a.type.toLowerCase().includes(filter))
     );
+
+    if (companySortMode === 'alpha') {
+        filtered = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    // 'recent' keeps the API order (already sorted by last_updated desc)
 
     if (!filtered.length) {
         list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">No companies yet. Start a chat to generate intelligence.</div>';
@@ -2785,7 +2845,7 @@ function showBriefing(dossier, b, _targetEl) {
             });
         }
         if (traj.interpretation) {
-            trajHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_stripCitations(traj.interpretation)}</div>`;
+            trajHtml += `<div style="font-size:13px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(traj.interpretation)}</div>`;
         }
         html += _briefingSection('Hiring Trajectory', trajHtml, true);
     }
@@ -2808,13 +2868,13 @@ function showBriefing(dossier, b, _targetEl) {
                     <span class="opp-service">${escHtml(opp.service || '')}</span>
                     <span class="opp-priority ${pClass}">${escHtml(opp.priority || '')}</span>
                 </div>
-                <div class="opp-evidence">${_stripCitations(opp.evidence || '')}</div>
+                <div class="opp-evidence">${_renderCitedText(opp.evidence || '')}</div>
                 <div class="opp-meta">
                     <span>${escHtml(opp.estimated_scope || '')}</span>
                 </div>
-                ${opp.why_now ? `<div class="opp-why-now">${escHtml(opp.why_now)}</div>` : ''}
+                ${opp.why_now ? `<div class="opp-why-now">${_renderCitedText(opp.why_now)}</div>` : ''}
                 <div class="opp-detail">
-                    ${opp.detail ? `<div class="opp-detail-text">${_stripCitations(opp.detail)}</div>` : ''}
+                    ${opp.detail ? `<div class="opp-detail-text">${_renderCitedText(opp.detail)}</div>` : ''}
                     ${allSources.length ? `<div class="opp-source-links"><span style="font-size:10px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
                 </div>
             </div>`;
@@ -3625,7 +3685,7 @@ async function openReport(filename) {
         if (ownerCompany) openCompanies.add(ownerCompany.name);
 
         // Add breadcrumb if company is known
-        if (meta.company && ownerCompany) {
+        if (meta.company) {
             const breadcrumbHtml = `<div class="report-breadcrumb">
                 <span class="breadcrumb-company" onclick="openDossier('${escHtml(meta.company)}')">${escHtml(meta.company)}</span>
                 <span class="breadcrumb-sep">›</span>
@@ -3835,6 +3895,7 @@ function _buildBriefingDashboard(content) {
                 <div class="dash-hero-company">${escHtml(identity.name || dossier.company_name)}</div>
                 ${identity.sector ? `<div class="dash-hero-sector">${escHtml(identity.sector)}</div>` : ''}
                 <div class="dash-hero-detail">${escHtml(metaParts.join(' · '))}</div>
+                <button class="dash-refresh-btn" onclick="event.stopPropagation();generateBriefing('${escHtml(dossier.company_name)}')">&#x21bb; Refresh Briefing</button>
             </div>
             <div class="dash-hero-score">
                 ${renderScoreRing(score, 100)}
@@ -3874,11 +3935,21 @@ function _buildBriefingDashboard(content) {
         let oppHtml = '<div class="opp-inner-grid">';
         opps.forEach(opp => {
             const pClass = `opp-priority-${opp.priority || 'medium'}`;
+            const explicitSources = opp.source_analyses || [];
+            const inlineSources = _extractSources((opp.evidence || '') + ' ' + (opp.detail || ''));
+            const allSources = [...new Set([...explicitSources, ...inlineSources])];
+            const sourceBadges = allSources.map(s =>
+                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
+            ).join(' ');
             oppHtml += `<div class="opp-card" onclick="this.classList.toggle('expanded')">
                 <div class="opp-card-header"><span class="opp-service">${escHtml(opp.service || '')}</span><span class="opp-priority ${pClass}">${escHtml(opp.priority || '')}</span></div>
-                <div class="opp-evidence">${_stripCitations(opp.evidence || '')}</div>
+                <div class="opp-evidence">${_renderCitedText(opp.evidence || '')}</div>
                 <div class="opp-meta"><span>${escHtml(opp.estimated_scope || '')}</span></div>
-                <div class="opp-detail">${opp.detail ? `<div class="opp-detail-text">${_stripCitations(opp.detail)}</div>` : ''}</div>
+                ${opp.why_now ? `<div class="opp-why-now">${_renderCitedText(opp.why_now)}</div>` : ''}
+                <div class="opp-detail">
+                    ${opp.detail ? `<div class="opp-detail-text">${_renderCitedText(opp.detail)}</div>` : ''}
+                    ${allSources.length ? `<div class="opp-source-links"><span style="font-size:10px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
+                </div>
             </div>`;
         });
         oppHtml += '</div>';
@@ -3919,7 +3990,7 @@ function _buildBriefingDashboard(content) {
                 trajHtml += `<div class="trajectory-row"><span class="trajectory-arrow ${arrowClass}">${arrow}</span><span style="color:var(--text-secondary);font-size:12px">${escHtml(shift.department || '')}</span> <span style="color:var(--text-muted);font-size:11px">${escHtml(shift.detail || '')}</span></div>`;
             });
         }
-        if (traj.interpretation) trajHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_stripCitations(traj.interpretation)}</div>`;
+        if (traj.interpretation) trajHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(traj.interpretation)}</div>`;
         cards += _dashCard('Hiring Trajectory', trajHtml, false);
     }
 
@@ -3929,9 +4000,9 @@ function _buildBriefingDashboard(content) {
         let bHtml = '';
         const confClass = `confidence-${budget.confidence || 'medium'}`;
         bHtml += `<div class="budget-row"><span class="budget-label">Can Afford</span><span class="budget-value">${budget.can_afford ? 'Yes' : 'Unlikely'}</span> <span class="confidence-badge ${confClass}">${escHtml(budget.confidence || '')} conf.</span></div>`;
-        if (budget.revenue_trend) bHtml += `<div class="budget-row"><span class="budget-label">Revenue</span><span class="budget-value">${escHtml(budget.revenue_trend)}</span></div>`;
-        if (budget.hiring_trend) bHtml += `<div class="budget-row"><span class="budget-label">Hiring</span><span class="budget-value">${escHtml(budget.hiring_trend)}</span></div>`;
-        if (budget.investment_areas && budget.investment_areas.length) bHtml += `<div class="budget-row"><span class="budget-label">Investing In</span><span class="budget-value">${budget.investment_areas.map(a => escHtml(a)).join(', ')}</span></div>`;
+        if (budget.revenue_trend) bHtml += `<div class="budget-row"><span class="budget-label">Revenue</span><span class="budget-value">${_renderCitedText(budget.revenue_trend)}</span></div>`;
+        if (budget.hiring_trend) bHtml += `<div class="budget-row"><span class="budget-label">Hiring</span><span class="budget-value">${_renderCitedText(budget.hiring_trend)}</span></div>`;
+        if (budget.investment_areas && budget.investment_areas.length) bHtml += `<div class="budget-row"><span class="budget-label">Investing In</span><span class="budget-value">${budget.investment_areas.map(a => _renderCitedText(a)).join(', ')}</span></div>`;
         if (budget.evidence) bHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px">${_renderCitedText(budget.evidence)}</div>`;
         cards += _dashCard('Budget & Appetite', bHtml, false);
     }
@@ -3945,7 +4016,7 @@ function _buildBriefingDashboard(content) {
             cHtml += `<div style="margin-bottom:6px">Urgency: <span class="confidence-badge ${urgClass}">${escHtml(comp.urgency)}</span></div>`;
         }
         (comp.competitors || []).forEach(c => {
-            cHtml += `<div class="competitor-row"><span class="competitor-name">${escHtml(c.name || '')}</span><span class="competitor-maturity">${escHtml(c.digital_maturity_estimate || '')}</span><span class="competitor-threat">${escHtml(c.threat || '')}</span></div>`;
+            cHtml += `<div class="competitor-row"><span class="competitor-name">${escHtml(c.name || '')}</span><span class="competitor-maturity">${_renderCitedText(c.digital_maturity_estimate || '')}</span><span class="competitor-threat">${_renderCitedText(c.threat || '')}</span></div>`;
         });
         cards += _dashCard('Competitive Pressure', cHtml, false);
     }
@@ -3961,7 +4032,7 @@ function _buildBriefingDashboard(content) {
             });
             fHtml += '</div>';
         }
-        if (fin.summary) fHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_stripCitations(fin.summary)}</div>`;
+        if (fin.summary) fHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(fin.summary)}</div>`;
         cards += _dashCard('Financial Position', fHtml, false);
     }
 
@@ -3974,8 +4045,8 @@ function _buildBriefingDashboard(content) {
             ipHtml += `<div class="budget-row"><span class="budget-label">Patents</span><span class="budget-value">${pd}</span></div>`;
         }
         if (ip.rd_intensity) ipHtml += `<div class="budget-row"><span class="budget-label">R&D</span><span class="budget-value">${escHtml(ip.rd_intensity)}</span></div>`;
-        if (ip.top_areas && ip.top_areas.length) ipHtml += `<div class="budget-row"><span class="budget-label">Focus</span><span class="budget-value">${ip.top_areas.map(a => escHtml(a)).join(', ')}</span></div>`;
-        if (ip.assessment) ipHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_stripCitations(ip.assessment)}</div>`;
+        if (ip.top_areas && ip.top_areas.length) ipHtml += `<div class="budget-row"><span class="budget-label">Focus</span><span class="budget-value">${ip.top_areas.map(a => _renderCitedText(a)).join(', ')}</span></div>`;
+        if (ip.assessment) ipHtml += `<div style="font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(ip.assessment)}</div>`;
         cards += _dashCard('Innovation & IP', ipHtml, false);
     }
 
@@ -3992,7 +4063,7 @@ function _buildBriefingDashboard(content) {
             });
         }
         if (talent.top_skills && talent.top_skills.length) tHtml += `<div class="skill-tags" style="margin-top:6px">${talent.top_skills.map(s => `<span class="skill-tag">${escHtml(s)}</span>`).join('')}</div>`;
-        if (talent.assessment) tHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_stripCitations(talent.assessment)}</div>`;
+        if (talent.assessment) tHtml += `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(talent.assessment)}</div>`;
         cards += _dashCard('Talent & Culture', tHtml, false);
     }
 
@@ -4002,7 +4073,7 @@ function _buildBriefingDashboard(content) {
         let rHtml = '<div class="risk-inner-grid">';
         risks.forEach(r => {
             const sev = r.severity || 'medium';
-            rHtml += `<div class="risk-card risk-${sev}"><div class="risk-category">${escHtml(r.category || '')} - ${escHtml(sev)}</div><div class="risk-desc">${_stripCitations(r.description || '')}</div></div>`;
+            rHtml += `<div class="risk-card risk-${sev}"><div class="risk-category">${escHtml(r.category || '')} - ${escHtml(sev)}</div><div class="risk-desc">${_renderCitedText(r.description || '')}</div></div>`;
         });
         rHtml += '</div>';
         cards += _dashCard('Risk Profile', rHtml, true);
@@ -4025,7 +4096,7 @@ function _buildBriefingDashboard(content) {
                 paras.push(sentences.slice(i, i + chunkSize).join(' '));
             }
         }
-        const stratHtml = paras.map(p => `<p style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin:0 0 14px 0">${_stripCitations(p.trim())}</p>`).join('');
+        const stratHtml = paras.map(p => `<p style="font-size:13px;color:var(--text-secondary);line-height:1.7;margin:0 0 14px 0">${_renderCitedText(p.trim())}</p>`).join('');
         cards += _dashCard('Strategic Assessment', stratHtml, true);
     }
 
@@ -4082,6 +4153,46 @@ function _buildBriefingDashboard(content) {
 
     html += `<div class="dash-grid">${cards}</div>`;
     content.innerHTML = html;
+
+    /* Equalize card heights per row — if a card's content is less than
+       half the tallest card in its row, let it keep its natural height
+       instead of stretching to match. */
+    requestAnimationFrame(() => {
+        const grid = content.querySelector('.dash-grid');
+        if (!grid) return;
+        const cards = Array.from(grid.querySelectorAll('.dash-card:not(.card-wide)'));
+        if (!cards.length) return;
+
+        // Temporarily set align-self:start on all to measure natural heights
+        cards.forEach(c => c.style.alignSelf = 'start');
+
+        // Group cards into rows by their offsetTop
+        const rows = [];
+        let currentRow = [cards[0]];
+        let currentTop = cards[0].offsetTop;
+        for (let i = 1; i < cards.length; i++) {
+            if (Math.abs(cards[i].offsetTop - currentTop) < 5) {
+                currentRow.push(cards[i]);
+            } else {
+                rows.push(currentRow);
+                currentRow = [cards[i]];
+                currentTop = cards[i].offsetTop;
+            }
+        }
+        rows.push(currentRow);
+
+        // For each row: if no card is less than half the tallest, stretch all
+        rows.forEach(row => {
+            const heights = row.map(c => c.offsetHeight);
+            const maxH = Math.max(...heights);
+            const tooShort = heights.filter(h => h <= maxH * 0.5).length;
+            if (tooShort < 2) {
+                // Stretch all cards in this row to the tallest
+                row.forEach(c => { c.style.alignSelf = ''; c.style.minHeight = maxH + 'px'; });
+            }
+            // else: leave align-self:start — cards keep natural heights
+        });
+    });
 }
 
 function _restoreOriginalReport() {

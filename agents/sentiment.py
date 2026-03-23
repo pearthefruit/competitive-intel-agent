@@ -6,6 +6,7 @@ from pathlib import Path
 from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from scraper.web_search import search_web, search_news, search_reddit, format_search_results
 from scraper.hackernews import search_hackernews
+from scraper.reddit_rss import search_reddit_rss
 from prompts.sentiment import build_sentiment_prompt
 
 
@@ -30,16 +31,50 @@ def sentiment_analysis(company):
     if web_count == 0:
         print(f"[sentiment] No Glassdoor/web results — company may be too small, too new, or using an unusual name that search engines don't associate with employer reviews")
 
+    # Blind / TeamBlind (anonymous, verified-employee reviews — strong for tech)
+    print("[sentiment] Searching Blind for anonymous employee reviews...")
+    blind = search_web(f"site:teamblind.com {company} reviews", max_results=3)
+    if not blind:
+        blind = search_web(f"teamblind.com {company} employee reviews", max_results=2)
+    all_results.extend(blind)
+    if blind:
+        print(f"[sentiment] Blind returned {len(blind)} results")
+
+    # Fishbowl (anonymous professional community — strong for finance/consulting)
+    print("[sentiment] Searching Fishbowl for professional community posts...")
+    fishbowl = search_web(f"site:fishbowlapp.com {company}", max_results=3)
+    if not fishbowl:
+        fishbowl = search_web(f"fishbowlapp.com {company} reviews culture", max_results=2)
+    all_results.extend(fishbowl)
+    if fishbowl:
+        print(f"[sentiment] Fishbowl returned {len(fishbowl)} results")
+
     # News about workplace/culture
     news = search_news(f"{company} employees workplace culture", max_results=3)
     all_results.extend(news)
 
-    # Reddit discussions (often candid employee perspectives)
+    # Reddit — general search + targeted career subreddits
     print("[sentiment] Searching Reddit for candid employee perspectives...")
     reddit = search_reddit(f"{company} working at employee experience", max_results=3)
     all_results.extend(reddit)
     if web_count == 0 and reddit:
         print(f"[sentiment] Reddit returned {len(reddit)} results — these tend to be more candid than formal review sites")
+
+    # Reddit — career-specific subreddits (finance, consulting, accounting, tech, CS)
+    career_subs = [
+        "FinancialCareers", "consulting", "Big4",
+        "cscareerquestions", "ExperiencedDevs",
+        "Accounting", "MBA",
+    ]
+    print(f"[sentiment] Searching {len(career_subs)} career subreddits...")
+    career_reddit = search_reddit_rss(
+        f"{company} working culture",
+        max_results=5,
+        subreddits=career_subs,
+    )
+    all_results.extend(career_reddit)
+    if career_reddit:
+        print(f"[sentiment] Career subreddits returned {len(career_reddit)} results")
 
     # Hacker News (tech community — candid takes on companies)
     print("[sentiment] Searching Hacker News for tech community perspectives...")
@@ -49,8 +84,7 @@ def sentiment_analysis(company):
         print(f"[sentiment] Hacker News returned {len(hn)} results — useful for tech industry sentiment")
 
     if not all_results:
-        print("[sentiment] No results from any source (web, news, Reddit, HN)")
-        print("[sentiment] This company likely has very low public visibility — try checking Blind, Fishbowl, or Comparably directly")
+        print("[sentiment] No results from any source (web, news, Reddit, Blind, Fishbowl, HN)")
         return None
 
     # Deduplicate
