@@ -3467,7 +3467,8 @@ async function processChat(chat) {
             }
         }
     } catch (e) {
-        chat.messages.push({ role: 'assistant', content: 'Connection error. Please try again.' });
+        console.error('[chat] Connection error:', e);
+        chat.messages.push({ role: 'assistant', content: `Connection error: ${e.message || 'stream interrupted'}. The server may still be processing — check the terminal for details.` });
     }
 
     const t = document.getElementById('typing');

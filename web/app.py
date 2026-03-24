@@ -762,6 +762,14 @@ def create_app(db_path="intel.db"):
         history = [{"role": "system", "content": system_content}] + messages
 
         def generate():
+          try:
+            yield from _generate_inner(history, today, db_path)
+          except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'text': f'Server error: {str(e)[:300]}'})}\n\n"
+
+        def _generate_inner(history, today, db_path):
             try:
                 llm = ChatLLM()
             except RuntimeError as e:
@@ -874,10 +882,11 @@ def create_app(db_path="intel.db"):
 
                         while t.is_alive():
                             try:
-                                msg = progress_q.get(timeout=0.3)
+                                msg = progress_q.get(timeout=2)
                                 yield f"data: {json.dumps({'type': 'tool_progress', 'name': fn_name, 'text': msg})}\n\n"
                             except queue.Empty:
-                                pass
+                                # Send SSE keepalive comment to prevent connection timeout
+                                yield ": keepalive\n\n"
 
                         # Drain remaining progress messages
                         while not progress_q.empty():
