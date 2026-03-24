@@ -914,6 +914,18 @@
             align-items: start;
         }
         .competitor-row:last-child { border-bottom: none; }
+        .competitor-header {
+            display: grid;
+            grid-template-columns: minmax(100px, 1fr) minmax(150px, 2fr) minmax(150px, 3fr);
+            gap: 12px;
+            padding: 6px 0 8px;
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
         .competitor-name {
             font-weight: 600;
             color: var(--text-primary);
@@ -2916,6 +2928,9 @@ function showBriefing(dossier, b, _targetEl) {
             const urgClass = comp.urgency === 'high' ? 'confidence-high' : comp.urgency === 'medium' ? 'confidence-medium' : 'confidence-low';
             compHtml += `<div style="margin-bottom:8px">Transformation urgency: <span class="confidence-badge ${urgClass}">${escHtml(comp.urgency)}</span></div>`;
         }
+        if ((comp.competitors || []).length) {
+            compHtml += `<div class="competitor-header"><span>Competitor</span><span>Digital Maturity</span><span>Threat Assessment</span></div>`;
+        }
         (comp.competitors || []).forEach(c => {
             compHtml += `<div class="competitor-row">
                 <span class="competitor-name">${escHtml(c.name || '')}</span>
@@ -4014,6 +4029,9 @@ function _buildBriefingDashboard(content) {
         if (comp.urgency) {
             const urgClass = comp.urgency === 'high' ? 'confidence-high' : comp.urgency === 'medium' ? 'confidence-medium' : 'confidence-low';
             cHtml += `<div style="margin-bottom:6px">Urgency: <span class="confidence-badge ${urgClass}">${escHtml(comp.urgency)}</span></div>`;
+        }
+        if ((comp.competitors || []).length) {
+            cHtml += `<div class="competitor-header"><span>Competitor</span><span>Digital Maturity</span><span>Threat Assessment</span></div>`;
         }
         (comp.competitors || []).forEach(c => {
             cHtml += `<div class="competitor-row"><span class="competitor-name">${escHtml(c.name || '')}</span><span class="competitor-maturity">${_renderCitedText(c.digital_maturity_estimate || '')}</span><span class="competitor-threat">${_renderCitedText(c.threat || '')}</span></div>`;

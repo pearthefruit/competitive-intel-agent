@@ -215,11 +215,23 @@ def _normalize_for_match(name):
 def _is_relevant_assignee(assignee, company_name):
     """Check if a patent assignee is plausibly related to the target company."""
     if not assignee:
-        return True  # No assignee data — keep it, let LLM decide
+        return False  # No assignee data — reject to avoid false positives
     norm_assignee = _normalize_for_match(assignee)
     norm_company = _normalize_for_match(company_name)
     if not norm_company:
         return True
+
+    # For short company names (<=5 chars), require stricter matching
+    # to avoid "Huel*" matching "Huelsman", "Hueller", etc.
+    if len(norm_company) <= 5:
+        # Assignee must start with the company name or match exactly
+        # (after normalization strips suffixes like Inc, LLC, etc.)
+        if norm_assignee == norm_company:
+            return True
+        # Allow "huel" to match "huel nutrition" but not "huelsman"
+        if norm_assignee.startswith(norm_company + " "):
+            return True
+        return False
 
     # Exact or substring match (either direction)
     if norm_company in norm_assignee or norm_assignee in norm_company:
@@ -265,8 +277,13 @@ def search_patents(company_name, max_results=25):
 
     Returns (list of patent dicts, total_count, source_name).
     """
-    # Primary: USPTO ODP with wildcard on company name
-    query = f"{company_name}*"
+    # Primary: USPTO ODP — use wildcard for longer names, exact for short ones
+    # Short names like "Huel" with wildcard "Huel*" match unrelated assignees
+    clean = company_name.strip()
+    if len(clean) <= 5:
+        query = f'"{clean}"'  # Exact match for short names
+    else:
+        query = f"{clean}*"
     patents, total = search_uspto(query, max_results)
     if patents:
         patents, removed = filter_relevant_patents(patents, company_name)
