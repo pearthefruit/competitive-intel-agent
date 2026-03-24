@@ -141,7 +141,7 @@ Two-pass scoring system: deterministic algorithm computes base scores, then LLM 
 
 **Pass 1 — Algorithmic (`agents/scoring.py`):**
 `compute_dms_scores(hiring_stats, all_key_facts)` computes base scores from structured data:
-- **Tech Modernity (30%):** Engineering ratio from `hiring_stats.dept_counts`, modern/legacy stack matching from `top_skills`, sector floor (AI→90, software→80), techstack infra + monitoring signals
+- **Tech Modernity (30%):** Engineering ratio from `hiring_stats.dept_counts`, modern/legacy stack matching from `top_skills`, sector additive bonus (AI→+25, software→+15) on top of base score (so a legacy SaaS company with weak signals can still score poorly), techstack infra + monitoring signals
 - **Data & Analytics (25%):** Data role subcategories from `hiring_stats.subcategory_counts`, "Data Infrastructure" strategic tag, advanced analytics + A/B testing tools from techstack key facts
 - **AI Readiness (25%):** `ai_ml_role_count` as % of engineering, "AI/ML Investment" strategic tag, `ai_ml_patents` from patents key facts, patent trend bonus
 - **Organizational Readiness (20%):** `hiring_trend` enum, growth signal ratio, count of investment-related strategic tags, sentiment enum + Glassdoor rating
@@ -155,6 +155,20 @@ Algorithmic scores + signals are injected into the briefing prompt. The LLM can 
 After LLM returns, `briefing.py` merges algo fields (`algorithmic_score`, `algorithmic_confidence`, `signals_used`) onto each sub-score, adds `algorithmic_weighted_score` to the top level, and **recomputes** `overall_score` + `overall_label` from LLM sub-scores (never trusts LLM arithmetic).
 
 Score tiers: Digital Vanguard (80-100), Digital Contender (60-79), Digitally Exposed (40-59), Digital Laggard (20-39), Digital Liability (0-19)
+
+**Anomaly Detection (`compute_anomaly_signals()` in `agents/scoring.py`):**
+Runs alongside DMS scoring and detects 8 structural anomaly types that indicate consulting opportunities regardless of DMS score:
+1. **Engineering-heavy org** — disproportionate engineering headcount vs. business functions
+2. **Top-heavy seniority** — high ratio of senior/staff/principal roles with few mid-level execution layers
+3. **Scaling without leaders** — rapid headcount growth with no corresponding management/director hiring
+4. **Replacement churn** — re-opening roles at the same level/department (turnover signal)
+5. **Department surge** — one department growing dramatically faster than the rest
+6. **AI without data foundation** — AI/ML roles hired before data engineering/infrastructure is in place
+7. **Growth-sentiment gap** — strong hiring signals paired with negative employee sentiment
+8. **Low Glassdoor** — Glassdoor rating below threshold (culture/leadership risk signal)
+9. **Strategic sprawl** — too many unrelated strategic tag clusters (unfocused roadmap)
+
+Detected anomalies are injected into the briefing prompt to improve engagement opportunity generation. Each anomaly includes a label, severity, and a plain-English description of why it matters to a consulting buyer.
 
 ### LLM Provider Rotation
 
@@ -301,7 +315,7 @@ USPTO_API_KEY       # USPTO PatentsView API key (falls back to PATENTSVIEW_API_K
 
 ## Current State (March 2026)
 
-Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat with multi-step context management (tool result summarization, dynamic tool schema selection, condensed system prompts), server-side PDF export (reports + briefings), and intelligence briefing with hybrid algorithmic+LLM Digital Maturity Score. The briefing is the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization. The DMS now uses a two-pass hybrid approach: deterministic algorithmic base scores computed from structured data, then LLM fine-tuning within ±10 bounds with required justification for deviations.
+Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat with multi-step context management (tool result summarization, dynamic tool schema selection, condensed system prompts), server-side PDF export (reports + briefings), and intelligence briefing with hybrid algorithmic+LLM Digital Maturity Score. The briefing is the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization. The DMS now uses a two-pass hybrid approach: deterministic algorithmic base scores computed from structured data, then LLM fine-tuning within ±10 bounds with required justification for deviations. Sector is applied as an additive bonus (AI→+25, software→+15) rather than a floor, so weak companies in strong sectors are no longer artificially propped up. A separate `compute_anomaly_signals()` function detects 8 structural anomaly types (engineering-heavy org, top-heavy seniority, scaling without leaders, replacement churn, department surge, AI without data foundation, growth-sentiment gap, low Glassdoor, strategic sprawl) and injects them into the briefing prompt to sharpen engagement opportunity generation.
 
 ## Planned Improvements
 

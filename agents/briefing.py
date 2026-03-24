@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agents.llm import generate_json, BRIEFING_CHAIN
-from agents.scoring import compute_dms_scores
+from agents.scoring import compute_dms_scores, compute_anomaly_signals
 from db import (get_connection, get_dossier_by_company, get_latest_key_facts,
                 get_company_id, compute_hiring_stats, get_hiring_snapshots,
                 get_recent_changes)
@@ -209,6 +209,13 @@ def generate_briefing(company_name, db_path="intel.db"):
         print(f"[briefing]   {dim}: {d['algorithmic_score']}/100 "
               f"(confidence: {d['confidence']:.0%}, {len(d['signals_used'])} signals)")
 
+    # 5.6. Detect structural anomalies for consulting opportunity hints
+    anomaly_signals = compute_anomaly_signals(hiring_stats, all_key_facts)
+    if anomaly_signals:
+        print(f"[briefing] Structural anomalies detected: {len(anomaly_signals)}")
+        for a in anomaly_signals:
+            print(f"[briefing]   [{a['severity']}] {a['type']}: {a['consulting_angle']}")
+
     # 6. Get recent change events for temporal context
     recent_changes = get_recent_changes(conn, dossier["id"], limit=15)
     if recent_changes:
@@ -222,6 +229,7 @@ def generate_briefing(company_name, db_path="intel.db"):
         hiring_snapshots=hiring_snapshots,
         data_confidence=data_confidence,
         algo_scores=algo_scores,
+        anomaly_signals=anomaly_signals,
     )
     if recent_changes:
         changes_text = "\n".join([

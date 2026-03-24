@@ -121,20 +121,24 @@ def _matches_any(text, keywords):
 # ---------------------------------------------------------------------------
 
 def _score_tech_modernity(hiring_stats, techstack_kf, profile_kf, hiring_kf):
-    """Score Tech Modernity (0-100)."""
+    """Score Tech Modernity (0-100).
+
+    Sector is an additive bonus, not a floor — so a legacy SaaS company can
+    still score poorly if their hiring/stack signals are weak.
+    """
     signals = []
     missing = []
-    floor = 0
 
     sector = _sector_text(profile_kf, hiring_kf)
 
-    # --- Sector floor ---
+    # --- Sector bonus (additive, not floor) ---
+    sector_pts = 0
     if _matches_any(sector, AI_NATIVE_KEYWORDS):
-        floor = 90
-        signals.append(f"AI-native sector '{sector}' → floor 90")
+        sector_pts = 25
+        signals.append(f"AI-native sector '{sector}' → +25 pts")
     elif _matches_any(sector, SOFTWARE_KEYWORDS):
-        floor = 80
-        signals.append(f"Software sector '{sector}' → floor 80")
+        sector_pts = 15
+        signals.append(f"Software sector '{sector}' → +15 pts")
 
     # --- Engineering ratio ---
     eng_pts = 0
@@ -196,10 +200,9 @@ def _score_tech_modernity(hiring_stats, techstack_kf, profile_kf, hiring_kf):
     else:
         missing.append("techstack")
 
-    # --- Combine ---
-    raw = eng_pts + stack_pts + infra_pts + monitoring_pts
-    base = _clamp(50 + raw)
-    final = max(floor, base)
+    # --- Combine (additive from base 30, no floor) ---
+    raw = sector_pts + eng_pts + stack_pts + infra_pts + monitoring_pts
+    final = _clamp(30 + raw)
 
     # Confidence: how many signal sources were present
     sources_present = sum([
@@ -212,21 +215,24 @@ def _score_tech_modernity(hiring_stats, techstack_kf, profile_kf, hiring_kf):
     return {
         "algorithmic_score": final,
         "confidence": confidence,
-        "signals_used": signals if signals else ["No signals available — defaulting to 50"],
+        "signals_used": signals if signals else ["No signals available — defaulting to 30"],
         "missing_analyses": sorted(set(missing)),
     }
 
 
 def _score_data_analytics(hiring_stats, techstack_kf, profile_kf, hiring_kf):
-    """Score Data & Analytics (0-100)."""
+    """Score Data & Analytics (0-100).
+
+    Sector bonus for data-product companies; no floor override.
+    """
     signals = []
     missing = []
-    floor = 0
 
     sector = _sector_text(profile_kf, hiring_kf)
+    sector_pts = 0
     if _matches_any(sector, DATA_PRODUCT_KEYWORDS):
-        floor = 85
-        signals.append(f"Data-product sector '{sector}' → floor 85")
+        sector_pts = 20
+        signals.append(f"Data-product sector '{sector}' → +20 pts")
 
     # --- Data role hiring ---
     data_hiring_pts = 0
@@ -281,10 +287,9 @@ def _score_data_analytics(hiring_stats, techstack_kf, profile_kf, hiring_kf):
     else:
         missing.append("techstack")
 
-    # --- Combine ---
-    raw = data_hiring_pts + tag_bonus + tooling_pts
-    base = _clamp(20 + raw)
-    final = max(floor, base)
+    # --- Combine (additive from base 15, no floor) ---
+    raw = sector_pts + data_hiring_pts + tag_bonus + tooling_pts
+    final = _clamp(15 + raw)
 
     sources_present = sum([
         hiring_stats is not None,
@@ -296,21 +301,24 @@ def _score_data_analytics(hiring_stats, techstack_kf, profile_kf, hiring_kf):
     return {
         "algorithmic_score": final,
         "confidence": confidence,
-        "signals_used": signals if signals else ["No signals available — defaulting to 20"],
+        "signals_used": signals if signals else ["No signals available — defaulting to 15"],
         "missing_analyses": sorted(set(missing)),
     }
 
 
 def _score_ai_readiness(hiring_stats, patents_kf, profile_kf, hiring_kf):
-    """Score AI Readiness (0-100)."""
+    """Score AI Readiness (0-100).
+
+    Sector bonus for AI-native companies; no floor override.
+    """
     signals = []
     missing = []
-    floor = 0
 
     sector = _sector_text(profile_kf, hiring_kf)
+    sector_pts = 0
     if _matches_any(sector, AI_NATIVE_KEYWORDS):
-        floor = 92
-        signals.append(f"AI-native sector '{sector}' → floor 92")
+        sector_pts = 30
+        signals.append(f"AI-native sector '{sector}' → +30 pts")
 
     # --- AI/ML hiring ---
     ai_hiring_pts = 0
@@ -375,10 +383,9 @@ def _score_ai_readiness(hiring_stats, patents_kf, profile_kf, hiring_kf):
     else:
         missing.append("patents")
 
-    # --- Combine ---
-    raw = ai_hiring_pts + patent_pts
-    base = _clamp(15 + raw)
-    final = max(floor, base)
+    # --- Combine (additive from base 10, no floor) ---
+    raw = sector_pts + ai_hiring_pts + patent_pts
+    final = _clamp(10 + raw)
 
     sources_present = sum([
         hiring_stats is not None,
@@ -390,7 +397,7 @@ def _score_ai_readiness(hiring_stats, patents_kf, profile_kf, hiring_kf):
     return {
         "algorithmic_score": final,
         "confidence": confidence,
-        "signals_used": signals if signals else ["No signals available — defaulting to 15"],
+        "signals_used": signals if signals else ["No signals available — defaulting to 10"],
         "missing_analyses": sorted(set(missing)),
     }
 
@@ -484,6 +491,174 @@ def _score_org_readiness(hiring_stats, hiring_kf, sentiment_kf):
         "signals_used": signals if signals else ["No signals available — defaulting to 15"],
         "missing_analyses": sorted(set(missing)),
     }
+
+
+# ---------------------------------------------------------------------------
+# Anomaly detection — structural signals that indicate consulting needs
+# regardless of Digital Maturity Score
+# ---------------------------------------------------------------------------
+
+SENIOR_SENIORITIES = frozenset({"Director", "VP", "C-Suite"})
+
+
+def compute_anomaly_signals(hiring_stats, all_key_facts):
+    """Detect structural anomalies that may indicate consulting opportunities.
+
+    These are independent of the DMS — a company scoring 95 can still have
+    anomalies that represent real engagement hooks (org design, change mgmt, etc.).
+
+    Returns list of dicts: {type, severity, signal, consulting_angle}
+    """
+    anomalies = []
+    hiring_kf = all_key_facts.get("hiring", {})
+    sentiment_kf = all_key_facts.get("sentiment", {})
+
+    if not hiring_stats:
+        return anomalies
+
+    dept_counts = hiring_stats.get("dept_counts", {})
+    total = hiring_stats.get("total_roles", 0)
+    seniority_counts = hiring_stats.get("seniority_counts", {})
+    stag_counts = hiring_stats.get("strategic_tag_counts", {})
+
+    # --- 1. Engineering-heavy org (>60%) ---
+    eng_count = dept_counts.get("Engineering", 0)
+    if total >= 10:
+        eng_pct = eng_count * 100 / total
+        if eng_pct >= 60:
+            anomalies.append({
+                "type": "engineering_heavy",
+                "severity": "notable",
+                "signal": (
+                    f"Engineering is {eng_pct:.0f}% of all open roles ({eng_count}/{total}). "
+                    f"Company may be underinvesting in go-to-market, operations, or people functions."
+                ),
+                "consulting_angle": "Org design, GTM strategy, operational scaling",
+            })
+
+    # --- 2. Top-heavy seniority (Director+ >= 15% of hiring) ---
+    if total >= 20:
+        senior_count = sum(seniority_counts.get(s, 0) for s in SENIOR_SENIORITIES)
+        senior_pct = senior_count * 100 / total
+        if senior_pct >= 15:
+            anomalies.append({
+                "type": "top_heavy_seniority",
+                "severity": "notable",
+                "signal": (
+                    f"Director+ roles are {senior_pct:.0f}% of hiring ({senior_count}/{total}). "
+                    f"May indicate leadership restructuring, exec churn, or rapid management build-out."
+                ),
+                "consulting_angle": "Leadership advisory, org restructuring, executive coaching",
+            })
+
+    # --- 3. Entry-heavy with few senior (inverse top-heavy — scaling without leaders) ---
+    if total >= 30:
+        entry_count = seniority_counts.get("Entry", 0)
+        senior_plus = sum(seniority_counts.get(s, 0) for s in SENIOR_SENIORITIES)
+        entry_pct = entry_count * 100 / total
+        senior_plus_pct = senior_plus * 100 / total
+        if entry_pct >= 40 and senior_plus_pct < 5:
+            anomalies.append({
+                "type": "scaling_without_leaders",
+                "severity": "notable",
+                "signal": (
+                    f"Entry-level is {entry_pct:.0f}% of hiring but Director+ is only "
+                    f"{senior_plus_pct:.0f}%. Rapid headcount growth without proportional "
+                    f"leadership investment."
+                ),
+                "consulting_angle": "Management training, leadership pipeline, org design for scale",
+            })
+
+    # --- 4. Low growth signal ratio → replacement churn ---
+    growth_ratio_pct = _parse_pct(hiring_stats.get("growth_signal_ratio", ""))
+    if growth_ratio_pct is not None and growth_ratio_pct < 20 and total >= 30:
+        anomalies.append({
+            "type": "replacement_churn",
+            "severity": "warning",
+            "signal": (
+                f"Only {growth_ratio_pct:.0f}% of {total} open roles are net-new (growth). "
+                f"Most hiring appears to be backfill/replacement, suggesting retention issues."
+            ),
+            "consulting_angle": "Retention strategy, employer brand, compensation benchmarking, exit interview analysis",
+        })
+
+    # --- 5. Single department surge (any dept >40% of hiring, excluding engineering) ---
+    for dept, count in dept_counts.items():
+        if dept == "Engineering":
+            continue
+        if total >= 15 and count >= 10:
+            dept_pct = count * 100 / total
+            if dept_pct >= 40:
+                anomalies.append({
+                    "type": "dept_surge",
+                    "severity": "notable",
+                    "signal": (
+                        f"{dept} is {dept_pct:.0f}% of all hiring ({count}/{total}). "
+                        f"Major build-out in a single function."
+                    ),
+                    "consulting_angle": f"Scaling support for {dept}, process design, talent strategy",
+                })
+
+    # --- 6. AI/ML hiring without data foundation ---
+    ai_ml_count = hiring_stats.get("ai_ml_role_count", 0)
+    if ai_ml_count >= 5:
+        subcat_counts = hiring_stats.get("subcategory_counts", {})
+        data_roles = sum(subcat_counts.get(s, 0) for s in DATA_SUBCATEGORIES)
+        has_data_tag = stag_counts.get("Data Infrastructure", 0) > 0
+        if data_roles < 3 and not has_data_tag:
+            anomalies.append({
+                "type": "ai_without_data_foundation",
+                "severity": "warning",
+                "signal": (
+                    f"Hiring {ai_ml_count} AI/ML roles but only {data_roles} data roles "
+                    f"and no 'Data Infrastructure' tag. May be building AI capability "
+                    f"without adequate data foundation."
+                ),
+                "consulting_angle": "Data strategy, data platform modernization, MLOps, data governance",
+            })
+
+    # --- 7. Fast growth + negative sentiment → change management ---
+    hiring_trend = (hiring_kf.get("hiring_trend") or "").lower()
+    if sentiment_kf:
+        overall_sentiment = (sentiment_kf.get("overall_sentiment") or "").lower()
+        if hiring_trend == "growing" and overall_sentiment == "negative":
+            anomalies.append({
+                "type": "growth_sentiment_gap",
+                "severity": "warning",
+                "signal": (
+                    "Rapid hiring growth combined with negative employee sentiment. "
+                    "Classic signs of scaling pain — culture dilution, process gaps, or burnout."
+                ),
+                "consulting_angle": "Change management, culture integration, org design for hypergrowth",
+            })
+
+        # Low Glassdoor regardless of other signals
+        glassdoor = sentiment_kf.get("glassdoor_rating")
+        if isinstance(glassdoor, (int, float)) and glassdoor < 3.0:
+            anomalies.append({
+                "type": "low_glassdoor",
+                "severity": "warning",
+                "signal": (
+                    f"Glassdoor rating {glassdoor}/5 signals significant employee dissatisfaction."
+                ),
+                "consulting_angle": "Employee experience transformation, leadership coaching, workplace strategy",
+            })
+
+    # --- 8. Many strategic tags but no clear focus (>5 different tags active) ---
+    active_tags = [t for t, c in stag_counts.items() if c > 0]
+    if len(active_tags) >= 6:
+        anomalies.append({
+            "type": "strategic_sprawl",
+            "severity": "notable",
+            "signal": (
+                f"{len(active_tags)} different strategic investment tags detected: "
+                f"{', '.join(sorted(active_tags)[:6])}. Company may be spreading investment "
+                f"across too many fronts."
+            ),
+            "consulting_angle": "Strategic prioritization, portfolio rationalization, program management",
+        })
+
+    return anomalies
 
 
 # ---------------------------------------------------------------------------

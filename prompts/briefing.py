@@ -182,9 +182,40 @@ def _format_algo_scores_block(algo_scores):
     return "\n".join(lines)
 
 
+def _format_anomaly_signals_block(anomaly_signals):
+    """Format structural anomaly signals into a prompt section for the LLM."""
+    if not anomaly_signals:
+        return ""
+
+    lines = [
+        "",
+        "---",
+        "",
+        "STRUCTURAL ANOMALY SIGNALS (algorithmically detected — use these to inform engagement opportunities):",
+        "",
+        "These anomalies were detected from the hiring data INDEPENDENTLY of the Digital Maturity Score.",
+        "A company can score 95 on digital maturity and still have structural problems that create",
+        "real consulting opportunities. Use these signals when generating engagement_opportunities.",
+        "",
+    ]
+
+    for a in anomaly_signals:
+        severity = a.get("severity", "notable").upper()
+        lines.append(f"  [{severity}] {a['signal']}")
+        lines.append(f"    → Consulting angle: {a['consulting_angle']}")
+        lines.append("")
+
+    lines.append("Use these signals alongside the report evidence when generating engagement_opportunities.")
+    lines.append("Anomalies marked [WARNING] should be strongly considered for HIGH priority opportunities.")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 def build_briefing_prompt(company_name, all_key_facts, report_summaries,
                           hiring_stats=None, hiring_snapshots=None,
-                          data_confidence=None, algo_scores=None):
+                          data_confidence=None, algo_scores=None,
+                          anomaly_signals=None):
     """Build the intelligence briefing prompt.
 
     Args:
@@ -195,6 +226,7 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries,
         hiring_snapshots: list of historical snapshot dicts (most recent first) or None
         data_confidence: dict with jobs_analyzed, scrape_source, analyses_available, etc. or None
         algo_scores: dict from compute_dms_scores() or None
+        anomaly_signals: list of anomaly dicts from compute_anomaly_signals() or None
     """
     # Format key facts with source labels
     facts_lines = []
@@ -408,7 +440,7 @@ Labels (direct, no sugarcoating — these should make a C-suite exec pay attenti
 - 20-39: "Digital Laggard"
 - 0-19: "Digital Liability"
 
----
+{_format_anomaly_signals_block(anomaly_signals)}---
 
 ENGAGEMENT OPPORTUNITY MAPPING:
 
