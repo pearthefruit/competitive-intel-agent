@@ -6,6 +6,7 @@ import httpx
 from bs4 import BeautifulSoup
 from urllib.parse import urlencode
 from scraper.workday import detect_workday
+from scraper.custom_api import lookup_custom_scraper
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
@@ -78,6 +79,25 @@ def detect_ats_board(company_name):
 
     Returns (ats_type, board_url, job_count) or (None, None, 0) if not found.
     """
+    # Check custom company APIs first (Amazon, Jane Street, etc.)
+    custom = lookup_custom_scraper(company_name)
+    if custom:
+        registry_key, scraper_cls, detect_url = custom
+        print(f"[detect] Known custom API for {company_name} ({registry_key})")
+        try:
+            resp = httpx.get(
+                detect_url,
+                headers={"User-Agent": USER_AGENT},
+                timeout=8,
+                follow_redirects=True,
+            )
+            if resp.status_code == 200:
+                print(f"[detect] Found! Custom API confirmed for {registry_key}")
+                return registry_key, detect_url, 0
+        except Exception:
+            pass
+        print(f"[detect] Custom API probe failed, falling back to generic detection")
+
     slugs = _generate_slugs(company_name)
     http = httpx.Client(
         headers={"User-Agent": USER_AGENT},

@@ -110,6 +110,8 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     status TEXT NOT NULL,
     error TEXT,
     caller TEXT,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -133,6 +135,8 @@ def _migrate_db(conn):
         ("dossiers", "briefing_json", "TEXT"),
         ("dossiers", "briefing_generated_at", "TIMESTAMP"),
         ("dossiers", "briefing_model", "TEXT"),
+        ("llm_usage", "input_tokens", "INTEGER"),
+        ("llm_usage", "output_tokens", "INTEGER"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -150,13 +154,14 @@ def init_db(db_path="intel.db"):
     conn.close()
 
 
-def log_llm_call(provider, model, key_hint, status, error=None, caller=None, db_path="intel.db"):
+def log_llm_call(provider, model, key_hint, status, error=None, caller=None,
+                  input_tokens=None, output_tokens=None, db_path="intel.db"):
     """Log an LLM API call for usage tracking."""
     try:
         conn = get_connection(db_path)
         conn.execute(
-            "INSERT INTO llm_usage (provider, model, key_hint, status, error, caller) VALUES (?, ?, ?, ?, ?, ?)",
-            (provider, model, key_hint, status, error, caller),
+            "INSERT INTO llm_usage (provider, model, key_hint, status, error, caller, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (provider, model, key_hint, status, error, caller, input_tokens, output_tokens),
         )
         conn.commit()
         conn.close()
@@ -172,7 +177,9 @@ def get_llm_usage_stats(db_path="intel.db"):
 
         # Today's calls by provider/model
         today_rows = conn.execute(
-            """SELECT provider, model, key_hint, status, COUNT(*) as cnt
+            """SELECT provider, model, key_hint, status, COUNT(*) as cnt,
+                      COALESCE(SUM(input_tokens), 0) as input_tokens,
+                      COALESCE(SUM(output_tokens), 0) as output_tokens
                FROM llm_usage WHERE DATE(created_at) = ?
                GROUP BY provider, model, key_hint, status
                ORDER BY cnt DESC""",
@@ -181,13 +188,21 @@ def get_llm_usage_stats(db_path="intel.db"):
 
         # Today's totals
         today_total = conn.execute(
-            "SELECT COUNT(*) as total, SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as success FROM llm_usage WHERE DATE(created_at) = ?",
+            """SELECT COUNT(*) as total,
+                      SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as success,
+                      COALESCE(SUM(input_tokens), 0) as input_tokens,
+                      COALESCE(SUM(output_tokens), 0) as output_tokens
+               FROM llm_usage WHERE DATE(created_at) = ?""",
             (today,)
         ).fetchone()
 
         # All time totals
         all_total = conn.execute(
-            "SELECT COUNT(*) as total, SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as success FROM llm_usage"
+            """SELECT COUNT(*) as total,
+                      SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as success,
+                      COALESCE(SUM(input_tokens), 0) as input_tokens,
+                      COALESCE(SUM(output_tokens), 0) as output_tokens
+               FROM llm_usage"""
         ).fetchone()
 
         # Recent errors
@@ -214,12 +229,16 @@ def get_llm_usage_stats(db_path="intel.db"):
             "today": {
                 "total": today_total["total"] if today_total else 0,
                 "success": today_total["success"] if today_total else 0,
+                "input_tokens": today_total["input_tokens"] if today_total else 0,
+                "output_tokens": today_total["output_tokens"] if today_total else 0,
                 "by_provider": [dict(r) for r in today_rows],
                 "hourly": [dict(r) for r in hourly],
             },
             "all_time": {
                 "total": all_total["total"] if all_total else 0,
                 "success": all_total["success"] if all_total else 0,
+                "input_tokens": all_total["input_tokens"] if all_total else 0,
+                "output_tokens": all_total["output_tokens"] if all_total else 0,
             },
             "recent_errors": [dict(r) for r in recent_errors],
         }

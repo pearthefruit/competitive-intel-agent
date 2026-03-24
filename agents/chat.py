@@ -199,23 +199,50 @@ CHAT_PROVIDERS = [
     {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-pro"},
     {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-3.1-pro-preview"},
     {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
+    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-3.1-flash-lite-preview"},
     # --- Groq (fast inference, OpenAI-compatible) ---
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "openai/gpt-oss-120b"},
     {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
     {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "meta-llama/llama-4-scout-17b-16e-instruct"},
     {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "qwen/qwen3-32b"},
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "openai/gpt-oss-20b"},
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "moonshotai/kimi-k2-instruct-0905"},
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.1-8b-instant"},
     {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "compound-beta"},
+    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "compound-beta-mini"},
     # --- Cerebras (fast inference) ---
-    {"name": "cerebras", "env_key": "CEREBRAS_API_KEY", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "llama-3.3-70b"},
-    # --- Mistral (direct API, free tier) ---
+    {"name": "cerebras", "env_key": "CEREBRAS_API_KEY", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "qwen-3-235b-a22b-instruct-2507"},
+    {"name": "cerebras", "env_key": "CEREBRAS_API_KEY", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "gpt-oss-120b"},
+    {"name": "cerebras", "env_key": "CEREBRAS_API_KEY", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "zai-glm-4.7"},
+    {"name": "cerebras", "env_key": "CEREBRAS_API_KEY", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "llama3.1-8b"},
+    # --- Mistral (direct API) ---
+    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-large-latest"},
+    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-medium-latest"},
     {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
+    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "magistral-medium-latest"},
+    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "magistral-small-latest"},
+    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "ministral-14b-latest"},
+    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "ministral-8b-latest"},
+    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "open-mistral-nemo"},
     # --- OpenRouter (free models) ---
     {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "nousresearch/hermes-3-llama-3.1-405b:free"},
-    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "nvidia/nemotron-3-super-120b-a12b:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "openai/gpt-oss-120b:free"},
     {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "qwen/qwen3-next-80b-a3b-instruct:free"},
-    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "mistralai/mistral-small-3.1-24b-instruct:free"},
-    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "stepfun/step-3.5-flash:free"},
-    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "google/gemma-3-27b-it:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "arcee-ai/trinity-large-preview:free"},
     {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "nvidia/nemotron-3-nano-30b-a3b:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "google/gemma-3-27b-it:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "z-ai/glm-4.5-air:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "mistralai/mistral-small-3.1-24b-instruct:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "openai/gpt-oss-20b:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "minimax/minimax-m2.5:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "stepfun/step-3.5-flash:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "arcee-ai/trinity-mini:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "google/gemma-3-12b-it:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "nvidia/nemotron-nano-9b-v2:free"},
+    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "qwen/qwen3-coder:free"},
 ]
 
 
@@ -229,8 +256,8 @@ class ChatLLM:
             raw_key = os.environ.get(p["env_key"], "").strip()
             if not raw_key:
                 continue
-            # Gemini supports multiple comma-separated keys — rotate through them
-            if p["name"] == "gemini" and "," in raw_key:
+            # Expand comma-separated keys for all providers
+            if "," in raw_key:
                 for k in raw_key.split(","):
                     k = k.strip()
                     if k:
@@ -258,11 +285,16 @@ class ChatLLM:
                 else:
                     result = self._chat_openai(p, messages, tools, force_tools=force_tools)
                 tc_count = len(result.get("tool_calls") or [])
+                in_tok = result.pop("_input_tokens", None)
+                out_tok = result.pop("_output_tokens", None)
+                tok_str = f" [{in_tok}→{out_tok} tok]" if in_tok else ""
                 print(f"[chat] OK {p['name']}/{p['model']}"
-                      + (f" → {tc_count} tool call(s)" if tc_count else " → text response"))
+                      + (f" → {tc_count} tool call(s)" if tc_count else " → text response")
+                      + tok_str)
                 from db import log_llm_call
                 key_hint = p["key"][-4:] if len(p["key"]) >= 4 else "****"
-                log_llm_call(p["name"], p["model"], key_hint, "success", caller="chat")
+                log_llm_call(p["name"], p["model"], key_hint, "success", caller="chat",
+                             input_tokens=in_tok, output_tokens=out_tok)
                 return result
             except Exception as e:
                 error_str = str(e)
@@ -324,7 +356,14 @@ class ChatLLM:
                 err_detail = resp.text[:200]
             raise RuntimeError(f"{resp.status_code} — {err_detail}")
 
-        return resp.json()["choices"][0]["message"]
+        resp_json = resp.json()
+        result = resp_json["choices"][0]["message"]
+        # Attach token usage for logging
+        usage = resp_json.get("usage")
+        if usage:
+            result["_input_tokens"] = usage.get("prompt_tokens")
+            result["_output_tokens"] = usage.get("completion_tokens")
+        return result
 
     def _chat_gemini(self, provider, messages, tools=None, force_tools=False):
         """Gemini native chat completion with function calling."""
@@ -362,7 +401,15 @@ class ChatLLM:
             )
 
         # Convert back to OpenAI format (no lock needed for pure data conversion)
-        return _gemini_response_to_openai(response)
+        result = _gemini_response_to_openai(response)
+        # Attach token usage for logging
+        try:
+            um = response.usage_metadata
+            result["_input_tokens"] = um.prompt_token_count
+            result["_output_tokens"] = um.candidates_token_count
+        except Exception:
+            pass
+        return result
 
     def close(self):
         self.http.close()

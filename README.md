@@ -2,12 +2,12 @@
 
 A competitive intelligence platform that scrapes job boards, analyzes financials, maps competitors, and generates consulting-ready intelligence briefings — from the terminal or a three-pane web dashboard.
 
-Built with Python, Flask, and free LLM APIs (Gemini, Groq, Cerebras, Mistral, OpenRouter) with public data sources (SEC EDGAR, PatentsView, DuckDuckGo, Reddit, HackerNews, YouTube).
+Built with Python, Flask, and free LLM APIs (Gemini, Groq, Cerebras, Mistral, OpenRouter) with public data sources (SEC EDGAR, PatentsView, DuckDuckGo, Reddit, HackerNews, YouTube, 1Point3Acres).
 
 ## Features
 
 ### Job Intelligence
-- **Auto-detect ATS boards** — Greenhouse, Lever, Ashby, with LinkedIn fallback
+- **Auto-detect ATS boards** — Custom APIs (Amazon, Jane Street) → Greenhouse, Lever, Ashby → Workday → LinkedIn fallback
 - **LLM classification** — department, seniority, skills, strategic signals
 - **Strategic reports** — hiring patterns, growth signals, org structure insights
 
@@ -16,7 +16,7 @@ Built with Python, Flask, and free LLM APIs (Gemini, Groq, Cerebras, Mistral, Op
 |------|--------|-------------|
 | `financial` | SEC EDGAR / web search | Revenue, profitability, R&D, cash position (public); funding & valuation (private) |
 | `competitors` | Web search + LLM | Competitive landscape, differentiators, market positioning |
-| `sentiment` | Web search + LLM | Employee reviews, workplace culture, Glassdoor themes |
+| `sentiment` | Web + Reddit + HN + Blind + 1P3A | Employee reviews, workplace culture, interview experiences |
 | `patents` | USPTO PatentsView | Innovation areas, IP strategy, filing trends |
 | `pricing` | Site crawl + LLM | Pricing tiers, feature matrix, positioning strategy |
 | `seo` | Site crawl + LLM | On-page SEO signals, structured data, AI-readiness |
@@ -63,16 +63,19 @@ competitive-intel-agent/
 │   └── compare.py          # Head-to-head comparison + landscape analysis
 ├── scraper/                # Data collection modules
 │   ├── ats_api.py          # Greenhouse, Lever, Ashby APIs
-│   ├── detect.py           # ATS type auto-detection
+│   ├── custom_api.py       # Custom company APIs (Amazon, Jane Street) with extensible registry
+│   ├── detect.py           # ATS auto-detection: custom APIs → Greenhouse/Lever/Ashby → Workday → LinkedIn
 │   ├── linkedin.py         # LinkedIn guest API scraper
+│   ├── workday.py          # Workday ATS API scraper
 │   ├── sec_edgar.py        # SEC EDGAR XBRL API client
 │   ├── stock_data.py       # Stock price data via yfinance
 │   ├── patents.py          # USPTO PatentsView + Google Patents
 │   ├── site_crawler.py     # Generic website crawler (httpx + BS4)
 │   ├── tech_detect.py      # Technology fingerprinting
 │   ├── web_search.py       # DuckDuckGo search wrapper (news, web, reddit, youtube)
-│   ├── reddit_rss.py       # Reddit RSS feed scraper (direct, bypasses DDG)
-│   ├── hackernews.py       # HackerNews Algolia API search + comments
+│   ├── reddit_rss.py       # Reddit RSS feed scraper with comment fetching
+│   ├── hackernews.py       # HackerNews Algolia API search + comment fetching
+│   ├── onepoint3acres.py   # 1Point3Acres interview experience scraper (Chinese tech community)
 │   └── youtube.py          # YouTube search + transcript extraction
 ├── prompts/                # LLM prompt templates
 │   ├── chat.py             # System prompt, condensed prompt, tool schemas + tiered selection for chat agent

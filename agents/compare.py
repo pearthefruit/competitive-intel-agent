@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier, get_temporal_context
+from agents.llm import generate_text, save_to_dossier, get_temporal_context, FAST_CHAIN
 from agents.financial import financial_analysis
 from agents.competitors import competitor_analysis
 from agents.sentiment import sentiment_analysis
@@ -159,7 +159,7 @@ def _profile_lookup(company):
 
     search_text = format_search_results(results)
     prompt = build_profile_lookup_prompt(company, search_text)
-    text, _ = generate_text(prompt, timeout=30)
+    text, _ = generate_text(prompt, timeout=30, chain=FAST_CHAIN)
 
     text = _parse_json_response(text)
     try:
@@ -211,7 +211,7 @@ def _extract_competitor_names(company, top_n=3):
     search_text = format_search_results(all_results)
     prompt = build_extract_competitors_prompt(company, search_text, company_profile=profile)
 
-    text, _ = generate_text(prompt, timeout=30)
+    text, _ = generate_text(prompt, timeout=30, chain=FAST_CHAIN)
 
     # Parse JSON from response
     text = _parse_json_response(text)

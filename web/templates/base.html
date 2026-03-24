@@ -1674,9 +1674,11 @@
         }
         .md-content hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
         .md-content blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--text-muted); margin: 8px 0; }
-        .md-content table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
-        .md-content th { text-align: left; padding: 8px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); font-weight: 600; }
+        .md-content table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; overflow-x: auto; display: block; }
+        .md-content th { text-align: left; padding: 8px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); font-weight: 600; white-space: nowrap; }
         .md-content td { padding: 8px 12px; border: 1px solid var(--border); color: var(--text-secondary); }
+        .md-content tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+        .md-content td:nth-child(n+2) { text-align: right; font-variant-numeric: tabular-nums; }
         .md-content code { background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px; font-size: 14px; }
         .md-content pre { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 6px; padding: 14px; overflow-x: auto; font-size: 14px; margin: 12px 0; }
         .md-content pre code { background: none; padding: 0; }
@@ -2391,8 +2393,11 @@ async function refreshUsageBadge() {
         const total = t.total || 0;
         const success = t.success || 0;
         const failed = total - success;
+        const totalTokens = (t.input_tokens || 0) + (t.output_tokens || 0);
 
-        badge.textContent = `${total} calls`;
+        // Badge shows calls + token count
+        const tokStr = totalTokens > 0 ? ` · ${_fmtTok(totalTokens)}` : '';
+        badge.textContent = `${total} calls${tokStr}`;
         badge.classList.remove('warning', 'danger');
         if (failed > 5) badge.classList.add('danger');
         else if (failed > 0) badge.classList.add('warning');
@@ -2404,14 +2409,21 @@ async function refreshUsageBadge() {
         html += `<div class="llm-usage-row"><span>Total calls</span><span class="cnt">${total}</span></div>`;
         html += `<div class="llm-usage-row"><span>Successful</span><span class="cnt">${success}</span></div>`;
         if (failed) html += `<div class="llm-usage-row error"><span>Failed/Rate-limited</span><span class="cnt">${failed}</span></div>`;
+        if (totalTokens > 0) {
+            html += `<div class="llm-usage-row"><span>Input tokens</span><span class="cnt">${_fmtTok(t.input_tokens||0)}</span></div>`;
+            html += `<div class="llm-usage-row"><span>Output tokens</span><span class="cnt">${_fmtTok(t.output_tokens||0)}</span></div>`;
+            html += `<div class="llm-usage-row"><span>Total tokens</span><span class="cnt" style="color:#a855f7">${_fmtTok(totalTokens)}</span></div>`;
+        }
 
-        // By provider
+        // By provider — with per-model token counts
         const byProvider = {};
         (t.by_provider || []).forEach(r => {
             const key = `${r.provider}/${r.model}`;
-            if (!byProvider[key]) byProvider[key] = { success: 0, fail: 0 };
+            if (!byProvider[key]) byProvider[key] = { success: 0, fail: 0, in_tok: 0, out_tok: 0 };
             if (r.status === 'success') byProvider[key].success += r.cnt;
             else byProvider[key].fail += r.cnt;
+            byProvider[key].in_tok += (r.input_tokens || 0);
+            byProvider[key].out_tok += (r.output_tokens || 0);
         });
         const providers = Object.entries(byProvider);
         if (providers.length) {
@@ -2419,7 +2431,8 @@ async function refreshUsageBadge() {
             providers.forEach(([name, counts]) => {
                 const short = name.split('/').pop().replace(/-/g, ' ').slice(0, 25);
                 const failStr = counts.fail ? ` <span style="color:#ef4444">(${counts.fail} fail)</span>` : '';
-                html += `<div class="llm-usage-row"><span>${escHtml(short)}</span><span class="cnt">${counts.success}${failStr}</span></div>`;
+                const modelTok = (counts.in_tok + counts.out_tok) > 0 ? ` <span style="color:#a855f7">${_fmtTok(counts.in_tok + counts.out_tok)}</span>` : '';
+                html += `<div class="llm-usage-row"><span>${escHtml(short)}</span><span class="cnt">${counts.success}${failStr}${modelTok}</span></div>`;
             });
         }
 
@@ -2429,7 +2442,7 @@ async function refreshUsageBadge() {
             html += '<div class="llm-usage-divider"></div>';
             html += '<div style="color:#ef4444;font-weight:600;margin-bottom:4px">Recent Errors</div>';
             errors.slice(0, 5).forEach(e => {
-                const time = (e.created_at || '').slice(11, 16);
+                const time = _utcToLocal(e.created_at);
                 const err = (e.error || '').slice(0, 60);
                 html += `<div style="color:var(--text-muted);font-size:11px;margin-bottom:2px">${time} ${escHtml(e.provider)}/${escHtml(e.model?.split('/').pop() || '')} — ${escHtml(err)}</div>`;
             });
@@ -3110,7 +3123,8 @@ function showBriefing(dossier, b, _targetEl) {
         if (Object.keys(deptFocus).length) {
             talHtml += `<div style="margin:8px 0">`;
             const sorted = Object.entries(deptFocus).sort((a, b) => b[1] - a[1]);
-            sorted.forEach(([dept, pct]) => {
+            sorted.forEach(([dept, raw]) => {
+                const pct = String(raw).replace('%', '');
                 talHtml += `<div class="sub-score-row"><span class="sub-score-label">${escHtml(dept)}</span><div class="sub-score-bar"><div class="sub-score-fill" style="width:${pct}%;background:var(--accent)"></div></div><span class="sub-score-value" style="color:var(--text-secondary)">${pct}%</span></div>`;
             });
             talHtml += `</div>`;
@@ -4201,7 +4215,8 @@ function _buildBriefingDashboard(content) {
         const deptFocus = talent.department_focus || {};
         if (Object.keys(deptFocus).length) {
             const sorted = Object.entries(deptFocus).sort((a, b) => b[1] - a[1]);
-            sorted.forEach(([dept, pct]) => {
+            sorted.forEach(([dept, raw]) => {
+                const pct = String(raw).replace('%', '');
                 tHtml += `<div class="sub-score-row"><span class="sub-score-label">${escHtml(dept)}</span><div class="sub-score-bar"><div class="sub-score-fill" style="width:${pct}%;background:var(--accent)"></div></div><span class="sub-score-value" style="color:var(--text-secondary)">${pct}%</span></div>`;
             });
         }
@@ -4510,6 +4525,18 @@ function cleanProgress(text) {
 function escHtml(s) {
     if (!s) return '';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function _fmtTok(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+    return String(n);
+}
+function _utcToLocal(utcStr) {
+    if (!utcStr) return '';
+    try {
+        const d = new Date(utcStr.endsWith('Z') ? utcStr : utcStr + 'Z');
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch { return utcStr.slice(11, 16); }
 }
 
 function formatArgs(args) {

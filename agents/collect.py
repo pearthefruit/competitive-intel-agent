@@ -7,6 +7,7 @@ from scraper.ats_api import detect_ats_type, GreenhouseScraper, LeverScraper, As
 from scraper.linkedin import LinkedInScraper
 from scraper.workday import WorkdayScraper
 from scraper.detect import detect_ats_board
+from scraper.custom_api import CUSTOM_REGISTRY
 from db import init_db, get_connection, upsert_company, insert_job
 
 
@@ -17,6 +18,10 @@ SCRAPERS = {
     'workday': WorkdayScraper,
     'linkedin': LinkedInScraper,
 }
+
+# Add custom company-specific scrapers (Amazon, Jane Street, etc.)
+for _key, _entry in CUSTOM_REGISTRY.items():
+    SCRAPERS[_key] = _entry["scraper"]
 
 LINKEDIN_SEARCH_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
 

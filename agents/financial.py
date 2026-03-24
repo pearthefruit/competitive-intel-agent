@@ -18,40 +18,22 @@ def financial_analysis(company):
     cik_result = lookup_cik(company)
 
     if isinstance(cik_result, list):
-        # Multiple matches — disambiguation needed
+        # Multiple matches — auto-select first (no interactive prompts)
         print(f"[financial] Multiple SEC matches found for '{company}':")
         for i, c in enumerate(cik_result, 1):
             print(f"  {i}. {c['company_name']} (ticker: {c['ticker']}, match: {c['match_type']})")
-
-        # In CLI mode, prompt for selection
-        try:
-            choice = input(f"\nSelect 1-{len(cik_result)}, or 0 for private company search: ").strip()
-            idx = int(choice) - 1
-            if idx < 0:
-                print(f"[financial] Using web search instead")
-                return _analyze_non_sec(company)
-            cik_info = cik_result[idx]
-        except (ValueError, IndexError, EOFError):
-            # Default to first match
-            cik_info = cik_result[0]
-            print(f"[financial] Defaulting to: {cik_info['company_name']}")
-
+        cik_info = cik_result[0]
+        print(f"[financial] Auto-selecting: {cik_info['company_name']}")
         return _analyze_public(company, cik_info)
 
     elif cik_result:
-        # If match is only via ticker and name doesn't obviously match, confirm
+        # If match is only via ticker and name doesn't match, fall back to web search
         if cik_result.get("match_type") == "ticker":
             search_upper = company.strip().upper()
             name_upper = cik_result["company_name"].upper()
             if search_upper not in name_upper:
-                print(f"[financial] Ticker '{cik_result['ticker']}' matches {cik_result['company_name']}")
-                print(f"  Is this the company you meant? (If not, this might be a private company)")
-                try:
-                    confirm = input("  Use this match? (y/n): ").strip().lower()
-                    if confirm != "y":
-                        return _analyze_non_sec(company)
-                except (EOFError, KeyboardInterrupt):
-                    pass
+                print(f"[financial] Ticker '{cik_result['ticker']}' matches {cik_result['company_name']} — name mismatch, using web search instead")
+                return _analyze_non_sec(company)
         return _analyze_public(company, cik_result)
     else:
         print(f"[financial] {company} not found in SEC EDGAR — could be private, foreign-listed, or filed under a different entity name")

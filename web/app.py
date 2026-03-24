@@ -162,7 +162,7 @@ def _summarize_tool_result(tool_name, raw_result):
     if len(raw_result) < 600:
         return raw_result  # Already short — no need to summarize
 
-    from agents.llm import generate_text
+    from agents.llm import generate_text, FAST_CHAIN
     prompt = (
         f"Compress this {tool_name} tool result into a dense 2-3 sentence summary. "
         f"Keep ALL key data points, numbers, company names, and actionable findings. "
@@ -171,7 +171,7 @@ def _summarize_tool_result(tool_name, raw_result):
     )
 
     try:
-        summary = generate_text(prompt, max_tokens=200)
+        summary, _ = generate_text(prompt, timeout=15, chain=FAST_CHAIN)
         if summary and len(summary.strip()) > 30:
             return summary.strip()
     except Exception as e:

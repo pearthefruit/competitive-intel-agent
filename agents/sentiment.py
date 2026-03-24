@@ -7,6 +7,7 @@ from agents.llm import generate_text, save_to_dossier, get_temporal_context
 from scraper.web_search import search_web, search_news, search_reddit, format_search_results
 from scraper.hackernews import search_hackernews
 from scraper.reddit_rss import search_reddit_rss
+from scraper.onepoint3acres import search_1point3acres
 from prompts.sentiment import build_sentiment_prompt
 
 
@@ -55,7 +56,7 @@ def sentiment_analysis(company):
 
     # Reddit — general search + targeted career subreddits
     print("[sentiment] Searching Reddit for candid employee perspectives...")
-    reddit = search_reddit(f"{company} working at employee experience", max_results=3)
+    reddit = search_reddit(f"{company} working at employee experience", max_results=5)
     all_results.extend(reddit)
     if web_count == 0 and reddit:
         print(f"[sentiment] Reddit returned {len(reddit)} results — these tend to be more candid than formal review sites")
@@ -71,6 +72,7 @@ def sentiment_analysis(company):
         f"{company} working culture",
         max_results=5,
         subreddits=career_subs,
+        fetch_comments_top_n=3,
     )
     all_results.extend(career_reddit)
     if career_reddit:
@@ -78,13 +80,20 @@ def sentiment_analysis(company):
 
     # Hacker News (tech community — candid takes on companies)
     print("[sentiment] Searching Hacker News for tech community perspectives...")
-    hn = search_hackernews(f"{company} working culture employees", max_results=3)
+    hn = search_hackernews(f"{company} working culture employees", max_results=5, fetch_comments_top_n=3)
     all_results.extend(hn)
     if web_count == 0 and hn:
         print(f"[sentiment] Hacker News returned {len(hn)} results — useful for tech industry sentiment")
 
+    # 1Point3Acres (Chinese tech community — interview experiences, hiring signals)
+    print("[sentiment] Searching 1Point3Acres for interview experiences...")
+    onepoint3 = search_1point3acres(company, max_results=15)
+    all_results.extend(onepoint3)
+    if onepoint3:
+        print(f"[sentiment] 1Point3Acres returned {len(onepoint3)} interview posts")
+
     if not all_results:
-        print("[sentiment] No results from any source (web, news, Reddit, Blind, Fishbowl, HN)")
+        print("[sentiment] No results from any source (web, news, Reddit, Blind, Fishbowl, HN, 1P3A)")
         return None
 
     # Deduplicate

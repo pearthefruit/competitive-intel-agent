@@ -14,22 +14,56 @@ Write a concise financial intelligence report (700-900 words) with these section
 2-3 sentence overview of the company's financial health, market position, and trajectory. Include market cap if available.
 
 ## Market Valuation
-Current stock price, market cap, enterprise value, and key valuation multiples (P/E, EV/EBITDA, Price/Book). How does the market value this company relative to its fundamentals? Is it trading at a premium or discount? Include 52-week range context.
+Present a summary table, then 1-2 sentences of commentary:
+
+| Metric | Value |
+|--------|-------|
+| Stock Price | $X.XX |
+| Market Cap | $X.XB |
+| P/E Ratio | X.X |
+| EV/EBITDA | X.X |
+| 52-Week Range | $X - $X |
+
+How does the market value this company relative to its fundamentals? Is it trading at a premium or discount?
 
 ## Revenue & Growth
-Revenue trends across quarters/years. Calculate and highlight YoY growth rates. Note acceleration or deceleration.
+Present a table of revenue by period with YoY growth, then commentary:
+
+| Period | Revenue | YoY Growth |
+|--------|---------|------------|
+| FY 2024 | $X.XB | +X.X% |
+| FY 2023 | $X.XB | +X.X% |
+| ... | ... | ... |
+
+Note acceleration or deceleration trends.
 
 ## Profitability
-Operating income, net income, gross profit margins. Are margins expanding or compressing?
+Present a margins table, then commentary:
+
+| Period | Gross Margin | Operating Margin | Net Margin |
+|--------|-------------|-----------------|------------|
+| FY 2024 | X.X% | X.X% | X.X% |
+| ... | ... | ... | ... |
+
+Are margins expanding or compressing?
 
 ## R&D Investment
-R&D spending levels and as % of revenue (if calculable). What does this signal about innovation priorities?
+R&D spending levels and as % of revenue (if calculable). Use a small table if multiple periods are available. What does this signal about innovation priorities?
 
 ## Balance Sheet Strength
-Cash position, total assets vs liabilities. Is the company well-capitalized?
+Present key balance sheet metrics in a table:
+
+| Metric | Value |
+|--------|-------|
+| Cash & Equivalents | $X.XB |
+| Total Assets | $X.XB |
+| Total Liabilities | $X.XB |
+| Debt-to-Equity | X.X |
+
+Is the company well-capitalized?
 
 ## Market Sentiment & Analyst Outlook
-If analyst estimates, price targets, upgrades/downgrades, or news are provided, summarize what the market expects. What do forward revenue estimates and analyst actions signal about the company's trajectory?
+If analyst estimates, price targets, upgrades/downgrades, or news are provided, summarize what the market expects. Use a table for analyst price targets if available. What do forward revenue estimates and analyst actions signal about the company's trajectory?
 
 ## Strategic Implications & Consulting Opportunities
 What do these financials tell us about the company's strategy? Connect financial trends to business decisions. Identify potential consulting engagement opportunities — e.g., margin compression → operational efficiency, flat R&D → innovation strategy, revenue decline → restructuring/transformation, rapid growth → scaling challenges, high capex → digital transformation.
@@ -43,6 +77,7 @@ Rules:
 - Calculate growth rates where consecutive periods are available.
 - Be direct and analytical — this is for competitive intelligence, not investor relations.
 - If data for a section is missing, note it briefly and move on.
+- USE MARKDOWN TABLES for all financial data — tables make numbers scannable. Follow each table with 1-2 sentences of analytical commentary. Do not bury numbers in prose paragraphs.
 
 CITATION FORMAT (like Perplexity — clickable numbered links):
 - Assign each unique source a number (1, 2, 3...).
@@ -85,16 +120,40 @@ Write a strategic financial intelligence report (700-900 words) with these secti
 2-3 sentence overview: financial health, market position, trajectory. Note the stock exchange and market cap.
 
 ## Revenue & Growth Trajectory
-Multi-year revenue trends from the financial statements. Calculate YoY growth rates. Is growth accelerating or decelerating? What do analyst consensus estimates project for the next 1-2 years?
+Present a multi-year revenue table, then commentary:
+
+| Year | Revenue | YoY Growth |
+|------|---------|------------|
+| 2024 | $X.XB | +X.X% |
+| 2023 | $X.XB | +X.X% |
+| ... | ... | ... |
+
+Is growth accelerating or decelerating? What do analyst consensus estimates project for the next 1-2 years?
 
 ## Profitability & Operational Efficiency
-Gross margin, operating margin, and net margin trends over time. Is the company getting more or less efficient? Where is margin pressure coming from (COGS, operating expenses, R&D)?
+Present a margins table, then commentary:
+
+| Year | Gross Margin | Operating Margin | Net Margin |
+|------|-------------|-----------------|------------|
+| 2024 | X.X% | X.X% | X.X% |
+| ... | ... | ... | ... |
+
+Is the company getting more or less efficient? Where is margin pressure coming from?
 
 ## Balance Sheet & Capital Allocation
-Cash position vs debt levels. How is the company deploying capital — R&D, capex, acquisitions, buybacks? Is free cash flow healthy?
+Present key balance sheet metrics in a table:
+
+| Metric | Value |
+|--------|-------|
+| Cash & Equivalents | $X.XB |
+| Total Debt | $X.XB |
+| Net Debt | $X.XB |
+| Free Cash Flow | $X.XB |
+
+How is the company deploying capital — R&D, capex, acquisitions, buybacks?
 
 ## Market Sentiment & Forward Outlook
-Analyst price targets, revenue estimates, recent upgrades/downgrades. What is the market pricing in? Use recent news to contextualize — restructuring announcements, M&A, leadership changes, strategic pivots.
+Analyst price targets, revenue estimates, recent upgrades/downgrades. Use a table for analyst consensus if available. What is the market pricing in?
 
 ## Consulting Engagement Opportunities
 Based on the financial signals, identify 2-3 specific consulting opportunities a firm like McKinsey, EY, or Deloitte might pursue. Be specific — connect each opportunity to a financial trend:
@@ -110,6 +169,7 @@ Rules:
 - Calculate margins and growth rates from the data provided.
 - Be direct and analytical — this is for competitive intelligence, not investor relations.
 - If data for a section is missing, note it briefly and move on.
+- USE MARKDOWN TABLES for all financial data — tables make numbers scannable. Follow each table with 1-2 sentences of analytical commentary. Do not bury numbers in prose paragraphs.
 
 CITATION FORMAT (like Perplexity — clickable numbered links):
 - Assign each unique source URL a number (1, 2, 3...).
@@ -137,13 +197,13 @@ Write a concise financial intelligence report (400-600 words) with these section
 What is publicly known about this company's financial position.
 
 ## Revenue & Growth
-Reported or estimated revenue figures, growth rates, recent earnings.
+Reported or estimated revenue figures, growth rates, recent earnings. If multiple data points are available, present them in a markdown table.
 
 ## Profitability & Financial Health
-Margins, profits, cash position, debt — whatever is available from public reporting or estimates.
+Margins, profits, cash position, debt — whatever is available from public reporting or estimates. Use a table if enough metrics are available.
 
 ## Funding & Valuation
-Known funding rounds, investors, and valuation estimates.
+Known funding rounds, investors, and valuation estimates. If multiple rounds are known, present in a table (Round | Date | Amount | Valuation).
 
 ## Business Model
 How the company makes money, based on available information.
@@ -155,6 +215,7 @@ Rules:
 - Only state what the search results support. Clearly note when information is estimated or unconfirmed.
 - Be direct and analytical.
 - If very little is known, say so — do not speculate extensively.
+- When enough data points exist, use markdown tables to present financial data — tables make numbers scannable.
 
 CITATION FORMAT (like Perplexity — clickable numbered links):
 - Assign each unique source URL a number (1, 2, 3...).

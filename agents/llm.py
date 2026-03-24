@@ -3,6 +3,7 @@
 import os
 import json
 import threading
+from collections import OrderedDict
 from pathlib import Path
 
 import httpx
@@ -18,42 +19,183 @@ from db import (get_connection, get_or_create_dossier, add_dossier_analysis,
                 add_dossier_event, get_previous_key_facts, log_llm_call)
 
 
-# Default chain for regular analyses — saves Gemini quota for briefings
-REPORT_PROVIDERS = [
-    # --- Groq (fast, generous limits) ---
-    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
-    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "meta-llama/llama-4-scout-17b-16e-instruct"},
-    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "qwen/qwen3-32b"},
-    # --- Cerebras (1M tokens/day) ---
-    {"name": "cerebras", "env_key": "CEREBRAS_API_KEY", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "llama-3.3-70b"},
-    # --- Mistral (unlimited daily, slow 2 RPM) ---
-    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
-    # --- Gemini (fallback — prefer saving quota for briefings) ---
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
-    # --- OpenRouter (low daily quota, last resort) ---
-    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "nousresearch/hermes-3-llama-3.1-405b:free"},
-    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "meta-llama/llama-3.3-70b-instruct:free"},
-    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "qwen/qwen3-next-80b-a3b-instruct:free"},
-    {"name": "openrouter", "env_key": "OPENROUTER_API_KEY", "url": "https://openrouter.ai/api/v1/chat/completions", "model": "mistralai/mistral-small-3.1-24b-instruct:free"},
-]
+# Provider definitions — models and endpoints per provider (ordered by capability)
+PROVIDER_DEFS = OrderedDict([
+    ("groq", {
+        "env_key": "GROQ_API_KEY",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "models": [
+            "openai/gpt-oss-120b",
+            "llama-3.3-70b-versatile",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+            "qwen/qwen3-32b",
+            "openai/gpt-oss-20b",
+            "moonshotai/kimi-k2-instruct-0905",
+            "llama-3.1-8b-instant",
+            "compound-beta",
+            "compound-beta-mini",
+        ],
+    }),
+    ("cerebras", {
+        "env_key": "CEREBRAS_API_KEY",
+        "url": "https://api.cerebras.ai/v1/chat/completions",
+        "models": [
+            "qwen-3-235b-a22b-instruct-2507",
+            "gpt-oss-120b",
+            "zai-glm-4.7",
+            "llama3.1-8b",
+        ],
+    }),
+    ("mistral", {
+        "env_key": "MISTRAL_API_KEY",
+        "url": "https://api.mistral.ai/v1/chat/completions",
+        "models": [
+            "mistral-large-latest",
+            "mistral-medium-latest",
+            "mistral-small-latest",
+            "magistral-medium-latest",
+            "magistral-small-latest",
+            "ministral-14b-latest",
+            "ministral-8b-latest",
+            "open-mistral-nemo",
+        ],
+    }),
+    ("gemini", {
+        "env_key": "GEMINI_API_KEYS",
+        "url": None,
+        "models": [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite-preview",
+        ],
+    }),
+    ("openrouter", {
+        "env_key": "OPENROUTER_API_KEY",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "models": [
+            "nousresearch/hermes-3-llama-3.1-405b:free",
+            "nvidia/nemotron-3-super-120b-a12b:free",
+            "openai/gpt-oss-120b:free",
+            "qwen/qwen3-next-80b-a3b-instruct:free",
+            "meta-llama/llama-3.3-70b-instruct:free",
+            "arcee-ai/trinity-large-preview:free",
+            "nvidia/nemotron-3-nano-30b-a3b:free",
+            "google/gemma-3-27b-it:free",
+            "z-ai/glm-4.5-air:free",
+            "mistralai/mistral-small-3.1-24b-instruct:free",
+            "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+            "openai/gpt-oss-20b:free",
+            "minimax/minimax-m2.5:free",
+            "stepfun/step-3.5-flash:free",
+            "arcee-ai/trinity-mini:free",
+            "google/gemma-3-12b-it:free",
+            "nvidia/nemotron-nano-9b-v2:free",
+            "qwen/qwen3-coder:free",
+        ],
+    }),
+])
 
-# Gemini-first chain reserved for intelligence briefings
-BRIEFING_PROVIDERS = [
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash-lite"},
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-2.5-flash"},
-    {"name": "gemini", "env_key": "GEMINI_API_KEYS", "url": None, "model": "gemini-3-flash-preview"},
-    # Fallbacks if Gemini is exhausted
-    {"name": "groq", "env_key": "GROQ_API_KEY", "url": "https://api.groq.com/openai/v1/chat/completions", "model": "llama-3.3-70b-versatile"},
-    {"name": "cerebras", "env_key": "CEREBRAS_API_KEY", "url": "https://api.cerebras.ai/v1/chat/completions", "model": "llama-3.3-70b"},
-    {"name": "mistral", "env_key": "MISTRAL_API_KEY", "url": "https://api.mistral.ai/v1/chat/completions", "model": "mistral-small-latest"},
-]
+# Provider rotation order for regular analyses (saves Gemini quota for briefings)
+REPORT_CHAIN = ["groq", "cerebras", "mistral", "gemini", "openrouter"]
+
+# Gemini-first for intelligence briefings (best structured JSON output)
+BRIEFING_CHAIN = ["gemini", "groq", "cerebras", "mistral", "openrouter"]
+
+# Lightweight chain for classification, extraction, summarization — small/fast models only
+FAST_CHAIN = {
+    "order": ["groq", "cerebras", "mistral", "gemini", "openrouter"],
+    "models": {
+        "groq": [
+            "llama-3.1-8b-instant",
+            "openai/gpt-oss-20b",
+            "compound-beta-mini",
+        ],
+        "cerebras": [
+            "llama3.1-8b",
+        ],
+        "mistral": [
+            "ministral-8b-latest",
+            "ministral-14b-latest",
+            "open-mistral-nemo",
+            "mistral-small-latest",
+        ],
+        "gemini": [
+            "gemini-2.5-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+        ],
+        "openrouter": [
+            "nvidia/nemotron-nano-9b-v2:free",
+            "google/gemma-3-12b-it:free",
+            "arcee-ai/trinity-mini:free",
+            "qwen/qwen3-coder:free",
+        ],
+    },
+}
 
 
-def generate_text(prompt, timeout=60, providers=None, caller=None):
+def _expand_chain(chain):
+    """Expand a chain into a flat provider list with key-round interleaving.
+
+    Pattern per round:
+        provider1/key_N → all models
+        provider2/key_N → all models
+        ...
+    Then next round with key_N+1.
+
+    Accepts either:
+        - list of provider names (uses all models from PROVIDER_DEFS)
+        - dict with "order" (provider names) and "models" (per-provider model subset)
+    """
+    # Handle dict-style chains (e.g., FAST_CHAIN with custom model subsets)
+    if isinstance(chain, dict):
+        order = chain["order"]
+        model_override = chain.get("models", {})
+    else:
+        order = chain
+        model_override = {}
+
+    # Parse keys for each provider in the chain
+    provider_keys = {}
+    for name in order:
+        defn = PROVIDER_DEFS.get(name)
+        if not defn:
+            continue
+        raw = os.environ.get(defn["env_key"], "").strip()
+        if not raw:
+            continue
+        keys = [k.strip() for k in raw.split(",") if k.strip()]
+        if keys:
+            provider_keys[name] = keys
+
+    if not provider_keys:
+        return []
+
+    max_keys = max(len(v) for v in provider_keys.values())
+
+    expanded = []
+    for ki in range(max_keys):
+        for name in order:
+            if name not in provider_keys or ki >= len(provider_keys[name]):
+                continue
+            key = provider_keys[name][ki]
+            defn = PROVIDER_DEFS[name]
+            models = model_override.get(name, defn["models"])
+            for model in models:
+                expanded.append({
+                    "name": name,
+                    "url": defn["url"],
+                    "model": model,
+                    "_key": key,
+                })
+
+    return expanded
+
+
+def generate_text(prompt, timeout=60, chain=None, caller=None):
     """Try providers in order until one works. Returns (text, model_name).
 
-    Gemini entries with comma-separated keys in GEMINI_API_KEYS are expanded
-    so each key is tried before moving to the next provider/model.
+    Uses key-round interleaving: all models per key, then next key.
     """
     # Auto-detect caller from stack if not provided
     if not caller:
@@ -61,22 +203,8 @@ def generate_text(prompt, timeout=60, providers=None, caller=None):
         frame = inspect.currentframe().f_back
         caller = f"{Path(frame.f_code.co_filename).stem}:{frame.f_code.co_name}" if frame else "unknown"
 
-    provider_list = providers or REPORT_PROVIDERS
+    expanded = _expand_chain(chain or REPORT_CHAIN)
     http = httpx.Client(timeout=timeout, follow_redirects=True)
-
-    # Expand comma-separated keys (works for all providers)
-    expanded = []
-    for p in provider_list:
-        raw_key = os.environ.get(p["env_key"], "").strip()
-        if not raw_key:
-            continue
-        if "," in raw_key:
-            for k in raw_key.split(","):
-                k = k.strip()
-                if k:
-                    expanded.append({**p, "_key": k})
-        else:
-            expanded.append({**p, "_key": raw_key})
 
     for p in expanded:
         key = p["_key"]
@@ -91,18 +219,33 @@ def generate_text(prompt, timeout=60, providers=None, caller=None):
                     model = genai.GenerativeModel(p["model"])
                     response = model.generate_content(prompt)
                 http.close()
-                print(f"[llm] ✓ {model_id} (key …{key_hint})")
-                log_llm_call(p["name"], p["model"], key_hint, "success", caller=caller)
+                # Extract token counts from Gemini response
+                in_tok = out_tok = None
+                try:
+                    um = response.usage_metadata
+                    in_tok = um.prompt_token_count
+                    out_tok = um.candidates_token_count
+                except Exception:
+                    pass
+                print(f"[llm] ✓ {model_id} (key …{key_hint})" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
+                log_llm_call(p["name"], p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
                 return response.text, model_id
             else:
                 headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
                 body = {"model": p["model"], "messages": [{"role": "user", "content": prompt}], "temperature": 0.3}
                 resp = http.post(p["url"], json=body, headers=headers)
                 if resp.status_code == 200:
-                    text = resp.json()["choices"][0]["message"]["content"]
+                    resp_json = resp.json()
+                    text = resp_json["choices"][0]["message"]["content"]
+                    # Extract token counts from OpenAI-compatible response
+                    in_tok = out_tok = None
+                    usage = resp_json.get("usage")
+                    if usage:
+                        in_tok = usage.get("prompt_tokens")
+                        out_tok = usage.get("completion_tokens")
                     http.close()
-                    print(f"[llm] ✓ {model_id} (key …{key_hint})")
-                    log_llm_call(p["name"], p["model"], key_hint, "success", caller=caller)
+                    print(f"[llm] ✓ {model_id} (key …{key_hint})" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
+                    log_llm_call(p["name"], p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
                     return text, model_id
                 elif resp.status_code == 429:
                     print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
@@ -127,10 +270,10 @@ def generate_text(prompt, timeout=60, providers=None, caller=None):
     raise RuntimeError("All LLM providers failed for text generation")
 
 
-def generate_json(prompt, timeout=60, providers=None):
+def generate_json(prompt, timeout=60, chain=None):
     """Generate text and parse as JSON. Returns parsed dict/list or None."""
     try:
-        text, _ = generate_text(prompt, timeout=timeout, providers=providers)
+        text, _ = generate_text(prompt, timeout=timeout, chain=chain)
         # Strip markdown code fences if present
         text = text.strip()
         if text.startswith("```"):
@@ -380,7 +523,7 @@ def extract_key_facts(company, report_text, analysis_type=None):
 
     prompt_template = _TYPE_KEY_FACTS_PROMPTS.get(analysis_type, _KEY_FACTS_PROMPT)
     prompt = prompt_template.format(company=company, report_text=report_text)
-    facts = generate_json(prompt, timeout=30)
+    facts = generate_json(prompt, timeout=30, chain=FAST_CHAIN)
 
     if isinstance(facts, dict):
         # Clean out null values

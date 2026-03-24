@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agents.llm import generate_json, BRIEFING_PROVIDERS
+from agents.llm import generate_json, BRIEFING_CHAIN
 from db import (get_connection, get_dossier_by_company, get_latest_key_facts,
                 get_company_id, compute_hiring_stats, get_hiring_snapshots,
                 get_recent_changes)
@@ -71,7 +71,7 @@ def _build_data_confidence(hiring_stats, analyses, company_name, conn):
             if ats in ("greenhouse", "lever", "ashby", "workday"):
                 scrape_coverage = f"{ats.title()} API (full board — all open roles captured)"
             elif ats == "linkedin":
-                scrape_coverage = "LinkedIn guest API (sample — up to 100 of total open roles)"
+                scrape_coverage = f"LinkedIn guest API (found {jobs_analyzed} — scans up to 100)"
             else:
                 scrape_coverage = f"{ats} (coverage unknown)"
 
@@ -222,7 +222,7 @@ def generate_briefing(company_name, db_path="intel.db"):
             f"Incorporate these trends into your Strategic Outlook and Key Opportunities sections. "
             f"Highlight which changes are most strategically significant."
         )
-    briefing = generate_json(prompt, timeout=90, providers=BRIEFING_PROVIDERS)
+    briefing = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN)
 
     if not isinstance(briefing, dict):
         msg = "LLM did not return valid JSON — all providers may be rate-limited or down"

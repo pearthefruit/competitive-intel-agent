@@ -54,7 +54,7 @@ competitive-intel-agent/
 │   ├── analyze.py           # Strategic hiring analysis report
 │   ├── financial.py         # SEC EDGAR / web search financial analysis
 │   ├── competitors.py       # Competitive landscape mapping
-│   ├── sentiment.py         # Employee sentiment (Glassdoor, Reddit, HN)
+│   ├── sentiment.py         # Employee sentiment (Glassdoor, Reddit+comments, HN+comments, Blind, Fishbowl, 1P3A)
 │   ├── patents.py           # USPTO patent portfolio analysis
 │   ├── techstack.py         # Website technology detection + analysis
 │   ├── seo.py               # SEO & AEO audit
@@ -83,10 +83,12 @@ competitive-intel-agent/
 │   ├── stock_data.py        # Stock price data via yfinance
 │   ├── patents.py           # USPTO PatentsView + Google Patents search
 │   ├── ats_api.py           # ATS board scrapers (Greenhouse, Lever, Ashby, Workday, etc.)
+│   ├── custom_api.py        # Custom company-specific careers API scrapers (Amazon, Jane Street) + registry
 │   ├── linkedin.py          # LinkedIn guest API job listing scraper
-│   ├── detect.py            # ATS type auto-detection
-│   ├── reddit_rss.py        # Reddit RSS feed scraper (direct, bypasses DDG)
-│   ├── hackernews.py        # HackerNews Algolia API search + comments
+│   ├── detect.py            # ATS type auto-detection (custom APIs → ATS probes → Workday → LinkedIn)
+│   ├── reddit_rss.py        # Reddit RSS feed scraper with comment fetching (direct, bypasses DDG)
+│   ├── hackernews.py        # HackerNews Algolia API search + comment fetching
+│   ├── onepoint3acres.py    # 1Point3Acres (一亩三分地) interview experience scraper (Chinese tech community)
 │   └── youtube.py           # YouTube search + transcript extraction
 ├── web/
 │   ├── app.py               # Flask app factory, API routes, SSE chat endpoint, tool result summarization
@@ -100,7 +102,7 @@ competitive-intel-agent/
 
 ### Data Flow
 
-1. **Collect:** Scrape job listings from ATS boards → `companies` + `jobs` tables
+1. **Collect:** Scrape job listings from ATS boards (or custom company APIs for Amazon, Jane Street, etc.) → `companies` + `jobs` tables
 2. **Classify:** LLM classifies each job (department, seniority, strategic tags) → `classifications` table
 3. **Analyze:** Generate strategic hiring analysis report → saved to `reports/` + `dossier_analyses`
 4. **Other analyses:** Financial, competitors, sentiment, patents, techstack, SEO, pricing — each produces a report + key facts stored on the dossier
@@ -122,7 +124,7 @@ Type-specific extraction prompts in `agents/llm.py` (9 type-specific + 1 generic
 - **seo:** seo_title_optimization_pct, seo_meta_desc_pct, seo_heading_hierarchy_pct, seo_schema_types, seo_has_faq_schema, seo_has_article_schema, aeo_readiness_signals, seo_overall_assessment, pages_analyzed
 - **pricing:** pricing_model, pricing_tiers, price_range, has_public_pricing, has_free_tier, target_segment
 - **hiring:** total_open_roles, engineering_ratio, ai_ml_ratio, top_departments, top_subcategories, seniority_skew, growth_signal, top_strategic_tags, hiring_trend, notable_shifts, top_skills, primary_locations
-- **sentiment:** overall_sentiment, glassdoor_rating, recommend_to_friend_pct, approve_of_ceo_pct, top_pros, top_cons, culture_themes, notable_concerns, sentiment_trend
+- **sentiment:** overall_sentiment, glassdoor_rating, recommend_to_friend_pct, approve_of_ceo_pct, top_pros, top_cons, culture_themes, notable_concerns, sentiment_trend (sources: Glassdoor snippets, Blind snippets, Fishbowl snippets, Reddit posts+comments, HN stories+comments, 1Point3Acres interview posts, news)
 - **financial:** revenue, revenue_growth, market_cap, valuation, headcount, profitability, cash_position, recent_funding, key_financial_risks, financial_health
 - **competitors:** key_competitors, market_position, competitive_advantages, competitive_weaknesses, market_share, competitive_moat, threat_level
 - **patents:** total_patents, recent_patents, top_patent_areas, ai_ml_patents, patent_trend, notable_patents, rd_intensity

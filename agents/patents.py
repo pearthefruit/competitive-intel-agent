@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, generate_json, save_to_dossier, get_temporal_context
+from agents.llm import generate_text, generate_json, save_to_dossier, get_temporal_context, FAST_CHAIN
 from scraper.patents import (
     search_patents, search_patents_with_name,
     format_patents_for_prompt,
@@ -49,7 +49,7 @@ Example output for "Google":
 
 Return ONLY a JSON array of strings, nothing else."""
 
-    result = generate_json(prompt)
+    result = generate_json(prompt, chain=FAST_CHAIN)
     if isinstance(result, list) and result:
         return [str(q) for q in result[:12]]
 
