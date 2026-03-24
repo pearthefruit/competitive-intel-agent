@@ -49,6 +49,7 @@ competitive-intel-agent/
 │   ├── llm.py               # LLM provider rotation, generate_text/generate_json, save_to_dossier, key facts extraction, change detection
 │   ├── chat.py              # Agentic chat with Gemini function calling (ChatLLM class)
 │   ├── briefing.py          # Intelligence briefing generator (Digital Maturity Score)
+│   ├── scoring.py           # Algorithmic DMS base scores (deterministic, runs before LLM)
 │   ├── collect.py           # Job scraping from ATS boards
 │   ├── classify.py          # Job classification (department, seniority, strategic tags)
 │   ├── analyze.py           # Strategic hiring analysis report
@@ -63,7 +64,7 @@ competitive-intel-agent/
 │   └── profile.py           # Full company profile (runs financial + competitors + sentiment + patents)
 ├── prompts/
 │   ├── chat.py              # System prompt, condensed prompt, tool schemas + tiered selection for chat agent
-│   ├── briefing.py          # Briefing prompt with Digital Maturity scoring rubric
+│   ├── briefing.py          # Briefing prompt with hybrid DMS scoring rubric + algo score injection
 │   ├── analyze.py           # Hiring analysis prompt
 │   ├── classify.py          # Job classification prompt
 │   ├── financial.py         # Financial analysis prompt
@@ -107,7 +108,7 @@ competitive-intel-agent/
 3. **Analyze:** Generate strategic hiring analysis report → saved to `reports/` + `dossier_analyses`
 4. **Other analyses:** Financial, competitors, sentiment, patents, techstack, SEO, pricing — each produces a report + key facts stored on the dossier
 5. **Dossier system:** All analyses accumulate on a company dossier. Key facts are extracted from each report and stored as JSON. Changes between runs are detected and saved as timeline events.
-6. **Briefing:** Synthesizes all dossier data into a consulting-ready intelligence briefing with Digital Maturity Score and engagement opportunities.
+6. **Briefing:** Computes algorithmic DMS base scores from structured data, then synthesizes all dossier data into a consulting-ready intelligence briefing with hybrid Digital Maturity Score and engagement opportunities.
 
 ### Dossier System
 
@@ -115,7 +116,8 @@ competitive-intel-agent/
 - `dossier_analyses` table: one row per analysis run (links to dossier, stores report_file + key_facts_json)
 - `dossier_events` table: timeline events (change_detected, manual notes)
 - `save_to_dossier()` in `agents/llm.py`: called at end of every analysis — extracts key facts, detects changes, stores everything
-- `generate_briefing()` in `agents/briefing.py`: synthesizes all data into structured JSON briefing
+- `compute_dms_scores()` in `agents/scoring.py`: computes deterministic base scores from hiring stats + key facts
+- `generate_briefing()` in `agents/briefing.py`: calls scoring module, then synthesizes all data into structured JSON briefing, merges algo scores, recomputes overall
 
 ### Key Facts Extraction
 
@@ -133,13 +135,24 @@ Type-specific extraction prompts in `agents/llm.py` (9 type-specific + 1 generic
 
 Also includes `reextract_all_key_facts()` function to re-extract from existing reports using type-specific prompts without re-running analyses.
 
-### Digital Maturity Score (Briefing)
+### Digital Maturity Score — Hybrid Algorithmic + LLM
 
-LLM-scored 0-100 composite with 4 weighted sub-scores:
-- **Tech Modernity (30%):** Modern vs legacy stack signals from techstack analysis
-- **Data & Analytics (25%):** Analytics tools sophistication from techstack + SEO data
-- **AI Readiness (25%):** AI/ML hiring signals from classifications + patent portfolio
-- **Organizational Readiness (20%):** Hiring momentum, engineering ratio, strategic tags
+Two-pass scoring system: deterministic algorithm computes base scores, then LLM adjusts within ±10 with justification.
+
+**Pass 1 — Algorithmic (`agents/scoring.py`):**
+`compute_dms_scores(hiring_stats, all_key_facts)` computes base scores from structured data:
+- **Tech Modernity (30%):** Engineering ratio from `hiring_stats.dept_counts`, modern/legacy stack matching from `top_skills`, sector floor (AI→90, software→80), techstack infra + monitoring signals
+- **Data & Analytics (25%):** Data role subcategories from `hiring_stats.subcategory_counts`, "Data Infrastructure" strategic tag, advanced analytics + A/B testing tools from techstack key facts
+- **AI Readiness (25%):** `ai_ml_role_count` as % of engineering, "AI/ML Investment" strategic tag, `ai_ml_patents` from patents key facts, patent trend bonus
+- **Organizational Readiness (20%):** `hiring_trend` enum, growth signal ratio, count of investment-related strategic tags, sentiment enum + Glassdoor rating
+
+Each dimension returns: `algorithmic_score` (0-100), `confidence` (0.0-1.0), `signals_used` (human-readable list), `missing_analyses`.
+
+**Pass 2 — LLM adjustment:**
+Algorithmic scores + signals are injected into the briefing prompt. The LLM can adjust each sub-score by ±10. Deviations >5 require an "Algorithmic deviation:" justification in the rationale. High-confidence dimensions (≥0.75) discourage adjustments beyond ±5.
+
+**Pass 3 — Post-processing (`agents/briefing.py`):**
+After LLM returns, `briefing.py` merges algo fields (`algorithmic_score`, `algorithmic_confidence`, `signals_used`) onto each sub-score, adds `algorithmic_weighted_score` to the top level, and **recomputes** `overall_score` + `overall_label` from LLM sub-scores (never trusts LLM arithmetic).
 
 Score tiers: Digital Vanguard (80-100), Digital Contender (60-79), Digitally Exposed (40-59), Digital Laggard (20-39), Digital Liability (0-19)
 
@@ -288,7 +301,7 @@ USPTO_API_KEY       # USPTO PatentsView API key (falls back to PATENTSVIEW_API_K
 
 ## Current State (March 2026)
 
-Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat with multi-step context management (tool result summarization, dynamic tool schema selection, condensed system prompts), server-side PDF export (reports + briefings), and intelligence briefing with Digital Maturity Score. The briefing is the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization.
+Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat with multi-step context management (tool result summarization, dynamic tool schema selection, condensed system prompts), server-side PDF export (reports + briefings), and intelligence briefing with hybrid algorithmic+LLM Digital Maturity Score. The briefing is the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization. The DMS now uses a two-pass hybrid approach: deterministic algorithmic base scores computed from structured data, then LLM fine-tuning within ±10 bounds with required justification for deviations.
 
 ## Planned Improvements
 

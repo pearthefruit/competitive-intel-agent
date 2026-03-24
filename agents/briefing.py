@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agents.llm import generate_json, BRIEFING_CHAIN
+from agents.scoring import compute_dms_scores
 from db import (get_connection, get_dossier_by_company, get_latest_key_facts,
                 get_company_id, compute_hiring_stats, get_hiring_snapshots,
                 get_recent_changes)
@@ -199,6 +200,15 @@ def generate_briefing(company_name, db_path="intel.db"):
           f"({len(data_confidence['analyses_available'])} analyses, "
           f"{data_confidence['jobs_analyzed']} jobs)")
 
+    # 5.5. Compute algorithmic DMS base scores
+    algo_scores = compute_dms_scores(hiring_stats, all_key_facts)
+    print(f"[briefing] Algorithmic DMS: {algo_scores['weighted_algorithmic_score']}/100 "
+          f"(confidence: {algo_scores['overall_confidence']:.0%})")
+    for dim in ("tech_modernity", "data_analytics", "ai_readiness", "org_readiness"):
+        d = algo_scores[dim]
+        print(f"[briefing]   {dim}: {d['algorithmic_score']}/100 "
+              f"(confidence: {d['confidence']:.0%}, {len(d['signals_used'])} signals)")
+
     # 6. Get recent change events for temporal context
     recent_changes = get_recent_changes(conn, dossier["id"], limit=15)
     if recent_changes:
@@ -211,6 +221,7 @@ def generate_briefing(company_name, db_path="intel.db"):
         hiring_stats=hiring_stats,
         hiring_snapshots=hiring_snapshots,
         data_confidence=data_confidence,
+        algo_scores=algo_scores,
     )
     if recent_changes:
         changes_text = "\n".join([
@@ -230,7 +241,58 @@ def generate_briefing(company_name, db_path="intel.db"):
         conn.close()
         raise RuntimeError(msg)
 
-    # 7. Store on dossier
+    # 7.5. Merge algorithmic scores and recompute overall
+    if "digital_maturity" in briefing:
+        dm = briefing["digital_maturity"]
+        sub = dm.get("sub_scores", {})
+
+        # Map schema keys to scoring module keys
+        _DIM_MAP = {
+            "tech_modernity": "tech_modernity",
+            "data_analytics": "data_analytics",
+            "ai_readiness": "ai_readiness",
+            "organizational_readiness": "org_readiness",
+        }
+        for schema_key, scoring_key in _DIM_MAP.items():
+            dim_data = algo_scores.get(scoring_key, {})
+            if schema_key in sub:
+                sub[schema_key]["algorithmic_score"] = dim_data.get("algorithmic_score", 50)
+                sub[schema_key]["algorithmic_confidence"] = dim_data.get("confidence", 0.0)
+                sub[schema_key]["signals_used"] = dim_data.get("signals_used", [])
+
+        dm["algorithmic_weighted_score"] = algo_scores["weighted_algorithmic_score"]
+        dm["overall_algorithmic_confidence"] = algo_scores["overall_confidence"]
+
+        # Recompute overall_score from LLM sub-scores (never trust LLM arithmetic)
+        weights = {
+            "tech_modernity": 0.30,
+            "data_analytics": 0.25,
+            "ai_readiness": 0.25,
+            "organizational_readiness": 0.20,
+        }
+        computed_overall = sum(
+            sub.get(k, {}).get("score", 50) * w
+            for k, w in weights.items()
+        )
+        dm["overall_score"] = round(computed_overall)
+
+        # Recompute label from overall score
+        score = dm["overall_score"]
+        if score >= 80:
+            dm["overall_label"] = "Digital Vanguard"
+        elif score >= 60:
+            dm["overall_label"] = "Digital Contender"
+        elif score >= 40:
+            dm["overall_label"] = "Digitally Exposed"
+        elif score >= 20:
+            dm["overall_label"] = "Digital Laggard"
+        else:
+            dm["overall_label"] = "Digital Liability"
+
+        print(f"[briefing] Algo base: {algo_scores['weighted_algorithmic_score']}/100 → "
+              f"LLM-adjusted: {dm['overall_score']}/100 ({dm['overall_label']})")
+
+    # 9. Store on dossier
     now = datetime.now(timezone.utc).isoformat()
     model_used = "unknown"
     conn.execute(

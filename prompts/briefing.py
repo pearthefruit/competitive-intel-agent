@@ -16,32 +16,46 @@ _BRIEFING_SCHEMA = {
         "website": "string",
     },
     "digital_maturity": {
-        "overall_score": "integer 0-100",
+        "overall_score": "integer 0-100 (auto-recomputed from sub-scores — your value will be overwritten)",
         "overall_label": "Digital Vanguard | Digital Contender | Digitally Exposed | Digital Laggard | Digital Liability",
+        "algorithmic_weighted_score": "integer 0-100 (auto-populated — do not set)",
+        "overall_algorithmic_confidence": "float 0-1 (auto-populated — do not set)",
         "sub_scores": {
             "tech_modernity": {
-                "score": "integer 0-100",
-                "rationale": "string with [source] tags",
+                "score": "integer 0-100 (your adjusted score, within ±10 of algorithmic base)",
+                "rationale": "string with [source] tags. If deviating >5 from algorithmic base, include 'Algorithmic deviation: ...' sentence",
                 "signals": ["string with [source] tag"],
                 "source_analyses": ["string — which analyses informed this score"],
+                "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
+                "algorithmic_confidence": "float 0-1 (auto-populated — do not set)",
+                "signals_used": ["string (auto-populated — do not set)"],
             },
             "data_analytics": {
-                "score": "integer 0-100",
-                "rationale": "string with [source] tags",
+                "score": "integer 0-100 (your adjusted score, within ±10 of algorithmic base)",
+                "rationale": "string with [source] tags. If deviating >5 from algorithmic base, include 'Algorithmic deviation: ...' sentence",
                 "signals": ["string with [source] tag"],
                 "source_analyses": ["string"],
+                "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
+                "algorithmic_confidence": "float 0-1 (auto-populated — do not set)",
+                "signals_used": ["string (auto-populated — do not set)"],
             },
             "ai_readiness": {
-                "score": "integer 0-100",
-                "rationale": "string with [source] tags",
+                "score": "integer 0-100 (your adjusted score, within ±10 of algorithmic base)",
+                "rationale": "string with [source] tags. If deviating >5 from algorithmic base, include 'Algorithmic deviation: ...' sentence",
                 "signals": ["string with [source] tag"],
                 "source_analyses": ["string"],
+                "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
+                "algorithmic_confidence": "float 0-1 (auto-populated — do not set)",
+                "signals_used": ["string (auto-populated — do not set)"],
             },
             "organizational_readiness": {
-                "score": "integer 0-100",
-                "rationale": "string with [source] tags",
+                "score": "integer 0-100 (your adjusted score, within ±10 of algorithmic base)",
+                "rationale": "string with [source] tags. If deviating >5 from algorithmic base, include 'Algorithmic deviation: ...' sentence",
                 "signals": ["string with [source] tag"],
                 "source_analyses": ["string"],
+                "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
+                "algorithmic_confidence": "float 0-1 (auto-populated — do not set)",
+                "signals_used": ["string (auto-populated — do not set)"],
             },
         },
     },
@@ -111,9 +125,66 @@ _BRIEFING_SCHEMA = {
 }
 
 
+def _format_algo_scores_block(algo_scores):
+    """Format algorithmic scores into a prompt section for the LLM."""
+    if not algo_scores:
+        return ""
+
+    dim_labels = {
+        "tech_modernity": "Tech Modernity",
+        "data_analytics": "Data & Analytics",
+        "ai_readiness": "AI Readiness",
+        "org_readiness": "Organizational Readiness",
+    }
+
+    lines = [
+        "",
+        "---",
+        "",
+        "DIGITAL MATURITY SCORE — HYBRID SCORING:",
+        "",
+        "The algorithmic system has pre-computed base scores from structured data. Your job is to:",
+        "1. Review the algorithmic score and the signals that produced it",
+        "2. Apply your contextual judgment to fine-tune — you MAY adjust each sub-score by up to ±10 points",
+        "3. If you adjust by more than ±5, you MUST include a sentence in rationale starting with "
+        "\"Algorithmic deviation:\" explaining what qualitative context the algorithm could not see",
+        "4. DO NOT adjust simply to produce a rounder number or a more palatable overall score",
+        "",
+        "ALGORITHMIC BASE SCORES (computed from structured data before this LLM call):",
+        "",
+    ]
+
+    for dim_key, label in dim_labels.items():
+        dim = algo_scores.get(dim_key, {})
+        score = dim.get("algorithmic_score", 50)
+        conf = dim.get("confidence", 0.0)
+        signals = dim.get("signals_used", [])
+        missing = dim.get("missing_analyses", [])
+
+        lines.append(f"  {label}: {score}/100  (confidence: {conf:.0%})")
+        for sig in signals:
+            lines.append(f"    - {sig}")
+        if missing:
+            lines.append(f"    Missing analyses: {', '.join(missing)}")
+        lines.append("")
+
+    weighted = algo_scores.get("weighted_algorithmic_score", 50)
+    overall_conf = algo_scores.get("overall_confidence", 0.0)
+    lines.append(f"  Weighted algorithmic overall: {weighted}/100  (confidence: {overall_conf:.0%})")
+    lines.append("")
+    lines.append("ADJUSTMENT RULES:")
+    lines.append("- If confidence for a dimension is >= 0.75, adjustments beyond ±5 are strongly discouraged")
+    lines.append("- If confidence is < 0.50 (sparse data), you have more discretion to adjust based on qualitative signals from the reports")
+    lines.append("- Never adjust a score below 0 or above 100")
+    lines.append("- The overall_score field will be RECOMPUTED from your final sub-scores — do not try to set it yourself")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 def build_briefing_prompt(company_name, all_key_facts, report_summaries,
                           hiring_stats=None, hiring_snapshots=None,
-                          data_confidence=None):
+                          data_confidence=None, algo_scores=None):
     """Build the intelligence briefing prompt.
 
     Args:
@@ -123,6 +194,7 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries,
         hiring_stats: dict with dept_counts, seniority_counts, etc. or None
         hiring_snapshots: list of historical snapshot dicts (most recent first) or None
         data_confidence: dict with jobs_analyzed, scrape_source, analyses_available, etc. or None
+        algo_scores: dict from compute_dms_scores() or None
     """
     # Format key facts with source labels
     facts_lines = []
@@ -284,9 +356,9 @@ Similarly, [hiring] data should NOT be cited for financial_position or innovatio
 
 The source_analyses array for each section MUST match the inline [source] tags used in that section's text fields.
 
----
+{_format_algo_scores_block(algo_scores)}---
 
-DIGITAL CAPABILITY SCORING RUBRIC:
+DIGITAL CAPABILITY SCORING RUBRIC (reference for justifying any adjustments from algorithmic base):
 
 IMPORTANT: This score measures the company's ACTUAL digital and technological capability — NOT their attractiveness as a consulting target. Score honestly. A digitally advanced company can still need consulting help (specialized AI work, org design, M&A integration, etc.).
 
@@ -327,7 +399,7 @@ Secondary signals: analytics tools detected on website (Segment, Amplitude, etc.
 - 20-39: Shrinking hiring, negative sentiment, no strategic investment signals.
 - NUANCE: Negative sentiment from rapid growth (burnout, equity complaints during hypergrowth) is NOT the same as organizational resistance to change. Distinguish growing pains from structural dysfunction. A company growing from 1000 to 8000 employees will have cultural friction — that's an org design opportunity, not a sign of low readiness.
 
-**Overall score = weighted average (Tech×0.30 + Data×0.25 + AI×0.25 + Org×0.20). COMPUTE THIS PRECISELY — do the arithmetic, show your work mentally, and round to the nearest integer. The overall_score must equal the weighted average of sub-scores.**
+**Overall score = weighted average (Tech×0.30 + Data×0.25 + AI×0.25 + Org×0.20). NOTE: The overall_score will be RECOMPUTED programmatically from your sub-scores after this call — focus on getting each sub-score right rather than the overall arithmetic.**
 
 Labels (direct, no sugarcoating — these should make a C-suite exec pay attention):
 - 80-100: "Digital Vanguard"
