@@ -13,7 +13,7 @@ from scraper.web_search import search_web, format_search_results
 from prompts.patents import build_patent_prompt, build_patent_prompt_fallback
 
 
-def _research_company_entities(company):
+def _research_company_entities(company, industry=""):
     """Web search + LLM to discover all entity names a company might file patents under.
 
     Searches the web first to gather real info, then asks LLM to synthesize
@@ -31,9 +31,13 @@ def _research_company_entities(company):
             f"- {r.get('title', '')}: {r.get('body', '')}" for r in web_results
         )
 
+    industry_context = ""
+    if industry:
+        industry_context = f"\n\nKnown industry/sector: {industry}"
+
     # Step 2: LLM synthesizes name variations from training data + web results
     prompt = f"""A user is searching for US patents filed by "{company}". The USPTO search uses the applicant/assignee name field.
-{web_context}
+{web_context}{industry_context}
 
 Based on both the web research above and your own knowledge, generate ALL possible entity names this company might file patents under. Consider:
 - Legal entity variations (Inc., LLC, Corp., etc.)
@@ -42,10 +46,21 @@ Based on both the web research above and your own knowledge, generate ALL possib
 - Former names or DBAs ("also known as", "formerly known as", "operates as")
 - Research divisions or technology licensing arms
 
-Generate a JSON array of 5-12 applicant name search queries. Use wildcards (*) where helpful. Order from most likely to least likely.
+CRITICAL — Entity Disambiguation:
+- Only include entities that are GENUINELY the same company or its direct subsidiaries/parents.
+- Do NOT include similarly-named but DIFFERENT companies. For example:
+  - "Abbott Capital" (PE firm) must NOT include "Abbott Laboratories" (healthcare company)
+  - "Delta Dental" must NOT include "Delta Air Lines"
+- Do NOT generate overly-broad wildcards (e.g. "Abbott*") if they would match unrelated companies with the same root name. Only use broad wildcards when there is ONE dominant company with that name.
+- If the company is in finance, private equity, or consulting, it likely holds ZERO patents — return a short list of only the most precise variations.
+
+Generate a JSON array of 3-12 applicant name search queries. Use wildcards (*) where helpful. Order from most likely to least likely.
 
 Example output for "Google":
 ["Google*", "Google LLC", "Alphabet*", "DeepMind*", "Waymo*"]
+
+Example output for "Abbott Capital" (a PE firm — NOT Abbott Laboratories):
+["Abbott Capital*", "Abbott Capital Management*"]
 
 Return ONLY a JSON array of strings, nothing else."""
 
@@ -78,12 +93,24 @@ def _search_with_name_variations(company, max_results=25, company_industry=""):
 
     # Step 2: Research company + LLM generates informed name variations
     print(f"[patents] No results for \"{company}\" — researching entity names...")
-    variations = _research_company_entities(company)
+    variations = _research_company_entities(company, industry=company_industry)
     print(f"[patents] Trying {len(variations)} name variations: {variations[:5]}...")
 
+    # For multi-word companies, track the first word to detect overly-broad variations
+    company_words = company.lower().split()
+    first_word = company_words[0] if len(company_words) >= 2 else None
+
     for name_query in variations:
+        clean_query = name_query.rstrip("*").strip().lower()
+
         # Skip if it's essentially the same as the original search
-        if name_query.rstrip("*").lower() == company.lower():
+        if clean_query == company.lower():
+            continue
+
+        # Skip overly-broad variations for multi-word companies:
+        # e.g. "Abbott*" for "Abbott Capital" would match Abbott Laboratories
+        if first_word and clean_query == first_word:
+            print(f"[patents] Skipping overly-broad \"{name_query}\" for \"{company}\"")
             continue
 
         print(f"[patents] Trying \"{name_query}\"...")
