@@ -101,6 +101,17 @@ CREATE TABLE IF NOT EXISTS hiring_snapshots (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(company_id, snapshot_date)
 );
+
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    key_hint TEXT,
+    status TEXT NOT NULL,
+    error TEXT,
+    caller TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -137,6 +148,83 @@ def init_db(db_path="intel.db"):
     _migrate_db(conn)
     conn.commit()
     conn.close()
+
+
+def log_llm_call(provider, model, key_hint, status, error=None, caller=None, db_path="intel.db"):
+    """Log an LLM API call for usage tracking."""
+    try:
+        conn = get_connection(db_path)
+        conn.execute(
+            "INSERT INTO llm_usage (provider, model, key_hint, status, error, caller) VALUES (?, ?, ?, ?, ?, ?)",
+            (provider, model, key_hint, status, error, caller),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # Don't let logging failures break anything
+
+
+def get_llm_usage_stats(db_path="intel.db"):
+    """Get LLM usage statistics for today and all time."""
+    try:
+        conn = get_connection(db_path)
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        # Today's calls by provider/model
+        today_rows = conn.execute(
+            """SELECT provider, model, key_hint, status, COUNT(*) as cnt
+               FROM llm_usage WHERE DATE(created_at) = ?
+               GROUP BY provider, model, key_hint, status
+               ORDER BY cnt DESC""",
+            (today,)
+        ).fetchall()
+
+        # Today's totals
+        today_total = conn.execute(
+            "SELECT COUNT(*) as total, SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as success FROM llm_usage WHERE DATE(created_at) = ?",
+            (today,)
+        ).fetchone()
+
+        # All time totals
+        all_total = conn.execute(
+            "SELECT COUNT(*) as total, SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as success FROM llm_usage"
+        ).fetchone()
+
+        # Recent errors
+        recent_errors = conn.execute(
+            """SELECT provider, model, key_hint, error, created_at
+               FROM llm_usage WHERE status != 'success' AND DATE(created_at) = ?
+               ORDER BY created_at DESC LIMIT 10""",
+            (today,)
+        ).fetchall()
+
+        # Hourly breakdown today
+        hourly = conn.execute(
+            """SELECT strftime('%H', created_at) as hour, COUNT(*) as cnt,
+                      SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as success
+               FROM llm_usage WHERE DATE(created_at) = ?
+               GROUP BY hour ORDER BY hour""",
+            (today,)
+        ).fetchall()
+
+        conn.close()
+
+        return {
+            "date": today,
+            "today": {
+                "total": today_total["total"] if today_total else 0,
+                "success": today_total["success"] if today_total else 0,
+                "by_provider": [dict(r) for r in today_rows],
+                "hourly": [dict(r) for r in hourly],
+            },
+            "all_time": {
+                "total": all_total["total"] if all_total else 0,
+                "success": all_total["success"] if all_total else 0,
+            },
+            "recent_errors": [dict(r) for r in recent_errors],
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 def hash_description(text):

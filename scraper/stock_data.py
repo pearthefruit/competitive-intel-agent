@@ -158,6 +158,29 @@ def lookup_ticker(company_name):
     return search_ticker(company_name)
 
 
+def get_company_industry(company_name):
+    """Look up a company's sector, industry, and description via Yahoo Finance.
+
+    Returns dict with sector, industry, description (any may be empty).
+    Falls back gracefully if company isn't publicly traded.
+    """
+    ticker = lookup_ticker(company_name)
+    if not ticker:
+        return {"sector": "", "industry": "", "description": ""}
+
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info or {}
+        return {
+            "sector": info.get("sector") or "",
+            "industry": info.get("industry") or "",
+            "description": (info.get("longBusinessSummary") or "")[:500],
+        }
+    except Exception as e:
+        print(f"[stock] Industry lookup failed for {ticker}: {e}")
+        return {"sector": "", "industry": "", "description": ""}
+
+
 def get_stock_data(ticker):
     """Fetch current market data for a ticker symbol.
 

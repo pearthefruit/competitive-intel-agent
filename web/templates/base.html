@@ -63,6 +63,9 @@
         .left-header {
             padding: 16px 16px 0;
             flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
         .left-logo {
@@ -73,6 +76,50 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             margin-bottom: 12px;
+        }
+
+        .llm-usage-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: var(--bg-tertiary);
+            color: var(--text-muted);
+            cursor: pointer;
+            margin-bottom: 12px;
+            transition: background 0.2s;
+            white-space: nowrap;
+        }
+        .llm-usage-badge:hover { background: var(--border); }
+        .llm-usage-badge.warning { color: #f59e0b; }
+        .llm-usage-badge.danger { color: #ef4444; }
+
+        .llm-usage-panel {
+            margin: 0 12px 8px;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 12px;
+        }
+        .llm-usage-title {
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .llm-usage-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+            color: var(--text-muted);
+        }
+        .llm-usage-row .cnt { color: var(--text-primary); font-weight: 600; }
+        .llm-usage-row.error .cnt { color: #ef4444; }
+        .llm-usage-divider {
+            border-top: 1px solid var(--border);
+            margin: 6px 0;
         }
 
         .left-tabs {
@@ -1952,6 +1999,11 @@
     <div class="left-pane">
         <div class="left-header">
             <div class="left-logo">SignalVault</div>
+            <div class="llm-usage-badge" id="llm-usage-badge" onclick="toggleUsagePanel()" title="LLM API calls today">—</div>
+        </div>
+        <div class="llm-usage-panel" id="llm-usage-panel" style="display:none">
+            <div class="llm-usage-title">API Usage Today</div>
+            <div id="llm-usage-content">Loading...</div>
         </div>
         <div class="left-tabs">
             <button class="left-tab active" onclick="switchLeftTab('chats')">Chats</button>
@@ -2207,6 +2259,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadChats();
     renderChatList();
     loadReports();
+    refreshUsageBadge();
     // Start with a fresh chat or load the most recent
     if (chats.length) {
         loadChat(chats[0].id);
@@ -2325,6 +2378,77 @@ function refreshSidebar() {
     const panel = document.getElementById('panel-companies');
     if (panel && panel.classList.contains('active')) loadCompanies();
 }
+
+// --- LLM Usage Tracking ---
+async function refreshUsageBadge() {
+    try {
+        const resp = await fetch('/api/llm-usage');
+        const data = await resp.json();
+        const badge = document.getElementById('llm-usage-badge');
+        if (!badge || data.error) return;
+
+        const t = data.today || {};
+        const total = t.total || 0;
+        const success = t.success || 0;
+        const failed = total - success;
+
+        badge.textContent = `${total} calls`;
+        badge.classList.remove('warning', 'danger');
+        if (failed > 5) badge.classList.add('danger');
+        else if (failed > 0) badge.classList.add('warning');
+
+        // Render panel content
+        const panel = document.getElementById('llm-usage-content');
+        if (!panel) return;
+        let html = '';
+        html += `<div class="llm-usage-row"><span>Total calls</span><span class="cnt">${total}</span></div>`;
+        html += `<div class="llm-usage-row"><span>Successful</span><span class="cnt">${success}</span></div>`;
+        if (failed) html += `<div class="llm-usage-row error"><span>Failed/Rate-limited</span><span class="cnt">${failed}</span></div>`;
+
+        // By provider
+        const byProvider = {};
+        (t.by_provider || []).forEach(r => {
+            const key = `${r.provider}/${r.model}`;
+            if (!byProvider[key]) byProvider[key] = { success: 0, fail: 0 };
+            if (r.status === 'success') byProvider[key].success += r.cnt;
+            else byProvider[key].fail += r.cnt;
+        });
+        const providers = Object.entries(byProvider);
+        if (providers.length) {
+            html += '<div class="llm-usage-divider"></div>';
+            providers.forEach(([name, counts]) => {
+                const short = name.split('/').pop().replace(/-/g, ' ').slice(0, 25);
+                const failStr = counts.fail ? ` <span style="color:#ef4444">(${counts.fail} fail)</span>` : '';
+                html += `<div class="llm-usage-row"><span>${escHtml(short)}</span><span class="cnt">${counts.success}${failStr}</span></div>`;
+            });
+        }
+
+        // Recent errors
+        const errors = data.recent_errors || [];
+        if (errors.length) {
+            html += '<div class="llm-usage-divider"></div>';
+            html += '<div style="color:#ef4444;font-weight:600;margin-bottom:4px">Recent Errors</div>';
+            errors.slice(0, 5).forEach(e => {
+                const time = (e.created_at || '').slice(11, 16);
+                const err = (e.error || '').slice(0, 60);
+                html += `<div style="color:var(--text-muted);font-size:11px;margin-bottom:2px">${time} ${escHtml(e.provider)}/${escHtml(e.model?.split('/').pop() || '')} — ${escHtml(err)}</div>`;
+            });
+        }
+
+        panel.innerHTML = html;
+    } catch {}
+}
+
+function toggleUsagePanel() {
+    const panel = document.getElementById('llm-usage-panel');
+    if (!panel) return;
+    const visible = panel.style.display !== 'none';
+    panel.style.display = visible ? 'none' : 'block';
+    if (!visible) refreshUsageBadge();
+}
+
+// Refresh usage badge periodically
+setInterval(refreshUsageBadge, 15000);
 
 function toggleCompanySort() {
     companySortMode = companySortMode === 'recent' ? 'alpha' : 'recent';

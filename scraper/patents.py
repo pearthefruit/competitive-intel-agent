@@ -253,26 +253,80 @@ def _is_relevant_assignee(assignee, company_name):
     return False
 
 
-def filter_relevant_patents(patents, company_name):
-    """Filter patent list to only those with assignees plausibly matching the company.
+def _is_relevant_to_industry(patent_title, company_industry):
+    """Check if a patent title is plausibly related to the company's industry.
+
+    Only filters out OBVIOUS mismatches — e.g., automotive patents for a food company.
+    Returns True (keep) if unsure. Only returns False for clear mismatches.
+    """
+    if not company_industry or not patent_title:
+        return True  # No industry data — can't filter
+
+    title_lower = patent_title.lower()
+    industry_lower = company_industry.lower()
+
+    # Build a set of "obviously unrelated" keywords based on the company's sector.
+    # Only flag patents that are clearly in a different field.
+    # Map: if company is in sector X, these patent title keywords are red flags.
+    sector_exclusions = {
+        "food": ["combustion", "semiconductor", "integrated circuit", "antenna", "wireless transceiver",
+                 "turbine engine", "internal combustion", "drilling", "wellbore", "hydraulic fracturing"],
+        "beverage": ["combustion", "semiconductor", "integrated circuit", "antenna", "wireless transceiver",
+                     "turbine engine", "drilling", "wellbore"],
+        "consumer defensive": ["semiconductor", "integrated circuit", "wellbore", "drilling",
+                               "hydraulic fracturing", "turbine engine", "combustion engine"],
+        "healthcare": ["combustion", "drilling", "wellbore", "hydraulic fracturing",
+                       "internal combustion"],
+        "financial": ["combustion", "semiconductor", "wellbore", "drilling", "turbine",
+                      "antenna", "hydraulic fracturing"],
+        "real estate": ["combustion", "semiconductor", "integrated circuit", "wellbore",
+                        "drilling", "turbine engine", "hydraulic fracturing"],
+    }
+
+    # Find which exclusion list applies
+    excluded_keywords = []
+    for sector_key, keywords in sector_exclusions.items():
+        if sector_key in industry_lower:
+            excluded_keywords = keywords
+            break
+
+    if not excluded_keywords:
+        return True  # No exclusion list for this sector
+
+    for keyword in excluded_keywords:
+        if keyword in title_lower:
+            return False
+
+    return True
+
+
+def filter_relevant_patents(patents, company_name, company_industry=""):
+    """Filter patent list by assignee match and optional industry relevance.
 
     Returns (filtered_patents, removed_count).
     """
     relevant = []
-    removed = 0
+    removed_assignee = 0
+    removed_industry = 0
     for p in patents:
-        if _is_relevant_assignee(p.get("assignee", ""), company_name):
-            relevant.append(p)
-        else:
-            removed += 1
-    if removed:
-        print(f"[patents] Filtered {removed} irrelevant patents (assignee mismatch)")
+        if not _is_relevant_assignee(p.get("assignee", ""), company_name):
+            removed_assignee += 1
+            continue
+        if company_industry and not _is_relevant_to_industry(p.get("title", ""), company_industry):
+            removed_industry += 1
+            continue
+        relevant.append(p)
+    removed = removed_assignee + removed_industry
+    if removed_assignee:
+        print(f"[patents] Filtered {removed_assignee} patents (assignee mismatch)")
+    if removed_industry:
+        print(f"[patents] Filtered {removed_industry} patents (industry mismatch)")
     return relevant, removed
 
 
 # --- Public API: try USPTO ODP first, then Google Patents ---
 
-def search_patents(company_name, max_results=25):
+def search_patents(company_name, max_results=25, company_industry=""):
     """Search for patents by company. Tries USPTO ODP (wildcard), then Google Patents.
 
     Returns (list of patent dicts, total_count, source_name).
@@ -286,7 +340,7 @@ def search_patents(company_name, max_results=25):
         query = f"{clean}*"
     patents, total = search_uspto(query, max_results)
     if patents:
-        patents, removed = filter_relevant_patents(patents, company_name)
+        patents, removed = filter_relevant_patents(patents, company_name, company_industry)
         if patents:
             return patents, total - removed, "USPTO ODP"
 
@@ -294,14 +348,14 @@ def search_patents(company_name, max_results=25):
     print("[patents] Trying Google Patents as fallback...")
     patents, total = search_google_patents(company_name, max_results)
     if patents:
-        patents, removed = filter_relevant_patents(patents, company_name)
+        patents, removed = filter_relevant_patents(patents, company_name, company_industry)
         if patents:
             return patents, total - removed, "Google Patents"
 
     return [], 0, None
 
 
-def search_patents_with_name(name_query, max_results=25):
+def search_patents_with_name(name_query, max_results=25, company_industry=""):
     """Search USPTO with a specific applicant name query (for agentic retries).
 
     Returns (list of patent dicts, total_count).
@@ -309,13 +363,13 @@ def search_patents_with_name(name_query, max_results=25):
     clean_name = name_query.rstrip("*").strip()
     patents, total = search_uspto(name_query, max_results)
     if patents:
-        patents, removed = filter_relevant_patents(patents, clean_name)
+        patents, removed = filter_relevant_patents(patents, clean_name, company_industry)
         if patents:
             return patents, total - removed
     # Try Google Patents with the raw name
     patents, total = search_google_patents(clean_name, max_results)
     if patents:
-        patents, removed = filter_relevant_patents(patents, clean_name)
+        patents, removed = filter_relevant_patents(patents, clean_name, company_industry)
         if patents:
             return patents, total - removed
     return [], 0

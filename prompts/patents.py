@@ -30,6 +30,7 @@ Rules:
 - If the patent count is low (<5), note this and what it might mean.
 - Be direct and analytical — this is competitive intelligence.
 - Focus on strategic implications, not just listing patents.
+- If the company's industry is provided, use it as a sanity check. Flag any patents that seem completely unrelated to the company's known business (they may be false matches from the search). Do NOT include clearly irrelevant patents in your analysis — note them briefly as likely false matches if any are present.
 
 CITATION FORMAT (like Perplexity — clickable numbered links):
 - Assign each unique patent or source a number (1, 2, 3...).

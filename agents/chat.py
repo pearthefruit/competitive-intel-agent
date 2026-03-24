@@ -260,12 +260,19 @@ class ChatLLM:
                 tc_count = len(result.get("tool_calls") or [])
                 print(f"[chat] OK {p['name']}/{p['model']}"
                       + (f" → {tc_count} tool call(s)" if tc_count else " → text response"))
+                from db import log_llm_call
+                key_hint = p["key"][-4:] if len(p["key"]) >= 4 else "****"
+                log_llm_call(p["name"], p["model"], key_hint, "success", caller="chat")
                 return result
             except Exception as e:
                 error_str = str(e)
                 error_lower = error_str.lower()
                 errors.append(f"{p['name']}/{p['model']}: {error_str[:120]}")
                 print(f"[chat] FAIL {p['name']}/{p['model']}: {error_str[:120]}")
+
+                # Log the failure
+                from db import log_llm_call
+                key_hint = p["key"][-4:] if len(p["key"]) >= 4 else "****"
 
                 # Rate limit detection (check FIRST — TPM/RPM errors contain
                 # "token" and "limit" which would false-match context overflow)
@@ -278,12 +285,15 @@ class ChatLLM:
                            or "resource_exhausted" in error_lower
                            or "413" in error_str)
                 if is_rate:
+                    log_llm_call(p["name"], p["model"], key_hint, "rate_limited", error=error_str[:200], caller="chat")
                     continue
 
                 # Context overflow — propagate so caller can trim
                 if any(kw in error_lower for kw in ["context", "length", "too long", "maximum"]):
+                    log_llm_call(p["name"], p["model"], key_hint, "error", error=error_str[:200], caller="chat")
                     raise
 
+                log_llm_call(p["name"], p["model"], key_hint, "error", error=error_str[:200], caller="chat")
                 continue
 
         raise RuntimeError("All chat providers failed:\n  " + "\n  ".join(errors))
@@ -554,9 +564,12 @@ def _execute_tool(name, args, db_path, progress_callback=None):
 
         elif name == "search_patents_raw":
             from scraper.patents import search_patents, format_patents_for_prompt
+            from scraper.stock_data import get_company_industry
             company = args["company"]
             max_results = args.get("max_results", 15)
-            patents, total, source = search_patents(company, max_results)
+            industry_info = get_company_industry(company)
+            industry_str = industry_info.get("industry") or industry_info.get("sector") or ""
+            patents, total, source = search_patents(company, max_results, company_industry=industry_str)
             if not patents:
                 return f"No patents found for '{company}' in USPTO or Google Patents. The company may file under a different legal entity name, or may not hold US patents."
             text = format_patents_for_prompt(patents, total)

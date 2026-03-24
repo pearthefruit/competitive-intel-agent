@@ -382,6 +382,12 @@ def create_app(db_path="intel.db"):
 
     # --- Dossier API ---
 
+    @app.route("/api/llm-usage")
+    def llm_usage():
+        from db import get_llm_usage_stats
+        stats = get_llm_usage_stats(db_path)
+        return jsonify(stats)
+
     @app.route("/api/dossiers")
     def list_dossiers():
         conn = get_connection(db_path)

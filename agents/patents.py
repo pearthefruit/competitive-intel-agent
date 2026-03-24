@@ -8,6 +8,7 @@ from scraper.patents import (
     search_patents, search_patents_with_name,
     format_patents_for_prompt,
 )
+from scraper.stock_data import get_company_industry
 from scraper.web_search import search_web, format_search_results
 from prompts.patents import build_patent_prompt, build_patent_prompt_fallback
 
@@ -64,14 +65,14 @@ Return ONLY a JSON array of strings, nothing else."""
     return variations
 
 
-def _search_with_name_variations(company, max_results=25):
+def _search_with_name_variations(company, max_results=25, company_industry=""):
     """Agentic patent search: try multiple name variations until we find results.
 
     Returns (patents, total_count, source, matched_name) or ([], 0, None, None).
     """
     # Step 1: Try direct search first
     print(f"[patents] Searching USPTO for \"{company}\"...")
-    patents, total, source = search_patents(company, max_results)
+    patents, total, source = search_patents(company, max_results, company_industry)
     if patents:
         return patents, total, source, company
 
@@ -86,7 +87,7 @@ def _search_with_name_variations(company, max_results=25):
             continue
 
         print(f"[patents] Trying \"{name_query}\"...")
-        patents, total = search_patents_with_name(name_query, max_results)
+        patents, total = search_patents_with_name(name_query, max_results, company_industry)
         if patents:
             print(f"[patents] Found {total} patents under \"{name_query}\"")
             return patents, total, "USPTO ODP", name_query
@@ -100,8 +101,23 @@ def patent_analysis(company):
     """Analyze a company's patent portfolio. Returns report path or None."""
     print(f"\n[patents] Analyzing patent portfolio for {company}...")
 
+    # Look up company industry for relevance filtering
+    print(f"[patents] Looking up industry for {company}...")
+    industry_info = get_company_industry(company)
+    industry_str = industry_info.get("industry") or industry_info.get("sector") or ""
+    if industry_str:
+        print(f"[patents] Industry: {industry_str}")
+    else:
+        # Fallback: quick web search for industry context
+        web_results = search_web(f'"{company}" company industry sector what does', max_results=2)
+        if web_results:
+            industry_str = " ".join(r.get("body", "") for r in web_results)[:300]
+            print(f"[patents] Industry context from web: {industry_str[:80]}...")
+
     # Agentic search with name variations
-    patents, total_count, source, matched_name = _search_with_name_variations(company)
+    patents, total_count, source, matched_name = _search_with_name_variations(
+        company, company_industry=industry_str
+    )
 
     if patents:
         patents_text = format_patents_for_prompt(patents, total_count)
@@ -109,6 +125,8 @@ def patent_analysis(company):
         extra_context = ""
         if matched_name and matched_name.lower().rstrip("*") != company.lower():
             extra_context = f"\nNote: Patents are filed under the entity name \"{matched_name}\" (not \"{company}\").\n"
+        if industry_str:
+            extra_context += f"\nCompany industry: {industry_str}\n"
         prompt = build_patent_prompt(company, extra_context + patents_text, total_count)
     else:
         # Final fallback: web search for patent information

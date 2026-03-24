@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 gemini_lock = threading.Lock()
 
 from db import (get_connection, get_or_create_dossier, add_dossier_analysis,
-                add_dossier_event, get_previous_key_facts)
+                add_dossier_event, get_previous_key_facts, log_llm_call)
 
 
 # Default chain for regular analyses — saves Gemini quota for briefings
@@ -49,12 +49,18 @@ BRIEFING_PROVIDERS = [
 ]
 
 
-def generate_text(prompt, timeout=60, providers=None):
+def generate_text(prompt, timeout=60, providers=None, caller=None):
     """Try providers in order until one works. Returns (text, model_name).
 
     Gemini entries with comma-separated keys in GEMINI_API_KEYS are expanded
     so each key is tried before moving to the next provider/model.
     """
+    # Auto-detect caller from stack if not provided
+    if not caller:
+        import inspect
+        frame = inspect.currentframe().f_back
+        caller = f"{Path(frame.f_code.co_filename).stem}:{frame.f_code.co_name}" if frame else "unknown"
+
     provider_list = providers or REPORT_PROVIDERS
     http = httpx.Client(timeout=timeout, follow_redirects=True)
 
@@ -86,6 +92,7 @@ def generate_text(prompt, timeout=60, providers=None):
                     response = model.generate_content(prompt)
                 http.close()
                 print(f"[llm] ✓ {model_id} (key …{key_hint})")
+                log_llm_call(p["name"], p["model"], key_hint, "success", caller=caller)
                 return response.text, model_id
             else:
                 headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
@@ -95,16 +102,25 @@ def generate_text(prompt, timeout=60, providers=None):
                     text = resp.json()["choices"][0]["message"]["content"]
                     http.close()
                     print(f"[llm] ✓ {model_id} (key …{key_hint})")
+                    log_llm_call(p["name"], p["model"], key_hint, "success", caller=caller)
                     return text, model_id
                 elif resp.status_code == 429:
                     print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
+                    log_llm_call(p["name"], p["model"], key_hint, "rate_limited", error="429", caller=caller)
+                    continue
+                else:
+                    err = f"HTTP {resp.status_code}"
+                    print(f"[llm] {model_id} (key …{key_hint}) failed: {err}")
+                    log_llm_call(p["name"], p["model"], key_hint, "error", error=err, caller=caller)
                     continue
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
                 print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
+                log_llm_call(p["name"], p["model"], key_hint, "rate_limited", error=err_str[:200], caller=caller)
             else:
                 print(f"[llm] {model_id} (key …{key_hint}) failed: {e}")
+                log_llm_call(p["name"], p["model"], key_hint, "error", error=err_str[:200], caller=caller)
             continue
 
     http.close()
