@@ -497,7 +497,7 @@ Estimates are based on typical Big 4 / MBB engagement structures (blended daily 
 - **$2-5M, 9-18 months**: Large team (6-10 consultants). Multi-workstream programs, enterprise-wide platform rollout, M&A integration. Appropriate for $10B+ revenue companies with complex operations.
 - **$5M+, 12-24 months**: Full transformation team (10+ consultants). Company-wide digital transformation, multi-geography rollout. Only appropriate for $50B+ companies with evidence of large-scale transformation need.
 
-CRITICAL: Scale the estimate to the company's size and complexity. A $2B company does NOT get a $5M engagement. Use revenue, headcount, and hiring velocity as sizing inputs. If in doubt, estimate conservatively — an overstated scope destroys credibility faster than an understated one.
+CRITICAL: Scale the estimate to the company's size and complexity. A $2B company does NOT get a $5M engagement. Use revenue, headcount, and hiring velocity as sizing inputs. For financial services firms (asset managers, PE, banks), use AUM as a primary size indicator — a $500B AUM firm has different consulting capacity than a $5B boutique. If in doubt, estimate conservatively — an overstated scope destroys credibility faster than an understated one.
 
 ---
 

@@ -127,7 +127,7 @@ Type-specific extraction prompts in `agents/llm.py` (9 type-specific + 1 generic
 - **pricing:** pricing_model, pricing_tiers, price_range, has_public_pricing, has_free_tier, target_segment
 - **hiring:** total_open_roles, engineering_ratio, ai_ml_ratio, top_departments, top_subcategories, seniority_skew, growth_signal, top_strategic_tags, hiring_trend, notable_shifts, top_skills, primary_locations
 - **sentiment:** overall_sentiment, glassdoor_rating, recommend_to_friend_pct, approve_of_ceo_pct, top_pros, top_cons, culture_themes, notable_concerns, sentiment_trend (sources: Glassdoor snippets, Blind snippets, Fishbowl snippets, Reddit posts+comments, HN stories+comments, 1Point3Acres interview posts, news)
-- **financial:** revenue, revenue_growth, market_cap, valuation, headcount, profitability, cash_position, recent_funding, key_financial_risks, financial_health
+- **financial:** revenue, revenue_growth, market_cap, valuation, headcount, profitability, cash_position, recent_funding, key_financial_risks, financial_health, aum, aum_growth, fee_structure, fund_strategy, is_financial_services
 - **competitors:** key_competitors, market_position, competitive_advantages, competitive_weaknesses, market_share, competitive_moat, threat_level
 - **patents:** total_patents, recent_patents, top_patent_areas, ai_ml_patents, patent_trend, notable_patents, rd_intensity
 - **profile:** hq_location, ceo, founded, sector, headcount, revenue, market_cap, key_products, key_competitors, business_model, key_risks

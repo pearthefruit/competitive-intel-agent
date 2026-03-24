@@ -438,6 +438,11 @@ Fields to extract:
 - "recent_funding": string describing latest funding round (e.g. "Series E, $4B at $380B valuation") or null
 - "key_financial_risks": array of top 3 financial risks
 - "financial_health": one of "strong", "moderate", "weak", "unknown"
+- "aum": assets under management as string (e.g. "$1.5T") or null — for asset managers, PE firms, hedge funds, wealth managers
+- "aum_growth": AUM growth as string (e.g. "+12%") or null
+- "fee_structure": fee structure as string (e.g. "2% mgmt + 20% performance") or null
+- "fund_strategy": investment strategy as string (e.g. "Multi-strategy hedge fund") or null
+- "is_financial_services": true if the company is a bank, asset manager, insurer, PE/VC firm, hedge fund, or other financial services firm; false otherwise
 
 Report:
 {report_text}

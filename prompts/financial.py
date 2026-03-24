@@ -65,6 +65,13 @@ Is the company well-capitalized?
 ## Market Sentiment & Analyst Outlook
 If analyst estimates, price targets, upgrades/downgrades, or news are provided, summarize what the market expects. Use a table for analyst price targets if available. What do forward revenue estimates and analyst actions signal about the company's trajectory?
 
+## Financial Services Metrics (ONLY if this is a financial services firm — skip entirely otherwise)
+If the company is an asset manager, bank, insurer, private equity firm, hedge fund, or other financial services firm, include a section with relevant sector-specific metrics:
+- **Asset Managers / PE / Hedge Funds:** AUM (assets under management), AUM growth, fee structure (management + performance fees), fund strategy, number of funds
+- **Banks:** Net interest margin, capital adequacy ratio (CET1/Tier 1), loan-to-deposit ratio, credit quality (NPL ratio)
+- **Insurance:** Gross written premiums, combined ratio, investment portfolio size
+Present in a table. If the company is NOT a financial services firm, skip this section entirely.
+
 ## Strategic Implications & Consulting Opportunities
 What do these financials tell us about the company's strategy? Connect financial trends to business decisions. Identify potential consulting engagement opportunities — e.g., margin compression → operational efficiency, flat R&D → innovation strategy, revenue decline → restructuring/transformation, rapid growth → scaling challenges, high capex → digital transformation.
 
@@ -155,6 +162,13 @@ How is the company deploying capital — R&D, capex, acquisitions, buybacks?
 ## Market Sentiment & Forward Outlook
 Analyst price targets, revenue estimates, recent upgrades/downgrades. Use a table for analyst consensus if available. What is the market pricing in?
 
+## Financial Services Metrics (ONLY if this is a financial services firm — skip entirely otherwise)
+If the company is an asset manager, bank, insurer, PE firm, hedge fund, or other financial services firm, include sector-specific metrics:
+- **Asset Managers / PE / Hedge Funds:** AUM, AUM growth, fee structure, fund strategy, number of funds
+- **Banks:** Net interest margin, capital adequacy ratio, loan-to-deposit ratio, credit quality
+- **Insurance:** Gross written premiums, combined ratio, investment portfolio size
+Present in a table. Skip this section entirely for non-financial-services companies.
+
 ## Consulting Engagement Opportunities
 Based on the financial signals, identify 2-3 specific consulting opportunities a firm like McKinsey, EY, or Deloitte might pursue. Be specific — connect each opportunity to a financial trend:
 - Margin compression → operational transformation / cost optimization
@@ -204,6 +218,12 @@ Margins, profits, cash position, debt — whatever is available from public repo
 
 ## Funding & Valuation
 Known funding rounds, investors, and valuation estimates. If multiple rounds are known, present in a table (Round | Date | Amount | Valuation).
+
+## Financial Services Metrics (ONLY if this is a financial services firm — skip entirely otherwise)
+If the company is an asset manager, bank, PE firm, hedge fund, or other financial services firm, include sector-specific metrics even if the firm is private:
+- **Asset Managers / PE / Hedge Funds:** AUM (assets under management) — this is often publicly reported even for private firms via SEC ADV filings, press releases, or industry databases. Also include fund strategy, fee structure, and number of funds if available.
+- **Banks / Insurance:** Capital ratios, premiums, or other sector-specific metrics if available.
+Present in a table. Skip this section entirely for non-financial-services companies.
 
 ## Business Model
 How the company makes money, based on available information.

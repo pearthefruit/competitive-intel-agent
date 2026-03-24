@@ -125,10 +125,13 @@ def _analyze_non_sec(company):
     print(f"[financial] Searching for financial data on {company}...")
 
     # Multiple targeted searches (cover both private and foreign-listed companies)
+    year = datetime.now().year
     queries = [
         f"{company} revenue earnings financial results",
         f"{company} funding valuation market cap",
-        f"{company} financial news {datetime.now().year - 1} {datetime.now().year}",
+        f"{company} financial news {year - 1} {year}",
+        # Finance-sector queries — harmless for non-finance companies (just return nothing)
+        f"{company} assets under management AUM {year}",
     ]
 
     all_results = []
