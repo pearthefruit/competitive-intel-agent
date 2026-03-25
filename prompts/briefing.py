@@ -182,6 +182,9 @@ def _format_algo_scores_block(algo_scores):
     lines.append("- Do NOT restate the algorithmic base score in the rationale (e.g. 'Algorithmic base score of 30'). The scores are displayed separately in the UI.")
     lines.append("- Jump straight into the evidence and analysis. Lead with what the data shows, not how the score was computed.")
     lines.append("- Only mention 'Algorithmic deviation:' if you adjusted by more than ±5 — and even then, explain the WHY, not the math.")
+    lines.append("- SMALL SAMPLE SIZES: If fewer than 10 roles were analyzed, the hiring data is insufficient to draw conclusions. "
+                 "Do NOT analyze department distribution, hiring strategy, or growth signals — just state 'Insufficient hiring data (N roles)' "
+                 "and rely on other evidence sources. Never describe 3 roles as a 'strategy' or 'focus'.")
     lines.append("")
 
     return "\n".join(lines)

@@ -85,9 +85,24 @@ class LinkedInScraper:
         if detail_failures:
             print(f"[linkedin] {detail_failures} jobs saved with SERP-only data (detail pages blocked)")
 
+        # Filter out jobs not posted by the target company.
+        # The keyword search returns any listing mentioning the company name,
+        # not just listings FROM that company.
+        company_lower = company_name.lower().strip()
+        filtered = []
+        rejected = 0
+        for job in jobs:
+            card_company = (job.get("company") or "").lower().strip()
+            if card_company and company_lower not in card_company and card_company not in company_lower:
+                rejected += 1
+                continue
+            filtered.append(job)
+        if rejected:
+            print(f"[linkedin] Filtered out {rejected} jobs not posted by {company_name}")
+
         # Normalize to match ATS scraper output format
         normalized = []
-        for job in jobs:
+        for job in filtered:
             normalized.append({
                 "title": job.get("title"),
                 "department": None,  # LinkedIn doesn't provide department
