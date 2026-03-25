@@ -5,7 +5,7 @@ from datetime import datetime
 from collections import Counter
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier, get_temporal_context
+from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
 from db import init_db, get_connection, get_company_id, get_all_classified_jobs, get_company_info
 from prompts.analyze import build_analyze_prompt
 from scraper.web_search import search_news, format_news_for_prompt
@@ -103,6 +103,42 @@ def _pct(count, total):
     return count * 100 // total if total else 0
 
 
+def _generate_insufficient_data_report(company_name, company, jobs, db_path):
+    """Generate a minimal report when the sample size is too small for analysis."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    job_list = "\n".join(f"- {j.get('title', 'Unknown')} ({j.get('location', 'N/A')})" for j in jobs)
+    report = f"""# Competitive Intelligence: {company_name}
+
+**Generated:** {today}
+**Jobs found:** {len(jobs)}
+**Data source:** {company['url'] or 'N/A'}
+**ATS:** {company['ats_type'] or 'N/A'}
+
+---
+
+## Insufficient Data
+
+Only {len(jobs)} role(s) were found, which is below the minimum threshold of 10 for meaningful hiring analysis. Department distribution, seniority trends, and strategic conclusions cannot be reliably drawn from this sample.
+
+### Roles Found
+
+{job_list}
+
+### Recommendation
+
+- Re-collect with a broader search or verify the company's careers page URL
+- Check if the company posts on a different ATS board or uses a different name on LinkedIn
+- Consider supplementing with manual research for companies with very few open roles
+"""
+    filename = unique_report_path(company_name, "hiring")
+    filename = Path(filename)
+    filename.parent.mkdir(parents=True, exist_ok=True)
+    filename.write_text(report, encoding="utf-8")
+    print(f"[analyze] Insufficient data report saved to {filename}")
+    save_to_dossier(company_name, "hiring", report_file=str(filename), report_text=report, model_used="none", db_path=db_path)
+    return str(filename)
+
+
 def analyze(company_name, db_path="intel.db"):
     """Generate strategic report for the given company.
 
@@ -127,11 +163,12 @@ def analyze(company_name, db_path="intel.db"):
         print(f"[analyze] Run 'classify' first to categorize collected job postings")
         return None
 
-    print(f"[analyze] Generating report for {company_name} ({len(jobs)} jobs)...")
+    if len(jobs) < 10:
+        print(f"[analyze] Only {len(jobs)} jobs for {company_name} — insufficient for meaningful hiring analysis (minimum 10)")
+        print(f"[analyze] Generating minimal report noting insufficient data")
+        return _generate_insufficient_data_report(company_name, company, jobs, db_path)
 
-    if len(jobs) < 5:
-        print(f"[analyze] Only {len(jobs)} jobs classified — small sample makes department/seniority trends unreliable")
-        print(f"[analyze] Company may have few open roles, or the careers page returned limited results")
+    print(f"[analyze] Generating report for {company_name} ({len(jobs)} jobs)...")
 
     # Compute stats
     (dept_counts, subcat_counts, seniority_counts, location_counts,
@@ -265,7 +302,7 @@ def analyze(company_name, db_path="intel.db"):
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
     safe_name = company_name.lower().replace(" ", "_").replace("/", "_")
-    filename = reports_dir / f"{safe_name}_{today}.md"
+    filename = unique_report_path(reports_dir, f"{safe_name}_{today}.md")
     filename.write_text(report, encoding="utf-8")
 
     print(f"[analyze] Report saved to {filename}")

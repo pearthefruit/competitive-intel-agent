@@ -192,10 +192,95 @@ def _expand_chain(chain):
     return expanded
 
 
-def generate_text(prompt, timeout=60, chain=None, caller=None):
+def unique_report_path(reports_dir, base_name):
+    """Return a unique report filepath, adding a sequence suffix if needed.
+
+    E.g. huel_financial_2026-03-24.md → huel_financial_2026-03-24_2.md if the
+    base already exists.
+    """
+    reports_dir = Path(reports_dir)
+    candidate = reports_dir / base_name
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem   # e.g. "huel_financial_2026-03-24"
+    suffix = candidate.suffix  # ".md"
+    seq = 2
+    while True:
+        candidate = reports_dir / f"{stem}_{seq}{suffix}"
+        if not candidate.exists():
+            return candidate
+        seq += 1
+
+
+def normalize_citations(text):
+    """Fix malformed LLM citation formats into standard markdown links.
+
+    Handles three classes of malformed citations:
+    1. Fullwidth brackets: 【¹†url】 or 【¹ url】
+    2. Dagger/space inside brackets: [¹†url] or [¹ url]
+    3. Reference-style orphans: [¹] with a numbered Sources section at the
+       bottom like "1. [Title](url)" — reconnects markers to their URLs.
+    """
+    # --- Class 1: fullwidth brackets ---
+    text = re.sub(
+        r'【([¹²³⁴⁵⁶⁷⁸⁹⁰\d]+)[†⁺+\s]+(https?://[^\s】]+?)】',
+        r'[\1](\2)',
+        text
+    )
+    # --- Class 2: dagger, plus, or space inside standard brackets ---
+    text = re.sub(
+        r'\[([¹²³⁴⁵⁶⁷⁸⁹⁰\d]+)[†⁺+\s]+(https?://[^\s\]]+?)\]',
+        r'[\1](\2)',
+        text
+    )
+
+    # --- Class 3: reference-style orphans ---
+    # Parse the Sources/References section to build number → URL map.
+    SUPER_DIGITS = {'¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5',
+                    '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁰': '0'}
+    DIGIT_SUPERS = {v: k for k, v in SUPER_DIGITS.items()}
+
+    # Isolate the Sources section to safely scrape loose markdown URL formats
+    sources_text = text
+    lower_text = text.lower()
+    for header in ["## sources", "## references", "# sources", "sources:", "sources\n"]:
+        if header in lower_text:
+            idx = lower_text.rfind(header)
+            sources_text = text[idx:]
+            break
+
+    source_map = {}  # "1" → url
+    # MATCH OPTIONS:
+    # "1. [Title](url)"
+    # "* 1. https://..."
+    # "- [1] Title - https://..."
+    for m in re.finditer(r'^[^\S\r\n]*(?:[-*]\s+)?(?:\[?(\d+)\]?\.?)\s+.*?(https?://[^\s)\]\'"<>]+)', sources_text, re.MULTILINE):
+        source_map[m.group(1)] = m.group(2)
+
+    if source_map:
+        # Replaces orphan superscripts like [¹] OR naked superscripts like ¹
+        # As long as they are not currently followed by a (url...
+        def _replace_orphan(match):
+            superscript = match.group(1)
+            # Convert superscript to digit
+            digit = ''.join(SUPER_DIGITS.get(c, c) for c in superscript)
+            url = source_map.get(digit)
+            if url:
+                return f'[{superscript}]({url})'
+            return match.group(0)  # leave unchanged if no source found
+
+        # Match [¹] or just ¹ not followed by (
+        text = re.sub(r'\[?([¹²³⁴⁵⁶⁷⁸⁹⁰]+)\]?(?!\()', _replace_orphan, text)
+
+    return text
+
+
+def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
     """Try providers in order until one works. Returns (text, model_name).
 
     Uses key-round interleaving: all models per key, then next key.
+    If json_mode=True, hints providers to return valid JSON
+    (Gemini response_mime_type, OpenAI-compat response_format).
     """
     # Auto-detect caller from stack if not provided
     if not caller:
@@ -217,7 +302,8 @@ def generate_text(prompt, timeout=60, chain=None, caller=None):
                 with gemini_lock:
                     genai.configure(api_key=key)
                     model = genai.GenerativeModel(p["model"])
-                    response = model.generate_content(prompt)
+                    gen_config = {"response_mime_type": "application/json"} if json_mode else None
+                    response = model.generate_content(prompt, generation_config=gen_config)
                 http.close()
                 # Extract token counts from Gemini response
                 in_tok = out_tok = None
@@ -229,10 +315,13 @@ def generate_text(prompt, timeout=60, chain=None, caller=None):
                     pass
                 print(f"[llm] ✓ {model_id} (key …{key_hint})" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
                 log_llm_call(p["name"], p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
-                return response.text, model_id
+                result_text = response.text if not json_mode else response.text
+                return (normalize_citations(result_text) if not json_mode else result_text), model_id
             else:
                 headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
                 body = {"model": p["model"], "messages": [{"role": "user", "content": prompt}], "temperature": 0.3}
+                if json_mode:
+                    body["response_format"] = {"type": "json_object"}
                 resp = http.post(p["url"], json=body, headers=headers)
                 if resp.status_code == 200:
                     resp_json = resp.json()
@@ -246,7 +335,7 @@ def generate_text(prompt, timeout=60, chain=None, caller=None):
                     http.close()
                     print(f"[llm] ✓ {model_id} (key …{key_hint})" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
                     log_llm_call(p["name"], p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
-                    return text, model_id
+                    return (normalize_citations(text) if not json_mode else text), model_id
                 elif resp.status_code == 429:
                     print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
                     log_llm_call(p["name"], p["model"], key_hint, "rate_limited", error="429", caller=caller)
@@ -270,23 +359,94 @@ def generate_text(prompt, timeout=60, chain=None, caller=None):
     raise RuntimeError("All LLM providers failed for text generation")
 
 
-def generate_json(prompt, timeout=60, chain=None):
-    """Generate text and parse as JSON. Returns parsed dict/list or None."""
+def _extract_json(text):
+    """Extract JSON from LLM response, handling markdown fences and surrounding text.
+
+    Returns parsed dict/list, or None if no valid JSON found.
+    """
+    text = text.strip()
+
+    # Strip markdown code fences
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    text = text.strip()
+    if text.startswith("json"):
+        text = text[4:].strip()
+
+    # Try direct parse first (fast path)
     try:
-        text, _ = generate_text(prompt, timeout=timeout, chain=chain)
-        # Strip markdown code fences if present
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-        if text.startswith("json"):
-            text = text[4:].strip()
         return json.loads(text)
-    except Exception as e:
-        print(f"[llm] JSON generation failed: {e}")
+    except json.JSONDecodeError:
+        pass
+
+    # Find the outermost JSON object {...} or array [...] in the response
+    for start_char, end_char in (("{", "}"), ("[", "]")):
+        start = text.find(start_char)
+        if start == -1:
+            continue
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            c = text[i]
+            if escape:
+                escape = False
+                continue
+            if c == "\\":
+                escape = True
+                continue
+            if c == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if c == start_char:
+                depth += 1
+            elif c == end_char:
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:i + 1])
+                    except json.JSONDecodeError:
+                        break
+    return None
+
+
+def generate_json(prompt, timeout=60, chain=None):
+    """Generate text and parse as JSON. Retries on parse failure.
+
+    Returns parsed dict/list or None.
+    """
+    # Attempt 1: generation with json_mode hint
+    try:
+        text, model = generate_text(prompt, timeout=timeout, chain=chain, json_mode=True)
+    except RuntimeError as e:
+        print(f"[llm] JSON generation failed — all providers down: {e}")
         return None
+
+    result = _extract_json(text)
+    if result is not None:
+        return result
+
+    # Parse failed — log and retry with stricter instruction
+    print(f"[llm] {model} returned non-JSON ({len(text)} chars), retrying with stricter prompt...")
+    print(f"[llm] Response preview: {text[:150]}...")
+
+    try:
+        retry_prompt = prompt + "\n\nCRITICAL: Return ONLY valid JSON. No explanation, no markdown fences, no text before or after the JSON object."
+        text2, model2 = generate_text(retry_prompt, timeout=timeout, chain=chain, json_mode=True)
+    except RuntimeError:
+        print(f"[llm] Retry also failed — all providers exhausted")
+        return None
+
+    result = _extract_json(text2)
+    if result is not None:
+        return result
+
+    print(f"[llm] Retry from {model2} also non-JSON: {text2[:150]}...")
+    return None
 
 
 # --- Dossier integration ---
@@ -337,6 +497,13 @@ Fields to extract:
 - "infrastructure_provider": primary cloud/hosting (e.g. "AWS", "Google Cloud", "Vercel") or null
 - "total_technologies_detected": integer count of all technologies found
 - "tech_modernity_signals": array of 2-3 short observations about whether the stack is modern, legacy, or mixed
+- "backend_languages": array of backend programming languages from hiring data (e.g. ["Python", "Go", "Java"]) or null
+- "databases": array of database technologies from hiring data (e.g. ["PostgreSQL", "Redis", "MongoDB"]) or null
+- "cloud_platform": primary cloud platform from hiring data (e.g. "AWS", "GCP", "Azure") or null
+- "devops_tools": array of DevOps/infrastructure tools from hiring data (e.g. ["Kubernetes", "Terraform", "Docker"]) or null
+- "data_stack": array of data engineering tools from hiring data (e.g. ["Spark", "Airflow", "Snowflake", "dbt"]) or null
+- "ai_ml_frameworks": array of AI/ML frameworks from hiring data (e.g. ["PyTorch", "TensorFlow", "LangChain"]) or null
+- "hiring_data_available": boolean — true if the report includes hiring-derived technology signals, false otherwise
 
 Report:
 {report_text}
