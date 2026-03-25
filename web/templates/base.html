@@ -2576,8 +2576,12 @@ function renderCompanyList() {
                         <span class="report-date">${dateStr}</span></div>`;
                 } else {
                     itemsHtml += `<div class="report-item${noReport}">
-                        <span class="report-type-dot dot-${a.type}"></span>${escHtml(a.type)}<span class="report-date">${dateStr}</span>
-                        <span class="rename-btn" onclick="deleteOrphanAnalysis(${a.id}, event)" title="Remove stale entry">&times;</span></div>`;
+                        <span class="report-type-dot dot-${a.type}"></span>
+                        <div class="report-rename-wrap">
+                            <span class="report-name-text">${escHtml(a.type)}</span>
+                            <span class="rename-btn" onclick="deleteOrphanAnalysis(${a.id}, event)" title="Remove stale entry">&times;</span>
+                        </div>
+                        <span class="report-date">${dateStr}</span></div>`;
                 }
             });
 

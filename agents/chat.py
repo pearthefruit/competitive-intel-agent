@@ -684,6 +684,13 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             if new == 0 and skipped == 0:
                 return "Pipeline stopped: no jobs collected. Check the company name or provide a direct URL."
 
+            total_jobs = new + skipped
+            if total_jobs < 10:
+                # Classify with fast mode (zero LLM calls) just so analyze can see the jobs
+                classify(args["company"], db_path, mode="fast")
+                path = analyze(args["company"], db_path)
+                return f"Only {total_jobs} jobs found — insufficient for hiring analysis (minimum 10). Report notes insufficient data."
+
             cls_mode = args.get("classification_mode", "comprehensive")
             count = classify(args["company"], db_path,
                             seniority_framework=args.get("seniority_framework"),

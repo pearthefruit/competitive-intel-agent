@@ -107,28 +107,15 @@ def _generate_insufficient_data_report(company_name, company, jobs, db_path):
     """Generate a minimal report when the sample size is too small for analysis."""
     today = datetime.now().strftime("%Y-%m-%d")
     job_list = "\n".join(f"- {j.get('title', 'Unknown')} ({j.get('location', 'N/A')})" for j in jobs)
-    report = f"""# Competitive Intelligence: {company_name}
+    report = f"""# Hiring Analysis: {company_name}
 
-**Generated:** {today}
-**Jobs found:** {len(jobs)}
-**Data source:** {company['url'] or 'N/A'}
-**ATS:** {company['ats_type'] or 'N/A'}
+**Generated:** {today} | **Jobs found:** {len(jobs)} | **Source:** {company['url'] or 'N/A'}
 
 ---
 
-## Insufficient Data
+Not enough data for hiring analysis — only {len(jobs)} role(s) found (minimum 10 required).
 
-Only {len(jobs)} role(s) were found, which is below the minimum threshold of 10 for meaningful hiring analysis. Department distribution, seniority trends, and strategic conclusions cannot be reliably drawn from this sample.
-
-### Roles Found
-
-{job_list}
-
-### Recommendation
-
-- Re-collect with a broader search or verify the company's careers page URL
-- Check if the company posts on a different ATS board or uses a different name on LinkedIn
-- Consider supplementing with manual research for companies with very few open roles
+**Roles found:** {', '.join(j.get('title', 'Unknown') for j in jobs) or 'None'}
 """
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
