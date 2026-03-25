@@ -22,8 +22,8 @@ _BRIEFING_SCHEMA = {
         "overall_algorithmic_confidence": "float 0-1 (auto-populated — do not set)",
         "sub_scores": {
             "tech_modernity": {
-                "score": "integer 0-100 (your adjusted score, within ±10 of algorithmic base)",
-                "rationale": "string with [source] tags. If deviating >5 from algorithmic base, include 'Algorithmic deviation: ...' sentence",
+                "score": "integer 0-100 — your score based on all evidence",
+                "rationale": "string with [source] tags — explain what evidence supports the score",
                 "signals": ["string with [source] tag"],
                 "source_analyses": ["string — which analyses informed this score"],
                 "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
@@ -31,8 +31,8 @@ _BRIEFING_SCHEMA = {
                 "signals_used": ["string (auto-populated — do not set)"],
             },
             "data_analytics": {
-                "score": "integer 0-100 (your adjusted score, within ±10 of algorithmic base)",
-                "rationale": "string with [source] tags. If deviating >5 from algorithmic base, include 'Algorithmic deviation: ...' sentence",
+                "score": "integer 0-100 — your score based on all evidence",
+                "rationale": "string with [source] tags — explain what evidence supports the score",
                 "signals": ["string with [source] tag"],
                 "source_analyses": ["string"],
                 "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
@@ -40,8 +40,8 @@ _BRIEFING_SCHEMA = {
                 "signals_used": ["string (auto-populated — do not set)"],
             },
             "ai_readiness": {
-                "score": "integer 0-100 (your adjusted score, within ±10 of algorithmic base)",
-                "rationale": "string with [source] tags. If deviating >5 from algorithmic base, include 'Algorithmic deviation: ...' sentence",
+                "score": "integer 0-100 — your score based on all evidence",
+                "rationale": "string with [source] tags — explain what evidence supports the score",
                 "signals": ["string with [source] tag"],
                 "source_analyses": ["string"],
                 "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
@@ -49,8 +49,8 @@ _BRIEFING_SCHEMA = {
                 "signals_used": ["string (auto-populated — do not set)"],
             },
             "organizational_readiness": {
-                "score": "integer 0-100 (your adjusted score, within ±10 of algorithmic base)",
-                "rationale": "string with [source] tags. If deviating >5 from algorithmic base, include 'Algorithmic deviation: ...' sentence",
+                "score": "integer 0-100 — your score based on all evidence",
+                "rationale": "string with [source] tags — explain what evidence supports the score",
                 "signals": ["string with [source] tag"],
                 "source_analyses": ["string"],
                 "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
@@ -126,66 +126,34 @@ _BRIEFING_SCHEMA = {
 
 
 def _format_algo_scores_block(algo_scores):
-    """Format algorithmic scores into a prompt section for the LLM."""
-    if not algo_scores:
-        return ""
+    """Format scoring instructions for the LLM.
 
-    dim_labels = {
-        "tech_modernity": "Tech Modernity",
-        "data_analytics": "Data & Analytics",
-        "ai_readiness": "AI Readiness",
-        "org_readiness": "Organizational Readiness",
-    }
-
+    The LLM scores each dimension directly using the rubric and all available
+    evidence. Algorithmic signals are NOT shown to the LLM — they are injected
+    as metadata after the LLM responds (for the info-icon audit trail).
+    """
     lines = [
         "",
         "---",
         "",
-        "DIGITAL MATURITY SCORE — HYBRID SCORING:",
+        "DIGITAL MATURITY SCORING:",
         "",
-        "The algorithmic system has pre-computed base scores from structured data. Your job is to:",
-        "1. Review the algorithmic score and the signals that produced it",
-        "2. Apply your contextual judgment to fine-tune — you MAY adjust each sub-score by up to ±10 points",
-        "3. If you adjust by more than ±5, you MUST include a sentence in rationale starting with "
-        "\"Algorithmic deviation:\" explaining what qualitative context the algorithm could not see",
-        "4. DO NOT adjust simply to produce a rounder number or a more palatable overall score",
+        "Score each dimension 0-100 based on ALL available evidence from the reports, key facts, and hiring data above.",
+        "Use the scoring rubric below as your guide. Your scores are final — they will be used directly.",
         "",
-        "ALGORITHMIC BASE SCORES (computed from structured data before this LLM call):",
+        "The overall_score will be RECOMPUTED as a weighted average from your sub-scores — do not try to set it yourself.",
+        "",
+        "SCORING RULES:",
+        "- Base your scores on EVIDENCE, not assumptions. Every score must be justified by data from the reports.",
+        "- SMALL SAMPLE SIZES: If fewer than 100 roles were analyzed (especially LinkedIn samples), "
+        "do NOT treat department percentages as reliable. A 41-role LinkedIn snapshot showing 6% engineering "
+        "does NOT mean the company lacks engineering capability — it means the sample is too small to draw structural conclusions. "
+        "Focus on sector identity, patents, strategic tags, report content, and the company's known products/capabilities.",
+        "- Consider the company's CORE BUSINESS and PRODUCTS when scoring, not just scraped data. Samsung making HBM chips "
+        "is strong AI Readiness evidence even if few 'AI Engineer' titles appear in a small LinkedIn sample.",
+        "- Do NOT restate the score number in the rationale (e.g. 'The score of 53...'). Scores are displayed separately in the UI.",
         "",
     ]
-
-    for dim_key, label in dim_labels.items():
-        dim = algo_scores.get(dim_key, {})
-        score = dim.get("algorithmic_score", 50)
-        conf = dim.get("confidence", 0.0)
-        signals = dim.get("signals_used", [])
-        missing = dim.get("missing_analyses", [])
-
-        lines.append(f"  {label}: {score}/100  (confidence: {conf:.0%})")
-        for sig in signals:
-            lines.append(f"    - {sig}")
-        if missing:
-            lines.append(f"    Missing analyses: {', '.join(missing)}")
-        lines.append("")
-
-    weighted = algo_scores.get("weighted_algorithmic_score", 50)
-    overall_conf = algo_scores.get("overall_confidence", 0.0)
-    lines.append(f"  Weighted algorithmic overall: {weighted}/100  (confidence: {overall_conf:.0%})")
-    lines.append("")
-    lines.append("ADJUSTMENT RULES:")
-    lines.append("- If confidence for a dimension is >= 0.75, adjustments beyond ±5 are strongly discouraged")
-    lines.append("- If confidence is < 0.50 (sparse data), you have more discretion to adjust based on qualitative signals from the reports")
-    lines.append("- Never adjust a score below 0 or above 100")
-    lines.append("- The overall_score field will be RECOMPUTED from your final sub-scores — do not try to set it yourself")
-    lines.append("")
-    lines.append("RATIONALE WRITING RULES:")
-    lines.append("- Do NOT restate the algorithmic base score in the rationale (e.g. 'Algorithmic base score of 30'). The scores are displayed separately in the UI.")
-    lines.append("- Jump straight into the evidence and analysis. Lead with what the data shows, not how the score was computed.")
-    lines.append("- Only mention 'Algorithmic deviation:' if you adjusted by more than ±5 — and even then, explain the WHY, not the math.")
-    lines.append("- SMALL SAMPLE SIZES: If fewer than 10 roles were analyzed, the hiring data is insufficient to draw conclusions. "
-                 "Do NOT analyze department distribution, hiring strategy, or growth signals — just state 'Insufficient hiring data (N roles)' "
-                 "and rely on other evidence sources. Never describe 3 roles as a 'strategy' or 'focus'.")
-    lines.append("")
 
     return "\n".join(lines)
 
@@ -398,7 +366,7 @@ The source_analyses array for each section MUST match the inline [source] tags u
 
 {_format_algo_scores_block(algo_scores)}---
 
-DIGITAL CAPABILITY SCORING RUBRIC (reference for justifying any adjustments from algorithmic base):
+DIGITAL CAPABILITY SCORING RUBRIC:
 
 IMPORTANT: This score measures the company's ACTUAL digital and technological capability — NOT their attractiveness as a consulting target. Score honestly. A digitally advanced company can still need consulting help (specialized AI work, org design, M&A integration, etc.).
 
@@ -442,7 +410,7 @@ Secondary signals: analytics tools detected on website (Segment, Amplitude, etc.
 - 20-39: Shrinking hiring, negative sentiment, no strategic investment signals.
 - NUANCE: Negative sentiment from rapid growth (burnout, equity complaints during hypergrowth) is NOT the same as organizational resistance to change. Distinguish growing pains from structural dysfunction. A company growing from 1000 to 8000 employees will have cultural friction — that's an org design opportunity, not a sign of low readiness.
 
-**Overall score = weighted average (Tech×0.30 + Data×0.25 + AI×0.25 + Org×0.20). NOTE: The overall_score will be RECOMPUTED programmatically from your sub-scores after this call — focus on getting each sub-score right rather than the overall arithmetic.**
+**Overall score = weighted average (Tech×0.30 + Data×0.25 + AI×0.25 + Org×0.20). NOTE: The overall_score will be RECOMPUTED programmatically from your sub-scores — focus on getting each sub-score right rather than the overall arithmetic.**
 
 Labels (direct, no sugarcoating — these should make a C-suite exec pay attention):
 - 80-100: "Digital Vanguard"

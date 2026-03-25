@@ -764,6 +764,7 @@ def create_app(db_path="intel.db"):
                 "analysis_count": dos.get("analysis_count", 0),
                 "event_count": dos.get("event_count", 0),
                 "has_briefing": bool(dos.get("briefing_json")),
+                "briefing_generated_at": dos.get("briefing_generated_at"),
                 "last_updated": dos.get("updated_at") or dos.get("last_analysis_at") or "",
                 "analyses": [],
                 "orphan_reports": [],

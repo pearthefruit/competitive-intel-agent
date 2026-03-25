@@ -73,7 +73,8 @@
             font-weight: 700;
             letter-spacing: -0.3px;
             background: linear-gradient(135deg, var(--accent), var(--purple));
-            -webkit-background-clip: text;
+            background-clip: text;
+    -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             margin-bottom: 12px;
         }
@@ -1073,7 +1074,8 @@
             font-size: 28px;
             font-weight: 700;
             background: linear-gradient(135deg, var(--accent), var(--purple));
-            -webkit-background-clip: text;
+            background-clip: text;
+    -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
         .welcome-sub {
@@ -2480,6 +2482,19 @@ async function refreshUsageBadge() {
             });
         }
 
+        // All-time totals
+        const a = data.all_time || {};
+        if (a.total) {
+            html += '<div class="llm-usage-divider"></div>';
+            const allTok = (a.input_tokens || 0) + (a.output_tokens || 0);
+            const allFailed = (a.total || 0) - (a.success || 0);
+            html += `<div style="color:var(--text-muted);font-weight:600;margin-bottom:4px">All Time</div>`;
+            html += `<div class="llm-usage-row"><span>Total calls</span><span class="cnt">${a.total.toLocaleString()}</span></div>`;
+            html += `<div class="llm-usage-row"><span>Successful</span><span class="cnt">${(a.success||0).toLocaleString()}</span></div>`;
+            if (allFailed) html += `<div class="llm-usage-row error"><span>Failed/Rate-limited</span><span class="cnt">${allFailed.toLocaleString()}</span></div>`;
+            if (allTok > 0) html += `<div class="llm-usage-row"><span>Total tokens</span><span class="cnt" style="color:#a855f7">${_fmtTok(allTok)}</span></div>`;
+        }
+
         panel.innerHTML = html;
     } catch {}
 }
@@ -2494,6 +2509,25 @@ function toggleUsagePanel() {
 
 // Refresh usage badge periodically
 setInterval(refreshUsageBadge, 15000);
+
+function _formatSidebarDate(dateStr) {
+    if (!dateStr) return '';
+    let ds = dateStr;
+    if (!ds.includes('T') && ds.includes(' ')) ds = ds.replace(' ', 'T');
+    
+    // Add Z if it's missing and it looks like UTC (which our DB timestamps are)
+    if (!ds.includes('Z') && !ds.includes('+')) ds += 'Z';
+    
+    const d = new Date(ds);
+    if (isNaN(d.getTime())) return '';
+    
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    let h = d.getHours(), ampm = h >= 12 ? 'p' : 'a';
+    h = h % 12 || 12;
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${mm}-${dd} ${h}:${min}${ampm}`;
+}
 
 function toggleCompanySort() {
     companySortMode = companySortMode === 'recent' ? 'alpha' : 'recent';
@@ -2543,29 +2577,22 @@ function renderCompanyList() {
             // Briefing link
             if (company.has_briefing) {
                 const briefActive = activeDossierName === company.name ? ' active' : '';
-                itemsHtml += `<div class="company-briefing-link${briefActive}" onclick="openDossier('${escHtml(company.name)}')" onmousedown="handleSidebarMouseDown(event,'briefing',null,'${escHtml(company.name)}')">&#9733; Intelligence Briefing</div>`;
+                const briefDateStr = _formatSidebarDate(company.briefing_generated_at);
+                const displayDate = briefDateStr ? `<span class="report-date" style="font-size:10px; margin-left:auto; opacity:0.7">${briefDateStr}</span>` : '';
+                
+                itemsHtml += `<div class="company-briefing-link${briefActive}" onclick="openDossier('${escHtml(company.name)}')" onmousedown="handleSidebarMouseDown(event,'briefing',null,'${escHtml(company.name)}')">
+                    <span style="display:flex; align-items:center; width:100%">
+                        &#9733; Intelligence Briefing
+                        ${displayDate}
+                    </span>
+                </div>`;
             }
 
-            // Analysis items
-            (company.analyses || []).forEach(a => {
-                const isActive = currentReportFilename === a.report_file ? ' active' : '';
-                const noReport = !a.has_report ? ' no-report' : '';
-                let dateStr = '';
-                if (a.date) {
-                    if (a.date.includes('T')) {
-                        // Full ISO timestamp "2026-03-24T19:19:05" — show date + local time
-                        const d = new Date(a.date + 'Z');
-                        const mm = String(d.getMonth() + 1).padStart(2, '0');
-                        const dd = String(d.getDate()).padStart(2, '0');
-                        let h = d.getHours(), ampm = h >= 12 ? 'p' : 'a';
-                        h = h % 12 || 12;
-                        const min = String(d.getMinutes()).padStart(2, '0');
-                        dateStr = `${mm}-${dd} ${h}:${min}${ampm}`;
-                    } else {
-                        // Date-only fallback "2026-03-24"
-                        dateStr = a.date.slice(5);
-                    }
-                }
+                // Analysis items
+                (company.analyses || []).forEach(a => {
+                    const isActive = currentReportFilename === a.report_file ? ' active' : '';
+                    const noReport = !a.has_report ? ' no-report' : '';
+                    const dateStr = _formatSidebarDate(a.date);
                 itemsHtml += `<div class="report-item can-drag${isActive}" onclick="openReport('${escHtml(a.report_file)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(a.report_file)}','${escHtml(company.name)}')">
                     <span class="report-type-dot dot-${a.type}"></span>
                     <div class="report-rename-wrap">
@@ -3077,6 +3104,14 @@ function showBriefing(dossier, b, _targetEl) {
     if (identity.hq_location) html += `<span>${escHtml(identity.hq_location)}</span>`;
     if (identity.founded) html += `<span>Est. ${identity.founded}</span>`;
     if (identity.headcount) html += `<span>${escHtml(String(identity.headcount))} employees</span>`;
+    if (dossier.briefing_generated_at) {
+        let dateStr = dossier.briefing_generated_at;
+        if (!dateStr.includes('T') && dateStr.includes(' ')) dateStr = dateStr.replace(' ', 'T');
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) {
+            html += `<span>Last Refreshed: ${d.toLocaleString()}</span>`;
+        }
+    }
     html += `</div>`;
 
     // Staleness check — normalize timestamps to UTC for comparison
@@ -4246,6 +4281,15 @@ function _buildBriefingDashboard(content) {
                 <div class="dash-hero-company">${escHtml(identity.name || dossier.company_name)}</div>
                 ${identity.sector ? `<div class="dash-hero-sector">${escHtml(identity.sector)}</div>` : ''}
                 <div class="dash-hero-detail">${escHtml(metaParts.join(' · '))}</div>
+                <div class="dash-hero-timestamp" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; font-style: italic;">
+                    Last Refreshed: ${(() => {
+                        if (!dossier.briefing_generated_at) return 'Never';
+                        let ds = dossier.briefing_generated_at;
+                        if (!ds.includes('T') && ds.includes(' ')) ds = ds.replace(' ', 'T');
+                        const d = new Date(ds);
+                        return isNaN(d.getTime()) ? 'Never' : d.toLocaleString();
+                    })()}
+                </div>
                 <button class="dash-refresh-btn" onclick="event.stopPropagation();generateBriefing('${escHtml(dossier.company_name)}')">&#x21bb; Refresh Briefing</button>
             </div>
             <div class="dash-hero-score">

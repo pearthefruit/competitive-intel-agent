@@ -252,7 +252,7 @@ def generate_briefing(company_name, db_path="intel.db"):
         conn.close()
         raise RuntimeError(msg)
 
-    # 7.5. Merge algorithmic scores and recompute overall
+    # 7.5. LLM scores are authoritative — inject algorithmic metadata for info-icon audit trail
     if "digital_maturity" in briefing:
         dm = briefing["digital_maturity"]
         sub = dm.get("sub_scores", {})
@@ -267,6 +267,7 @@ def generate_briefing(company_name, db_path="intel.db"):
         for schema_key, scoring_key in _DIM_MAP.items():
             dim_data = algo_scores.get(scoring_key, {})
             if schema_key in sub:
+                # Inject algorithmic metadata (info icon shows these as "proof")
                 sub[schema_key]["algorithmic_score"] = dim_data.get("algorithmic_score", 50)
                 sub[schema_key]["algorithmic_confidence"] = dim_data.get("confidence", 0.0)
                 sub[schema_key]["signals_used"] = dim_data.get("signals_used", [])
@@ -300,8 +301,8 @@ def generate_briefing(company_name, db_path="intel.db"):
         else:
             dm["overall_label"] = "Digital Liability"
 
-        print(f"[briefing] Algo base: {algo_scores['weighted_algorithmic_score']}/100 → "
-              f"LLM-adjusted: {dm['overall_score']}/100 ({dm['overall_label']})")
+        print(f"[briefing] LLM DMS: {dm['overall_score']}/100 ({dm['overall_label']}) "
+              f"[algo reference: {algo_scores['weighted_algorithmic_score']}/100]")
 
     # 9. Store on dossier
     now = datetime.now(timezone.utc).isoformat()

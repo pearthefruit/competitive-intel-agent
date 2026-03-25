@@ -165,8 +165,8 @@ def log_llm_call(provider, model, key_hint, status, error=None, caller=None,
         )
         conn.commit()
         conn.close()
-    except Exception:
-        pass  # Don't let logging failures break anything
+    except Exception as e:
+        print(f"[log_llm_call] LOGGING FAILED: {e}")
 
 
 def get_llm_usage_stats(db_path="intel.db"):
@@ -175,12 +175,12 @@ def get_llm_usage_stats(db_path="intel.db"):
         conn = get_connection(db_path)
         today = datetime.now().strftime("%Y-%m-%d")
 
-        # Today's calls by provider/model
+        # Today's calls by provider/model (convert UTC timestamps to local time)
         today_rows = conn.execute(
             """SELECT provider, model, key_hint, status, COUNT(*) as cnt,
                       COALESCE(SUM(input_tokens), 0) as input_tokens,
                       COALESCE(SUM(output_tokens), 0) as output_tokens
-               FROM llm_usage WHERE DATE(created_at) = ?
+               FROM llm_usage WHERE DATE(created_at, 'localtime') = ?
                GROUP BY provider, model, key_hint, status
                ORDER BY cnt DESC""",
             (today,)
@@ -192,7 +192,7 @@ def get_llm_usage_stats(db_path="intel.db"):
                       SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as success,
                       COALESCE(SUM(input_tokens), 0) as input_tokens,
                       COALESCE(SUM(output_tokens), 0) as output_tokens
-               FROM llm_usage WHERE DATE(created_at) = ?""",
+               FROM llm_usage WHERE DATE(created_at, 'localtime') = ?""",
             (today,)
         ).fetchone()
 
@@ -208,16 +208,16 @@ def get_llm_usage_stats(db_path="intel.db"):
         # Recent errors
         recent_errors = conn.execute(
             """SELECT provider, model, key_hint, error, created_at
-               FROM llm_usage WHERE status != 'success' AND DATE(created_at) = ?
+               FROM llm_usage WHERE status != 'success' AND DATE(created_at, 'localtime') = ?
                ORDER BY created_at DESC LIMIT 10""",
             (today,)
         ).fetchall()
 
-        # Hourly breakdown today
+        # Hourly breakdown today (show local hours)
         hourly = conn.execute(
-            """SELECT strftime('%H', created_at) as hour, COUNT(*) as cnt,
+            """SELECT strftime('%H', created_at, 'localtime') as hour, COUNT(*) as cnt,
                       SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as success
-               FROM llm_usage WHERE DATE(created_at) = ?
+               FROM llm_usage WHERE DATE(created_at, 'localtime') = ?
                GROUP BY hour ORDER BY hour""",
             (today,)
         ).fetchall()
