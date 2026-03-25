@@ -13,10 +13,11 @@ import httpx
 
 # Subreddits useful for competitive intelligence, by category
 SUBREDDITS = {
-    "general": ["technology", "business", "startups", "Entrepreneur"],
-    "finance": ["investing", "stocks", "wallstreetbets", "SecurityAnalysis"],
+    "general": ["technology", "business", "startups", "Entrepreneur", "news"],
+    "finance": ["investing", "stocks", "wallstreetbets", "SecurityAnalysis", "economics"],
     "tech": ["programming", "cscareerquestions", "SaaS", "devops"],
     "industry": ["consulting", "MBA", "ProductManagement"],
+    "retail_cpg": ["retail", "CPG", "FMCG", "ecommerce", "supplychain"],
 }
 
 _NS = {"atom": "http://www.w3.org/2005/Atom"}
@@ -153,10 +154,27 @@ def search_reddit_rss(query, max_results=10, subreddits=None, fetch_comments_top
     all_results = []
     seen_ids = set()
 
-    # Pick subreddits to search
+    # Pick subreddits to search dynamically
     if subreddits is None:
-        # Search a mix of general + relevant subreddits
-        subreddits = ["technology", "business", "startups", "investing", "SaaS"]
+        try:
+            # Use an ultra-fast LLM call to guess the company's sector from the query and pick tailored subreddits
+            from agents.llm import generate_text, FAST_CHAIN
+            prompt = (
+                f"You are a routing agent for a competitive intelligence system. "
+                f"What are the 4 best Reddit subreddits to search for data on: '{query}'?\n"
+                f"Deduce the industry (e.g., 'SaaS', 'FMCG', 'consulting', 'banking', 'retail', 'tech').\n"
+                f"Reply ONLY with a comma separated list of 4 relevant subreddit names without the 'r/' prefix (e.g. 'business, SaaS, startups, investing'). Do not include any other text."
+            )
+            sub_text, _ = generate_text(prompt, timeout=4, chain=FAST_CHAIN)
+            picked = [s.strip().replace("r/", "") for s in sub_text.split(",") if s.strip()]
+            if picked and len(picked) <= 8:
+                subreddits = picked[:4]
+                print(f"[reddit_rss] AI Dynamically selected subreddits for context: {subreddits}")
+            else:
+                raise ValueError("LLM returned malformed list")
+        except Exception as e:
+            print(f"[reddit_rss] Dynamic subreddit selection skipped ({e}), using defaults.")
+            subreddits = ["business", "technology", "investing", "news"]
 
     # Search each subreddit (limit per sub to avoid hammering)
     per_sub = max(2, max_results // len(subreddits))
