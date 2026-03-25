@@ -178,6 +178,11 @@ def _format_algo_scores_block(algo_scores):
     lines.append("- Never adjust a score below 0 or above 100")
     lines.append("- The overall_score field will be RECOMPUTED from your final sub-scores — do not try to set it yourself")
     lines.append("")
+    lines.append("RATIONALE WRITING RULES:")
+    lines.append("- Do NOT restate the algorithmic base score in the rationale (e.g. 'Algorithmic base score of 30'). The scores are displayed separately in the UI.")
+    lines.append("- Jump straight into the evidence and analysis. Lead with what the data shows, not how the score was computed.")
+    lines.append("- Only mention 'Algorithmic deviation:' if you adjusted by more than ±5 — and even then, explain the WHY, not the math.")
+    lines.append("")
 
     return "\n".join(lines)
 
