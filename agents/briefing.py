@@ -172,6 +172,9 @@ def generate_briefing(company_name, db_path="intel.db"):
     # 2. Get hiring stats using shared function
     company_id = get_company_id(conn, company_name)
     hiring_stats = compute_hiring_stats(conn, company_id) if company_id else None
+    if hiring_stats and hiring_stats["total_roles"] < 10:
+        print(f"[briefing] Only {hiring_stats['total_roles']} roles — insufficient for DMS scoring, treating as no hiring data")
+        hiring_stats = None
     if hiring_stats:
         print(f"[briefing] Hiring data: {hiring_stats['total_roles']} roles, "
               f"{hiring_stats['ai_ml_role_count']} AI/ML")
