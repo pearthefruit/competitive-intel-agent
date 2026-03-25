@@ -120,7 +120,7 @@ Not enough data for hiring analysis — only {len(jobs)} role(s) found (minimum 
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
     safe_name = company_name.lower().replace(" ", "_").replace("/", "_")
-    filename = unique_report_path(reports_dir, f"{safe_name}_{today}.md")
+    filename = unique_report_path(reports_dir, f"{safe_name}_hiring_{today}.md")
     filename.write_text(report, encoding="utf-8")
     print(f"[analyze] Insufficient data report saved to {filename}")
     save_to_dossier(company_name, "hiring", report_file=str(filename), report_text=report, model_used="none", db_path=db_path)
@@ -290,7 +290,7 @@ def analyze(company_name, db_path="intel.db"):
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
     safe_name = company_name.lower().replace(" ", "_").replace("/", "_")
-    filename = unique_report_path(reports_dir, f"{safe_name}_{today}.md")
+    filename = unique_report_path(reports_dir, f"{safe_name}_hiring_{today}.md")
     filename.write_text(report, encoding="utf-8")
 
     print(f"[analyze] Report saved to {filename}")

@@ -74,13 +74,31 @@ def _parse_report_filename(filename):
     return {"company": company, "type": analysis_type, "date": date, "filename": filename}
 
 
+def _build_report_type_map(db_path="intel.db"):
+    """Build a mapping of report filename → analysis_type from the DB."""
+    try:
+        conn = get_connection(db_path)
+        rows = conn.execute(
+            "SELECT report_file, analysis_type FROM dossier_analyses WHERE report_file IS NOT NULL"
+        ).fetchall()
+        conn.close()
+        # Normalize paths: store just the filename portion as key
+        return {Path(r["report_file"]).name: r["analysis_type"] for r in rows}
+    except Exception:
+        return {}
+
+
 def _get_all_reports():
     """Get all reports sorted by modification time (newest first)."""
     reports_dir = Path("reports")
     reports = []
     if reports_dir.exists():
+        type_map = _build_report_type_map()
         for f in sorted(reports_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
             info = _parse_report_filename(f.name)
+            # Override fallback types with the actual type from DB
+            if info["type"] in ("analysis", "report") and f.name in type_map:
+                info["type"] = type_map[f.name]
             info["size"] = f.stat().st_size
             reports.append(info)
     return reports

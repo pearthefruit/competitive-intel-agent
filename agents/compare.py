@@ -1,7 +1,7 @@
 """Agent: Company Comparison & Landscape — side-by-side analysis and auto-discovery."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, FAST_CHAIN, unique_report_path
@@ -11,8 +11,12 @@ from agents.sentiment import sentiment_analysis
 from agents.patents import patent_analysis
 from scraper.web_search import search_web, format_search_results
 from prompts.compare import build_comparison_prompt, build_landscape_prompt, build_extract_competitors_prompt, build_profile_lookup_prompt
+from db import get_connection, get_dossier_by_company
 
 DEFAULT_ANALYSES = ["financial", "sentiment", "competitors", "patents"]
+
+# Reuse reports generated within this many days
+REPORT_FRESHNESS_DAYS = 7
 
 ANALYSIS_FNS = {
     "financial": financial_analysis,
@@ -22,20 +26,62 @@ ANALYSIS_FNS = {
 }
 
 
+def _find_recent_report(company, analysis_type, max_age_days=REPORT_FRESHNESS_DAYS, db_path="intel.db"):
+    """Check dossier_analyses for a recent report of this type. Returns file path or None."""
+    try:
+        conn = get_connection(db_path)
+        row = conn.execute(
+            """SELECT da.report_file, da.created_at FROM dossier_analyses da
+               JOIN dossiers d ON da.dossier_id = d.id
+               WHERE d.company_name = ? COLLATE NOCASE
+                 AND da.analysis_type = ?
+                 AND da.report_file IS NOT NULL
+               ORDER BY da.created_at DESC LIMIT 1""",
+            (company, analysis_type),
+        ).fetchone()
+        conn.close()
+
+        if not row:
+            return None
+
+        # Check age
+        created = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+        age_days = (datetime.now(timezone.utc) - created).days
+        if age_days > max_age_days:
+            return None
+
+        # Check file still exists on disk
+        path = Path(row["report_file"])
+        if path.exists():
+            return str(path)
+    except Exception as e:
+        print(f"[compare] Could not check for recent {analysis_type} report for {company}: {e}")
+
+    return None
+
+
 def _run_analyses(company, analyses):
     """Run selected analyses for a company sequentially. Returns {type: path}.
 
-    Runs sequentially to avoid nested ThreadPoolExecutor issues — ddgs (web search)
-    uses threading internally, so nesting pools causes 'cannot schedule new futures
-    after interpreter shutdown' errors.
+    Reuses recent reports (within REPORT_FRESHNESS_DAYS) when available to avoid
+    redundant API calls. Runs sequentially to avoid nested ThreadPoolExecutor
+    issues — ddgs (web search) uses threading internally.
     """
     report_paths = {}
     for atype in analyses:
         fn = ANALYSIS_FNS.get(atype)
         if not fn:
             continue
+
+        # Check for a recent existing report first
+        recent = _find_recent_report(company, atype)
+        if recent:
+            report_paths[atype] = recent
+            print(f"[compare] {company} / {atype}: reusing recent report → {recent}")
+            continue
+
         try:
-            print(f"[compare] {company} / {atype}: running...")
+            print(f"[compare] {company} / {atype}: running fresh...")
             path = fn(company)
             if path:
                 report_paths[atype] = path
