@@ -2991,10 +2991,29 @@ function renderScoreRing(score, size) {
     </div>`;
 }
 
-function renderSubScore(label, score) {
+function renderSubScore(label, score, algoData) {
     const cc = _scoreColorClass(score);
+    let infoIcon = '';
+    if (algoData && algoData.algorithmic_score !== undefined) {
+        const algoScore = algoData.algorithmic_score;
+        const conf = algoData.algorithmic_confidence;
+        const signals = algoData.signals_used || [];
+        const confPct = conf !== undefined ? Math.round(conf * 100) + '%' : '?';
+        const delta = score - algoScore;
+        const deltaStr = delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : '±0';
+        let tipRows = signals.map(s => `<div class="methodology-tip-row">${escHtml(s)}</div>`).join('');
+        if (!tipRows) tipRows = '<div class="methodology-tip-row" style="font-style:italic">No structured signals</div>';
+        const tipId = 'algo-tip-' + label.replace(/[^a-zA-Z]/g, '');
+        infoIcon = ` <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('${tipId}')" style="font-size:11px">&#9432;</span>
+            <div class="methodology-tip" id="${tipId}">
+                <div class="methodology-tip-title">Algorithmic Base: ${algoScore}/100 → Final: ${score}/100 (${deltaStr})</div>
+                <div class="methodology-tip-row"><strong>Confidence:</strong> ${confPct}</div>
+                <div style="margin-top:4px;font-size:12px;font-weight:600;color:var(--text-secondary)">Signals:</div>
+                ${tipRows}
+            </div>`;
+    }
     return `<div class="sub-score-row">
-        <span class="sub-score-label">${escHtml(label)}</span>
+        <span class="sub-score-label">${escHtml(label)}${infoIcon}</span>
         <div class="sub-score-bar"><div class="sub-score-fill" style="width:${score}%;background:var(--${cc === 'vanguard' ? 'green' : cc === 'contender' ? 'accent' : cc === 'exposed' ? 'yellow' : 'red'})"></div></div>
         <span class="sub-score-value score-${cc}">${score}</span>
     </div>`;
@@ -3120,7 +3139,7 @@ function showBriefing(dossier, b, _targetEl) {
     const subLabels = { tech_modernity: 'Tech Modernity', data_analytics: 'Data & Analytics', ai_readiness: 'AI Readiness', organizational_readiness: 'Org Readiness' };
     Object.entries(subLabels).forEach(([key, lbl]) => {
         const sub = subs[key] || {};
-        html += renderSubScore(lbl, sub.score || 0);
+        html += renderSubScore(lbl, sub.score || 0, sub);
     });
 
     // Sub-score rationales with source badges at end
@@ -4194,7 +4213,7 @@ function _buildBriefingDashboard(content) {
     let barsHtml = '';
     Object.entries(subLabels).forEach(([key, lbl]) => {
         const sub = subs[key] || {};
-        barsHtml += renderSubScore(lbl, sub.score || 0);
+        barsHtml += renderSubScore(lbl, sub.score || 0, sub);
     });
 
     let confLine = '';
