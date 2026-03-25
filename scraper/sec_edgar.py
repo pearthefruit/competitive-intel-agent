@@ -179,7 +179,8 @@ def extract_financials(facts):
     """Extract key financial metrics from XBRL company facts.
 
     Returns dict of {metric_name: [{period, value, unit, filed}, ...]}.
-    Only includes USD annual (10-K) and quarterly (10-Q) data.
+    Only includes clean annual (FY) and single-quarter (Q1-Q4) data,
+    filtering out cumulative YTD entries and duplicates.
     """
     if not facts or "facts" not in facts:
         return {}
@@ -190,7 +191,14 @@ def extract_financials(facts):
     results = {}
 
     for metric_name, tag_options in FINANCIAL_TAGS.items():
-        # Try each tag variant until we find one with data
+        # Try ALL tag variants and pick the one with the most recent data.
+        # Companies change XBRL tags over time (e.g. "Revenues" -> ASC 606
+        # "RevenueFromContractWithCustomerExcludingAssessedTax"), so the
+        # first tag with data may only have stale entries.
+        best_entries = []
+        best_max_period = ""
+        best_tag = None
+
         for tag in tag_options:
             # Check both us-gaap and dei namespaces
             concept = us_gaap.get(tag) or dei.get(tag)
@@ -209,23 +217,37 @@ def extract_financials(facts):
             if not unit_data:
                 continue
 
-            # Filter to 10-K (annual) and 10-Q (quarterly) filings
+            # Filter to 10-K/10-Q filings, prefer entries with a "frame"
+            # field (CY2025, CY2025Q3, etc.) which are clean single-period
+            # snapshots. Entries without "frame" are often cumulative YTD
+            # figures (e.g. Jan-Sep) that confuse analysis.
             entries = []
+            seen = set()  # Deduplicate by (period, fiscal_period)
             for item in unit_data:
                 form = item.get("form", "")
                 if form not in ("10-K", "10-Q", "10-K/A", "10-Q/A"):
                     continue
 
-                # Only include entries with an end date (period-end snapshots)
                 end_date = item.get("end")
                 if not end_date:
                     continue
 
-                # Skip entries with start dates far from end (annual in quarterly, etc.)
-                start = item.get("start")
-                if start and form in ("10-Q", "10-Q/A"):
-                    # Quarterly entries should span ~90 days
-                    pass  # Keep all for now, LLM can interpret
+                fp = item.get("fp", "")
+                frame = item.get("frame", "")
+
+                # Skip cumulative YTD entries from 10-Q filings.
+                # These lack a "frame" and span >100 days (e.g. Jan-Sep).
+                # We only want single-quarter entries (frame like CY2025Q3)
+                # and full-year entries (frame like CY2025 from 10-K).
+                if form in ("10-Q", "10-Q/A") and not frame:
+                    continue
+
+                # Deduplicate: same period end + fiscal period can appear
+                # in multiple filings (e.g. FY2024 in both 2024 and 2025 10-K)
+                dedup_key = (end_date, fp)
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
 
                 entries.append({
                     "period": end_date,
@@ -233,14 +255,21 @@ def extract_financials(facts):
                     "form": form,
                     "filed": item.get("filed", ""),
                     "fiscal_year": item.get("fy"),
-                    "fiscal_period": item.get("fp"),
+                    "fiscal_period": fp,
                 })
 
             if entries:
-                # Sort by period descending, keep last 12 entries (3 years)
                 entries.sort(key=lambda x: x["period"], reverse=True)
-                results[metric_name] = entries[:12]
-                break  # Found data for this metric, move to next
+                max_period = entries[0]["period"]
+                # Keep whichever tag has the most recent data point
+                if max_period > best_max_period:
+                    best_max_period = max_period
+                    best_entries = entries
+                    best_tag = tag
+
+        if best_entries:
+            results[metric_name] = best_entries[:12]
+            print(f"[edgar] {metric_name}: using tag '{best_tag}', latest={best_max_period}, {len(best_entries)} entries")
 
     return results
 

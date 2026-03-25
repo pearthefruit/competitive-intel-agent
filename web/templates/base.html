@@ -1163,48 +1163,115 @@
 
         .msg-tool { margin-right: auto; max-width: 90%; }
         .tool-call-bubble {
-            padding: 8px 12px;
-            background: rgba(168,85,247,0.08);
-            border: 1px solid rgba(168,85,247,0.2);
-            border-radius: 8px;
-            font-size: 13px;
+            padding: 12px 16px;
+            background: rgba(168,85,247,0.06);
+            border: 1px solid rgba(168,85,247,0.25);
+            border-radius: 10px;
+            font-size: 14px;
             color: var(--purple);
             cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
         }
-        .tool-call-bubble:hover { background: rgba(168,85,247,0.14); }
-        .tool-call-name { font-weight: 600; }
-        .tool-call-args { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+        .tool-call-bubble:hover { background: rgba(168,85,247,0.12); border-color: rgba(168,85,247,0.4); }
+        .tool-call-header { display: flex; align-items: center; gap: 8px; }
+        .tool-call-icon {
+            width: 28px; height: 28px;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(168,85,247,0.15);
+            border-radius: 6px;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+        .tool-call-name { font-weight: 700; font-size: 14px; }
+        .tool-call-header .tool-expand-chevron {
+            margin-left: auto;
+            font-size: 12px;
+            opacity: 0.5;
+            transition: transform 0.2s ease;
+        }
+        .tool-call-bubble.expanded .tool-expand-chevron { transform: rotate(180deg); }
+        .tool-call-args { color: var(--text-muted); font-size: 12px; margin-top: 6px; padding-left: 36px; font-family: 'SF Mono', 'Fira Code', monospace; }
+        /* Collapsible sections: hidden when not expanded (except while running) */
+        .tool-call-bubble:not(.running):not(.expanded) .tool-call-args,
+        .tool-call-bubble:not(.running):not(.expanded) .tool-progress-log,
+        .tool-call-bubble:not(.running):not(.expanded) .tool-result-content { display: none; }
         .tool-call-status {
             display: flex;
             align-items: center;
-            gap: 6px;
-            margin-top: 4px;
-            font-size: 12px;
+            gap: 8px;
+            margin-top: 8px;
+            padding-left: 36px;
+            font-size: 13px;
         }
         .tool-spinner {
-            width: 12px; height: 12px;
-            border: 1.5px solid rgba(168,85,247,0.3);
+            width: 14px; height: 14px;
+            border: 2px solid rgba(168,85,247,0.3);
             border-top-color: var(--purple);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
-        .tool-status-text { color: var(--purple); opacity: 0.7; }
-        .tool-done-check { color: var(--green); font-size: 14px; }
+        .tool-status-text { color: var(--purple); opacity: 0.8; }
+        .tool-done-check { color: var(--green); font-size: 16px; font-weight: 700; }
         @keyframes spin { to { transform: rotate(360deg); } }
         .tool-result-content {
             display: none;
-            margin-top: 6px;
-            padding: 8px;
-            background: var(--bg-primary);
-            border-radius: 6px;
+            margin-top: 10px;
+            padding: 10px 12px;
+            background: rgba(255,255,255,0.03);
+            border-top: 1px solid rgba(168,85,247,0.15);
+            border-radius: 0 0 8px 8px;
             font-size: 12px;
             color: var(--text-muted);
-            max-height: 120px;
+            max-height: 160px;
             overflow-y: auto;
             white-space: pre-wrap;
             word-break: break-word;
+            font-family: 'SF Mono', 'Fira Code', monospace;
         }
         .tool-call-bubble.expanded .tool-result-content { display: block; }
+        /* Connector line between sequential tool calls */
+        .msg-tool + .msg-tool { margin-top: 2px; }
+        .msg-tool + .msg-tool::before {
+            content: '';
+            display: block;
+            width: 2px;
+            height: 8px;
+            background: rgba(168,85,247,0.25);
+            margin-left: 22px;
+            margin-bottom: 2px;
+        }
+
+        /* Progress step log inside tool call bubble */
+        .tool-progress-log {
+            margin-top: 8px;
+            padding: 8px 0 0 36px;
+            border-top: 1px solid rgba(168,85,247,0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .tool-progress-step {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+            opacity: 0.85;
+            animation: stepFadeIn 0.3s ease;
+        }
+        .tool-step-check {
+            color: var(--purple);
+            font-size: 11px;
+            opacity: 0.6;
+            flex-shrink: 0;
+        }
+        /* Completed tool: dim the steps slightly */
+        .tool-call-bubble:not(.running) .tool-progress-step { opacity: 0.6; }
+        @keyframes stepFadeIn {
+            from { opacity: 0; transform: translateX(-4px); }
+            to { opacity: 0.85; transform: translateX(0); }
+        }
 
         /* Thinking bubble — agent reasoning */
         .msg-thinking { margin-right: auto; max-width: 90%; }
@@ -3694,14 +3761,24 @@ function renderMessages() {
         } else if (m.role === 'tool_call') {
             const hasResult = !!m.result;
             const isExpanded = expandedSet.has('c' + msgIdx);
+            const steps = m.steps || [];
+            const stepsHtml = steps.length
+                ? `<div class="tool-progress-log">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(s)}</div>`).join('')}</div>`
+                : '';
             const statusHtml = hasResult
-                ? `<div class="tool-call-status"><span class="tool-done-check">&#10003;</span> <span class="tool-status-text" style="color:var(--green)">Done</span></div>`
-                : `<div class="tool-call-status"><div class="tool-spinner"></div> <span class="tool-status-text">Running ${escHtml(m.name)}...</span></div>`;
+                ? `<div class="tool-call-status"><span class="tool-done-check">&#10003;</span> <span class="tool-status-text" style="color:var(--green)">Done — ${steps.length} step${steps.length !== 1 ? 's' : ''}</span></div>`
+                : `<div class="tool-call-status"><div class="tool-spinner"></div> <span class="tool-status-text">Running ${escHtml(toolLabel(m.name))}...</span></div>`;
+            const chevron = hasResult ? `<span class="tool-expand-chevron">&#9660;</span>` : '';
             html += `<div class="msg msg-tool">
-                <div class="tool-call-bubble${hasResult ? (isExpanded ? ' expanded' : '') : ' running'}" data-msg-idx="${msgIdx}" onclick="if(this.querySelector('.tool-result-content'))this.classList.toggle('expanded')">
-                    <div><span class="tool-call-name">${escHtml(m.name)}</span></div>
+                <div class="tool-call-bubble${hasResult ? (isExpanded ? ' expanded' : '') : ' running'}" data-msg-idx="${msgIdx}" onclick="this.classList.toggle('expanded')">
+                    <div class="tool-call-header">
+                        <div class="tool-call-icon">${toolIcon(m.name)}</div>
+                        <span class="tool-call-name">${escHtml(toolLabel(m.name))}</span>
+                        ${chevron}
+                    </div>
                     <div class="tool-call-args">${escHtml(formatArgs(m.args))}</div>
                     ${statusHtml}
+                    ${stepsHtml}
                     ${m.result ? `<div class="tool-result-content">${escHtml(m.result)}</div>` : ''}
                 </div>
                 ${m.reportFile ? `<div class="report-link" onclick="openReport('${m.reportFile}')">View Report &rarr;</div>` : ''}
@@ -3897,7 +3974,7 @@ function handleSSE(event, chat) {
         // Remove typing indicator — the tool call bubble with spinner replaces it
         const t = document.getElementById('typing');
         if (t) t.remove();
-        chat.messages.push({ role: 'tool_call', name: event.name, args: event.args, result: null, reportFile: null });
+        chat.messages.push({ role: 'tool_call', name: event.name, args: event.args, result: null, reportFile: null, steps: [] });
         // Auto-detect company from tool args
         if (!chat.company && event.args) {
             const detected = event.args.company || event.args.company_name || event.args.company_a || null;
@@ -3907,14 +3984,37 @@ function handleSSE(event, chat) {
         renderMessages();
 
     } else if (event.type === 'tool_progress') {
-        // Update the running tool's status text with live progress
+        // Accumulate progress steps in the tool_call message data
+        const cleaned = cleanProgress(event.text);
+        for (let i = chat.messages.length - 1; i >= 0; i--) {
+            if (chat.messages[i].role === 'tool_call' && !chat.messages[i].result) {
+                if (!chat.messages[i].steps) chat.messages[i].steps = [];
+                // Avoid duplicate consecutive steps
+                const steps = chat.messages[i].steps;
+                if (!steps.length || steps[steps.length - 1] !== cleaned) {
+                    steps.push(cleaned);
+                }
+                break;
+            }
+        }
+        // Live-update the DOM: append step to the progress log
         const runningBubbles = document.querySelectorAll('.tool-call-bubble.running');
         const bubble = runningBubbles[runningBubbles.length - 1];
         if (bubble) {
-            const statusText = bubble.querySelector('.tool-status-text');
-            if (statusText) {
-                statusText.textContent = cleanProgress(event.text);
+            let log = bubble.querySelector('.tool-progress-log');
+            if (!log) {
+                log = document.createElement('div');
+                log.className = 'tool-progress-log';
+                const status = bubble.querySelector('.tool-call-status');
+                if (status) status.after(log);
             }
+            const step = document.createElement('div');
+            step.className = 'tool-progress-step';
+            step.innerHTML = `<span class="tool-step-check">&#10003;</span> ${escHtml(cleaned)}`;
+            log.appendChild(step);
+            // Update the spinner status text to show current step
+            const statusText = bubble.querySelector('.tool-status-text');
+            if (statusText) statusText.textContent = cleaned;
         }
         // Auto-scroll
         const container = document.getElementById('chat-messages');
@@ -4783,6 +4883,22 @@ function _utcToLocal(utcStr) {
 function formatArgs(args) {
     if (!args) return '';
     return Object.entries(args).map(([k,v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
+}
+
+function toolIcon(name) {
+    const icons = {
+        financial_analysis: '📊', hiring_analysis: '👥', competitor_analysis: '⚔️',
+        sentiment_analysis: '💬', patent_analysis: '🔬', techstack_analysis: '🛠️',
+        seo_analysis: '🔍', pricing_analysis: '💰', compare_companies: '⚖️',
+        landscape_analysis: '🗺️', company_profile: '🏢', generate_briefing: '📋',
+        web_search: '🌐', news_search: '📰', think: '🧠',
+        scrape_page: '🕷️', lookup_ticker: '📈', search_sec: '🏛️',
+    };
+    return icons[name] || '⚙️';
+}
+
+function toolLabel(name) {
+    return (name || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 function formatDate(ts) {
