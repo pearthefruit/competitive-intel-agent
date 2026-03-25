@@ -130,9 +130,10 @@ Only {len(jobs)} role(s) were found, which is below the minimum threshold of 10 
 - Check if the company posts on a different ATS board or uses a different name on LinkedIn
 - Consider supplementing with manual research for companies with very few open roles
 """
-    filename = unique_report_path(company_name, "hiring")
-    filename = Path(filename)
-    filename.parent.mkdir(parents=True, exist_ok=True)
+    reports_dir = Path("reports")
+    reports_dir.mkdir(exist_ok=True)
+    safe_name = company_name.lower().replace(" ", "_").replace("/", "_")
+    filename = unique_report_path(reports_dir, f"{safe_name}_{today}.md")
     filename.write_text(report, encoding="utf-8")
     print(f"[analyze] Insufficient data report saved to {filename}")
     save_to_dossier(company_name, "hiring", report_file=str(filename), report_text=report, model_used="none", db_path=db_path)
