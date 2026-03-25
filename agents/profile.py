@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier, get_temporal_context
+from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
 from agents.financial import financial_analysis
 from agents.competitors import competitor_analysis
 from agents.sentiment import sentiment_analysis
@@ -112,7 +112,7 @@ def company_profile(company, url=None, db_path="intel.db"):
 
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
-    filename = reports_dir / f"{safe_name}_profile_{today}.md"
+    filename = unique_report_path(reports_dir, f"{safe_name}_profile_{today}.md")
     filename.write_text(report, encoding="utf-8")
 
     print(f"\n{'='*60}")

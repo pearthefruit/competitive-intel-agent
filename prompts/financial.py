@@ -29,10 +29,11 @@ How does the market value this company relative to its fundamentals? Is it tradi
 ## Revenue & Growth
 Present a table of revenue by period with YoY growth, then commentary:
 
-| Period | Revenue | YoY Growth |
-|--------|---------|------------|
-| FY 2024 | $X.XB | +X.X% |
-| FY 2023 | $X.XB | +X.X% |
+| Fiscal/Calendar Year | Revenue | Revenue Type | YoY Growth | Source |
+|----------------------|---------|--------------|------------|--------|
+| [Projected Year (if available)] | $X.XB | [e.g. Total / E-Commerce] | +X.X% (proj) | [¹](url) |
+| [Most Recent Actual Year] | $X.XB | [e.g. Total / E-Commerce] | +X.X% | [²](url) |
+| [Prior Year] | $X.XB | [e.g. Total / E-Commerce] | +X.X% | [³](url) |
 | ... | ... | ... |
 
 Note acceleration or deceleration trends.
@@ -42,7 +43,7 @@ Present a margins table, then commentary:
 
 | Period | Gross Margin | Operating Margin | Net Margin |
 |--------|-------------|-----------------|------------|
-| FY 2024 | X.X% | X.X% | X.X% |
+| [Most Recent FY] | X.X% | X.X% | X.X% |
 | ... | ... | ... | ... |
 
 Are margins expanding or compressing?
@@ -79,12 +80,14 @@ What do these financials tell us about the company's strategy? Connect financial
 2-3 financial risks or red flags visible in the data.
 
 Rules:
+- OMNICHANNEL VS E-COMMERCE: Explicitly distinguish between Total Corporate/Omnichannel Revenue and channel-specific metrics (e.g., E-Commerce GMV or online-store turnover). Do not present e-commerce specific revenue as the company's total revenue.
+- FUTURE ESTIMATES: If the data contains ANY estimates, projections, or forecasts for current or future years (e.g., 2025, 2026), you MUST include them in the Revenue table. Do not restrict the table to only past/closed years.
 - Use actual numbers from the data. Do not fabricate figures.
 - Express large numbers in billions/millions for readability.
 - Calculate growth rates where consecutive periods are available.
 - Be direct and analytical — this is for competitive intelligence, not investor relations.
 - If data for a section is missing, note it briefly and move on.
-- USE MARKDOWN TABLES for all financial data — tables make numbers scannable. Follow each table with 1-2 sentences of analytical commentary. Do not bury numbers in prose paragraphs.
+- USE MARKDOWN TABLES for all financial data. YOU MUST INCLUDE ALL 5 COLUMNS EXACTLY AS SHOWN IN THE TEMPLATE (including the 'Source' column). Never drop or combine columns.
 
 CITATION FORMAT (like Perplexity — clickable numbered links):
 - Assign each unique source a number (1, 2, 3...).
@@ -103,7 +106,7 @@ Source numbering:
 - Reuse the same number when citing the same source again.
 
 ## Sources
-At the end, list all numbered sources:
+At the end, list all numbered sources. YOU MUST INCLUDE THE FULL 'https://' URL for every source:
 1. [SEC 10-K - Date](url)
 2. [Yahoo Finance - {ticker}](https://finance.yahoo.com/quote/{ticker}/)
 3. [SEC EDGAR - {ticker}](https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={ticker}&type=&dateb=&owner=include&count=40)
@@ -129,10 +132,11 @@ Write a strategic financial intelligence report (700-900 words) with these secti
 ## Revenue & Growth Trajectory
 Present a multi-year revenue table, then commentary:
 
-| Year | Revenue | YoY Growth |
-|------|---------|------------|
-| 2024 | $X.XB | +X.X% |
-| 2023 | $X.XB | +X.X% |
+| Fiscal/Calendar Year | Revenue | Revenue Type | YoY Growth | Source |
+|----------------------|---------|--------------|------------|--------|
+| [Projected Year (if available)] | $X.XB | [e.g. Total / E-Commerce] | +X.X% (proj) | [¹](url) |
+| [Most Recent Actual Year] | $X.XB | [e.g. Total / E-Commerce] | +X.X% | [²](url) |
+| [Prior Year] | $X.XB | [e.g. Total / E-Commerce] | +X.X% | [³](url) |
 | ... | ... | ... |
 
 Is growth accelerating or decelerating? What do analyst consensus estimates project for the next 1-2 years?
@@ -142,7 +146,7 @@ Present a margins table, then commentary:
 
 | Year | Gross Margin | Operating Margin | Net Margin |
 |------|-------------|-----------------|------------|
-| 2024 | X.X% | X.X% | X.X% |
+| [Most Recent Year] | X.X% | X.X% | X.X% |
 | ... | ... | ... | ... |
 
 Is the company getting more or less efficient? Where is margin pressure coming from?
@@ -179,11 +183,16 @@ Based on the financial signals, identify 2-3 specific consulting opportunities a
 - Strategic pivot visible in news → change management / integration (M&A)
 
 Rules:
+- FUTURE ESTIMATES: If the data contains ANY estimates, projections, or forecasts for current or future years (e.g., 2025, 2026), you MUST include them in the Revenue table. Do not restrict the table to only past/closed years.
 - Use actual numbers from the financial statements. Do not fabricate figures.
 - Calculate margins and growth rates from the data provided.
 - Be direct and analytical — this is for competitive intelligence, not investor relations.
 - If data for a section is missing, note it briefly and move on.
 - USE MARKDOWN TABLES for all financial data — tables make numbers scannable. Follow each table with 1-2 sentences of analytical commentary. Do not bury numbers in prose paragraphs.
+- OMNICHANNEL VS E-COMMERCE: Explicitly distinguish between Total Corporate/Omnichannel Revenue and channel-specific metrics (e.g., E-Commerce GMV). Do not present channel-specific revenue or growth as the company's total revenue or growth.
+- CURRENCY: Always specify the currency for every figure. If the company reports in a non-USD currency, use their reporting currency as primary and note USD equivalents in parentheses where helpful. NEVER mix currencies without labeling each.
+- CONFLICTING DATA: When web search results and financial statements give different figures for the same metric, acknowledge the discrepancy and prefer the structured financial statement data.
+- FISCAL YEARS: Be precise about which fiscal year each figure refers to. If the fiscal year end differs from calendar year, note it.
 
 CITATION FORMAT (like Perplexity — clickable numbered links):
 - Assign each unique source URL a number (1, 2, 3...).
@@ -193,7 +202,7 @@ CITATION FORMAT (like Perplexity — clickable numbered links):
 - Yahoo Finance data should cite: https://finance.yahoo.com/quote/TICKER/
 
 ## Sources
-At the end, list all numbered sources:
+At the end, list all numbered sources. YOU MUST INCLUDE THE FULL 'https://' URL for every source:
 1. [Source Title](url)
 2. [Yahoo Finance - TICKER](url)
 ...and so on for each unique source used.
@@ -211,7 +220,13 @@ Write a concise financial intelligence report (400-600 words) with these section
 What is publicly known about this company's financial position.
 
 ## Revenue & Growth
-Reported or estimated revenue figures, growth rates, recent earnings. If multiple data points are available, present them in a markdown table.
+Reported or estimated revenue figures, growth rates, recent earnings. If data is available, present it in this exact table format:
+
+| Fiscal/Calendar Year | Revenue | Revenue Type | YoY Growth | Source |
+|----------------------|---------|--------------|------------|--------|
+| [Projected Year (if available)] | $X.XB/M | [e.g. Total / E-Commerce] | +X.X% (proj) | [¹](url) |
+| [Most Recent Actual Year] | $X.XB/M | [e.g. Total / E-Commerce] | +X.X% | [²](url) |
+| [Prior Year] | $X.XB/M | [e.g. Total / E-Commerce] | +X.X% | [³](url) |
 
 ## Profitability & Financial Health
 Margins, profits, cash position, debt — whatever is available from public reporting or estimates. Use a table if enough metrics are available.
@@ -232,10 +247,15 @@ How the company makes money, based on available information.
 What the financial signals suggest about the company's strategy and trajectory.
 
 Rules:
+- FUTURE ESTIMATES: If the search results contain ANY estimates, projections, or forecasts for current or future years (e.g., 2025, 2026), you MUST include them in the Revenue table. Do not restrict the table to only past/closed years.
 - Only state what the search results support. Clearly note when information is estimated or unconfirmed.
 - Be direct and analytical.
 - If very little is known, say so — do not speculate extensively.
-- When enough data points exist, use markdown tables to present financial data — tables make numbers scannable.
+- When enough data points exist, use markdown tables to present financial data. YOU MUST INCLUDE ALL 5 COLUMNS EXACTLY AS SHOWN IN THE TEMPLATE (including the 'Source' column). Never drop or combine columns.
+- OMNICHANNEL VS E-COMMERCE: Explicitly distinguish between Total Corporate/Omnichannel Revenue and channel-specific metrics (e.g., E-Commerce GMV or online-store turnover). If a source specifies "E-Commerce", do not treat it as total company revenue. Do not calculate total growth rates using a mix of e-commerce and total revenue figures.
+- CURRENCY: Always specify the currency for every figure (e.g., £214M, US$114M). If sources report in different currencies, pick the company's home currency as primary and note USD equivalents in parentheses. NEVER mix currencies in the same table without labeling each.
+- CONFLICTING DATA: When multiple sources give different figures for the same metric, acknowledge the discrepancy explicitly (e.g., "Revenue estimates range from £180M to £250M depending on source"). Do NOT cherry-pick one figure and ignore others.
+- FISCAL YEARS: Be precise about which fiscal year or calendar year each figure refers to. Do not mislabel a 2025 figure as 2024 or vice versa. If the fiscal year end differs from calendar year, note it.
 
 CITATION FORMAT (like Perplexity — clickable numbered links):
 - Assign each unique source URL a number (1, 2, 3...).
@@ -244,7 +264,7 @@ CITATION FORMAT (like Perplexity — clickable numbered links):
 - NEVER present a number or factual claim without a clickable citation link.
 
 ## Sources
-At the end, list all numbered sources:
+At the end, list all numbered sources. YOU MUST INCLUDE THE FULL 'https://' URL for every source:
 1. [Source Title](url)
 ...and so on for each unique source used.
 """

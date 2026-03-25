@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, generate_json, save_to_dossier, get_temporal_context, FAST_CHAIN
+from agents.llm import generate_text, generate_json, save_to_dossier, get_temporal_context, FAST_CHAIN, unique_report_path
 from scraper.patents import (
     search_patents, search_patents_with_name,
     format_patents_for_prompt,
@@ -189,7 +189,7 @@ def patent_analysis(company):
 
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
-    filename = reports_dir / f"{safe_name}_patents_{today}.md"
+    filename = unique_report_path(reports_dir, f"{safe_name}_patents_{today}.md")
     filename.write_text(report, encoding="utf-8")
 
     print(f"[patents] Report saved to {filename}")

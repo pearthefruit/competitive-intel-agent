@@ -40,7 +40,7 @@ CITATION FORMAT (like Perplexity — clickable numbered links):
 - Reuse the same number when citing the same patent again.
 
 ## Sources
-At the end, list all numbered sources:
+At the end, list all numbered sources. YOU MUST INCLUDE THE FULL 'https://' URL for every source:
 1. [US12345678 - Patent Title](https://patents.google.com/patent/US12345678)
 2. [US87654321 - Patent Title](https://patents.google.com/patent/US87654321)
 ...and so on.
@@ -71,7 +71,7 @@ CITATION FORMAT (like Perplexity — clickable numbered links):
 - Use Unicode superscript characters: ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹
 
 ## Sources
-At the end, list all numbered sources:
+At the end, list all numbered sources. YOU MUST INCLUDE THE FULL 'https://' URL for every source:
 1. [Source Title](url)
 ...and so on.
 """

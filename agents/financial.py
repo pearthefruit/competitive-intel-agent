@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier, get_temporal_context
+from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
 from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, get_recent_filings, format_financials_for_prompt
 from scraper.stock_data import get_stock_data, format_stock_data_for_prompt, get_extended_financials, format_extended_financials_for_prompt
 from scraper.web_search import search_web, search_news, format_search_results
@@ -112,7 +112,7 @@ def _analyze_public(company, cik_info):
 
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
-    filename = reports_dir / f"{safe_name}_financial_{today}.md"
+    filename = unique_report_path(reports_dir, f"{safe_name}_financial_{today}.md")
     filename.write_text(report, encoding="utf-8")
 
     print(f"[financial] Report saved to {filename}")
@@ -127,8 +127,9 @@ def _analyze_non_sec(company):
     # Multiple targeted searches (cover both private and foreign-listed companies)
     year = datetime.now().year
     queries = [
-        f"{company} revenue earnings financial results",
-        f"{company} funding valuation market cap",
+        f"{company} revenue earnings financial results {year - 1} {year}",
+        f"{company} funding valuation market cap {year}",
+        f"{company} annual report fiscal year {year - 1}",
         f"{company} financial news {year - 1} {year}",
         # Finance-sector queries — harmless for non-finance companies (just return nothing)
         f"{company} assets under management AUM {year}",
@@ -136,9 +137,9 @@ def _analyze_non_sec(company):
 
     all_results = []
     for query in queries:
-        results = search_web(query, max_results=3)
+        results = search_web(query, max_results=5, fetch_content=True)
         all_results.extend(results)
-        news = search_news(query, max_results=2)
+        news = search_news(query, max_results=3, fetch_content=True)
         all_results.extend(news)
 
     if not all_results:
@@ -154,6 +155,12 @@ def _analyze_non_sec(company):
         if title not in seen_titles:
             seen_titles.add(title)
             unique_results.append(r)
+
+    # Log fetch stats so we can see how much content actually made it through
+    fetched = [r for r in unique_results if len(r.get("body", "")) > 300]
+    snippet_only = [r for r in unique_results if 0 < len(r.get("body", "")) <= 300]
+    no_body = [r for r in unique_results if not r.get("body")]
+    print(f"[financial] Search results: {len(unique_results)} unique ({len(fetched)} with fetched content, {len(snippet_only)} snippet-only, {len(no_body)} no body)")
 
     search_text = format_search_results(unique_results)
 
@@ -206,7 +213,7 @@ def _analyze_non_sec(company):
 
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
-    filename = reports_dir / f"{safe_name}_financial_{today}.md"
+    filename = unique_report_path(reports_dir, f"{safe_name}_financial_{today}.md")
     filename.write_text(report, encoding="utf-8")
 
     print(f"[financial] Report saved to {filename}")

@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier, get_temporal_context, FAST_CHAIN
+from agents.llm import generate_text, save_to_dossier, get_temporal_context, FAST_CHAIN, unique_report_path
 from agents.financial import financial_analysis
 from agents.competitors import competitor_analysis
 from agents.sentiment import sentiment_analysis
@@ -127,7 +127,7 @@ def compare_companies(company_a, company_b, analyses=None):
 
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
-    filename = reports_dir / f"{safe_a}_vs_{safe_b}_{today}.md"
+    filename = unique_report_path(reports_dir, f"{safe_a}_vs_{safe_b}_{today}.md")
     filename.write_text(report, encoding="utf-8")
 
     print(f"\n{'='*60}")
@@ -282,7 +282,7 @@ def landscape_analysis(company, top_n=3):
 
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
-    filename = reports_dir / f"{safe_name}_landscape_{today}.md"
+    filename = unique_report_path(reports_dir, f"{safe_name}_landscape_{today}.md")
     filename.write_text(report, encoding="utf-8")
 
     print(f"\n{'='*60}")

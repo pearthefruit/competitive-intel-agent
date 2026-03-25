@@ -3,7 +3,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier, get_temporal_context
+from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
 from scraper.web_search import search_web, search_news, search_reddit, search_youtube, format_search_results
 from scraper.hackernews import search_hackernews
 from prompts.competitors import build_competitor_prompt
@@ -88,7 +88,7 @@ def competitor_analysis(company):
 
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
-    filename = reports_dir / f"{safe_name}_competitors_{today}.md"
+    filename = unique_report_path(reports_dir, f"{safe_name}_competitors_{today}.md")
     filename.write_text(report, encoding="utf-8")
 
     print(f"[competitors] Report saved to {filename}")

@@ -40,7 +40,7 @@ CITATION FORMAT (like Perplexity — clickable numbered links):
 - Reuse the same number when citing the same source again.
 
 ## Sources
-At the end, list all numbered sources:
+At the end, list all numbered sources. YOU MUST INCLUDE THE FULL 'https://' URL for every source:
 1. [Source Title](url)
 2. [Source Title](url)
 ...and so on.

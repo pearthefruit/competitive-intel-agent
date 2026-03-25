@@ -5,7 +5,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 from pathlib import Path
 
-from agents.llm import generate_text, save_to_dossier, get_temporal_context
+from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
 from scraper.site_crawler import crawl_site
 from prompts.pricing import build_pricing_prompt
 
@@ -112,7 +112,7 @@ def pricing_analysis(url, company_name=None):
 
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
-    filename = reports_dir / f"{safe_domain}_pricing_{today}.md"
+    filename = unique_report_path(reports_dir, f"{safe_domain}_pricing_{today}.md")
     filename.write_text(report, encoding="utf-8")
 
     print(f"[pricing] Report saved to {filename}")
