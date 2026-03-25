@@ -443,6 +443,14 @@ def create_app(db_path="intel.db"):
             if conn: conn.close()
             return jsonify({"error": str(e)}), 500
 
+    @app.route("/api/analyses/<int:analysis_id>", methods=["DELETE"])
+    def delete_analysis(analysis_id):
+        conn = get_connection(db_path)
+        conn.execute("DELETE FROM dossier_analyses WHERE id = ?", (analysis_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+
     # --- Dossier API ---
 
     @app.route("/api/llm-usage")

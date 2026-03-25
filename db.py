@@ -372,6 +372,18 @@ def clear_classifications(conn, company_id):
     conn.commit()
 
 
+def clear_company_jobs(conn, company_id):
+    """Delete all jobs AND classifications for a company, forcing a fresh scrape."""
+    conn.execute(
+        "DELETE FROM classifications WHERE job_id IN (SELECT id FROM jobs WHERE company_id = ?)",
+        (company_id,),
+    )
+    count = conn.execute("SELECT COUNT(*) FROM jobs WHERE company_id = ?", (company_id,)).fetchone()[0]
+    conn.execute("DELETE FROM jobs WHERE company_id = ?", (company_id,))
+    conn.commit()
+    return count
+
+
 def get_all_classified_jobs(conn, company_id):
     rows = conn.execute(
         """SELECT j.*, c.department_category, c.department_subcategory,

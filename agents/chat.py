@@ -670,6 +670,16 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             return "Analysis failed — no data available. Make sure jobs have been collected and classified first."
 
         elif name == "hiring_pipeline":
+            # Fresh mode: purge old jobs before re-collecting
+            if args.get("fresh"):
+                from db import get_connection, get_company_id, clear_company_jobs
+                conn = get_connection(db_path)
+                cid = get_company_id(conn, args["company"])
+                if cid:
+                    purged = clear_company_jobs(conn, cid)
+                    print(f"[pipeline] Purged {purged} old jobs for {args['company']} — starting fresh")
+                conn.close()
+
             new, skipped = collect(args["company"], args.get("url"), db_path)
             if new == 0 and skipped == 0:
                 return "Pipeline stopped: no jobs collected. Check the company name or provide a direct URL."

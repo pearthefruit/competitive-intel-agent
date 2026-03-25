@@ -240,7 +240,8 @@ TOOL_SCHEMAS = [
                     "url": {"type": "string", "description": "ATS board URL. Optional — auto-detected if omitted."},
                     "seniority_framework": {"type": "string", "enum": ["tech", "banking", "consulting", "corporate"], "description": "Industry seniority framework. OMIT this parameter unless the user explicitly specifies a framework — the backend defaults to 'corporate' which works for most companies. Only override: pure software/tech companies→tech, banks/financial services→banking, consulting firms→consulting."},
                     "custom_seniority_rules": {"type": "string", "description": "Custom seniority mapping rules. Only use if the user explicitly describes a non-standard leveling system."},
-                    "classification_mode": {"type": "string", "enum": ["fast", "comprehensive"], "description": "Classification mode. 'fast': heuristic-only, zero API calls. 'comprehensive': heuristic + LLM. Default: comprehensive."}
+                    "classification_mode": {"type": "string", "enum": ["fast", "comprehensive"], "description": "Classification mode. 'fast': heuristic-only, zero API calls. 'comprehensive': heuristic + LLM. Default: comprehensive."},
+                    "fresh": {"type": "boolean", "description": "Set to true to purge all existing jobs for this company and re-scrape from scratch. Use when the user says 'rerun', 'redo', 'fresh', 'recollect', or when previous data was bad/stale."}
                 },
                 "required": ["company"]
             }
