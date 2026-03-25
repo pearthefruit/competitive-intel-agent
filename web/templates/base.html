@@ -3261,7 +3261,7 @@ function showBriefing(dossier, b, _targetEl) {
             compHtml += `<div class="competitor-row">
                 <span class="competitor-name">${escHtml(c.name || '')}</span>
                 <span class="competitor-maturity">${escHtml(c.digital_maturity_estimate || '')}</span>
-                <span class="competitor-threat">${escHtml(c.threat || '')}</span>
+                <span class="competitor-threat">${_renderCitedText(c.threat || '')}</span>
             </div>`;
         });
         if (comp.urgency_drivers && comp.urgency_drivers.length) {
