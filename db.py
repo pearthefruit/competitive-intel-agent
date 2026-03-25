@@ -436,7 +436,7 @@ def add_dossier_analysis(conn, dossier_id, analysis_type, report_file=None,
         (datetime.now(timezone.utc).isoformat(), dossier_id),
     )
     conn.commit()
-    return cur.lastrowid
+    return result_id
 
 
 def add_dossier_event(conn, dossier_id, event_type, title, description=None,

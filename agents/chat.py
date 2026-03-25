@@ -719,7 +719,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             return "SEO audit failed — could not crawl the site."
 
         elif name == "techstack_analysis":
-            path = techstack_analysis(args["url"], args.get("max_pages", 5), company_name=args.get("company_name"))
+            path = techstack_analysis(args["url"], args.get("max_pages", 5), company_name=args.get("company_name"), db_path=db_path)
             if path:
                 return f"Tech stack analysis saved to: {path}"
             return "Tech stack analysis failed — could not crawl the site."

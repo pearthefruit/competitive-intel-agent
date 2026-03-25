@@ -98,9 +98,11 @@ def financial_cmd(company):
 @cli.command("techstack")
 @click.option("--url", required=True, help="Website URL to analyze")
 @click.option("--max-pages", default=5, help="Max pages to crawl (default: 5)")
-def techstack_cmd(url, max_pages):
+@click.option("--company", default=None, help="Company name (enables hiring data enrichment)")
+@click.option("--db", default="intel.db", help="SQLite database path")
+def techstack_cmd(url, max_pages, company, db):
     """Detect and analyze a website's technology stack."""
-    techstack_analysis(url, max_pages)
+    techstack_analysis(url, max_pages, company_name=company, db_path=db)
 
 
 @cli.command("patents")

@@ -44,7 +44,7 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
 - **competitor_analysis**: Map competitive landscape — competitors, differentiators, market position.
 - **sentiment_analysis**: Employee sentiment and workplace culture from reviews and news.
 - **seo_audit**: SEO & AEO audit on a website.
-- **techstack_analysis**: Detect technologies a website uses.
+- **techstack_analysis**: Detect technologies a website uses + internal engineering stack from hiring data (when available).
 - **pricing_analysis**: Analyze pricing strategy, tiers, and positioning.
 
 ### Multi-Company
@@ -112,7 +112,7 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
   - **tech** (default): All software, tech, and startup companies, or when the industry is unclear
   Always pass the `seniority_framework` parameter when calling classify or hiring_pipeline. If the user specifies a framework, use that. If they describe custom leveling rules, pass `custom_seniority_rules`.
 - **Intelligence briefings**: Use `generate_briefing` after a company has multiple analyses (financial, competitors, hiring, techstack, etc.) to create a consulting-ready intelligence briefing with a Digital Maturity Score, engagement opportunity map, risk profile, and strategic assessment. The briefing is stored on the dossier and rendered in the right pane. **Hiring data is mandatory** — if the briefing fails due to missing hiring analysis, automatically run `hiring_pipeline` for the company, then retry `generate_briefing`.
-- **Website analyses and company linking**: When running `techstack_analysis`, `seo_audit`, or `pricing_analysis`, always pass the `company_name` parameter if you know which company owns the website. This links the analysis to the correct company dossier instead of creating a separate entry for the domain.
+- **Website analyses and company linking**: When running `techstack_analysis`, `seo_audit`, or `pricing_analysis`, always pass the `company_name` parameter if you know which company owns the website. This links the analysis to the correct company dossier instead of creating a separate entry for the domain. **Do NOT waste tool calls searching for a company's website URL** — just infer it directly (e.g., "Danone" → `https://www.danone.com`, "Stripe" → `https://stripe.com`). The crawler will follow redirects if the URL isn't exact. Only search for the URL if the company name is ambiguous or you genuinely don't know their domain.
 - **Multi-company queries**: See the Critical Rules section above — always use `batch_company_analysis` for multi-company queries. Max 5 companies per batch."""
 
 # Condensed system prompt for follow-up rounds — saves ~8K chars of context
@@ -384,7 +384,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "techstack_analysis",
-            "description": "Detect and analyze a website's technology stack by crawling it. Identifies frameworks, analytics, CDNs, CMS, marketing tools. Saves a .md report.",
+            "description": "Detect and analyze a website's technology stack by crawling it. Identifies frameworks, analytics, CDNs, CMS, marketing tools. When company_name is provided and the company has hiring data in the DB, the report is enriched with internal engineering stack signals (backend languages, databases, cloud platforms, DevOps tools, AI/ML frameworks) from classified job listings. Saves a .md report.",
             "parameters": {
                 "type": "object",
                 "properties": {

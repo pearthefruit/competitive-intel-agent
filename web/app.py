@@ -5,6 +5,7 @@ import sys
 import json
 import threading
 import queue
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, render_template, request, jsonify, Response
@@ -26,7 +27,12 @@ from db import (init_db, get_connection, get_all_dossiers, get_dossier_by_compan
 
 def _parse_report_filename(filename):
     """Extract company name, analysis type, and date from a report filename."""
+    import re
+    
     stem = Path(filename).stem  # e.g. "stripe_financial_2026-03-20"
+    # Strip any trailing deduplication suffixes like " (1)", " 7", or "_7" appended by OS/browsers or our own save logic
+    stem = re.sub(r'[\s\(\)]+\d+\s*$', '', stem)
+    stem = re.sub(r'_(\d+)$', '', stem)
 
     # Comparison reports: {company_a}_vs_{company_b}_{date}.md
     if "_vs_" in stem:
@@ -203,7 +209,7 @@ def create_app(db_path="intel.db"):
     def list_reports():
         return jsonify(_get_all_reports())
 
-    @app.route("/api/reports/<filename>/content")
+    @app.route("/api/reports/<path:filename>/content")
     def report_content(filename):
         filepath = Path("reports") / filename
         if not filepath.exists() or filepath.suffix != ".md":
@@ -212,7 +218,7 @@ def create_app(db_path="intel.db"):
         info = _parse_report_filename(filename)
         return jsonify({"content": content, **info})
 
-    @app.route("/api/reports/<filename>/pdf")
+    @app.route("/api/reports/<path:filename>/pdf")
     def export_report_pdf(filename):
         """Convert a markdown report to a styled PDF and return it for download."""
         import markdown as md
@@ -372,13 +378,70 @@ def create_app(db_path="intel.db"):
             },
         )
 
-    @app.route("/api/reports/<filename>", methods=["DELETE"])
-    def delete_report(filename):
-        filepath = Path("reports") / filename
-        if filepath.exists() and filepath.suffix == ".md":
-            filepath.unlink()
+    @app.route("/api/reports/<path:filename>", methods=["PATCH", "DELETE"])
+    def manage_report(filename):
+        if request.method == "DELETE":
+            filepath = Path("reports") / filename
+            if filepath.exists() and filepath.suffix == ".md":
+                filepath.unlink()
+                # Also clean up from DB
+                conn = get_connection(db_path)
+                conn.execute("UPDATE dossier_analyses SET report_file = NULL WHERE report_file = ? OR report_file = ?", (filename, f"reports/{filename}"))
+                conn.commit()
+                conn.close()
+                return jsonify({"ok": True})
+            return jsonify({"error": "Not found"}), 404
+            
+        elif request.method == "PATCH":
+            data = request.json
+            new_filename = data.get("new_filename")
+            if not new_filename:
+                return jsonify({"error": "new_filename required"}), 400
+            if not new_filename.endswith(".md"):
+                new_filename += ".md"
+            
+            old_path = Path("reports") / filename
+            new_path = Path("reports") / new_filename
+            
+            if not old_path.exists():
+                return jsonify({"error": "Original report not found"}), 404
+            if new_path.exists():
+                return jsonify({"error": "A report with that name already exists"}), 400
+                
+            try:
+                old_path.rename(new_path)
+                # Update DB references
+                conn = get_connection(db_path)
+                conn.execute("UPDATE dossier_analyses SET report_file = ? WHERE report_file = ? OR report_file = ?", 
+                             (new_filename, filename, f"reports/{filename}"))
+                conn.commit()
+                conn.close()
+                return jsonify({"ok": True, "new_filename": new_filename})
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/dossiers/<path:name>", methods=["PATCH"])
+    def rename_dossier(name):
+        data = request.json
+        new_name = data.get("new_name")
+        if not new_name:
+            return jsonify({"error": "new_name required"}), 400
+            
+        conn = get_connection(db_path)
+        existing = conn.execute("SELECT id FROM dossiers WHERE company_name COLLATE NOCASE = ?", (new_name,)).fetchone()
+        if existing:
+            conn.close()
+            return jsonify({"error": "A company with that name already exists"}), 400
+            
+        try:
+            conn.execute("UPDATE dossiers SET company_name = ?, updated_at = ? WHERE company_name COLLATE NOCASE = ?",
+                         (new_name, datetime.now(timezone.utc).isoformat(), name))
+            conn.commit()
+            conn.close()
             return jsonify({"ok": True})
-        return jsonify({"error": "Not found"}), 404
+        except Exception as e:
+            if conn: conn.close()
+            return jsonify({"error": str(e)}), 500
 
     # --- Dossier API ---
 
@@ -395,7 +458,7 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify(dossiers)
 
-    @app.route("/api/dossiers/<company_name>")
+    @app.route("/api/dossiers/<path:company_name>")
     def get_dossier_detail(company_name):
         conn = get_connection(db_path)
         dossier = get_dossier_by_company(conn, company_name)
@@ -426,7 +489,7 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify(dossier)
 
-    @app.route("/api/dossiers/<company_name>/events", methods=["POST"])
+    @app.route("/api/dossiers/<path:company_name>/events", methods=["POST"])
     def create_dossier_event(company_name):
         data = request.json
         if not data or not data.get("title") or not data.get("event_type"):
@@ -444,7 +507,7 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True, "event_id": event_id})
 
-    @app.route("/api/dossiers/<company_name>/hiring-snapshots")
+    @app.route("/api/dossiers/<path:company_name>/hiring-snapshots")
     def get_company_snapshots(company_name):
         """Get hiring snapshot history for a company."""
         conn = get_connection(db_path)
@@ -456,7 +519,7 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify(snapshots)
 
-    @app.route("/api/dossiers/<company_name>/briefing", methods=["POST"])
+    @app.route("/api/dossiers/<path:company_name>/briefing", methods=["POST"])
     def generate_briefing_api(company_name):
         """Generate or refresh the intelligence briefing for a company."""
         from agents.briefing import generate_briefing
@@ -469,7 +532,7 @@ def create_app(db_path="intel.db"):
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
-    @app.route("/api/dossiers/<company_name>/pdf")
+    @app.route("/api/dossiers/<path:company_name>/pdf")
     def export_briefing_pdf(company_name):
         """Export a company's intelligence briefing as a styled PDF."""
         from xhtml2pdf import pisa
@@ -696,15 +759,22 @@ def create_app(db_path="intel.db"):
                 "orphan_reports": [],
             }
 
-        # Attach analyses to companies
+        # Attach analyses to companies (deduplicate by report_file)
         reports_dir = Path("reports")
+        seen_report_files = set()
         for a in all_analyses:
             name = a["company_name"]
             if name not in companies:
                 continue
             report_basename = os.path.basename(a["report_file"]) if a["report_file"] else None
+            # Skip duplicate entries pointing to the same file (keep the first,
+            # which is the most recent since results are ordered by created_at DESC)
+            if report_basename and report_basename in seen_report_files:
+                continue
+            if report_basename:
+                seen_report_files.add(report_basename)
             has_report = bool(report_basename and (reports_dir / report_basename).exists())
-            date_str = (a["created_at"] or "")[:10]
+            date_str = (a["created_at"] or "")[:19]
             companies[name]["analyses"].append({
                 "id": a["id"],
                 "type": a["analysis_type"],
