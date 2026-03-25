@@ -2566,23 +2566,13 @@ function renderCompanyList() {
                         dateStr = a.date.slice(5);
                     }
                 }
-                if (a.has_report) {
-                    itemsHtml += `<div class="report-item can-drag${isActive}${noReport}" onclick="openReport('${escHtml(a.report_file)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(a.report_file)}','${escHtml(company.name)}')">
-                        <span class="report-type-dot dot-${a.type}"></span>
-                        <div class="report-rename-wrap">
-                            <span class="report-name-text">${escHtml(a.type)}</span>
-                            <span class="rename-btn" onclick="renameReport('${escHtml(a.report_file)}', event)" title="Rename report">Edit</span>
-                        </div>
-                        <span class="report-date">${dateStr}</span></div>`;
-                } else {
-                    itemsHtml += `<div class="report-item${noReport}">
-                        <span class="report-type-dot dot-${a.type}"></span>
-                        <div class="report-rename-wrap">
-                            <span class="report-name-text">${escHtml(a.type)}</span>
-                            <span class="rename-btn" onclick="deleteOrphanAnalysis(${a.id}, event)" title="Remove stale entry">&times;</span>
-                        </div>
-                        <span class="report-date">${dateStr}</span></div>`;
-                }
+                itemsHtml += `<div class="report-item can-drag${isActive}" onclick="openReport('${escHtml(a.report_file)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(a.report_file)}','${escHtml(company.name)}')">
+                    <span class="report-type-dot dot-${a.type}"></span>
+                    <div class="report-rename-wrap">
+                        <span class="report-name-text">${escHtml(a.type)}</span>
+                        <span class="rename-btn" onclick="renameReport('${escHtml(a.report_file)}', event)" title="Rename report">Edit</span>
+                    </div>
+                    <span class="report-date">${dateStr}</span></div>`;
             });
 
             // Orphan reports (files not linked to any dossier_analyses row)

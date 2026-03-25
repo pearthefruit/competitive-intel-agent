@@ -212,8 +212,10 @@ def create_app(db_path="intel.db"):
     @app.route("/api/reports/<path:filename>/content")
     def report_content(filename):
         filepath = Path("reports") / filename
-        if not filepath.exists() or filepath.suffix != ".md":
-            return jsonify({"error": "Not found"}), 404
+        if not filepath.exists():
+            # File missing — return a placeholder instead of 404
+            info = _parse_report_filename(filename)
+            return jsonify({"content": f"*Report file not found on disk.* The analysis ran but the file `{filename}` is missing — it may have been moved or deleted.", **info})
         content = filepath.read_text(encoding="utf-8")
         info = _parse_report_filename(filename)
         return jsonify({"content": content, **info})
