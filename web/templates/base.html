@@ -310,6 +310,38 @@
         .company-gen-briefing-btn:hover { background: rgba(59,130,246,0.22); }
         .report-item.no-report { opacity: 0.5; cursor: default; }
         .report-item.no-report:hover { background: none; color: var(--text-secondary); }
+
+        .rename-btn {
+            padding: 2px 4px;
+            border-radius: 3px;
+            color: var(--text-muted);
+            cursor: pointer;
+            opacity: 0;
+            transition: all 0.1s;
+            font-size: 11px;
+            line-height: 1;
+        }
+        .company-group-header:hover .rename-btn,
+        .report-item:hover .rename-btn {
+            opacity: 0.6;
+        }
+        .rename-btn:hover {
+            opacity: 1 !important;
+            color: var(--accent);
+            background: rgba(59,130,246,0.1);
+        }
+        .report-rename-wrap {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex: 1;
+            min-width: 0;
+        }
+        .report-name-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
         .report-breadcrumb {
             display: flex; align-items: center; gap: 6px;
             padding: 8px 0 12px; margin-bottom: 8px;
@@ -1618,7 +1650,7 @@
         .drop-zone-overlay {
             display: none;
             position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
+            top: 0; left: var(--left-width); right: 0; bottom: 0;
             z-index: 9999;
             background: rgba(0,0,0,0.4);
         }
@@ -2518,10 +2550,30 @@ function renderCompanyList() {
             (company.analyses || []).forEach(a => {
                 const isActive = currentReportFilename === a.report_file ? ' active' : '';
                 const noReport = !a.has_report ? ' no-report' : '';
-                const dateStr = a.date ? a.date.slice(5) : '';
+                let dateStr = '';
+                if (a.date) {
+                    if (a.date.includes('T')) {
+                        // Full ISO timestamp "2026-03-24T19:19:05" — show date + local time
+                        const d = new Date(a.date + 'Z');
+                        const mm = String(d.getMonth() + 1).padStart(2, '0');
+                        const dd = String(d.getDate()).padStart(2, '0');
+                        let h = d.getHours(), ampm = h >= 12 ? 'p' : 'a';
+                        h = h % 12 || 12;
+                        const min = String(d.getMinutes()).padStart(2, '0');
+                        dateStr = `${mm}-${dd} ${h}:${min}${ampm}`;
+                    } else {
+                        // Date-only fallback "2026-03-24"
+                        dateStr = a.date.slice(5);
+                    }
+                }
                 if (a.has_report) {
                     itemsHtml += `<div class="report-item can-drag${isActive}${noReport}" onclick="openReport('${escHtml(a.report_file)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(a.report_file)}','${escHtml(company.name)}')">
-                        <span class="report-type-dot dot-${a.type}"></span>${escHtml(a.type)}<span class="report-date">${dateStr}</span></div>`;
+                        <span class="report-type-dot dot-${a.type}"></span>
+                        <div class="report-rename-wrap">
+                            <span class="report-name-text">${escHtml(a.type)}</span>
+                            <span class="rename-btn" onclick="renameReport('${escHtml(a.report_file)}', event)" title="Rename report">Edit</span>
+                        </div>
+                        <span class="report-date">${dateStr}</span></div>`;
                 } else {
                     itemsHtml += `<div class="report-item${noReport}">
                         <span class="report-type-dot dot-${a.type}"></span>${escHtml(a.type)}<span class="report-date">${dateStr}</span></div>`;
@@ -2532,7 +2584,12 @@ function renderCompanyList() {
             (company.orphan_reports || []).forEach(fn => {
                 const isActive = currentReportFilename === fn ? ' active' : '';
                 itemsHtml += `<div class="report-item can-drag${isActive}" onclick="openReport('${escHtml(fn)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(fn)}','${escHtml(company.name)}')">
-                    <span class="report-type-dot"></span>${escHtml(fn.replace(/\.md$/, ''))}<span class="report-date"></span></div>`;
+                    <span class="report-type-dot"></span>
+                    <div class="report-rename-wrap">
+                        <span class="report-name-text">${escHtml(fn.replace(/\.md$/, ''))}</span>
+                        <span class="rename-btn" onclick="renameReport('${escHtml(fn)}', event)" title="Rename report">Edit</span>
+                    </div>
+                    <span class="report-date"></span></div>`;
             });
 
             // Generate briefing button
@@ -2544,7 +2601,8 @@ function renderCompanyList() {
         return `<div class="company-group${isOpen ? ' open' : ''}">
             <div class="company-group-header" onclick="toggleCompany('${escHtml(company.name)}')">
                 <span class="company-group-chevron">${chevron}</span>
-                ${escHtml(company.name)}
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${escHtml(company.name)}</span>
+                <span class="rename-btn" onclick="renameCompany('${escHtml(company.name)}', event)" title="Rename company">Edit</span>
                 ${starHtml}
                 ${sectorHtml}
                 <span class="company-group-count">${company.analysis_count || 0}</span>
@@ -2552,6 +2610,46 @@ function renderCompanyList() {
             ${isOpen ? `<div class="company-group-items">${itemsHtml}</div>` : ''}
         </div>`;
     }).join('');
+}
+
+async function renameCompany(oldNameEscaped, event) {
+    if (event) event.stopPropagation();
+    // Unescape name in case it was HTML escaped in the template
+    const d = document.createElement('div');
+    d.innerHTML = oldNameEscaped;
+    const oldName = d.textContent;
+
+    const newName = await showPromptModal(`Rename ${oldName} to:`);
+    if (!newName || newName === oldName) return;
+
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(oldName)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_name: newName })
+        });
+        const text = await resp.text();
+        let data;
+        try { data = JSON.parse(text); } catch (e) { data = { error: 'Server returned non-JSON response: ' + text.slice(0, 100) }; }
+
+        if (!resp.ok) {
+            alert(data.error || 'Rename failed');
+            return;
+        }
+        // Update local state and refresh
+        if (openCompanies.has(oldName)) {
+            openCompanies.delete(oldName);
+            openCompanies.add(newName);
+        }
+        if (activeDossierName === oldName) activeDossierName = newName;
+        loadCompanies();
+        if (activeContext && activeContext.company === oldName) {
+            setContext(newName, activeContext.type, activeContext.label);
+        }
+    } catch (e) {
+        console.error('Rename error:', e);
+        alert('An error occurred during rename: ' + e.message);
+    }
 }
 
 async function openDossier(companyName) {
@@ -2593,6 +2691,49 @@ function showDossierDetail(d) {
 
     // Fall back to legacy view
     showLegacyDossierDetail(d);
+}
+
+async function renameReport(oldFilenameEscaped, event) {
+    if (event) event.stopPropagation();
+    // Unescape filename in case it was HTML escaped
+    const d = document.createElement('div');
+    d.innerHTML = oldFilenameEscaped;
+    const oldFilename = d.textContent;
+
+    const oldName = oldFilename.replace(/\.md$/, '');
+    const newName = await showPromptModal(`Rename report to:`, oldName);
+    if (!newName || newName === oldName) return;
+
+    try {
+        const resp = await fetch(`/api/reports/${encodeURIComponent(oldFilename)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_filename: newName })
+        });
+        const text = await resp.text();
+        let data;
+        try { data = JSON.parse(text); } catch (e) { data = { error: 'Server returned non-JSON: ' + text.slice(0, 100) }; }
+
+        if (!resp.ok) {
+            alert(data.error || 'Rename failed');
+            return;
+        }
+        
+        // Update local state
+        if (currentReportFilename === oldFilename) {
+            currentReportFilename = data.new_filename;
+        }
+        
+        // Refresh UI
+        loadCompanies();
+        // If the report was open, re-render it to update breadcrumbs etc
+        if (currentReportFilename === data.new_filename) {
+            openReport(data.new_filename);
+        }
+    } catch (e) {
+        console.error('Rename report error:', e);
+        alert('An error occurred during report rename: ' + e.message);
+    }
 }
 
 function _scoreColorClass(score) {
@@ -2720,7 +2861,16 @@ function showSourcePopover(event, type) {
         html += `<div class="source-popover-fact" style="font-style:italic">No structured facts extracted yet. Run this analysis to populate.</div>`;
     }
 
-    html += `<div class="source-popover-link" onclick="dismissSourcePopover();scrollToSourceReport('${type}')">View full report &rarr;</div>`;
+    // Detect which split panel the badge lives in (if any) so scrollToSourceReport
+    // targets the correct panel when both panels have briefings.
+    let originPanel = '';
+    if (_splitActive) {
+        const leftContent = document.getElementById('split-content-left');
+        const rightContent = document.getElementById('split-content-right');
+        if (leftContent && leftContent.contains(badge)) originPanel = 'left';
+        else if (rightContent && rightContent.contains(badge)) originPanel = 'right';
+    }
+    html += `<div class="source-popover-link" onclick="dismissSourcePopover();scrollToSourceReport('${type}','${originPanel}')">View full report &rarr;</div>`;
 
     pop.innerHTML = html;
     document.body.appendChild(pop);
@@ -2771,7 +2921,7 @@ function dismissSourcePopover() {
     if (pop) pop.remove();
 }
 
-function scrollToSourceReport(type) {
+function scrollToSourceReport(type, originPanel) {
     // If in dashboard/expanded mode, restore original briefing first
     const rp = document.getElementById('right-pane');
     if (rp && rp.classList.contains('expanded') && _originalReportHTML) {
@@ -2789,7 +2939,27 @@ function scrollToSourceReport(type) {
         }
     }
 
-    const sections = document.querySelectorAll('.briefing-section');
+    // In split view, .right-body is display:none so its .briefing-section elements
+    // are hidden. Scope search to the originating split panel.
+    let searchRoot = document;
+    if (_splitActive) {
+        if (originPanel) {
+            // Badge told us which panel it lives in
+            const panelContent = document.getElementById('split-content-' + originPanel);
+            if (panelContent) searchRoot = panelContent;
+        } else {
+            // Fallback: pick whichever panel has briefing sections
+            const leftContent = document.getElementById('split-content-left');
+            const rightContent = document.getElementById('split-content-right');
+            if (leftContent && leftContent.querySelector('.briefing-section')) {
+                searchRoot = leftContent;
+            } else if (rightContent && rightContent.querySelector('.briefing-section')) {
+                searchRoot = rightContent;
+            }
+        }
+    }
+
+    const sections = searchRoot.querySelectorAll('.briefing-section');
     for (const sec of sections) {
         const title = sec.querySelector('.briefing-section-title');
         if (title && title.textContent.includes('Source Reports')) {
@@ -3735,14 +3905,14 @@ function handleSSE(event, chat) {
 }
 
 // ===================== QUICK ACTIONS =====================
-function showPromptModal(label) {
+function showPromptModal(label, defaultValue = '') {
     return new Promise((resolve) => {
         const overlay = document.createElement('div');
         overlay.className = 'prompt-overlay';
         overlay.innerHTML = `
             <div class="prompt-modal">
                 <div class="prompt-modal-title">${label}</div>
-                <input class="prompt-modal-input" type="text" autofocus />
+                <input class="prompt-modal-input" type="text" value="${escHtml(defaultValue)}" autofocus />
                 <div class="prompt-modal-buttons">
                     <button class="prompt-modal-btn cancel">Cancel</button>
                     <button class="prompt-modal-btn confirm">OK</button>
@@ -3758,7 +3928,10 @@ function showPromptModal(label) {
             if (e.key === 'Escape') close(null);
         });
         overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
-        setTimeout(() => inp.focus(), 50);
+        setTimeout(() => {
+            inp.focus();
+            if (defaultValue) inp.select();
+        }, 50);
     });
 }
 
@@ -3843,7 +4016,7 @@ async function openReport(filename) {
             const breadcrumbHtml = `<div class="report-breadcrumb">
                 <span class="breadcrumb-company" onclick="openDossier('${escHtml(meta.company)}')">${escHtml(meta.company)}</span>
                 <span class="breadcrumb-sep">›</span>
-                <span class="breadcrumb-current">${escHtml(meta.type || 'report')} report</span>
+                <span class="breadcrumb-current">${escHtml(meta.type && meta.type !== 'report' ? meta.type + ' report' : 'report')}</span>
             </div>`;
             contentEl.innerHTML = breadcrumbHtml + contentEl.innerHTML;
         }

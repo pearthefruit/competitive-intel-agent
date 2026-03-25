@@ -109,9 +109,13 @@ def _sector_text(profile_kf, hiring_kf):
 
 
 def _matches_any(text, keywords):
-    """Check if text contains any keyword from the set."""
+    """Check if text contains any keyword from the set (word-boundary match).
+
+    Uses regex word boundaries to avoid false positives like 'water infrastructure'
+    matching 'infrastructure' in SOFTWARE_KEYWORDS, or 'saas-centric' matching 'saas'.
+    """
     for kw in keywords:
-        if kw in text:
+        if re.search(rf"\b{re.escape(kw)}\b", text):
             return True
     return False
 

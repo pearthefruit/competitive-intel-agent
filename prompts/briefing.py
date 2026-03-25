@@ -400,6 +400,9 @@ Score each dimension 0-100 based on ALL available evidence.
 Primary signals: hiring data (what technologies they hire for), sector/product (what they build), engineering ratio.
 Secondary signals: website tech stack (what's on their public site — this is a weak signal for internal capability).
 
+CRITICAL DISTINCTION — "uses SaaS tools" vs "is a SaaS company":
+A non-tech company (food, retail, manufacturing, etc.) whose public website uses SaaS tools like Algolia, Cloudflare, or Shopify is NOT a SaaS/software company. Using off-the-shelf SaaS products on a marketing website is a PURCHASING decision, not an engineering capability. If anything, heavy reliance on third-party SaaS for a company's public site suggests they LACK internal engineering depth — it is a neutral-to-negative signal for tech modernity, never a positive one. Only score website SaaS usage positively if the company's CORE BUSINESS is technology/software.
+
 - 80-100: Company IS a technology/software/AI company (core product is technology), OR hiring data shows modern stack (React/Go/Rust/K8s/cloud-native/microservices roles dominate), high engineering ratio (>50% of open roles). If a company literally BUILDS software, LLMs, cloud infrastructure, or AI products, floor at 80 — their tech modernity is self-evident regardless of what's on their marketing website.
 - 60-79: Tech-adjacent company with significant engineering investment (30-50% engineering roles), modern tools in hiring reqs, some legacy maintenance roles. Mixed website tech stack.
 - 40-59: Non-tech company with modest engineering team (<30% roles). Hiring shows legacy technologies (COBOL, mainframe, .NET Framework, on-prem). Website shows dated stack.
