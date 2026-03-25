@@ -864,7 +864,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
             companies = args["companies"][:5]  # Hard cap at 5
-            framework = args.get("seniority_framework", "tech")
+            framework = args.get("seniority_framework")  # None → classify() defaults to "corporate"
             depth = args.get("depth", "standard")
 
             if progress_callback:

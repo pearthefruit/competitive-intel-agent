@@ -238,7 +238,7 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "company": {"type": "string", "description": "Company name (e.g. 'Stripe', 'Datadog')"},
                     "url": {"type": "string", "description": "ATS board URL. Optional — auto-detected if omitted."},
-                    "seniority_framework": {"type": "string", "enum": ["tech", "banking", "consulting", "corporate"], "description": "Industry seniority framework. Auto-detect from company: Goldman Sachs→banking, McKinsey→consulting, Walmart→corporate, tech companies→tech."},
+                    "seniority_framework": {"type": "string", "enum": ["tech", "banking", "consulting", "corporate"], "description": "Industry seniority framework. OMIT this parameter unless the user explicitly specifies a framework — the backend defaults to 'corporate' which works for most companies. Only override: pure software/tech companies→tech, banks/financial services→banking, consulting firms→consulting."},
                     "custom_seniority_rules": {"type": "string", "description": "Custom seniority mapping rules. Only use if the user explicitly describes a non-standard leveling system."},
                     "classification_mode": {"type": "string", "enum": ["fast", "comprehensive"], "description": "Classification mode. 'fast': heuristic-only, zero API calls. 'comprehensive': heuristic + LLM. Default: comprehensive."}
                 },
@@ -270,7 +270,7 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "company": {"type": "string", "description": "Company name"},
-                    "seniority_framework": {"type": "string", "enum": ["tech", "banking", "consulting", "corporate"], "description": "Industry seniority framework. Auto-detect from company: banks→banking, consulting firms→consulting, retail/manufacturing→corporate, tech→tech."},
+                    "seniority_framework": {"type": "string", "enum": ["tech", "banking", "consulting", "corporate"], "description": "Industry seniority framework. OMIT unless the user explicitly specifies — backend defaults to 'corporate'. Only override: pure software/tech→tech, banks→banking, consulting firms→consulting."},
                     "custom_seniority_rules": {"type": "string", "description": "Custom seniority mapping rules. Only use if the user explicitly describes a non-standard leveling system."},
                     "mode": {"type": "string", "enum": ["fast", "comprehensive"], "description": "Classification mode. 'fast': heuristic-only (regex), zero API calls, classifies ALL jobs instantly — good enough for hiring stats and briefings. 'comprehensive': heuristic + LLM for strategic fields (subcategory, skills, signals). Default: comprehensive."}
                 },
@@ -648,7 +648,7 @@ TOOL_SCHEMAS = [
                     "seniority_framework": {
                         "type": "string",
                         "enum": ["tech", "banking", "consulting", "corporate"],
-                        "description": "Industry seniority framework for job classification"
+                        "description": "Industry seniority framework. OMIT unless user specifies — backend defaults to 'corporate'."
                     },
                     "depth": {
                         "type": "string",
