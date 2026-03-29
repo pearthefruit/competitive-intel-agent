@@ -479,6 +479,11 @@ def create_app(db_path="intel.db"):
         stats = get_llm_usage_stats(db_path)
         return jsonify(stats)
 
+    @app.route("/api/llm-health")
+    def llm_health():
+        from agents.llm import get_health_status
+        return jsonify(get_health_status())
+
     @app.route("/api/dossiers")
     def list_dossiers():
         conn = get_connection(db_path)
@@ -753,6 +758,429 @@ def create_app(db_path="intel.db"):
                 "Content-Type": "application/pdf",
             },
         )
+
+    # --- ICP Profile API ---
+
+    @app.route("/api/icp-profiles")
+    def list_icp_profiles():
+        """List all ICP profiles."""
+        from db import get_all_icp_profiles
+        conn = get_connection(db_path)
+        profiles = get_all_icp_profiles(conn)
+        conn.close()
+        # Strip large config_json from list response (config is in parsed 'config' key)
+        for p in profiles:
+            p.pop("config_json", None)
+            p.pop("survey_answers_json", None)
+        return jsonify(profiles)
+
+    @app.route("/api/icp-profiles/<int:profile_id>")
+    def get_icp_profile_route(profile_id):
+        """Get a single ICP profile with full config."""
+        from db import get_icp_profile
+        conn = get_connection(db_path)
+        profile = get_icp_profile(conn, profile_id)
+        conn.close()
+        if not profile:
+            return jsonify({"error": "Profile not found"}), 404
+        return jsonify(profile)
+
+    @app.route("/api/icp-profiles", methods=["POST"])
+    def create_icp_profile_route():
+        """Create a new ICP profile."""
+        from db import create_icp_profile, set_active_icp_profile
+        data = request.json or {}
+        name = data.get("name", "").strip()
+        config = data.get("config")
+        if not name or not config:
+            return jsonify({"error": "name and config are required"}), 400
+        conn = get_connection(db_path)
+        pid = create_icp_profile(
+            conn, name, data.get("description", ""),
+            json.dumps(config),
+            survey_answers_json=json.dumps(data["survey_answers"]) if data.get("survey_answers") else None,
+        )
+        set_active_icp_profile(conn, pid)
+        conn.close()
+        return jsonify({"ok": True, "id": pid})
+
+    @app.route("/api/icp-profiles/<int:profile_id>", methods=["PUT"])
+    def update_icp_profile_route(profile_id):
+        """Update an ICP profile."""
+        from db import update_icp_profile
+        data = request.json or {}
+        conn = get_connection(db_path)
+        update_icp_profile(
+            conn, profile_id,
+            name=data.get("name"),
+            description=data.get("description"),
+            config_json=json.dumps(data["config"]) if "config" in data else None,
+        )
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/icp-profiles/<int:profile_id>", methods=["DELETE"])
+    def delete_icp_profile_route(profile_id):
+        """Delete a non-default ICP profile."""
+        from db import get_icp_profile, delete_icp_profile, get_active_icp_profile, set_active_icp_profile
+        conn = get_connection(db_path)
+        profile = get_icp_profile(conn, profile_id)
+        if not profile:
+            conn.close()
+            return jsonify({"error": "Not found"}), 404
+        if profile.get("is_default"):
+            conn.close()
+            return jsonify({"error": "Cannot delete the default profile"}), 400
+        delete_icp_profile(conn, profile_id)
+        # If deleted profile was active, fall back to default
+        active = get_active_icp_profile(conn)
+        if not active:
+            default_row = conn.execute("SELECT id FROM icp_profiles WHERE is_default = 1").fetchone()
+            if default_row:
+                set_active_icp_profile(conn, default_row["id"])
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/icp-profiles/<int:profile_id>/activate", methods=["POST"])
+    def activate_icp_profile_route(profile_id):
+        """Set a profile as the active one."""
+        from db import set_active_icp_profile
+        conn = get_connection(db_path)
+        set_active_icp_profile(conn, profile_id)
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/icp-profiles/generate", methods=["POST"])
+    def generate_icp_profile_route():
+        """Generate an ICP config from wizard survey answers using LLM."""
+        data = request.json or {}
+        survey_answers = data.get("survey_answers")
+        if not survey_answers:
+            return jsonify({"error": "survey_answers required"}), 400
+        try:
+            from prompts.icp_generate import build_icp_generation_prompt
+            from agents.llm import generate_json as llm_generate_json, BRIEFING_CHAIN
+            prompt = build_icp_generation_prompt(survey_answers)
+            config = llm_generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN)
+            if not isinstance(config, dict) or "dimensions" not in config:
+                return jsonify({"error": "LLM did not return valid ICP config. Try again."}), 500
+            # Validate weights sum to ~1.0 and normalize if needed
+            total_weight = sum(d.get("weight", 0) for d in config.get("dimensions", []))
+            if abs(total_weight - 1.0) > 0.05:
+                for d in config["dimensions"]:
+                    d["weight"] = round(d["weight"] / total_weight, 2)
+                # Fix rounding: adjust first dimension to make sum exactly 1.0
+                remainder = 1.0 - sum(d["weight"] for d in config["dimensions"])
+                if config["dimensions"]:
+                    config["dimensions"][0]["weight"] = round(config["dimensions"][0]["weight"] + remainder, 2)
+            return jsonify({"ok": True, "config": config, "survey_answers": survey_answers})
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": str(e)}), 500
+
+    # --- Prospecting API ---
+
+    @app.route("/api/ua-targets")
+    def list_ua_targets():
+        """Get all companies with ICP fit scores, filtered by active ICP profile."""
+        from db import get_ua_targets, get_active_icp_profile
+        conn = get_connection(db_path)
+        # Filter by ICP profile if specified, otherwise use active profile
+        icp_profile_id = request.args.get("icp_profile_id", type=int)
+        if icp_profile_id is None:
+            active = get_active_icp_profile(conn)
+            if active:
+                icp_profile_id = active["id"]
+        targets = get_ua_targets(conn, icp_profile_id=icp_profile_id)
+        conn.close()
+        return jsonify(targets)
+
+    @app.route("/api/dossiers/<path:company_name>/ua-fit", methods=["POST"])
+    def compute_ua_fit(company_name):
+        """Score a single company's prospect fit using research analysis reports."""
+        from agents.ua_fit import score_ua_fit
+        data = request.json or {}
+        website_url = data.get("website_url")
+        try:
+            fit = score_ua_fit(company_name, website_url=website_url, db_path=db_path)
+            if fit:
+                return jsonify({"ok": True, "score": fit})
+            return jsonify({"error": "Failed to generate fit score"}), 500
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    # --- Campaign API ---
+
+    @app.route("/api/campaigns")
+    def list_campaigns():
+        """Get all campaigns with prospect counts, avg scores, and prospect data."""
+        from db import get_all_campaigns, get_campaign_detail
+        conn = get_connection(db_path)
+        campaigns = get_all_campaigns(conn)
+        # Attach prospect data + parsed insight to each campaign for sidebar rendering
+        for c in campaigns:
+            detail = get_campaign_detail(conn, c["id"])
+            if detail:
+                c["prospects"] = detail.get("prospects", [])
+                c["insight"] = detail.get("insight")
+            else:
+                c["prospects"] = []
+        conn.close()
+        return jsonify(campaigns)
+
+    @app.route("/api/campaigns/<int:campaign_id>")
+    def get_campaign(campaign_id):
+        """Get a single campaign with its prospects joined to dossier ua_fit data."""
+        from db import get_campaign_detail
+        conn = get_connection(db_path)
+        campaign = get_campaign_detail(conn, campaign_id)
+        conn.close()
+        if not campaign:
+            return jsonify({"error": "Campaign not found"}), 404
+        return jsonify(campaign)
+
+    @app.route("/api/campaigns/<int:campaign_id>", methods=["PATCH"])
+    def update_campaign(campaign_id):
+        """Rename a campaign."""
+        from db import rename_campaign
+        data = request.json or {}
+        name = data.get("name", "").strip()
+        if not name:
+            return jsonify({"error": "name is required"}), 400
+        conn = get_connection(db_path)
+        rename_campaign(conn, campaign_id, name)
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/campaigns/<int:campaign_id>", methods=["DELETE"])
+    def remove_campaign(campaign_id):
+        """Delete a campaign and its prospect links (not the dossiers)."""
+        from db import delete_campaign
+        conn = get_connection(db_path)
+        delete_campaign(conn, campaign_id)
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/campaign-prospects/<int:campaign_id>/<int:dossier_id>", methods=["PATCH"])
+    def update_campaign_prospect(campaign_id, dossier_id):
+        """Update a prospect's workflow status."""
+        from db import update_prospect_status
+        data = request.json or {}
+        status = data.get("prospect_status", "").strip()
+        if status not in ("new", "reviewing", "brief_ready", "contacted"):
+            return jsonify({"error": "Invalid prospect_status"}), 400
+        conn = get_connection(db_path)
+        update_prospect_status(conn, campaign_id, dossier_id, status)
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/campaigns/<int:campaign_id>/insight", methods=["POST"])
+    def generate_campaign_insight(campaign_id):
+        """Generate a vertical insight for a campaign."""
+        from agents.ua_fit import generate_vertical_insight
+        insight = generate_vertical_insight(campaign_id, db_path=db_path)
+        if not insight:
+            return jsonify({"error": "Could not generate insight"}), 500
+        return jsonify(insight)
+
+    @app.route("/api/campaigns/<int:campaign_id>/prospects/<path:company_name>/brief", methods=["POST"])
+    def generate_prospect_brief(campaign_id, company_name):
+        """Generate an outreach brief for a prospect in a campaign."""
+        from agents.ua_fit import generate_outreach_brief
+        brief = generate_outreach_brief(company_name, campaign_id, db_path=db_path)
+        if not brief:
+            return jsonify({"error": "Could not generate brief"}), 500
+        return jsonify(brief)
+
+    @app.route("/api/ua-pipeline", methods=["POST"])
+    def ua_pipeline_api():
+        """Run the full prospecting pipeline with SSE progress streaming.
+
+        Pipeline: Discover -> Validate websites -> Analyze + Score (3 companies in parallel).
+        Each company's analyses run sequentially (techstack -> financial -> sentiment) to
+        avoid nested ThreadPoolExecutor deadlocks with ddgs.
+        """
+        data = request.json or {}
+        niche = data.get("niche", "").strip()
+        top_n = min(data.get("top_n", 10), 20)
+        if not niche:
+            return jsonify({"error": "niche is required"}), 400
+
+        def generate():
+            import queue
+            import threading
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            campaign_id = None
+
+            try:
+                # ---- Phase 1: Discovery ----
+                yield f"data: {json.dumps({'type': 'status', 'text': f'Discovering companies in: {niche}...'})}\n\n"
+
+                from agents.ua_discover import discover_prospects
+                companies = discover_prospects(niche, top_n=top_n, db_path=db_path)
+
+                if not companies:
+                    yield f"data: {json.dumps({'type': 'error', 'text': 'No companies found for this niche.'})}\n\n"
+                    return
+
+                # Create campaign record
+                from db import (create_campaign, add_campaign_prospect,
+                                update_campaign_status, get_or_create_dossier)
+                conn = get_connection(db_path)
+                campaign_id = create_campaign(conn, niche, top_n)
+                conn.close()
+
+                yield f"data: {json.dumps({'type': 'discovered', 'companies': companies, 'campaign_id': campaign_id})}\n\n"
+
+                # ---- Phase 2: Website Validation ----
+                yield f"data: {json.dumps({'type': 'status', 'text': f'Validating {len(companies)} company websites...'})}\n\n"
+
+                from agents.ua_fit import validate_websites, score_ua_fit
+
+                valid_q = queue.Queue()
+                valid_holder = [None]
+
+                def _valid_cb(event_type, ev_data):
+                    valid_q.put((event_type, ev_data))
+
+                def _run_validation():
+                    try:
+                        valid, results = validate_websites(companies, progress_cb=_valid_cb)
+                        valid_holder[0] = (valid, results)
+                    except Exception as exc:
+                        print(f"[pipeline] Validation error: {exc}")
+                        valid_holder[0] = (companies, [])
+                    finally:
+                        valid_q.put(("_done", None))
+
+                vt = threading.Thread(target=_run_validation, daemon=True)
+                vt.start()
+
+                while True:
+                    try:
+                        ev_type, ev_data = valid_q.get(timeout=0.2)
+                    except queue.Empty:
+                        continue
+                    if ev_type == "_done":
+                        break
+                    yield f"data: {json.dumps({'type': ev_type, **ev_data})}\n\n"
+
+                vt.join(timeout=120)
+
+                valid_companies, validation_results = valid_holder[0]
+                rejected = [v for v in (validation_results or []) if not v.get("valid")]
+
+                # Persist campaign_prospects with validation status
+                conn = get_connection(db_path)
+                for vr in (validation_results or []):
+                    name = vr.get("name", "")
+                    dossier_id = get_or_create_dossier(conn, name)
+                    if not vr.get("valid"):
+                        vstatus = "parked"
+                    elif vr.get("limited"):
+                        vstatus = "http_403" if "403" in (vr.get("reason") or "") else "connection_failed"
+                    else:
+                        vstatus = "valid"
+                    add_campaign_prospect(conn, campaign_id, dossier_id,
+                                          validation_status=vstatus,
+                                          validation_reason=vr.get("reason"))
+                conn.close()
+
+                limited_count = sum(1 for v in (validation_results or []) if v.get("limited"))
+                yield f"data: {json.dumps({'type': 'validation_complete', 'valid_count': len(valid_companies), 'rejected_count': len(rejected), 'limited_count': limited_count})}\n\n"
+
+                if not valid_companies:
+                    conn = get_connection(db_path)
+                    update_campaign_status(conn, campaign_id, 'error')
+                    conn.close()
+                    yield f"data: {json.dumps({'type': 'error', 'text': 'No valid companies after website validation.'})}\n\n"
+                    return
+
+                # ---- Phase 3: Parallel Scoring ----
+                yield f"data: {json.dumps({'type': 'status', 'text': f'Analyzing and scoring {len(valid_companies)} companies (3 at a time)...'})}\n\n"
+
+                score_q = queue.Queue()
+                scored_count = [0]
+
+                def _score_cb(event_type, ev_data):
+                    score_q.put((event_type, ev_data))
+
+                def _run_parallel_scoring():
+                    def _score_one(company):
+                        name = company.get("name", "?")
+                        website = company.get("website")
+                        # Skip techstack if website is inaccessible (403, connection failed)
+                        if not company.get("_website_accessible", True):
+                            website = None
+                        try:
+                            fit = score_ua_fit(name, website_url=website,
+                                               db_path=db_path, progress_cb=_score_cb)
+                            if fit:
+                                _score_cb("scored", {
+                                    "company": name,
+                                    "overall_score": fit.get("overall_score", 0),
+                                    "label": fit.get("overall_label", "?"),
+                                    "angle": fit.get("recommended_angle", ""),
+                                    "analyses_used": list(fit.get("_analyses_used", {}).keys()),
+                                })
+                                scored_count[0] += 1
+                            else:
+                                _score_cb("score_error", {"company": name,
+                                                          "error": "No score returned"})
+                        except Exception as exc:
+                            _score_cb("score_error", {"company": name,
+                                                      "error": str(exc)[:200]})
+
+                    try:
+                        with ThreadPoolExecutor(max_workers=3) as executor:
+                            futures = [executor.submit(_score_one, c)
+                                       for c in valid_companies]
+                            for future in as_completed(futures):
+                                future.result()  # propagate unexpected exceptions
+                    except Exception as exc:
+                        import traceback
+                        traceback.print_exc()
+                        _score_cb("error", {"text": f"Scoring error: {str(exc)[:300]}"})
+                    finally:
+                        score_q.put(("_done", None))
+
+                st = threading.Thread(target=_run_parallel_scoring, daemon=True)
+                st.start()
+
+                while True:
+                    try:
+                        ev_type, ev_data = score_q.get(timeout=0.5)
+                    except queue.Empty:
+                        continue
+                    if ev_type == "_done":
+                        break
+                    yield f"data: {json.dumps({'type': ev_type, **ev_data})}\n\n"
+
+                st.join(timeout=900)
+
+                # Mark campaign complete
+                conn = get_connection(db_path)
+                update_campaign_status(conn, campaign_id, 'complete')
+                conn.close()
+
+                yield f"data: {json.dumps({'type': 'complete', 'total_scored': scored_count[0], 'campaign_id': campaign_id})}\n\n"
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                if campaign_id:
+                    try:
+                        conn = get_connection(db_path)
+                        update_campaign_status(conn, campaign_id, 'error')
+                        conn.close()
+                    except Exception:
+                        pass
+                yield f"data: {json.dumps({'type': 'error', 'text': f'Pipeline error: {str(e)[:300]}'})}\n\n"
+
+        return Response(generate(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # --- Unified Companies API ---
 

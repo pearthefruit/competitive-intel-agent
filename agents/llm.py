@@ -2,6 +2,7 @@
 
 import os
 import json
+import time
 import threading
 from collections import OrderedDict
 from pathlib import Path
@@ -14,6 +15,67 @@ from datetime import datetime, timezone
 
 # Lock for genai.configure() which sets global state — prevents races between threads
 gemini_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# Key health tracking — skip keys that are rate-limited or quota-exhausted
+# ---------------------------------------------------------------------------
+_key_health = {}          # (provider, key_hint) -> expiry (time.monotonic)
+_health_lock = threading.Lock()
+
+_COOLDOWN_QUOTA = 3600    # 60 min — daily quota exhaustion
+_COOLDOWN_RATE = 60       # 60 sec — per-minute rate limits
+_COOLDOWN_ERROR = 120     # 2 min  — generic server errors
+
+
+def _key_hint(key):
+    """Last 4 chars of key for health tracking and logging."""
+    return key[-4:] if len(key) >= 4 else "****"
+
+
+def mark_key_unhealthy(provider, key, error_str):
+    """Record a key failure with appropriate cooldown duration."""
+    hint = _key_hint(key)
+    err_lower = error_str.lower()
+
+    if "quota" in err_lower or "exceeded" in err_lower or "resource_exhausted" in err_lower:
+        cooldown = _COOLDOWN_QUOTA
+        reason = "quota"
+    elif "429" in error_str or "rate limit" in err_lower or "rate_limit" in err_lower:
+        cooldown = _COOLDOWN_RATE
+        reason = "rate"
+    else:
+        cooldown = _COOLDOWN_ERROR
+        reason = "error"
+
+    expiry = time.monotonic() + cooldown
+    with _health_lock:
+        _key_health[(provider, hint)] = expiry
+    print(f"[health] {provider} key ...{hint} cooled down {cooldown}s ({reason})")
+
+
+def is_key_healthy(provider, key):
+    """Check if a key is currently healthy (not in cooldown)."""
+    hint = _key_hint(key)
+    with _health_lock:
+        expiry = _key_health.get((provider, hint))
+    if expiry is None:
+        return True
+    if time.monotonic() >= expiry:
+        with _health_lock:
+            _key_health.pop((provider, hint), None)
+        return True
+    return False
+
+
+def get_health_status():
+    """Return current health dict for diagnostics."""
+    now = time.monotonic()
+    with _health_lock:
+        return {
+            f"{p}...{h}": {"remaining_s": round(exp - now)}
+            for (p, h), exp in _key_health.items()
+            if exp > now
+        }
 
 from db import (get_connection, get_or_create_dossier, add_dossier_analysis,
                 add_dossier_event, get_previous_key_facts, log_llm_call)
@@ -135,19 +197,18 @@ FAST_CHAIN = {
 
 
 def _expand_chain(chain):
-    """Expand a chain into a flat provider list with key-round interleaving.
+    """Expand a chain into a flat provider list with per-provider key exhaustion.
 
-    Pattern per round:
-        provider1/key_N → all models
-        provider2/key_N → all models
-        ...
-    Then next round with key_N+1.
+    For each provider in chain order, generates all (key, model) combinations
+    before moving to the next provider.  Within a provider, keys are
+    interleaved per model so a rate-limited key is skipped quickly:
+        provider1/model0/key0, provider1/model0/key1, provider1/model1/key0, ...
+        provider2/model0/key0, ...
 
     Accepts either:
         - list of provider names (uses all models from PROVIDER_DEFS)
         - dict with "order" (provider names) and "models" (per-provider model subset)
     """
-    # Handle dict-style chains (e.g., FAST_CHAIN with custom model subsets)
     if isinstance(chain, dict):
         order = chain["order"]
         model_override = chain.get("models", {})
@@ -155,8 +216,7 @@ def _expand_chain(chain):
         order = chain
         model_override = {}
 
-    # Parse keys for each provider in the chain
-    provider_keys = {}
+    expanded = []
     for name in order:
         defn = PROVIDER_DEFS.get(name)
         if not defn:
@@ -165,23 +225,13 @@ def _expand_chain(chain):
         if not raw:
             continue
         keys = [k.strip() for k in raw.split(",") if k.strip()]
-        if keys:
-            provider_keys[name] = keys
+        if not keys:
+            continue
 
-    if not provider_keys:
-        return []
-
-    max_keys = max(len(v) for v in provider_keys.values())
-
-    expanded = []
-    for ki in range(max_keys):
-        for name in order:
-            if name not in provider_keys or ki >= len(provider_keys[name]):
-                continue
-            key = provider_keys[name][ki]
-            defn = PROVIDER_DEFS[name]
-            models = model_override.get(name, defn["models"])
-            for model in models:
+        models = model_override.get(name, defn["models"])
+        # For each model, try all keys before moving to next model
+        for model in models:
+            for key in keys:
                 expanded.append({
                     "name": name,
                     "url": defn["url"],
@@ -278,7 +328,7 @@ def normalize_citations(text):
 def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
     """Try providers in order until one works. Returns (text, model_name).
 
-    Uses key-round interleaving: all models per key, then next key.
+    Per-provider key exhaustion: all keys × models per provider, then next provider.
     If json_mode=True, hints providers to return valid JSON
     (Gemini response_mime_type, OpenAI-compat response_format).
     """
@@ -291,11 +341,16 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
     expanded = _expand_chain(chain or REPORT_CHAIN)
     http = httpx.Client(timeout=timeout, follow_redirects=True)
 
+    skipped_unhealthy = 0
     for p in expanded:
         key = p["_key"]
         model_id = f"{p['name']}/{p['model']}"
-        # Show truncated key suffix so you can tell which account was used
         key_hint = key[-4:] if len(key) >= 4 else '****'
+
+        # Skip keys in cooldown
+        if not is_key_healthy(p["name"], key):
+            skipped_unhealthy += 1
+            continue
 
         try:
             if p["name"] == "gemini":
@@ -339,6 +394,7 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
                 elif resp.status_code == 429:
                     print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
                     log_llm_call(p["name"], p["model"], key_hint, "rate_limited", error="429", caller=caller)
+                    mark_key_unhealthy(p["name"], key, "429")
                     continue
                 else:
                     err = f"HTTP {resp.status_code}"
@@ -350,12 +406,15 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
             if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
                 print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
                 log_llm_call(p["name"], p["model"], key_hint, "rate_limited", error=err_str[:200], caller=caller)
+                mark_key_unhealthy(p["name"], key, err_str)
             else:
                 print(f"[llm] {model_id} (key …{key_hint}) failed: {e}")
                 log_llm_call(p["name"], p["model"], key_hint, "error", error=err_str[:200], caller=caller)
             continue
 
     http.close()
+    if skipped_unhealthy:
+        print(f"[llm] Skipped {skipped_unhealthy} entries due to key cooldowns")
     raise RuntimeError("All LLM providers failed for text generation")
 
 
@@ -674,6 +733,31 @@ Report:
 
 Return ONLY valid JSON, no explanation."""
 
+_UA_FIT_FACTS_PROMPT = """Extract structured ICP fit scoring facts from this analysis report about {company}.
+
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "ua_fit_score": overall ICP fit score as integer (0-100)
+- "ua_fit_label": one of "Prime Prospect", "Strong Candidate", "Possible Fit", "Weak Fit", "Not a Fit"
+- "channel_saturation_score": integer (0-100)
+- "growth_posture_score": integer (0-100)
+- "creative_readiness_score": integer (0-100)
+- "size_budget_fit_score": integer (0-100)
+- "intent_signals_score": integer (0-100)
+- "primary_ad_channels": array of advertising channels they use (e.g. ["Meta", "TikTok", "Google Ads"])
+- "ecom_platform": ecommerce platform if detected (e.g. "Shopify", "BigCommerce") or null
+- "recent_funding": string describing latest funding round or null
+- "estimated_revenue": string estimate if mentioned (e.g. "$50M") or null
+- "estimated_employees": string estimate if mentioned or null
+- "recommended_angle": the recommended sales approach in 1 sentence
+- "key_risk": the single biggest risk or objection for this prospect
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
 _TYPE_KEY_FACTS_PROMPTS = {
     "techstack": _TECHSTACK_FACTS_PROMPT,
     "seo": _SEO_FACTS_PROMPT,
@@ -684,6 +768,7 @@ _TYPE_KEY_FACTS_PROMPTS = {
     "competitors": _COMPETITORS_FACTS_PROMPT,
     "patents": _PATENTS_FACTS_PROMPT,
     "profile": _PROFILE_FACTS_PROMPT,
+    "ua_fit": _UA_FIT_FACTS_PROMPT,
 }
 
 

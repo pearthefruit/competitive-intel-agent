@@ -76,6 +76,11 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
 - **save_dossier_event**: Add a strategic event to a company's timeline (e.g. acquisition, product launch, leadership change, regulatory action). Use this when you discover notable events during research.
 - **generate_briefing**: Generate a consulting-ready intelligence briefing with Digital Maturity Score (0-100), engagement opportunity map, budget/appetite signals, competitive pressure assessment, and strategic assessment. Requires at least 2 analyses in the dossier. Use after building up a company dossier.
 
+### Prospecting (Lead Discovery & Prospect Fit Scoring)
+- **ua_discover**: Discover prospective companies in a target niche/vertical. Searches web, Reddit, and news to find SMB-to-midmarket companies suited for premium video/streaming TV advertising. Returns a list of discovered companies.
+- **ua_fit_score**: Score a company's prospect fit for Universal Ads (premium video advertising). Runs techstack, financial, and sentiment analyses, then scores 5 fixed dimensions (Financial Capacity, Advertising Maturity, Growth Trajectory, Creative Readiness, Channel Expansion Intent) 0-100 with evidence-backed rationale. Use when someone asks "is this a good prospect?" or "score this lead."
+- **get_ua_targets**: Get all companies with prospect fit scores, sorted by score. Use to answer "who are our best prospects?" or "show me the pipeline."
+
 ### Reasoning
 - **think**: Record your step-by-step reasoning. The user can see this. Use it liberally — before decisions, after unexpected results, when evaluating data quality.
 
@@ -133,6 +138,7 @@ FOLLOW_UP_TOOL_NAMES = CORE_TOOL_NAMES | {
     "competitor_analysis", "sentiment_analysis", "seo_audit",
     "techstack_analysis", "pricing_analysis", "compare_companies",
     "landscape_analysis", "collect", "classify", "analyze",
+    "ua_discover", "ua_fit_score", "get_ua_targets",
 }
 
 
@@ -667,6 +673,48 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "get_current_datetime",
             "description": "Get the current date and time. Use when answering questions about deadlines, 'today', 'this week', or when the user needs to know the current date/time.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            }
+        }
+    },
+    # --- Prospecting ---
+    {
+        "type": "function",
+        "function": {
+            "name": "ua_discover",
+            "description": "Discover prospective companies in a target niche or vertical. Searches web, Reddit, and news to find companies that match the configured ICP. Returns a list of discovered companies with names, websites, and descriptions. Use when the user says 'find prospects in...', 'discover leads in...', or asks about companies in a specific vertical.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "niche": {"type": "string", "description": "Target niche/vertical (e.g. 'DTC skincare brands', 'fintech apps', 'meal kit companies')"},
+                    "top_n": {"type": "integer", "description": "Max companies to discover (default: 15)"}
+                },
+                "required": ["niche"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ua_fit_score",
+            "description": "Score a company's prospect fit for Universal Ads (premium video/streaming TV advertising). Runs techstack, financial, and sentiment research analyses, then scores 5 fixed dimensions (Financial Capacity 25%, Advertising Maturity 20%, Growth Trajectory 20%, Creative Readiness 20%, Channel Expansion Intent 15%) 0-100 with evidence-backed rationale. Use when someone asks 'is this a good prospect?', 'score this company', or 'how well does X fit our criteria?'",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "company": {"type": "string", "description": "Company name to score"},
+                    "website_url": {"type": "string", "description": "Company website URL (optional, enables tech stack + ad pixel detection)"}
+                },
+                "required": ["company"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_ua_targets",
+            "description": "Get all companies with ICP fit scores, sorted by score descending. Returns the full prospect pipeline. Use when the user asks 'show me our prospects', 'who are the best leads?', 'what's in the pipeline?', or 'list scored companies'.",
             "parameters": {
                 "type": "object",
                 "properties": {},

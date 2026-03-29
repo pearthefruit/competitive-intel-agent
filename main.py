@@ -158,6 +158,56 @@ def landscape_cmd(company, top_n):
     landscape_analysis(company, top_n)
 
 
+@cli.command("ua-discover")
+@click.option("--niche", required=True, help="Target niche/vertical (e.g. 'DTC skincare brands')")
+@click.option("--top-n", default=15, help="Max companies to discover (default: 15)")
+@click.option("--db", default="intel.db", help="SQLite database path")
+def ua_discover_cmd(niche, top_n, db):
+    """Discover prospective companies in a niche/vertical."""
+    from agents.ua_discover import discover_prospects
+    companies = discover_prospects(niche, top_n, db)
+    if companies:
+        print(f"\n  Discovered {len(companies)} companies in '{niche}'")
+    else:
+        print(f"\n  No companies found for '{niche}'")
+
+
+@cli.command("ua-fit")
+@click.option("--company", required=True, help="Company name")
+@click.option("--url", default=None, help="Company website URL (optional, enables tech detection)")
+@click.option("--db", default="intel.db", help="SQLite database path")
+def ua_fit_cmd(company, url, db):
+    """Score a company's prospect fit using research analyses (techstack, financial, sentiment)."""
+    from agents.ua_fit import score_ua_fit
+    fit = score_ua_fit(company, website_url=url, db_path=db)
+    if fit:
+        print(f"\n  {company}: {fit['overall_score']}/100 — {fit['overall_label']}")
+        print(f"  Angle: {fit.get('recommended_angle', 'N/A')}")
+    else:
+        print(f"\n  Failed to score {company}")
+
+
+@cli.command("ua-pipeline")
+@click.option("--niche", required=True, help="Target niche/vertical (e.g. 'DTC skincare brands')")
+@click.option("--top-n", default=15, help="Max companies to discover and score (default: 15)")
+@click.option("--db", default="intel.db", help="SQLite database path")
+def ua_pipeline_cmd(niche, top_n, db):
+    """Full pipeline: discover companies, validate websites, run analyses, score prospects."""
+    from agents.ua_fit import run_pipeline
+    companies, results, report_path = run_pipeline(niche, top_n, db)
+    if report_path:
+        scored = [(n, f) for n, f in results if f]
+        scored.sort(key=lambda x: x[1].get("overall_score", 0), reverse=True)
+        print(f"\n{'='*60}")
+        print(f"  Pipeline complete: {len(scored)} companies scored")
+        print(f"  Report: {report_path}")
+        print(f"{'='*60}")
+        if scored:
+            print(f"\n  Top prospects:")
+            for i, (name, fit) in enumerate(scored[:5], 1):
+                print(f"    {i}. {name} — {fit['overall_score']}/100 ({fit['overall_label']})")
+
+
 @cli.command("chat")
 @click.option("--db", default="intel.db", help="SQLite database path")
 def chat_cmd(db):

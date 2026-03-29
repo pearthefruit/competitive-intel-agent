@@ -111,6 +111,24 @@ FINGERPRINTS = {
         (r"algolia[\.-]com|algolia\.js|algoliasearch", "Algolia"),
         (r"elasticsearch|elastic[\.-]co", "Elasticsearch"),
     ],
+    "Advertising Pixels": [
+        (r"facebook\.com.*fbevents|fbq\(|connect\.facebook\.net.*fbevents", "Facebook Pixel"),
+        (r"googleadservices|google-ads|googlesyndication|conversion.*google", "Google Ads"),
+        (r"tiktok\.com.*ttq|analytics\.tiktok|tiktok-pixel", "TikTok Pixel"),
+        (r"snap\.licdn\.com|linkedin.*insight|linkedin\.com.*insight", "LinkedIn Insight Tag"),
+        (r"snapchat\.com.*scevent|snaptr\(|sc-static\.net.*scevent", "Snapchat Pixel"),
+        (r"criteo\.com|criteo\.min|static\.criteo", "Criteo"),
+        (r"doubleclick\.net", "DoubleClick/DV360"),
+        (r"pinterest\.com.*pinit|pintrk\(|pinterestTag", "Pinterest Tag"),
+        (r"taboola\.com|cdn\.taboola", "Taboola"),
+        (r"outbrain\.com|outbrain-widget", "Outbrain"),
+    ],
+    "E-commerce": [
+        (r"shopify[\.-]com|cdn\.shopify", "Shopify"),
+        (r"bigcommerce[\.-]com", "BigCommerce"),
+        (r"magento|mage[\.-]", "Magento"),
+        (r"woocommerce|wc-ajax", "WooCommerce"),
+    ],
 }
 
 # Header-based detection

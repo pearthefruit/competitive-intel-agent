@@ -121,8 +121,24 @@ def _analyze_public(company, cik_info):
 
 
 def _analyze_non_sec(company):
-    """Analyze a company not in SEC EDGAR (foreign-listed or private) using Yahoo Finance + web search."""
+    """Analyze a company not in SEC EDGAR using ProPublica 990 + Yahoo Finance + web search."""
     print(f"[financial] Searching for financial data on {company}...")
+
+    # Try ProPublica Nonprofit Explorer first (free, no auth, structured 990 data)
+    nonprofit_data = None
+    try:
+        from scraper.nonprofit import search_nonprofit, get_nonprofit_financials, format_990_for_prompt
+        match = search_nonprofit(company)
+        if match:
+            print(f"[financial] Found nonprofit match: {match['name']} (EIN: {match['ein']})")
+            financials = get_nonprofit_financials(match["ein"])
+            if financials and financials.get("filings"):
+                nonprofit_data = format_990_for_prompt(financials)
+                print(f"[financial] Got Form 990 data — {len(financials['filings'])} years of filings")
+            else:
+                print(f"[financial] Nonprofit matched but no 990 filings found")
+    except Exception as e:
+        print(f"[financial] ProPublica lookup failed: {e}")
 
     # Multiple targeted searches (cover both private and foreign-listed companies)
     year = datetime.now().year
@@ -188,6 +204,11 @@ def _analyze_non_sec(company):
                 if has_statements:
                     print(f"[financial] Got full financial statements — this company has structured data comparable to SEC filers")
 
+    # Prepend 990 data if available — gives LLM structured financials for nonprofits
+    if nonprofit_data:
+        search_text = nonprofit_data + "\n\n---\n\nADDITIONAL WEB SEARCH CONTEXT:\n" + search_text
+        has_statements = True  # 990 data is structured like financial statements
+
     # Generate report
     prompt = build_financial_prompt_private(company, search_text, has_statements=has_statements)
     prompt += get_temporal_context(company, "financial")
@@ -200,7 +221,13 @@ def _analyze_non_sec(company):
     safe_name = company.lower().replace(" ", "_").replace(".", "_")
 
     ticker_info = f" | **Ticker:** {ticker}" if ticker else ""
-    source = "Web Search + Yahoo Finance" if ticker else "Web Search"
+    source_parts = []
+    if nonprofit_data:
+        source_parts.append("ProPublica 990")
+    if ticker:
+        source_parts.append("Yahoo Finance")
+    source_parts.append("Web Search")
+    source = " + ".join(source_parts)
     header = f"""# Financial Analysis: {company}
 
 **Status:** Not in SEC EDGAR (foreign-listed or private){ticker_info} | **Date:** {today}

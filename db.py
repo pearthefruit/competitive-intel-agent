@@ -114,6 +114,41 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     output_tokens INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS icp_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_default INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 0,
+    survey_answers_json TEXT,
+    config_json TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS campaigns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    niche TEXT NOT NULL,
+    name TEXT,
+    top_n INTEGER,
+    status TEXT DEFAULT 'running',
+    insight_json TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS campaign_prospects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+    dossier_id INTEGER NOT NULL REFERENCES dossiers(id),
+    validation_status TEXT,
+    validation_reason TEXT,
+    prospect_status TEXT DEFAULT 'new',
+    brief_json TEXT,
+    discovered_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(campaign_id, dossier_id)
+);
 """
 
 
@@ -137,6 +172,9 @@ def _migrate_db(conn):
         ("dossiers", "briefing_model", "TEXT"),
         ("llm_usage", "input_tokens", "INTEGER"),
         ("llm_usage", "output_tokens", "INTEGER"),
+        ("dossiers", "ua_fit_json", "TEXT"),
+        ("dossiers", "ua_fit_generated_at", "TEXT"),
+        ("dossiers", "icp_profile_id", "INTEGER"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -150,6 +188,7 @@ def init_db(db_path="intel.db"):
     conn = get_connection(db_path)
     conn.executescript(SCHEMA)
     _migrate_db(conn)
+    ensure_default_icp_profile(conn)
     conn.commit()
     conn.close()
 
@@ -448,7 +487,7 @@ def add_dossier_analysis(conn, dossier_id, analysis_type, report_file=None,
         (datetime.now(timezone.utc).isoformat(), dossier_id),
     )
     conn.commit()
-    return result_id
+    return cur.lastrowid
 
 
 def add_dossier_event(conn, dossier_id, event_type, title, description=None,
@@ -700,3 +739,422 @@ def get_recent_changes(conn, dossier_id, limit=15):
         (dossier_id, limit),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_ua_targets(conn, icp_profile_id=None):
+    """Get dossiers with UA fit scores, optionally filtered by ICP profile.
+
+    When icp_profile_id is provided, only return prospects scored under that profile.
+    """
+    if icp_profile_id is not None:
+        rows = conn.execute(
+            """SELECT d.id, d.company_name, d.sector, d.description,
+                      d.ua_fit_json, d.ua_fit_generated_at, d.icp_profile_id,
+                      (SELECT COUNT(*) FROM dossier_analyses WHERE dossier_id = d.id) as analysis_count
+               FROM dossiers d
+               WHERE d.ua_fit_json IS NOT NULL
+                 AND (d.icp_profile_id = ? OR d.icp_profile_id IS NULL)
+               ORDER BY json_extract(d.ua_fit_json, '$.overall_score') DESC""",
+            (icp_profile_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT d.id, d.company_name, d.sector, d.description,
+                      d.ua_fit_json, d.ua_fit_generated_at, d.icp_profile_id,
+                      (SELECT COUNT(*) FROM dossier_analyses WHERE dossier_id = d.id) as analysis_count
+               FROM dossiers d
+               WHERE d.ua_fit_json IS NOT NULL
+               ORDER BY json_extract(d.ua_fit_json, '$.overall_score') DESC"""
+        ).fetchall()
+    results = []
+    for r in rows:
+        d = dict(r)
+        if d.get("ua_fit_json"):
+            try:
+                d["ua_fit"] = json.loads(d["ua_fit_json"])
+            except (json.JSONDecodeError, TypeError):
+                d["ua_fit"] = None
+        results.append(d)
+    return results
+
+
+# --- Campaign helpers ---
+
+def create_campaign(conn, niche, top_n, name=None):
+    """Create a new campaign. Returns campaign id."""
+    now = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        "INSERT INTO campaigns (niche, name, top_n, status, created_at, updated_at) VALUES (?, ?, ?, 'running', ?, ?)",
+        (niche, name or niche, top_n, now, now),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_campaign_status(conn, campaign_id, status):
+    """Update campaign status (running|complete|error)."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE campaigns SET status = ?, updated_at = ? WHERE id = ?",
+        (status, now, campaign_id),
+    )
+    conn.commit()
+
+
+def add_campaign_prospect(conn, campaign_id, dossier_id, validation_status=None, validation_reason=None):
+    """Add a prospect to a campaign. Upserts on (campaign_id, dossier_id)."""
+    conn.execute(
+        """INSERT INTO campaign_prospects (campaign_id, dossier_id, validation_status, validation_reason)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(campaign_id, dossier_id) DO UPDATE SET
+             validation_status = excluded.validation_status,
+             validation_reason = excluded.validation_reason""",
+        (campaign_id, dossier_id, validation_status, validation_reason),
+    )
+    conn.commit()
+
+
+def update_prospect_status(conn, campaign_id, dossier_id, prospect_status):
+    """Update a prospect's workflow status (new|reviewing|brief_ready|contacted)."""
+    conn.execute(
+        "UPDATE campaign_prospects SET prospect_status = ? WHERE campaign_id = ? AND dossier_id = ?",
+        (prospect_status, campaign_id, dossier_id),
+    )
+    conn.commit()
+
+
+def get_all_campaigns(conn):
+    """Get all campaigns with prospect counts and avg scores."""
+    rows = conn.execute(
+        """SELECT c.*,
+                  (SELECT COUNT(*) FROM campaign_prospects WHERE campaign_id = c.id) as prospect_count,
+                  (SELECT ROUND(AVG(json_extract(d.ua_fit_json, '$.overall_score')), 1)
+                   FROM campaign_prospects cp
+                   JOIN dossiers d ON cp.dossier_id = d.id
+                   WHERE cp.campaign_id = c.id AND d.ua_fit_json IS NOT NULL) as avg_score
+           FROM campaigns c ORDER BY c.created_at DESC"""
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_campaign_detail(conn, campaign_id):
+    """Get a single campaign with its prospects joined to dossier ua_fit data."""
+    campaign = conn.execute("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)).fetchone()
+    if not campaign:
+        return None
+    campaign = dict(campaign)
+    rows = conn.execute(
+        """SELECT cp.*, d.company_name, d.sector, d.description as company_description,
+                  d.ua_fit_json, d.ua_fit_generated_at
+           FROM campaign_prospects cp
+           JOIN dossiers d ON cp.dossier_id = d.id
+           WHERE cp.campaign_id = ?
+           ORDER BY CASE WHEN d.ua_fit_json IS NOT NULL
+                    THEN json_extract(d.ua_fit_json, '$.overall_score') ELSE 0 END DESC""",
+        (campaign_id,),
+    ).fetchall()
+    prospects = []
+    for r in rows:
+        p = dict(r)
+        if p.get("ua_fit_json"):
+            try:
+                p["ua_fit"] = json.loads(p["ua_fit_json"])
+            except (json.JSONDecodeError, TypeError):
+                p["ua_fit"] = None
+        else:
+            p["ua_fit"] = None
+        if p.get("brief_json"):
+            try:
+                p["brief"] = json.loads(p["brief_json"])
+            except (json.JSONDecodeError, TypeError):
+                p["brief"] = None
+        else:
+            p["brief"] = None
+        prospects.append(p)
+    campaign["prospects"] = prospects
+    if campaign.get("insight_json"):
+        try:
+            campaign["insight"] = json.loads(campaign["insight_json"])
+        except (json.JSONDecodeError, TypeError):
+            campaign["insight"] = None
+    else:
+        campaign["insight"] = None
+    return campaign
+
+
+def rename_campaign(conn, campaign_id, name):
+    """Rename a campaign."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute("UPDATE campaigns SET name = ?, updated_at = ? WHERE id = ?", (name, now, campaign_id))
+    conn.commit()
+
+
+def delete_campaign(conn, campaign_id):
+    """Delete a campaign and its prospect links (not the dossiers themselves)."""
+    conn.execute("DELETE FROM campaign_prospects WHERE campaign_id = ?", (campaign_id,))
+    conn.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))
+    conn.commit()
+
+
+# --- ICP Profile helpers ---
+
+def create_icp_profile(conn, name, description, config_json, survey_answers_json=None, is_default=0):
+    """Create a new ICP profile. Returns profile id."""
+    now = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        """INSERT INTO icp_profiles (name, description, is_default, config_json, survey_answers_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (name, description, is_default, config_json, survey_answers_json, now, now),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_icp_profile(conn, profile_id, name=None, description=None, config_json=None):
+    """Update an existing ICP profile."""
+    updates = ["updated_at = ?"]
+    params = [datetime.now(timezone.utc).isoformat()]
+    if name is not None:
+        updates.append("name = ?")
+        params.append(name)
+    if description is not None:
+        updates.append("description = ?")
+        params.append(description)
+    if config_json is not None:
+        updates.append("config_json = ?")
+        params.append(config_json)
+    params.append(profile_id)
+    conn.execute(f"UPDATE icp_profiles SET {', '.join(updates)} WHERE id = ?", params)
+    conn.commit()
+
+
+def delete_icp_profile(conn, profile_id):
+    """Delete a non-default ICP profile."""
+    conn.execute("DELETE FROM icp_profiles WHERE id = ? AND is_default = 0", (profile_id,))
+    conn.commit()
+
+
+def set_active_icp_profile(conn, profile_id):
+    """Set one profile as active, deactivating all others."""
+    conn.execute("UPDATE icp_profiles SET is_active = 0")
+    conn.execute("UPDATE icp_profiles SET is_active = 1 WHERE id = ?", (profile_id,))
+    conn.commit()
+
+
+def get_active_icp_profile(conn):
+    """Get the currently active ICP profile with parsed config. Returns dict or None."""
+    row = conn.execute(
+        "SELECT * FROM icp_profiles WHERE is_active = 1"
+    ).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    if d.get("config_json"):
+        try:
+            d["config"] = json.loads(d["config_json"])
+        except (json.JSONDecodeError, TypeError):
+            d["config"] = None
+    if d.get("survey_answers_json"):
+        try:
+            d["survey_answers"] = json.loads(d["survey_answers_json"])
+        except (json.JSONDecodeError, TypeError):
+            d["survey_answers"] = None
+    return d
+
+
+def get_icp_profile(conn, profile_id):
+    """Get a single ICP profile by ID with parsed config."""
+    row = conn.execute(
+        "SELECT * FROM icp_profiles WHERE id = ?", (profile_id,)
+    ).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    if d.get("config_json"):
+        try:
+            d["config"] = json.loads(d["config_json"])
+        except (json.JSONDecodeError, TypeError):
+            d["config"] = None
+    if d.get("survey_answers_json"):
+        try:
+            d["survey_answers"] = json.loads(d["survey_answers_json"])
+        except (json.JSONDecodeError, TypeError):
+            d["survey_answers"] = None
+    return d
+
+
+def get_all_icp_profiles(conn):
+    """Get all ICP profiles, active one first."""
+    rows = conn.execute(
+        "SELECT * FROM icp_profiles ORDER BY is_active DESC, is_default DESC, created_at DESC"
+    ).fetchall()
+    results = []
+    for r in rows:
+        d = dict(r)
+        if d.get("config_json"):
+            try:
+                d["config"] = json.loads(d["config_json"])
+            except (json.JSONDecodeError, TypeError):
+                d["config"] = None
+        results.append(d)
+    return results
+
+
+_DEFAULT_ICP_CONFIG = {
+    "icp_definition": (
+        "The ideal prospect is an SMB or midmarket brand ($1M\u2013$500M revenue) that is heavy on "
+        "social/performance marketing (Meta, TikTok, Google Ads, Instagram) but has little or no "
+        "TV/CTV/streaming advertising history. They are hitting a ceiling on social ad channels \u2014 "
+        "rising CPMs, diminishing returns, audience saturation. They have strong creative capabilities "
+        "\u2014 video content, UGC, influencer partnerships \u2014 meaning they could easily adapt existing "
+        "assets to 15\u201330 second TV spots. They are in a growth phase \u2014 recent funding, expanding "
+        "markets, hiring marketing talent. They are actively seeking new customer acquisition channels "
+        "beyond their current social media mix."
+    ),
+    "dimensions": [
+        {
+            "key": "channel_saturation",
+            "label": "Channel Saturation",
+            "weight": 0.25,
+            "description": "How heavily the company relies on social/performance channels vs TV/CTV",
+            "rubric": {
+                "80_100": "Clear evidence of heavy Meta/TikTok/Instagram ad spend (pixel detected, ad library presence, 'paid social' in job listings). No evidence of TV/CTV advertising. Classic 'social-native brand.'",
+                "60_79": "Some social ad indicators but less definitive. Or evidence of light CTV testing.",
+                "40_59": "Mixed signals. May have some social presence but unclear spending level. Or already doing some TV.",
+                "20_39": "Limited social ad signals. Primarily organic/SEO-driven, or already has substantial TV presence.",
+                "0_19": "Company is already a major TV advertiser, or shows no marketing activity at all.",
+            },
+            "signal_queries": {
+                "primary": "{company} advertising marketing strategy",
+                "secondary": None,
+                "news": False,
+                "reddit": None,
+            },
+            "signal_category_name": "Ad Channel & Tech Stack",
+            "use_tech_detection": True,
+        },
+        {
+            "key": "growth_posture",
+            "label": "Growth Posture",
+            "weight": 0.20,
+            "description": "Whether the company is in a growth phase",
+            "rubric": {
+                "80_100": "Recent funding round (Series A-C), aggressive hiring (especially marketing/growth), market expansion, revenue growth mentions.",
+                "60_79": "Some growth indicators \u2014 profitable and expanding, or new products/markets.",
+                "40_59": "Stable business with moderate growth. Not shrinking, but no aggressive expansion.",
+                "20_39": "Flat or declining. Cost-cutting, layoffs, market contraction.",
+                "0_19": "Struggling, pivoting away from growth, or lifestyle business.",
+            },
+            "signal_queries": {
+                "primary": "{company} funding round series investment 2024 2025 2026",
+                "secondary": "{company} growth expansion launch",
+                "news": True,
+                "reddit": None,
+            },
+            "signal_category_name": "Growth Signals",
+        },
+        {
+            "key": "creative_readiness",
+            "label": "Creative Readiness",
+            "weight": 0.20,
+            "description": "Quality of existing creative assets and video capability",
+            "rubric": {
+                "80_100": "Video-first brand. Strong Instagram/TikTok with professional or UGC video. Influencer partnerships. Visual product category.",
+                "60_79": "Good visual brand but maybe more photo-oriented. Could transition to video easily.",
+                "40_59": "Basic social presence but limited creative output. Would need development for video ads.",
+                "20_39": "Minimal brand presence. Text-heavy, B2B-oriented, hard to showcase in 15\u201330 seconds.",
+                "0_19": "No creative presence, or product fundamentally unsuited for video advertising.",
+            },
+            "signal_queries": {
+                "primary": "{company} Instagram TikTok social media presence",
+                "secondary": "{company} video content ads commercial",
+                "news": False,
+                "reddit": None,
+            },
+            "signal_category_name": "Brand & Creative",
+        },
+        {
+            "key": "size_budget_fit",
+            "label": "Size & Budget Fit",
+            "weight": 0.20,
+            "description": "Whether the company's size and budget align with the product",
+            "rubric": {
+                "80_100": "Sweet spot \u2014 $5M\u2013$200M revenue, has marketing team, can afford $10K\u2013$100K/month, not so large TV is core.",
+                "60_79": "Likely in range but less clear. Could be smaller side or larger side.",
+                "40_59": "Ambiguous. Could be too small (pre-revenue) or too large (public with TV budgets).",
+                "20_39": "Appears too small (bootstrap, solo founder) or too large (Fortune 500).",
+                "0_19": "Clearly outside target range \u2014 micro-business or mega-brand.",
+            },
+            "signal_queries": {
+                "primary": "{company} revenue employees company size",
+                "secondary": None,
+                "news": False,
+                "reddit": None,
+            },
+            "signal_category_name": "Size Indicators",
+        },
+        {
+            "key": "intent_signals",
+            "label": "Intent Signals",
+            "weight": 0.15,
+            "description": "Whether the company shows intent to explore new ad channels",
+            "rubric": {
+                "80_100": "Explicit mentions of exploring new channels, 'beyond social', rising CPM complaints, CTV interest, 'brand awareness' goals.",
+                "60_79": "Implicit intent \u2014 expanding marketing team, new markets, industry known for CTV adoption.",
+                "40_59": "No specific intent signals but profile suggests receptiveness.",
+                "20_39": "No intent signals. Company seems content with current channels.",
+                "0_19": "Focused on incompatible channels (B2B enterprise sales, no advertising model).",
+            },
+            "signal_queries": {
+                "primary": "{company} TV commercial streaming CTV advertising",
+                "secondary": "{company} new advertising channels brand awareness",
+                "news": False,
+                "reddit": "{company} advertising CPM social media ads",
+            },
+            "signal_category_name": "Intent & Pain Signals",
+        },
+    ],
+    "labels": [
+        {"min_score": 80, "label": "Prime Prospect"},
+        {"min_score": 60, "label": "Strong Candidate"},
+        {"min_score": 40, "label": "Possible Fit"},
+        {"min_score": 20, "label": "Weak Fit"},
+        {"min_score": 0, "label": "Not a Fit"},
+    ],
+    "discovery_filters": {
+        "include_description": "Focus on companies with real marketing operations, website, social presence, SMB-to-midmarket range.",
+        "exclude_description": "Exclude mega-brands already advertising on TV at scale (Nike, Coca-Cola, P&G). Exclude micro-businesses with no marketing presence.",
+        "search_queries_template": [
+            "top {niche} 2026",
+            "fastest growing {niche}",
+            "best {niche} companies brands",
+            "{niche} emerging brands to watch",
+        ],
+    },
+    "scoring_output_schema": {
+        "recommended_angle_guidance": "Reference the company's actual channel mix and suggest how premium streaming TV addresses their ceiling.",
+        "risk_focus": "budget concerns, existing vendor lock-in, lack of video assets, already doing TV",
+    },
+}
+
+
+def ensure_default_icp_profile(conn):
+    """Create the default ICP profile from hardcoded values if it doesn't exist."""
+    existing = conn.execute("SELECT id FROM icp_profiles WHERE is_default = 1").fetchone()
+    if existing:
+        return existing["id"]
+
+    now = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        """INSERT INTO icp_profiles (name, description, is_default, is_active, config_json, created_at, updated_at)
+           VALUES (?, ?, 1, 1, ?, ?, ?)""",
+        (
+            "Universal Ads \u2014 Premium Video",
+            "SMBs heavy on social, ready for streaming TV",
+            json.dumps(_DEFAULT_ICP_CONFIG),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return cur.lastrowid

@@ -13,7 +13,7 @@ A competitive intelligence platform that scrapes, classifies, and analyzes compa
 - **AI:** Multi-provider rotation — 5 providers with 17+ model fallbacks. Report providers: Gemini (primary, multi-key rotation), Groq, Cerebras, Mistral, OpenRouter (free models). Chat providers: Gemini (primary, native function calling), Groq, Cerebras, Mistral, OpenRouter. Separate provider lists for reports (`REPORT_PROVIDERS`) and chat (`CHAT_PROVIDERS`).
 - **Scraping:** httpx + BeautifulSoup, SEC EDGAR, USPTO patents, Reddit RSS, HackerNews, YouTube transcripts
 - **CLI:** Click-based (`main.py`), also serves web UI via `python main.py web --port 5001`
-- **DB:** `intel.db` — 7 tables: companies, jobs, classifications, dossiers, dossier_analyses, dossier_events, hiring_snapshots
+- **DB:** `intel.db` — 9 tables: companies, jobs, classifications, dossiers, dossier_analyses, dossier_events, hiring_snapshots, llm_usage, icp_profiles
 
 ## Commands
 
@@ -36,6 +36,11 @@ python main.py profile --company "Apple"            # runs financial + competito
 python main.py compare --company-a "Apple" --company-b "Samsung"
 python main.py landscape --company "Apple"           # auto-discovers competitors
 python main.py chat                                  # interactive chat REPL
+
+# Prospecting (ICP fit scoring)
+python main.py ua-discover --niche "DTC skincare" --top-n 15 [--icp-profile <id>]
+python main.py ua-fit --company "Glossier" [--url "https://glossier.com"] [--icp-profile <id>]
+python main.py ua-pipeline --niche "DTC skincare" --top-n 15 [--icp-profile <id>]
 ```
 
 ## Project Structure
@@ -61,10 +66,13 @@ competitive-intel-agent/
 │   ├── seo.py               # SEO & AEO audit
 │   ├── pricing.py           # Product & pricing strategy analysis
 │   ├── compare.py           # Head-to-head comparison + landscape analysis
-│   └── profile.py           # Full company profile (runs financial + competitors + sentiment + patents)
+│   ├── profile.py           # Full company profile (runs financial + competitors + sentiment + patents)
+│   ├── ua_discover.py       # Prospect discovery via web search (config-driven or hardcoded)
+│   └── ua_fit.py            # ICP fit scoring (dynamic or legacy signal collection)
 ├── prompts/
 │   ├── chat.py              # System prompt, condensed prompt, tool schemas + tiered selection for chat agent
 │   ├── briefing.py          # Briefing prompt with hybrid DMS scoring rubric + algo score injection
+│   ├── icp_generate.py      # ICP config generation prompt (survey answers → config JSON)
 │   ├── analyze.py           # Hiring analysis prompt
 │   ├── classify.py          # Job classification prompt
 │   ├── financial.py         # Financial analysis prompt
@@ -75,7 +83,9 @@ competitive-intel-agent/
 │   ├── seo.py               # SEO audit prompt
 │   ├── pricing.py           # Pricing analysis prompt
 │   ├── compare.py           # Comparison prompt
-│   └── profile.py           # Executive profile prompt
+│   ├── profile.py           # Executive profile prompt
+│   ├── ua_fit.py            # ICP fit scoring prompt (dynamic from config or hardcoded)
+│   └── ua_discover.py       # Prospect discovery prompt (dynamic from config or hardcoded)
 ├── scraper/
 │   ├── site_crawler.py      # General website crawler (httpx + BS4)
 │   ├── tech_detect.py       # Technology fingerprinting from HTML/headers/scripts
@@ -94,7 +104,7 @@ competitive-intel-agent/
 ├── web/
 │   ├── app.py               # Flask app factory, API routes, SSE chat endpoint, tool result summarization
 │   └── templates/
-│       └── base.html         # Entire SPA — HTML + CSS + JS in one file (~3000 lines)
+│       └── base.html         # Entire SPA — HTML + CSS + JS in one file (~7100 lines)
 ├── reports/                  # Generated markdown reports (gitignored)
 └── .env                      # API keys (gitignored)
 ```
@@ -200,6 +210,7 @@ Defined in `prompts/chat.py`, executed in `agents/chat.py`:
 - **Search:** web_search, reddit_search, reddit_deep_search, hn_search, youtube_search, youtube_transcript
 - **Database:** query_db
 - **Dossiers:** get_dossier, save_dossier_event, refresh_key_facts, generate_briefing
+- **Prospecting:** ua_discover (accepts icp_profile_id), ua_fit_score (accepts icp_profile_id), get_ua_targets
 - **Utility:** get_current_datetime
 
 ### Context-Aware Chat
@@ -243,12 +254,60 @@ This is the same multi-step LLM pattern used in Crucible (JobDiscovery) — spen
 - Used by briefing generator for temporal trend analysis (hiring trajectory)
 - `get_hiring_snapshots()` and `save_hiring_snapshot()` in `db.py`
 
+### Prospecting Module (ICP Fit Scoring)
+
+- **Purpose:** Score companies as prospects for streaming TV / CTV advertising (Universal Ads use case). Fixed 5-dimension rubric, research-backed (runs techstack→financial→sentiment analyses per company before scoring).
+- **Score identity:** "CTV Propensity Score" in UI, with info-icon tooltip explaining methodology
+- **Discovery:** `agents/ua_discover.py` + `prompts/ua_discover.py` — LLM generates prospect list from niche description via web search (4 hardcoded queries)
+- **Scoring:** `agents/ua_fit.py` + `prompts/ua_fit.py` — runs analyses, then LLM scores against fixed rubric
+- **Dimensions (fixed 5):**
+  - Financial Capacity (25%) — `financial_capacity` — SEC EDGAR / web
+  - Paid Media Footprint (20%) — `advertising_maturity` — ad pixel detection via techstack
+  - Growth Trajectory (20%) — `growth_trajectory` — financial growth + sentiment news
+  - Video Asset Readiness (20%) — `creative_readiness` — sentiment + social/video mentions
+  - Channel Expansion Intent (15%) — `channel_expansion_intent` — sentiment news + hiring signals
+- **Score Tiers:** Prime Prospect (80+), Strong Candidate (60+), Possible Fit (40+), Weak Fit (20+), Not a Fit (0+)
+- **UI:** Merged Dimension Cards (bar + rationale + signal tags), Outbound Strategy Playbook box, action button stubs (Sync to CRM, Generate Outreach, Add to Beeswax), per-dimension tooltips
+- **CLI commands:** `ua-discover`, `ua-fit`, `ua-pipeline`
+- **Chat integration:** 3 tools — `ua_discover`, `ua_fit_score`, `get_ua_targets`
+- **DB:** `dossiers.ua_fit_json` stores scores. `_dimensions` metadata allows UI to render with display labels (backward-compat with old stored data via `_dimDisplayLabel` override map in JS)
+
+### ICP Wizard System
+
+The ICP Wizard makes the prospecting module configurable instead of hardcoded. A guided survey generates a complete ICP config via LLM.
+
+**Config generation flow:**
+1. User completes 5-step survey in modal wizard
+2. Survey answers posted to `POST /api/icp-profiles/generate`
+3. LLM prompt (`prompts/icp_generate.py`) generates structured config JSON
+4. Config includes: dimensions (key, label, weight, rubric, signal_queries), labels, discovery_filters, icp_definition, suggested_niches
+5. User reviews and can edit weights/definition before saving
+
+**Wizard steps (in `base.html`):**
+- Step 0: Business type funnel (B2B/B2C -> industry -> sub-industry -> freeform detail) using `_INDUSTRY_TREE` data structure
+- Step 1: Your Offer (product + problem)
+- Step 2: Your Customers (adapts B2B vs B2C questions)
+- Step 3: How You Sell (adapts B2B vs B2C)
+- Step 4: Review (LLM generates config, user edits weights/definition)
+
+**UI elements:**
+- ICP profile indicator with popover menu (profile switching + wizard launch)
+- Niche suggestion chips from `config.suggested_niches` after wizard completion
+- Discover button shake animation + feedback when niche input empty
+- Methodology transparency section (per-dimension queries, URLs, snippets) replaces old "View Full Dossier" button
+
 ## Web UI
 
-Three-pane SPA layout:
-- **Left pane (260px):** Navigation tabs (Reports, Dossiers, Chat) + list view with company badges on chat items
+Module sidebar (64px) on far left with icon+label buttons (Research, Prospects). Each module has its own workspace toggled via `.active` class.
+
+**Research workspace** — three-pane SPA layout:
+- **Left pane (290px):** Navigation tabs (Reports, Dossiers, Chat) + list view with company badges on chat items
 - **Middle pane:** Chat interface with SSE streaming, tool call display, thinking indicators, context pill above input showing what company/report is being viewed
-- **Right pane (540px):** Report viewer / Dossier detail / Intelligence briefing with source popovers showing priority-ordered key facts
+- **Right pane (580px):** Report viewer / Dossier detail / Intelligence briefing with source popovers showing priority-ordered key facts
+
+**Prospecting workspace** — two-panel layout:
+- **Left panel (300px):** Niche text input + top-n number input + Discover button, ICP profile indicator with popover menu, niche suggestion chips, SSE progress panel during pipeline runs
+- **Main panel (flex):** Ranked prospect list with score rings, detail view with score ring + dynamic dimension bars + methodology section + recommended angle + risks + signal evidence
 
 ### CSS Design System
 
@@ -266,13 +325,28 @@ Three-pane SPA layout:
 | GET | `/api/reports` | List all reports |
 | GET | `/api/reports/<filename>/content` | Get report content |
 | GET | `/api/reports/<filename>/pdf` | Export report as styled PDF (server-side, xhtml2pdf) |
-| DELETE | `/api/reports/<filename>` | Delete report |
+| PATCH/DELETE | `/api/reports/<filename>` | Update metadata / Delete report |
+| PATCH | `/api/dossiers/<name>` | Update dossier metadata (sector, description) |
+| DELETE | `/api/analyses/<id>` | Delete individual analysis |
+| GET | `/api/llm-usage` | LLM usage stats (today + all-time) |
+| GET | `/api/llm-health` | LLM provider health check |
 | GET | `/api/dossiers` | List all dossiers |
 | GET | `/api/dossiers/<name>` | Get dossier detail (includes analyses, events, briefing_json) |
 | POST | `/api/dossiers/<name>/events` | Add timeline event |
 | GET | `/api/dossiers/<name>/hiring-snapshots` | Get hiring snapshot history for temporal trends |
 | POST | `/api/dossiers/<name>/briefing` | Generate intelligence briefing |
 | GET | `/api/dossiers/<name>/pdf` | Export intelligence briefing as styled PDF |
+| GET | `/api/icp-profiles` | List all ICP profiles |
+| GET | `/api/icp-profiles/<id>` | Get single ICP profile |
+| POST | `/api/icp-profiles` | Create ICP profile |
+| PUT | `/api/icp-profiles/<id>` | Update ICP profile |
+| DELETE | `/api/icp-profiles/<id>` | Delete non-default ICP profile |
+| POST | `/api/icp-profiles/<id>/activate` | Set ICP profile as active |
+| POST | `/api/icp-profiles/generate` | LLM-generate config from survey answers |
+| GET | `/api/ua-targets` | List scored prospects (sorted by score desc) |
+| POST | `/api/dossiers/<name>/ua-fit` | Score company against active ICP |
+| POST | `/api/ua-pipeline` | SSE pipeline: discover + score all (streaming progress) |
+| GET | `/api/companies` | List all companies |
 | POST | `/api/chat` | SSE chat endpoint (with context injection + company scoping + dynamic tool selection) |
 
 ## Code Conventions
@@ -306,16 +380,25 @@ USPTO_API_KEY       # USPTO PatentsView API key (falls back to PATENTSVIEW_API_K
 - **classifications:** id, job_id (UNIQUE), department_category, department_subcategory, seniority_level, key_skills, strategic_signals, strategic_tags, growth_signal, classified_at, model_used
 
 ### Dossier Tables
-- **dossiers:** id, company_name (UNIQUE NOCASE), sector, description, briefing_json, briefing_generated_at, briefing_model, created_at, updated_at
+- **dossiers:** id, company_name (UNIQUE NOCASE), sector, description, briefing_json, briefing_generated_at, briefing_model, ua_fit_score, ua_fit_label, ua_fit_json, ua_fit_generated_at, icp_profile_id, created_at, updated_at
 - **dossier_analyses:** id, dossier_id (FK), analysis_type, report_file, key_facts_json, model_used, created_at
 - **dossier_events:** id, dossier_id (FK), event_date, event_type, title, description, source_url, data_json, created_at
 
 ### Temporal Analysis
 - **hiring_snapshots:** id, company_id (FK), snapshot_date, total_roles, dept_counts, subcategory_counts, seniority_counts, strategic_tag_counts, ai_ml_role_count, growth_signal_ratio, top_skills, top_locations, created_at — UNIQUE(company_id, snapshot_date)
 
+### ICP Profiles
+- **icp_profiles:** id, name, description, is_default, is_active, survey_answers_json, config_json, created_at, updated_at
+  - `config_json` is the single source of truth: dimensions (key, label, weight, rubric, signal_queries), labels, discovery_filters, icp_definition, suggested_niches
+  - Default "Universal Ads ICP" profile auto-created via `ensure_default_icp_profile()` on first run
+  - 8 DB helpers: create/update/delete/set_active/get_active/get/get_all/ensure_default
+
+### LLM Usage Tracking
+- **llm_usage:** id, model, provider, prompt_tokens, completion_tokens, total_tokens, latency_ms, analysis_type, company_name, status, error_message, created_at
+
 ## Current State (March 2026)
 
-Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat with multi-step context management (tool result summarization, dynamic tool schema selection, condensed system prompts), server-side PDF export (reports + briefings), and intelligence briefing with hybrid algorithmic+LLM Digital Maturity Score. The briefing is the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization. The DMS now uses a two-pass hybrid approach: deterministic algorithmic base scores computed from structured data, then LLM fine-tuning within ±10 bounds with required justification for deviations. Sector is applied as an additive bonus (AI→+25, software→+15) rather than a floor, so weak companies in strong sectors are no longer artificially propped up. A separate `compute_anomaly_signals()` function detects 8 structural anomaly types (engineering-heavy org, top-heavy seniority, scaling without leaders, replacement churn, department surge, AI without data foundation, growth-sentiment gap, low Glassdoor, strategic sprawl) and injects them into the briefing prompt to sharpen engagement opportunity generation.
+Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat with multi-step context management (tool result summarization, dynamic tool schema selection, condensed system prompts), server-side PDF export (reports + briefings), and intelligence briefing with hybrid algorithmic+LLM Digital Maturity Score. Two modules via vertical sidebar: **Market Research** (three-pane layout for analysis, dossiers, chat) and **Prospecting** (ICP fit scoring with config-driven dimensions, niche-based lead discovery, SSE pipeline). The ICP Wizard system makes prospecting fully configurable — a 5-step guided survey generates custom scoring dimensions, weights, rubrics, signal queries, and discovery filters via LLM, stored as `icp_profiles` in the database. Scoring and discovery agents dynamically adapt to the active ICP profile (with hardcoded fallback for legacy compatibility). The briefing is the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization. The DMS now uses a two-pass hybrid approach: deterministic algorithmic base scores computed from structured data, then LLM fine-tuning within ±10 bounds with required justification for deviations. Sector is applied as an additive bonus (AI→+25, software→+15) rather than a floor, so weak companies in strong sectors are no longer artificially propped up. A separate `compute_anomaly_signals()` function detects 8 structural anomaly types (engineering-heavy org, top-heavy seniority, scaling without leaders, replacement churn, department surge, AI without data foundation, growth-sentiment gap, low Glassdoor, strategic sprawl) and injects them into the briefing prompt to sharpen engagement opportunity generation.
 
 ## Planned Improvements
 

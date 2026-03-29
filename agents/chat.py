@@ -9,7 +9,7 @@ import threading
 import httpx
 import google.generativeai as genai
 
-from agents.llm import gemini_lock
+from agents.llm import gemini_lock, is_key_healthy, mark_key_unhealthy
 from db import init_db, get_connection
 from agents.collect import collect
 from agents.classify import classify
@@ -277,7 +277,13 @@ class ChatLLM:
                 general knowledge.
         """
         errors = []
+        skipped_unhealthy = 0
         for p in self.providers:
+            # Skip keys in cooldown
+            if not is_key_healthy(p["name"], p["key"]):
+                skipped_unhealthy += 1
+                continue
+
             try:
                 print(f"[chat] Trying {p['name']}/{p['model']}...")
                 if p["name"] == "gemini":
@@ -318,6 +324,7 @@ class ChatLLM:
                            or "413" in error_str)
                 if is_rate:
                     log_llm_call(p["name"], p["model"], key_hint, "rate_limited", error=error_str[:200], caller="chat")
+                    mark_key_unhealthy(p["name"], p["key"], error_str)
                     continue
 
                 # Context overflow — propagate so caller can trim
@@ -328,6 +335,8 @@ class ChatLLM:
                 log_llm_call(p["name"], p["model"], key_hint, "error", error=error_str[:200], caller="chat")
                 continue
 
+        if skipped_unhealthy:
+            print(f"[chat] Skipped {skipped_unhealthy} provider entries due to key cooldowns")
         raise RuntimeError("All chat providers failed:\n  " + "\n  ".join(errors))
 
     def _chat_openai(self, provider, messages, tools=None, force_tools=False):
@@ -975,6 +984,63 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                 lines.append("")
 
             return "\n".join(lines)
+
+        elif name == "ua_discover":
+            from agents.ua_discover import discover_prospects
+            niche = args["niche"]
+            top_n = args.get("top_n", 15)
+            if progress_callback:
+                progress_callback(f"Discovering prospects in: {niche}")
+            companies = discover_prospects(niche, top_n=top_n, db_path=db_path)
+            if companies:
+                lines = [f"## Discovered {len(companies)} Companies in '{niche}'\n"]
+                for i, c in enumerate(companies, 1):
+                    lines.append(f"{i}. **{c.get('name', '?')}** — {c.get('description', 'No description')[:120]}")
+                    if c.get("website"):
+                        lines.append(f"   Website: {c['website']}")
+                lines.append(f"\nUse `ua_fit_score` to score any of these companies.")
+                return "\n".join(lines)
+            return "No companies found for this niche."
+
+        elif name == "ua_fit_score":
+            from agents.ua_fit import score_ua_fit
+            company = args["company"]
+            website_url = args.get("website_url")
+            if progress_callback:
+                progress_callback(f"Scoring prospect fit: {company}")
+            fit = score_ua_fit(company, website_url=website_url, db_path=db_path)
+            if fit:
+                lines = [f"## ICP Fit Score: {company}\n"]
+                lines.append(f"**Overall: {fit.get('overall_score', 0)}/100 — {fit.get('overall_label', '?')}**\n")
+                sub = fit.get("sub_scores", {})
+                for k, v in sub.items():
+                    label = k.replace("_", " ").title()
+                    lines.append(f"- **{label}**: {v.get('score', 0)}/100 — {v.get('rationale', '')[:150]}")
+                if fit.get("recommended_angle"):
+                    lines.append(f"\n**Recommended Angle:** {fit['recommended_angle']}")
+                if fit.get("key_risks"):
+                    lines.append("\n**Key Risks:**")
+                    for r in fit["key_risks"]:
+                        lines.append(f"- {r}")
+                cov = fit.get("signal_coverage", {})
+                lines.append(f"\nConfidence: {cov.get('confidence', '?')} ({cov.get('categories_with_data', 0)}/{cov.get('categories_total', 5)} signal categories)")
+                return "\n".join(lines)
+            return f"Failed to score {company}."
+
+        elif name == "get_ua_targets":
+            from db import get_connection, get_ua_targets
+            conn = get_connection(db_path)
+            targets = get_ua_targets(conn)
+            conn.close()
+            if targets:
+                lines = [f"## Prospect Pipeline ({len(targets)} companies)\n"]
+                lines.append("| Rank | Company | Score | Label | Angle |")
+                lines.append("|------|---------|-------|-------|-------|")
+                for i, t in enumerate(targets, 1):
+                    fit = t.get("ua_fit", {})
+                    lines.append(f"| {i} | {t.get('company_name', '?')} | {fit.get('overall_score', 0)}/100 | {fit.get('overall_label', '?')} | {(fit.get('recommended_angle') or 'N/A')[:80]} |")
+                return "\n".join(lines)
+            return "No prospects scored yet. Use `ua_discover` to find prospects and `ua_fit_score` to score them."
 
         else:
             return f"Unknown tool: {name}"

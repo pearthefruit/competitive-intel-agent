@@ -28,6 +28,7 @@
             --green: #22c55e;
             --yellow: #eab308;
             --red: #ef4444;
+            --sidebar-width: 64px;
             --left-width: 290px;
             --right-width: 580px;
         }
@@ -42,12 +43,591 @@
             overflow: hidden;
         }
 
-        /* === THREE-PANE LAYOUT === */
+        /* === MODULE SIDEBAR === */
         .app {
             display: flex;
             height: 100vh;
             width: 100vw;
         }
+
+        .module-sidebar {
+            width: var(--sidebar-width);
+            min-width: var(--sidebar-width);
+            background: #0c0c0e;
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 12px 0;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        .module-logo {
+            font-size: 18px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 16px;
+            padding: 4px 0;
+        }
+        .module-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 10px 6px;
+            width: calc(100% - 8px);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+            color: var(--text-muted);
+            text-decoration: none;
+            position: relative;
+        }
+        .module-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-secondary);
+        }
+        .module-item.active {
+            background: var(--accent-dim);
+            color: var(--accent);
+        }
+        .module-item.active::before {
+            content: '';
+            position: absolute;
+            left: -4px;
+            top: 8px;
+            bottom: 8px;
+            width: 3px;
+            background: var(--accent);
+            border-radius: 0 2px 2px 0;
+        }
+        .module-item svg {
+            width: 20px;
+            height: 20px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 1.8;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .module-item span {
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+
+        /* === WORKSPACES === */
+        .workspace {
+            display: none;
+            flex: 1;
+            min-width: 0;
+        }
+        .workspace.active {
+            display: flex;
+        }
+
+        /* === PROSPECTING: 4-PANE HORIZONTAL PIPELINE LAYOUT === */
+        #workspace-prospecting {
+            zoom: 1.15;
+        }
+        .prospect-sidebar {
+            width: 250px;
+            min-width: 250px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .prospect-sidebar-header {
+            padding: 16px 16px 0;
+            flex-shrink: 0;
+        }
+        .prospect-sidebar-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+        }
+        .prospect-search-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px 8px;
+        }
+
+        /* Flat sidebar items */
+        .search-query-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.1s;
+            margin-bottom: 2px;
+        }
+        .search-query-item:hover { background: var(--bg-hover); }
+        .search-query-item.active { background: var(--accent-dim); }
+        .search-query-info { flex: 1; min-width: 0; }
+        .search-query-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .search-query-meta {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 1px;
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        .search-query-score {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            font-size: 10px;
+            font-weight: 700;
+            flex-shrink: 0;
+            border: 2px solid var(--border);
+            color: var(--text-muted);
+        }
+        .search-query-actions {
+            display: flex;
+            gap: 2px;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        .search-query-item:hover .search-query-actions { opacity: 1; }
+        .search-query-actions .campaign-group-action {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+        .search-query-actions .campaign-group-action:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); }
+
+        /* Content area: 3 panes in a row with horizontal overflow */
+        .prospect-content {
+            flex: 1;
+            display: flex;
+            flex-direction: row;
+            overflow-x: auto;
+            min-width: 0;
+            background: var(--bg-primary);
+        }
+        .prospect-pane {
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border);
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .prospect-pane:last-child { border-right: none; }
+        .pane-execution { width: 420px; min-width: 320px; }
+        .pane-summary { flex: 1; min-width: 300px; }
+        .pane-detail { flex: 1; min-width: 300px; }
+
+        /* Pane resize handles */
+        .pane-resize-handle {
+            width: 5px;
+            cursor: col-resize;
+            background: transparent;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 5;
+            transition: background 0.15s;
+        }
+        .pane-resize-handle:hover,
+        .pane-resize-handle.dragging {
+            background: var(--accent);
+        }
+        .pane-resize-handle::after {
+            content: '';
+            position: absolute;
+            top: 0; bottom: 0; left: -3px; right: -3px;
+        }
+
+        /* Pane headers */
+        .pane-header {
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            background: var(--bg-secondary);
+        }
+        .pane-header-title {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+        }
+        .pane-status-badge {
+            font-size: 9px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .pane-status-badge:empty { display: none; }
+        .pane-status-badge.running { color: var(--purple); background: rgba(168,85,247,0.12); display: inline; }
+        .pane-status-badge.complete { color: var(--green); background: rgba(34,197,94,0.12); display: inline; }
+        .pane-status-badge.error { color: var(--red); background: rgba(239,68,68,0.12); display: inline; }
+
+        .pane-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+        .pane-empty {
+            padding: 40px 16px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+        .pane-empty .icon { font-size: 28px; margin-bottom: 8px; }
+        .pane-empty .subtitle { font-size: 12px; margin-top: 4px; }
+
+        .pipeline-map { }
+
+        /* --- PIPELINE MAP NODES --- */
+        .pipeline-node {
+            padding: 12px 16px;
+            background: rgba(168,85,247,0.06);
+            border: 1px solid rgba(168,85,247,0.25);
+            border-radius: 10px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            animation: nodeSlideIn 0.3s ease;
+        }
+        @keyframes nodeSlideIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .pipeline-node-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .pipeline-node-icon {
+            width: 28px; height: 28px;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(168,85,247,0.15);
+            border-radius: 6px;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+        .pipeline-node-label {
+            font-weight: 700;
+            font-size: 14px;
+            color: var(--purple);
+        }
+        .pipeline-node-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            padding-left: 36px;
+        }
+        .pipeline-node.running .pipeline-node-icon { animation: pulse 1.5s ease infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .pipeline-node.done { border-color: rgba(34,197,94,0.3); }
+        .pipeline-node.done .pipeline-node-icon { background: rgba(34,197,94,0.15); }
+        .pipeline-node.done .pipeline-node-label { color: var(--green); }
+
+        /* Connectors */
+        .pipeline-connector {
+            width: 2px;
+            height: 16px;
+            background: rgba(168,85,247,0.25);
+            margin: 0 0 0 22px;
+            animation: connectorGrow 0.25s ease;
+            transform-origin: top;
+        }
+        @keyframes connectorGrow {
+            from { transform: scaleY(0); }
+            to { transform: scaleY(1); }
+        }
+        .pipeline-connector.done { background: rgba(34,197,94,0.25); }
+
+        /* Company grid */
+        .pipeline-company-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 8px;
+        }
+        .company-card {
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: default;
+            transition: all 0.3s ease;
+            position: relative;
+            animation: cardSlideIn 0.35s ease both;
+        }
+        @keyframes cardSlideIn {
+            from { opacity: 0; transform: translateY(12px) scale(0.95); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .company-card:hover { background: rgba(255,255,255,0.04); }
+        .company-card.active { border-color: var(--accent); background: rgba(59,130,246,0.08); }
+        .company-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .company-card-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+            min-width: 0;
+        }
+        .company-card-ring {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            flex-shrink: 0;
+            border: 2px solid var(--border);
+            color: var(--text-muted);
+        }
+        .company-card.pending { border-style: dashed; opacity: 0.5; }
+        .company-card.scoring {
+            border-color: rgba(168,85,247,0.4);
+            opacity: 1;
+            box-shadow: 0 0 12px rgba(168,85,247,0.15);
+        }
+        .company-card.scoring .company-card-ring {
+            border-color: var(--purple);
+            color: var(--purple);
+        }
+        .company-card.scored { cursor: pointer; opacity: 1; box-shadow: 0 0 8px rgba(255,255,255,0.05); }
+        .company-card.error { border-color: rgba(239,68,68,0.3); opacity: 0.7; }
+        .company-card.limited {
+            border-style: dashed;
+            border-color: rgba(234,179,8,0.4);
+            opacity: 0.85;
+        }
+        .limited-badge {
+            display: inline-block;
+            padding: 1px 6px;
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: var(--yellow);
+            background: rgba(234,179,8,0.1);
+            border: 1px solid rgba(234,179,8,0.25);
+            border-radius: 4px;
+            margin-top: 2px;
+        }
+
+        /* Analysis tool list inside scoring cards */
+        .analysis-list {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(255,255,255,0.06);
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .analysis-row {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 11px;
+        }
+        .analysis-row-icon {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(255,255,255,0.12);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            font-size: 8px; font-weight: 700;
+            transition: all 0.25s ease;
+        }
+        .analysis-row-icon.running {
+            border-color: var(--purple);
+            background: rgba(168,85,247,0.15);
+            animation: pulse 1s ease infinite;
+        }
+        .analysis-row-icon.done {
+            border-color: var(--green);
+            background: rgba(16,163,74,0.1);
+            color: var(--green);
+        }
+        .analysis-row-icon.cached {
+            border-color: rgba(59,130,246,0.5);
+            background: rgba(59,130,246,0.08);
+            color: var(--accent);
+        }
+        .analysis-row-icon.error {
+            border-color: rgba(239,68,68,0.4);
+            background: rgba(239,68,68,0.06);
+            color: var(--red);
+        }
+        .analysis-row-name { color: var(--text-secondary); flex: 1; }
+        .analysis-row-status { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+        .analysis-row-status.running { color: var(--purple); }
+        .analysis-row-status.done { color: var(--green); }
+        .analysis-row-status.cached { color: var(--accent); }
+        .analysis-row-status.error { color: var(--red); }
+
+        /* Compact checkmarks shown after scoring */
+        .analysis-checks {
+            margin-top: 4px;
+            display: flex;
+            gap: 8px;
+            font-size: 10px;
+        }
+        .analysis-check { color: var(--text-muted); }
+        .analysis-check.done { color: var(--green); }
+        .analysis-check.cached { color: var(--accent); }
+        .analysis-check.error { color: var(--red); }
+
+        /* Fit levels legend */
+        .fit-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 8px; }
+        .fit-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+        .fit-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+        /* Agent Insights */
+        .agent-insights { font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+        .agent-insights-summary { margin-bottom: 10px; font-size: 12px; }
+        .agent-insights-priorities { list-style: none; padding: 0; margin: 0 0 10px; }
+        .agent-insights-priorities li { margin-bottom: 8px; padding-left: 28px; position: relative; }
+        .agent-insights-priorities li .priority-icon {
+            position: absolute; left: 0; top: 1px; width: 20px; height: 20px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 6px; font-size: 12px;
+        }
+        .agent-insights-priorities .priority-title { font-weight: 600; color: var(--text-primary); font-size: 12px; }
+        .agent-insights-priorities .priority-desc { font-size: 11px; color: var(--text-muted); margin-top: 1px; line-height: 1.4; }
+        .agent-insights-loading { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; padding: 12px 0; }
+        .agent-insights-loading .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--purple); border-radius: 50%; animation: spin 0.8s linear infinite; }
+
+        /* Market Signal Diagnostics badges */
+        .signal-diagnostics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .signal-badge {
+            background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 10px;
+            padding: 10px 12px; display: flex; gap: 10px; align-items: flex-start;
+            transition: border-color 0.2s;
+        }
+        .signal-badge:hover { border-color: rgba(255,255,255,0.15); }
+        .signal-badge-icon {
+            width: 32px; height: 32px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; font-size: 15px;
+        }
+        .signal-badge-title { font-size: 11px; font-weight: 700; color: var(--text-primary); line-height: 1.3; }
+        .signal-badge-sub { font-size: 10px; color: var(--text-muted); margin-top: 2px; line-height: 1.3; }
+
+        /* Snapshot pills */
+        .snap-pills { display: flex; flex-wrap: wrap; gap: 4px; }
+        .snap-pill {
+            display: inline-flex; align-items: center; gap: 4px;
+            font-size: 10px; font-weight: 600; padding: 3px 8px;
+            border-radius: 100px; letter-spacing: 0.2px;
+        }
+
+        /* Niche history dropdown */
+        .niche-history-wrap { position: relative; }
+        .niche-history {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0; right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            z-index: 200;
+            overflow: hidden;
+        }
+        .niche-history-item {
+            padding: 8px 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: background 0.1s;
+        }
+        .niche-history-item:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+        .niche-history-header {
+            padding: 5px 12px;
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        @keyframes dotPop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.5); }
+            100% { transform: scale(1); }
+        }
+
+        .company-card-spinner {
+            width: 12px; height: 12px;
+            border: 2px solid rgba(168,85,247,0.3);
+            border-top-color: var(--purple);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+        .company-card-meta {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            60% { transform: scale(1.15); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .company-card.scored .company-card-ring { animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+        /* Completion node */
+        .pipeline-complete-node {
+            padding: 14px 16px;
+            background: rgba(34,197,94,0.06);
+            border: 1px solid rgba(34,197,94,0.25);
+            border-radius: 10px;
+            font-size: 13px;
+            color: var(--green);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            animation: nodeSlideIn 0.3s ease;
+        }
+        .pipeline-complete-node .check { font-size: 18px; font-weight: 700; }
 
         /* --- LEFT PANE --- */
         .left-pane {
@@ -135,7 +715,7 @@
             flex: 1;
             padding: 10px 0;
             text-align: center;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 500;
             color: var(--text-muted);
             cursor: pointer;
@@ -1486,6 +2066,891 @@
             opacity: 0.8;
         }
 
+        /* --- PROSPECTING VIEW --- */
+        .prospect-header {
+            padding: 10px 12px 6px;
+            flex-shrink: 0;
+        }
+        .prospect-trigger {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .prospect-trigger input[type="text"] {
+            width: 100%;
+            padding: 8px 12px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 13px;
+            outline: none;
+        }
+        .prospect-trigger input[type="text"]:focus { border-color: var(--accent); }
+        .prospect-trigger input[type="text"]::placeholder { color: var(--text-muted); }
+        .prospect-trigger-row {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+        .prospect-trigger button {
+            flex: 1;
+            padding: 8px 14px;
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            border: none;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: opacity 0.15s;
+        }
+        .prospect-trigger button:hover { opacity: 0.85; }
+        .prospect-trigger button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .prospect-topn {
+            width: 52px;
+            padding: 8px 6px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 13px;
+            text-align: center;
+            outline: none;
+            -moz-appearance: textfield;
+        }
+        .prospect-topn::-webkit-outer-spin-button,
+        .prospect-topn::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        .prospect-topn:focus { border-color: var(--accent); }
+
+        /* ICP Indicator — hidden (dormant, not deleted) */
+        .icp-indicator-wrap { display: none !important; }
+        /* ICP Indicator + Popover */
+        ._icp-indicator-wrap-styles { position: relative; margin-bottom: 6px; }
+        .icp-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: border-color 0.15s;
+            overflow: hidden;
+        }
+        .icp-indicator:hover { border-color: var(--accent); }
+        .icp-indicator-label {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            flex-shrink: 0;
+        }
+        .icp-indicator-name {
+            font-size: 12px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+            min-width: 0;
+        }
+        .icp-indicator-chevron {
+            font-size: 10px;
+            color: var(--text-muted);
+            flex-shrink: 0;
+            transition: transform 0.15s;
+        }
+        .icp-indicator-wrap.open .icp-indicator-chevron { transform: rotate(180deg); }
+        .icp-indicator-wrap.open .icp-indicator { border-color: var(--accent); }
+
+        .icp-popover {
+            display: none;
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0; right: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            z-index: 100;
+            overflow: hidden;
+        }
+        .icp-indicator-wrap.open .icp-popover { display: block; }
+        .icp-popover-list { max-height: 200px; overflow-y: auto; padding: 4px; }
+        .icp-popover-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            color: var(--text-secondary);
+            transition: background 0.1s;
+        }
+        .icp-popover-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+        .icp-popover-item.active { color: var(--accent); }
+        .icp-popover-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            border: 1.5px solid var(--text-muted);
+            flex-shrink: 0;
+        }
+        .icp-popover-item.active .icp-popover-dot {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+        .icp-popover-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .icp-popover-divider { height: 1px; background: var(--border); margin: 2px 4px; }
+        .icp-popover-actions { padding: 4px; }
+        .icp-popover-action {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            color: var(--text-secondary);
+            transition: background 0.1s;
+        }
+        .icp-popover-action:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+        .icp-popover-action-icon { font-size: 13px; flex-shrink: 0; width: 16px; text-align: center; }
+
+        .icp-escape-hatch {
+            font-size: 11px; color: var(--text-muted); cursor: pointer; margin-top: 6px;
+            transition: color 0.15s;
+        }
+        .icp-escape-hatch:hover { color: var(--accent); }
+        .field-hint { font-size: 11px; color: var(--text-muted); margin-bottom: 6px; }
+
+        /* Niche suggestions */
+        .niche-suggestions {
+            display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+            margin-bottom: 6px; font-size: 11px;
+        }
+        .niche-suggestion-label { color: var(--text-muted); margin-right: 2px; }
+        .niche-chip {
+            padding: 3px 8px; border-radius: 10px; cursor: pointer;
+            background: var(--bg-tertiary); border: 1px solid var(--border);
+            color: var(--text-secondary); font-size: 11px; transition: all 0.15s;
+        }
+        .niche-chip:hover { border-color: var(--accent); color: var(--text-primary); }
+
+        /* Niche Builder trigger + modal */
+        .niche-input-wrap { position: relative; }
+        .niche-input-wrap input[type="text"] { padding-right: 34px; }
+        .niche-builder-trigger {
+            position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+            background: none; border: none; color: var(--text-muted); cursor: pointer;
+            padding: 4px; border-radius: 4px; font-size: 15px; line-height: 1;
+            transition: color 0.15s, background 0.15s;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .niche-builder-trigger:hover { color: var(--accent); background: var(--accent-dim); }
+        .niche-builder-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10001; animation: fadeIn 0.15s ease-out;
+        }
+        .niche-builder-modal {
+            background: var(--bg-secondary); border: 1px solid var(--border-strong);
+            border-radius: 16px; width: 480px; max-width: 95vw; max-height: 90vh;
+            overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+        }
+        .niche-builder-header {
+            padding: 20px 24px 0; display: flex;
+            align-items: center; justify-content: space-between;
+        }
+        .niche-builder-header h2 { font-size: 16px; font-weight: 700; color: var(--text-primary); margin: 0; }
+        .niche-builder-body { padding: 20px 24px; }
+        .niche-builder-footer { padding: 0 24px 20px; display: flex; justify-content: flex-end; gap: 8px; }
+        .niche-builder-preview {
+            margin-top: 4px; padding: 10px 12px; background: var(--bg-primary);
+            border: 1px solid var(--border); border-radius: 8px;
+            font-size: 13px; color: var(--text-primary); min-height: 20px; line-height: 1.4;
+        }
+        .niche-builder-preview-label { font-size: 11px; color: var(--text-muted); margin-top: 12px; }
+
+        /* Shake animation for empty niche input */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-4px); }
+            40%, 80% { transform: translateX(4px); }
+        }
+        .shake { animation: shake 0.5s ease; border-color: #ef4444 !important; }
+
+        /* ICP Wizard Overlay */
+        .icp-wizard-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10001;
+            animation: fadeIn 0.15s ease-out;
+        }
+        .icp-wizard {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-strong);
+            border-radius: 16px;
+            width: 560px;
+            max-width: 95vw;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+        }
+        .icp-wizard-header {
+            padding: 20px 24px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .icp-wizard-header h2 {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0;
+        }
+        .icp-wizard-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 22px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+        }
+        .icp-wizard-close:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+
+        /* Step indicators */
+        .icp-wizard-steps {
+            display: flex;
+            gap: 4px;
+            padding: 16px 24px 0;
+        }
+        .icp-step-dot {
+            flex: 1;
+            height: 4px;
+            border-radius: 2px;
+            background: var(--bg-tertiary);
+            transition: background 0.2s;
+        }
+        .icp-step-dot.active { background: var(--accent); }
+        .icp-step-dot.done { background: var(--green); }
+
+        /* Wizard content */
+        .icp-wizard-body {
+            padding: 20px 24px;
+        }
+        .icp-wizard-step {
+            display: none;
+        }
+        .icp-wizard-step.active {
+            display: block;
+        }
+        .icp-wizard-step h3 {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0 0 4px;
+        }
+        .icp-wizard-step .step-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+        .icp-field {
+            margin-bottom: 14px;
+        }
+        .icp-field label {
+            display: block;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 5px;
+        }
+        .icp-field textarea,
+        .icp-field input[type="text"],
+        .icp-field select {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 13px;
+            outline: none;
+            font-family: inherit;
+        }
+        .icp-field textarea { min-height: 70px; resize: vertical; }
+        .icp-field textarea:focus,
+        .icp-field input:focus,
+        .icp-field select:focus { border-color: var(--accent); }
+
+        /* Chip multi-select */
+        .icp-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .icp-chip {
+            padding: 6px 14px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+            background: var(--bg-primary);
+            user-select: none;
+        }
+        .icp-chip:hover { border-color: var(--accent); color: var(--text-primary); }
+        .icp-chip.selected {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+
+        /* Review step: dimension weight sliders */
+        .icp-dim-edit {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .icp-dim-edit .dim-name {
+            flex: 0 0 140px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .icp-dim-edit input[type="range"] {
+            flex: 1;
+            accent-color: var(--accent);
+        }
+        .icp-dim-edit .dim-weight {
+            flex: 0 0 40px;
+            text-align: right;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        /* Wizard nav */
+        .icp-wizard-nav {
+            display: flex;
+            justify-content: space-between;
+            padding: 0 24px 20px;
+        }
+        .icp-wizard-nav button {
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            transition: opacity 0.15s;
+        }
+        .icp-wizard-nav button:hover { opacity: 0.85; }
+        .icp-wizard-nav button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .icp-wizard-btn-back {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }
+        .icp-wizard-btn-next {
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            color: #fff;
+        }
+        .icp-wizard-btn-save {
+            background: linear-gradient(135deg, var(--green), #15803d);
+            color: #fff;
+        }
+
+        /* Spinner for generate step */
+        .icp-generate-spinner {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            padding: 30px 0;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+        .icp-generate-spinner .spinner {
+            width: 28px;
+            height: 28px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        .prospect-progress {
+            margin: 8px 12px;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .prospect-progress-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .prospect-progress-title .spinner {
+            width: 14px; height: 14px;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .prospect-progress-log {
+            max-height: 100px;
+            overflow-y: auto;
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        /* Campaign summary view (Pane 3) */
+        .campaign-view { }
+        .campaign-view-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            margin-bottom: 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+        .campaign-view-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0 0 2px;
+        }
+        .campaign-view-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .cv-section {
+            margin-bottom: 14px;
+        }
+        .cv-section-title {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .cv-step {
+            text-align: center;
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            min-width: 56px;
+        }
+        .cv-step-num {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .cv-step-label {
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+        .cv-step-arrow {
+            color: var(--text-muted);
+            font-size: 14px;
+            opacity: 0.4;
+        }
+        .cv-result-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+            cursor: pointer;
+            border-radius: 6px;
+            transition: background 0.1s;
+        }
+        .cv-result-row:hover { background: rgba(255,255,255,0.03); }
+        .cv-result-row.active { background: var(--accent-dim); }
+        .cv-result-row:last-child { border-bottom: none; }
+        .cv-result-score {
+            font-size: 14px;
+            font-weight: 700;
+            width: 28px;
+            text-align: right;
+            flex-shrink: 0;
+        }
+        .cv-result-name {
+            flex: 1;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .cv-result-label {
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+        /* Prospecting detail in center pane */
+        .icp-detail { padding: 16px; }
+        .icp-detail-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .icp-big-score {
+            width: 78px; height: 78px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border: 3px solid;
+            flex-shrink: 0;
+            position: relative;
+        }
+        .icp-big-score .num { font-size: 26px; font-weight: 700; line-height: 1; }
+        .icp-big-score .lbl { font-size: 9px; opacity: 0.7; margin-top: 1px; }
+        .icp-big-score.prime { border-color: var(--green); color: var(--green); }
+        .icp-big-score.strong { border-color: var(--accent); color: var(--accent); }
+        .icp-big-score.possible { border-color: var(--yellow); color: var(--yellow); }
+        .icp-big-score.weak { border-color: var(--red); color: var(--red); }
+        .icp-big-score.none { border-color: var(--text-muted); color: var(--text-muted); }
+
+        .icp-score-label-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 3px;
+        }
+        .icp-score-type-label {
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-muted);
+        }
+        .icp-info-icon {
+            width: 15px; height: 15px;
+            border-radius: 50%;
+            border: 1px solid var(--text-muted);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-muted);
+            cursor: help;
+            position: relative;
+            flex-shrink: 0;
+        }
+        .icp-info-icon:hover { border-color: var(--accent); color: var(--accent); }
+        .icp-info-icon .icp-info-tooltip {
+            display: none;
+            position: absolute;
+            left: 50%;
+            top: 22px;
+            transform: translateX(-50%);
+            background: #1e1e24;
+            border: 1px solid var(--border-strong);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 11px;
+            font-weight: 400;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            white-space: normal;
+            width: 260px;
+            z-index: 100;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            text-transform: none;
+            letter-spacing: normal;
+        }
+        .icp-info-icon:hover .icp-info-tooltip { display: block; }
+
+        /* Action buttons row */
+        .icp-actions-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-left: auto;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .icp-action-btn {
+            padding: 5px 11px;
+            font-size: 11px;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap;
+        }
+        .icp-action-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .icp-action-btn:disabled { cursor: not-allowed; opacity: 0.5; }
+        .icp-action-btn.primary {
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            border-color: transparent;
+            color: #fff;
+        }
+        .icp-action-btn.primary:hover { opacity: 0.85; }
+        .icp-action-btn .btn-icon { font-size: 13px; }
+
+        .icp-rescore-btn {
+            padding: 5px 11px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .icp-rescore-btn:hover { border-color: var(--accent); color: var(--accent); }
+        .icp-rescore-btn:disabled { cursor: not-allowed; opacity: 0.5; }
+
+        .icp-detail-meta h2 {
+            font-size: 18px; font-weight: 700; margin: 0 0 4px;
+        }
+        .icp-detail-meta .icp-label-badge {
+            display: inline-block;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 2px 10px;
+            border-radius: 10px;
+            background: var(--bg-tertiary);
+        }
+
+        .icp-section {
+            margin-bottom: 16px;
+        }
+        .icp-section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        /* Playbook / Outbound Strategy box */
+        .icp-playbook {
+            padding: 14px 16px;
+            background: linear-gradient(135deg, rgba(59,130,246,0.08), rgba(168,85,247,0.08));
+            border: 1px solid rgba(59,130,246,0.25);
+            border-radius: 10px;
+            margin-bottom: 16px;
+            position: relative;
+        }
+        .icp-playbook-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .icp-playbook-icon {
+            font-size: 16px;
+        }
+        .icp-playbook-label {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .icp-playbook-text {
+            font-size: 12px;
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        /* Dimension Cards (merged bar + evidence) */
+        .icp-dim-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 14px;
+            margin-bottom: 8px;
+            transition: border-color 0.15s;
+        }
+        .icp-dim-card:hover { border-color: var(--border-strong); }
+        .icp-dim-card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .icp-dim-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .icp-dim-name .dim-weight {
+            font-size: 10px;
+            font-weight: 400;
+            color: var(--text-muted);
+        }
+        .icp-dim-tooltip-icon {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            border: 1px solid var(--border-strong);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+            font-weight: 700;
+            color: var(--text-muted);
+            cursor: help;
+            position: relative;
+            flex-shrink: 0;
+        }
+        .icp-dim-tooltip-icon:hover { border-color: var(--accent); color: var(--accent); }
+        .icp-dim-tooltip-icon .dim-tooltip {
+            display: none;
+            position: absolute;
+            left: 50%;
+            top: 20px;
+            transform: translateX(-50%);
+            background: #1e1e24;
+            border: 1px solid var(--border-strong);
+            border-radius: 6px;
+            padding: 8px 10px;
+            font-size: 11px;
+            font-weight: 400;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            white-space: normal;
+            width: 220px;
+            z-index: 100;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+        }
+        .icp-dim-tooltip-icon:hover .dim-tooltip { display: block; }
+
+        .icp-dim-score-pill {
+            margin-left: auto;
+            font-size: 15px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .icp-dim-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255,255,255,0.06);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        .icp-dim-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.8s ease;
+        }
+        .icp-dim-rationale {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            margin-bottom: 6px;
+        }
+        .icp-dim-signals {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .icp-signal-tag {
+            display: inline-block;
+            font-size: 10px;
+            padding: 2px 8px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-muted);
+        }
+
+        .icp-snapshot {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .icp-snap-item {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .icp-snap-item span {
+            display: block;
+            font-size: 13px;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .icp-risks {
+            list-style: none;
+            padding: 0;
+        }
+        .icp-risks li {
+            font-size: 13px;
+            color: var(--text-secondary);
+            padding: 4px 0;
+            padding-left: 16px;
+            position: relative;
+        }
+        .icp-risks li::before {
+            content: "!";
+            position: absolute;
+            left: 0;
+            color: var(--yellow);
+            font-weight: 700;
+            font-size: 12px;
+        }
+
+        .icp-empty {
+            padding: 40px 20px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+        .icp-empty .icon { font-size: 32px; margin-bottom: 8px; }
+        .icp-empty .subtitle { font-size: 12px; margin-top: 4px; }
+
         /* --- RIGHT PANE --- */
         .right-pane {
             width: 0;
@@ -1697,7 +3162,7 @@
         .right-pane.split-active {
             position: fixed;
             top: 0;
-            left: var(--left-width);
+            left: calc(var(--sidebar-width) + var(--left-width));
             right: 0;
             bottom: 0;
             width: auto !important;
@@ -1719,7 +3184,7 @@
         .drop-zone-overlay {
             display: none;
             position: fixed;
-            top: 0; left: var(--left-width); right: 0; bottom: 0;
+            top: 0; left: calc(var(--sidebar-width) + var(--left-width)); right: 0; bottom: 0;
             z-index: 9999;
             background: rgba(0,0,0,0.4);
         }
@@ -1841,7 +3306,7 @@
         .right-pane.expanded {
             position: fixed;
             top: 0;
-            left: var(--left-width);
+            left: calc(var(--sidebar-width) + var(--left-width));
             right: 0;
             bottom: 0;
             width: auto !important;
@@ -2072,6 +3537,35 @@
             body { background: white !important; }
         }
 
+        /* Responsive: collapsible panes on narrow screens */
+        @media (max-width: 1439px) {
+            .pane-resize-handle { display: none; }
+            .prospect-sidebar { width: 200px; min-width: 200px; }
+            .prospect-pane {
+                width: 44px; min-width: 44px; flex: 0 0 44px;
+                overflow: hidden;
+                transition: all 0.3s ease;
+            }
+            .prospect-pane .pane-header {
+                writing-mode: vertical-rl; text-orientation: mixed;
+                cursor: pointer; padding: 12px 8px;
+                white-space: nowrap;
+            }
+            .prospect-pane .pane-body { display: none; }
+            .prospect-pane .pane-header .pane-status-badge { display: none; }
+            .prospect-pane.pane-focused {
+                width: auto; min-width: 400px; flex: 1 1 auto;
+            }
+            .prospect-pane.pane-focused .pane-header {
+                writing-mode: horizontal-tb; text-orientation: initial;
+                cursor: default; padding: 8px 16px;
+            }
+            .prospect-pane.pane-focused .pane-body {
+                display: flex; flex-direction: column; flex: 1;
+            }
+            .prospect-pane.pane-focused .pane-header .pane-status-badge { display: inline-block; }
+        }
+
         /* Toast notifications */
         .toast-container {
             position: fixed; top: 16px; right: 16px; z-index: 10000;
@@ -2098,7 +3592,21 @@
 <body>
 <div class="toast-container" id="toast-container"></div>
 <div class="app">
-    <!-- LEFT PANE -->
+    <!-- MODULE SIDEBAR -->
+    <div class="module-sidebar">
+        <div class="module-logo">SV</div>
+        <div class="module-item active" data-module="research" onclick="switchModule('research')">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Research</span>
+        </div>
+        <div class="module-item" data-module="prospecting" onclick="switchModule('prospecting')">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+            <span>Prospects</span>
+        </div>
+    </div>
+
+    <!-- WORKSPACE: MARKET RESEARCH -->
+    <div class="workspace active" id="workspace-research">
     <div class="left-pane">
         <div class="left-header">
             <div class="left-logo">SignalVault</div>
@@ -2213,7 +3721,86 @@
             <div class="md-content" id="right-content"></div>
         </div>
     </div>
-</div>
+    </div><!-- /workspace-research -->
+
+    <!-- WORKSPACE: PROSPECTING — 4-pane horizontal pipeline -->
+    <div class="workspace" id="workspace-prospecting">
+        <!-- PANE 1: Search History Sidebar -->
+        <div class="prospect-sidebar" id="prospect-sidebar">
+            <div class="prospect-sidebar-header">
+                <div class="prospect-sidebar-title">Prospecting</div>
+            </div>
+            <div class="prospect-header">
+                <div class="prospect-trigger">
+                    <div class="niche-input-wrap">
+                        <input type="text" id="prospect-niche-input" placeholder="Enter a niche to prospect..." onkeydown="if(event.key==='Enter')runProspectPipeline()">
+                        <button class="niche-builder-trigger" onclick="openNicheBuilder()" title="Niche Builder">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                        </button>
+                    </div>
+                    <div class="prospect-trigger-row">
+                        <input type="number" class="prospect-topn" id="prospect-topn" value="10" min="3" max="20" title="Max companies">
+                        <button id="prospect-run-btn" onclick="runProspectPipeline()">Discover</button>
+                    </div>
+                </div>
+            </div>
+            <div class="prospect-search-list" id="prospect-search-list"></div>
+        </div>
+
+        <!-- PANES 2-4: Content area with horizontal scroll -->
+        <div class="prospect-content" id="prospect-content">
+            <!-- PANE 2: Execution Engine -->
+            <div class="prospect-pane pane-execution" id="pane-execution">
+                <div class="pane-header">
+                    <span class="pane-header-title">Execution Engine</span>
+                    <span class="pane-status-badge" id="pane-execution-status"></span>
+                </div>
+                <div class="pane-body" id="pane-execution-body">
+                    <div class="pane-empty" id="pane-execution-empty">
+                        <div class="icon">&#128640;</div>
+                        <div>Run a discovery pipeline to see results here</div>
+                        <div class="subtitle">Enter a niche and click Discover to start.</div>
+                    </div>
+                    <div class="pipeline-map" id="pipeline-map" style="display:none"></div>
+                </div>
+            </div>
+
+            <div class="pane-resize-handle" data-left="pane-execution" data-right="pane-summary"></div>
+
+            <!-- PANE 3: Market Summary + Ranked List -->
+            <div class="prospect-pane pane-summary" id="pane-summary">
+                <div class="pane-header">
+                    <span class="pane-header-title">Market Summary</span>
+                </div>
+                <div class="pane-body" id="pane-summary-body">
+                    <div class="pane-empty" id="pane-summary-empty">
+                        <div class="icon">&#128202;</div>
+                        <div>Select a campaign or run a pipeline</div>
+                        <div class="subtitle">Results will appear here as companies are scored.</div>
+                    </div>
+                    <div id="pane-summary-content" style="display:none"></div>
+                </div>
+            </div>
+
+            <div class="pane-resize-handle" data-left="pane-summary" data-right="pane-detail"></div>
+
+            <!-- PANE 4: Company Detail -->
+            <div class="prospect-pane pane-detail" id="pane-detail">
+                <div class="pane-header">
+                    <span class="pane-header-title">Company Detail</span>
+                </div>
+                <div class="pane-body" id="pane-detail-body">
+                    <div class="pane-empty" id="pane-detail-empty">
+                        <div class="icon">&#127919;</div>
+                        <div>Select a company to view details</div>
+                        <div class="subtitle">Click any company in the ranked list.</div>
+                    </div>
+                    <div id="pane-detail-content" style="display:none"></div>
+                </div>
+            </div>
+        </div>
+    </div><!-- /workspace-prospecting -->
+</div><!-- /app -->
 
 <script>
 // ===================== MARKED CONFIG =====================
@@ -2394,6 +3981,14 @@ function switchLeftTab(tab) {
     document.querySelector(`.left-tab:nth-child(${idx})`).classList.add('active');
     document.getElementById(`panel-${tab}`).classList.add('active');
     if (tab === 'companies') loadCompanies();
+}
+
+function switchModule(mod) {
+    document.querySelectorAll('.module-item').forEach(m => m.classList.remove('active'));
+    document.querySelectorAll('.workspace').forEach(w => w.classList.remove('active'));
+    document.querySelector(`.module-item[data-module="${mod}"]`).classList.add('active');
+    document.getElementById(`workspace-${mod}`).classList.add('active');
+    if (mod === 'prospecting') { loadCampaigns(); }
 }
 
 // ===================== CHAT LIST =====================
@@ -4865,7 +6460,7 @@ function cleanProgress(text) {
 
 function escHtml(s) {
     if (!s) return '';
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function _fmtTok(n) {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
@@ -5247,6 +6842,2002 @@ async function _handleSplitDrop(side, payload) {
         await _loadIntoSplitPanel(side, 'report', payload.filename);
     } else if (payload.type === 'briefing' && payload.dossier) {
         await _loadIntoSplitPanel(side, 'briefing', payload.dossier);
+    }
+}
+
+// ===================== PROSPECTING =====================
+let allCampaigns = [];
+let activeCampaignId = null;
+let activeProspectName = null;
+let _prospectPipelineRunning = false;
+let _currentRunCampaignId = null; // tracks which campaign owns the live pipeline DOM in Pane 2
+
+// Flat prospect lookup — built from campaigns for detail view
+let _prospectsByName = {};
+
+function _prospectTierClass(score) {
+    if (score >= 80) return 'prime';
+    if (score >= 60) return 'strong';
+    if (score >= 40) return 'possible';
+    if (score >= 20) return 'weak';
+    return 'none';
+}
+
+function _dimColor(score) {
+    if (score >= 80) return 'var(--green)';
+    if (score >= 60) return 'var(--accent)';
+    if (score >= 40) return 'var(--yellow)';
+    return 'var(--red)';
+}
+
+async function loadCampaigns() {
+    try {
+        const resp = await fetch('/api/campaigns');
+        if (!resp.ok) { allCampaigns = []; }
+        else { allCampaigns = await resp.json(); }
+    } catch (e) { console.error('loadCampaigns failed:', e); allCampaigns = []; }
+    renderCampaignSidebar();
+}
+
+function renderCampaignSidebar() {
+    const list = document.getElementById('prospect-search-list');
+    if (!list) return;
+    _prospectsByName = {};
+
+    // Index all prospects from all campaigns for detail lookup
+    allCampaigns.forEach(c => {
+        (c.prospects || []).forEach(p => {
+            if (p.company_name) _prospectsByName[p.company_name] = p;
+        });
+    });
+
+    if (!allCampaigns.length) {
+        list.innerHTML = `<div class="pane-empty">
+            <div class="icon">&#128269;</div>
+            <div>No campaigns yet.</div>
+            <div class="subtitle">Enter a niche above to discover and score companies.</div>
+        </div>`;
+        return;
+    }
+
+    list.innerHTML = allCampaigns.map(c => {
+        const avgScore = c.avg_score ? Math.round(c.avg_score) : 0;
+        const tier = _prospectTierClass(avgScore);
+        const isActive = activeCampaignId === c.id ? ' active' : '';
+        const statusBadge = c.status === 'running'
+            ? '<span class="pane-status-badge running">Running</span>'
+            : c.status === 'error'
+            ? '<span class="pane-status-badge error">Error</span>'
+            : '';
+
+        return `<div class="search-query-item${isActive}" data-campaign-id="${c.id}" onclick="selectCampaign(${c.id})">
+            <div class="search-query-info">
+                <div class="search-query-name">${escHtml(c.name || c.niche)}</div>
+                <div class="search-query-meta">
+                    ${c.prospect_count || 0} prospects ${statusBadge}
+                </div>
+            </div>
+            <div class="search-query-score" style="border-color:${_dimColor(avgScore)};color:${_dimColor(avgScore)}">${avgScore || '—'}</div>
+            <div class="search-query-actions">
+                <button class="campaign-group-action" onclick="event.stopPropagation();renameCampaign(${c.id})" title="Rename">&#9998;</button>
+                <button class="campaign-group-action" onclick="event.stopPropagation();deleteCampaign(${c.id})" title="Delete">&times;</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function selectCampaign(campaignId) {
+    // Block switching while pipeline is running (protects live DOM)
+    if (_prospectPipelineRunning && _currentRunCampaignId && _currentRunCampaignId !== campaignId) return;
+
+    const wasActive = activeCampaignId === campaignId;
+    if (wasActive) return; // already selected, no-op
+
+    activeCampaignId = campaignId;
+    // Highlight sidebar item
+    document.querySelectorAll('.search-query-item').forEach(el => {
+        const id = parseInt(el.dataset.campaignId, 10);
+        el.classList.toggle('active', id === campaignId);
+    });
+    // Populate panes 2 + 3, clear pane 4
+    renderExecutionPane(campaignId);
+    renderSummaryPane(campaignId);
+    clearDetailPane();
+    focusPane('pane-execution');
+}
+
+async function renameCampaign(campaignId) {
+    const c = allCampaigns.find(x => x.id === campaignId);
+    const newName = prompt('Rename campaign:', c?.name || c?.niche || '');
+    if (!newName || !newName.trim()) return;
+    try {
+        await fetch(`/api/campaigns/${campaignId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName.trim() }),
+        });
+        await loadCampaigns();
+    } catch (e) { console.error('Rename failed:', e); }
+}
+
+async function deleteCampaign(campaignId) {
+    if (!confirm('Delete this campaign? Prospect data will be kept.')) return;
+    try {
+        await fetch(`/api/campaigns/${campaignId}`, { method: 'DELETE' });
+        if (activeCampaignId === campaignId) {
+            activeCampaignId = null;
+            _resetAllPanes();
+        }
+        await loadCampaigns();
+    } catch (e) { console.error('Delete failed:', e); }
+}
+
+// --- Pane helpers ---
+
+function _resetAllPanes() {
+    // Reset Pane 2
+    const mapEl = document.getElementById('pipeline-map');
+    const execEmpty = document.getElementById('pane-execution-empty');
+    const execStatus = document.getElementById('pane-execution-status');
+    if (mapEl) { mapEl.style.display = 'none'; mapEl.innerHTML = ''; }
+    if (execEmpty) execEmpty.style.display = 'block';
+    if (execStatus) { execStatus.textContent = ''; execStatus.className = 'pane-status-badge'; }
+    // Reset Pane 3
+    const sumContent = document.getElementById('pane-summary-content');
+    const sumEmpty = document.getElementById('pane-summary-empty');
+    if (sumContent) { sumContent.style.display = 'none'; sumContent.innerHTML = ''; }
+    if (sumEmpty) sumEmpty.style.display = 'block';
+    // Reset Pane 4
+    clearDetailPane();
+}
+
+function clearDetailPane() {
+    activeProspectName = null;
+    const detContent = document.getElementById('pane-detail-content');
+    const detEmpty = document.getElementById('pane-detail-empty');
+    if (detContent) { detContent.style.display = 'none'; detContent.innerHTML = ''; }
+    if (detEmpty) detEmpty.style.display = 'block';
+    // Remove highlights from Pane 2 cards and Pane 3 rows
+    document.querySelectorAll('.company-card.active').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.cv-result-row.active').forEach(r => r.classList.remove('active'));
+}
+
+// --- Pane 2: Execution Engine ---
+
+function renderExecutionPane(campaignId) {
+    // If this campaign is the one currently running live, don't touch DOM — just update badge
+    if (_prospectPipelineRunning && _currentRunCampaignId === campaignId) {
+        const badge = document.getElementById('pane-execution-status');
+        if (badge) { badge.textContent = 'Running'; badge.className = 'pane-status-badge running'; }
+        return;
+    }
+
+    const c = allCampaigns.find(x => x.id === campaignId);
+    if (!c) return;
+
+    const emptyEl = document.getElementById('pane-execution-empty');
+    const mapEl = document.getElementById('pipeline-map');
+    const badge = document.getElementById('pane-execution-status');
+
+    // Set status badge
+    if (badge) {
+        if (c.status === 'complete') { badge.textContent = 'Complete'; badge.className = 'pane-status-badge complete'; }
+        else if (c.status === 'error') { badge.textContent = 'Error'; badge.className = 'pane-status-badge error'; }
+        else { badge.textContent = ''; badge.className = 'pane-status-badge'; }
+    }
+
+    const prospects = (c.prospects || []).sort((a, b) =>
+        (b.ua_fit?.overall_score || 0) - (a.ua_fit?.overall_score || 0));
+    const scored = prospects.filter(p => p.ua_fit);
+    const valid = prospects.filter(p => p.validation_status === 'valid').length;
+    const limited = prospects.filter(p => p.validation_status && p.validation_status !== 'valid' && p.ua_fit).length;
+    const rejected = prospects.filter(p => !p.ua_fit && p.validation_status && p.validation_status !== 'valid').length;
+
+    // Build static pipeline reconstruction from historical data
+    emptyEl.style.display = 'none';
+    mapEl.style.display = 'block';
+
+    const companyCardsHtml = prospects.map(p => {
+        const fit = p.ua_fit;
+        const s = fit?.overall_score || 0;
+        const label = fit?.overall_label || '';
+        const color = s > 0 ? _dimColor(s) : 'var(--text-muted)';
+        const isRejected = !fit && p.validation_status && p.validation_status !== 'valid';
+        const isLimited = p.validation_status && p.validation_status !== 'valid' && fit;
+        let cls = 'company-card';
+        if (isRejected) cls += ' error';
+        else if (s > 0) cls += ' scored';
+        else cls += ' pending';
+
+        // Analysis steps from historical data (vertical layout matching live scoring style)
+        const analyses = fit?._analyses_used || {};
+        const labels = { techstack: 'Tech Stack', financial: 'Financial', brand_ad: 'Brand & Ad Intel' };
+        const checksHtml = Object.keys(analyses).length > 0
+            ? `<div class="analysis-list">${Object.keys(analyses).map(k =>
+                `<div class="analysis-row">
+                    <div class="analysis-row-icon done">&#10003;</div>
+                    <span class="analysis-row-name">${escHtml(labels[k] || k)}</span>
+                    <span class="analysis-row-status done">Done</span>
+                </div>`
+              ).join('')}</div>`
+            : '';
+
+        return `<div class="${cls}" data-company-name="${escHtml(p.company_name)}" style="${s > 0 ? 'border-color:' + color : ''}">
+            <div class="company-card-header">
+                <div class="company-card-name">${escHtml(p.company_name)}</div>
+                <div class="company-card-ring" style="${s > 0 ? 'border-color:' + color + ';color:' + color : ''}">${s > 0 ? s : (isRejected ? '!' : '—')}</div>
+            </div>
+            <div class="company-card-meta">${s > 0 ? `<span style="color:${color}">${escHtml(label)}</span>` : (isRejected ? '<span style="color:var(--red);font-size:10px">Rejected</span>' : (isLimited ? '<span class="limited-badge">Limited</span>' : ''))}</div>
+            ${checksHtml}
+        </div>`;
+    }).join('');
+
+    mapEl.innerHTML = `
+        <div class="pipeline-node done" style="padding:10px 14px">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon">&#128269;</div>
+                <div class="pipeline-node-label">Discovery</div>
+            </div>
+            <div class="pipeline-node-meta">Niche: <strong style="color:var(--text-primary)">${escHtml(c.niche || c.name)}</strong></div>
+        </div>
+        <div class="pipeline-connector done"></div>
+        <div class="pipeline-node done" style="padding:10px 14px">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon">&#10003;</div>
+                <div class="pipeline-node-label">Found ${prospects.length} companies</div>
+            </div>
+        </div>
+        <div class="pipeline-connector done"></div>
+        <div class="pipeline-node done" style="padding:10px 14px">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon">&#10003;</div>
+                <div class="pipeline-node-label">Validation</div>
+            </div>
+            <div class="pipeline-node-meta">${valid} valid${limited > 0 ? ` (${limited} limited)` : ''} &mdash; ${rejected} rejected</div>
+        </div>
+        <div class="pipeline-connector done"></div>
+        <div class="pipeline-node done" style="border-color:rgba(168,85,247,0.2);padding:12px">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon" style="background:rgba(168,85,247,0.15)">&#127919;</div>
+                <div class="pipeline-node-label" style="color:var(--purple)">Scored ${scored.length} companies</div>
+            </div>
+        </div>
+        <div class="pipeline-connector done"></div>
+        <div class="pipeline-company-grid">${companyCardsHtml}</div>
+        <div class="pipeline-connector done"></div>
+        <div class="pipeline-complete-node">
+            <span class="check">&#10003;</span>
+            Pipeline complete &mdash; ${scored.length} companies scored
+        </div>
+    `;
+}
+
+// --- Pane 3: Market Summary ---
+
+function renderSummaryPane(campaignId) {
+    const c = allCampaigns.find(x => x.id === campaignId);
+    if (!c) return;
+
+    const sumContent = document.getElementById('pane-summary-content');
+    const sumEmpty = document.getElementById('pane-summary-empty');
+    if (!sumContent) return;
+
+    const prospects = (c.prospects || []).sort((a, b) =>
+        (b.ua_fit?.overall_score || 0) - (a.ua_fit?.overall_score || 0));
+    const scored = prospects.filter(p => p.ua_fit);
+    const avgScore = scored.length
+        ? Math.round(scored.reduce((s, p) => s + (p.ua_fit?.overall_score || 0), 0) / scored.length)
+        : 0;
+
+    const statusText = c.status === 'complete' ? 'Complete' : c.status === 'running' ? 'Running...' : c.status === 'error' ? 'Error' : c.status;
+    let createdDate = '';
+    if (c.created_at) {
+        const d = new Date(c.created_at.replace(' ', 'T') + (c.created_at.includes('Z') || c.created_at.includes('+') ? '' : 'Z'));
+        createdDate = isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    // Score tier distribution
+    const tiers = { prime: 0, strong: 0, possible: 0, weak: 0 };
+    scored.forEach(p => { tiers[_prospectTierClass(p.ua_fit?.overall_score || 0)]++; });
+
+    // Tier distribution bar
+    const tierTotal = scored.length || 1;
+    const tierBarHtml = scored.length > 0 ? `
+        <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin-bottom:6px">
+            ${tiers.prime > 0 ? `<div style="width:${(tiers.prime/tierTotal)*100}%;background:var(--green)" title="${tiers.prime} Prime"></div>` : ''}
+            ${tiers.strong > 0 ? `<div style="width:${(tiers.strong/tierTotal)*100}%;background:var(--accent)" title="${tiers.strong} Strong"></div>` : ''}
+            ${tiers.possible > 0 ? `<div style="width:${(tiers.possible/tierTotal)*100}%;background:var(--yellow)" title="${tiers.possible} Possible"></div>` : ''}
+            ${tiers.weak > 0 ? `<div style="width:${(tiers.weak/tierTotal)*100}%;background:var(--red)" title="${tiers.weak} Weak"></div>` : ''}
+        </div>
+        <div style="display:flex;gap:12px;font-size:10px;color:var(--text-muted)">
+            ${tiers.prime > 0 ? `<span><span style="color:var(--green);font-weight:600">${tiers.prime}</span> Prime</span>` : ''}
+            ${tiers.strong > 0 ? `<span><span style="color:var(--accent);font-weight:600">${tiers.strong}</span> Strong</span>` : ''}
+            ${tiers.possible > 0 ? `<span><span style="color:var(--yellow);font-weight:600">${tiers.possible}</span> Possible</span>` : ''}
+            ${tiers.weak > 0 ? `<span><span style="color:var(--red);font-weight:600">${tiers.weak}</span> Weak</span>` : ''}
+        </div>` : '';
+
+    // Fit levels legend
+    const fitLegendHtml = `
+        <div class="fit-legend">
+            <span class="fit-legend-item"><span class="fit-dot" style="background:var(--green)"></span>80+ Prime</span>
+            <span class="fit-legend-item"><span class="fit-dot" style="background:var(--accent)"></span>60-79 Strong</span>
+            <span class="fit-legend-item"><span class="fit-dot" style="background:var(--yellow)"></span>40-59 Possible</span>
+            <span class="fit-legend-item"><span class="fit-dot" style="background:var(--red)"></span>20-39 Weak</span>
+            <span class="fit-legend-item"><span class="fit-dot" style="background:var(--text-muted)"></span>0-19 Not a Fit</span>
+        </div>`;
+
+    // Ranked results
+    const rankedHtml = _buildRankedListHtml(scored);
+
+    // Agent Insights
+    const insight = c.insight;
+    let insightHtml = '';
+    const _priorityIcons = [
+        { icon: '&#8593;', bg: 'rgba(22,163,74,0.12)', color: 'var(--green)' },   // trending up
+        { icon: '&#36;', bg: 'rgba(59,130,246,0.12)', color: 'var(--accent)' },    // dollar
+        { icon: '&#9678;', bg: 'rgba(168,85,247,0.12)', color: 'var(--purple)' },  // target
+    ];
+    if (insight) {
+        const summaryP = insight.vertical_summary ? `<div class="agent-insights-summary">${escHtml(insight.vertical_summary)}</div>` : '';
+        const prioritiesHtml = (insight.top_3_priorities || []).map((p, i) => {
+            const ic = _priorityIcons[i] || _priorityIcons[2];
+            return `<li><span class="priority-icon" style="background:${ic.bg};color:${ic.color}">${ic.icon}</span><div class="priority-title">${escHtml(p.title)}</div><div class="priority-desc">${escHtml(p.description)}</div></li>`;
+        }).join('');
+
+        // Market Signal Diagnostics — placeholder badges derived from batch data
+        const signalBadges = [
+            { icon: '&#128737;', bg: 'rgba(239,68,68,0.1)', color: 'var(--red)', title: 'Signal Vulnerability', sub: `${scored.filter(p => (p.ua_fit?.signal_coverage?.categories_with_data || 0) < 2).length}/${scored.length} have limited data coverage` },
+            { icon: '&#128200;', bg: 'rgba(22,163,74,0.1)', color: 'var(--green)', title: 'Growth Concentration', sub: `${scored.filter(p => (p.ua_fit?.sub_scores?.growth_trajectory?.score || 0) >= 60).length}/${scored.length} show strong growth signals` },
+            { icon: '&#127916;', bg: 'rgba(168,85,247,0.1)', color: 'var(--purple)', title: 'Creative Readiness', sub: `${scored.filter(p => (p.ua_fit?.sub_scores?.creative_readiness?.score || 0) >= 50).length}/${scored.length} have video assets for CTV` },
+            { icon: '&#128176;', bg: 'rgba(59,130,246,0.1)', color: 'var(--accent)', title: 'Ad Spend Maturity', sub: `${scored.filter(p => (p.ua_fit?.sub_scores?.advertising_maturity?.score || 0) >= 50).length}/${scored.length} run active paid media` },
+        ];
+        const signalHtml = signalBadges.map(b =>
+            `<div class="signal-badge"><div class="signal-badge-icon" style="background:${b.bg};color:${b.color}">${b.icon}</div><div><div class="signal-badge-title">${b.title}</div><div class="signal-badge-sub">${b.sub}</div></div></div>`
+        ).join('');
+
+        insightHtml = `
+            <div class="cv-section">
+                <div class="cv-section-title">Agent Insights</div>
+                <div class="agent-insights">
+                    ${summaryP}
+                    ${prioritiesHtml ? `<ul class="agent-insights-priorities">${prioritiesHtml}</ul>` : ''}
+                </div>
+            </div>
+            <div class="cv-section">
+                <div class="cv-section-title">Market Signal Diagnostics</div>
+                <div class="signal-diagnostics">${signalHtml}</div>
+            </div>`;
+    } else if (scored.length > 0) {
+        insightHtml = `
+            <div class="cv-section">
+                <div class="cv-section-title">Agent Insights</div>
+                <div id="agent-insights-placeholder" class="agent-insights-loading">
+                    <div class="spinner"></div>
+                    Generating insights...
+                </div>
+            </div>`;
+    }
+
+    sumEmpty.style.display = 'none';
+    sumContent.style.display = 'block';
+    sumContent.innerHTML = `
+        <div class="campaign-view">
+            <div class="campaign-view-header">
+                <div>
+                    <h2 class="campaign-view-title">${escHtml(c.name || c.niche)}</h2>
+                    <div class="campaign-view-meta">
+                        ${createdDate} &bull; ${statusText} &bull; Avg CTV Propensity: <span style="color:${_dimColor(avgScore)};font-weight:600">${avgScore}/100</span>
+                    </div>
+                </div>
+            </div>
+
+            ${scored.length > 0 ? `
+            <div class="cv-section">
+                <div class="cv-section-title">Score Distribution</div>
+                ${tierBarHtml}
+                ${fitLegendHtml}
+            </div>
+
+            ${insightHtml}
+
+            <div class="cv-section">
+                <div class="cv-section-title">Results</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click a company for detailed analysis</div>
+                <div id="pane-summary-ranked-list">${rankedHtml}</div>
+            </div>
+            ` : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">No scored prospects yet.</div>'}
+        </div>
+    `;
+
+    // Auto-trigger insight generation if missing
+    if (!insight && scored.length > 0 && c.status === 'complete') {
+        _autoGenerateInsight(campaignId);
+    }
+}
+
+function _buildRankedListHtml(scored) {
+    return scored.map(p => {
+        const s = p.ua_fit?.overall_score || 0;
+        const label = p.ua_fit?.overall_label || '';
+        const isLimited = p.validation_status && p.validation_status !== 'valid';
+        const isActive = activeProspectName === p.company_name ? ' active' : '';
+        return `<div class="cv-result-row${isActive}" data-company="${escHtml(p.company_name)}">
+            <span class="cv-result-score" style="color:${_dimColor(s)}">${s}</span>
+            <span class="cv-result-name">${escHtml(p.company_name)}${isLimited ? ' <span class="limited-badge">Limited</span>' : ''}</span>
+            <span class="cv-result-label" style="color:${_dimColor(s)}">${escHtml(label)}</span>
+        </div>`;
+    }).join('');
+}
+
+async function _autoGenerateInsight(campaignId) {
+    try {
+        const resp = await fetch(`/api/campaigns/${campaignId}/insight`, { method: 'POST' });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        // Update local cache
+        const c = allCampaigns.find(x => x.id === campaignId);
+        if (c) c.insight = data.insight || data;
+        // Re-render insight section if this campaign is still active
+        if (activeCampaignId === campaignId) {
+            renderSummaryPane(campaignId);
+        }
+    } catch (err) {
+        console.error('Failed to generate insight:', err);
+        const ph = document.getElementById('agent-insights-placeholder');
+        if (ph) ph.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Insights unavailable</span>';
+    }
+}
+
+// Real-time summary update during live pipeline (called on each 'scored' SSE event)
+function _updateLiveSummary(ev) {
+    const sumContent = document.getElementById('pane-summary-content');
+    const sumEmpty = document.getElementById('pane-summary-empty');
+    if (!sumContent) return;
+
+    // Show pane on first scored event
+    if (sumEmpty && sumEmpty.style.display !== 'none') {
+        sumEmpty.style.display = 'none';
+        sumContent.style.display = 'block';
+        sumContent.innerHTML = `<div class="campaign-view">
+            <div class="cv-section">
+                <div class="cv-section-title">Results (Live)</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Companies are ranked as they score</div>
+                <div id="pane-summary-ranked-list"></div>
+            </div>
+        </div>`;
+    }
+
+    // Insert into ranked list in sorted position (descending score)
+    const listEl = document.getElementById('pane-summary-ranked-list');
+    if (!listEl) return;
+
+    const score = ev.overall_score || 0;
+    const label = ev.label || '';
+    const name = ev.company || '';
+    const color = _dimColor(score);
+    const rowHtml = `<div class="cv-result-row" data-company="${escHtml(name)}" data-score="${score}">
+        <span class="cv-result-score" style="color:${color}">${score}</span>
+        <span class="cv-result-name">${escHtml(name)}</span>
+        <span class="cv-result-label" style="color:${color}">${escHtml(label)}</span>
+    </div>`;
+
+    // Find insertion point (sorted descending)
+    const existing = listEl.querySelectorAll('.cv-result-row');
+    let inserted = false;
+    for (const row of existing) {
+        const rowScore = parseInt(row.dataset.score || '0', 10);
+        if (score > rowScore) {
+            row.insertAdjacentHTML('beforebegin', rowHtml);
+            inserted = true;
+            break;
+        }
+    }
+    if (!inserted) listEl.insertAdjacentHTML('beforeend', rowHtml);
+}
+
+function closeProspectDetail() {
+    clearDetailPane();
+}
+
+async function openProspectDetail(companyName) {
+    activeProspectName = companyName;
+    // Highlight matching card in Pane 2 pipeline map
+    document.querySelectorAll('.company-card').forEach(c => {
+        c.classList.toggle('active', c.dataset.companyName === companyName);
+    });
+    // Highlight matching row in Pane 3 ranked list
+    document.querySelectorAll('.cv-result-row').forEach(r => {
+        r.classList.toggle('active', r.dataset.company === companyName);
+    });
+
+    // Show loading state in Pane 4 immediately
+    const detContent = document.getElementById('pane-detail-content');
+    const detEmpty = document.getElementById('pane-detail-empty');
+    if (detContent && detEmpty) {
+        detEmpty.style.display = 'none';
+        detContent.style.display = 'block';
+        detContent.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:40px;gap:10px;color:var(--text-muted)">
+            <div style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--purple);border-radius:50%;animation:spin 0.8s linear infinite"></div>
+            Loading ${escHtml(companyName)}...
+        </div>`;
+    }
+
+    // Find the prospect data from campaign lookup or fetch fresh
+    let p = _prospectsByName[companyName];
+    if (!p || !p.ua_fit) {
+        try {
+            const resp = await fetch('/api/ua-targets');
+            if (resp.ok) {
+                const targets = await resp.json();
+                p = targets.find(x => x.company_name === companyName);
+                if (p) _prospectsByName[companyName] = p;
+            }
+        } catch (e) { /* ignore */ }
+    }
+    if (!p || !p.ua_fit) {
+        if (detContent) detContent.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-muted)">
+            <div style="font-size:24px;margin-bottom:8px">&#8987;</div>
+            Score data not yet available for ${escHtml(companyName)}.<br>
+            <span style="font-size:11px">Try again once scoring completes.</span>
+        </div>`;
+        return;
+    }
+
+    const fit = p.ua_fit;
+    const score = fit.overall_score || 0;
+    const tier = _prospectTierClass(score);
+    const sub = fit.sub_scores || {};
+    const snap = fit.company_snapshot || {};
+
+    const analysesUsed = fit._analyses_used || {};
+
+    const dims = (fit._dimensions || [
+        { key: 'financial_capacity',      label: 'Financial Capacity',      weight: 0.25 },
+        { key: 'advertising_maturity',    label: 'Paid Media Footprint',    weight: 0.20 },
+        { key: 'growth_trajectory',       label: 'Growth Trajectory',       weight: 0.20 },
+        { key: 'creative_readiness',      label: 'Video Asset Readiness',   weight: 0.20 },
+        { key: 'channel_expansion_intent',label: 'Channel Expansion Intent',weight: 0.15 },
+    ]);
+
+    const _dimDisplayLabel = {
+        'advertising_maturity': 'Paid Media Footprint',
+        'creative_readiness': 'Video Asset Readiness',
+    };
+    const _dimTooltips = {
+        'financial_capacity': 'Evaluates revenue, funding, and budget capacity for $10K\u2013$100K/month CTV campaigns.',
+        'advertising_maturity': 'Checks for Meta/TikTok/Google Ads pixels and active paid media infrastructure.',
+        'growth_trajectory': 'Assesses revenue growth rate, expansion news, and hiring momentum.',
+        'creative_readiness': 'Looks for existing video content, social media visuals, and brand assets that translate to TV spots.',
+        'channel_expansion_intent': 'Detects signals of exploring new ad channels beyond current social/search spend.',
+    };
+
+    let dimCardsHtml = dims.map(d => {
+        const ds = sub[d.key] || {};
+        const s = ds.score || 0;
+        const color = _dimColor(s);
+        const wPct = Math.round((d.weight || 0) * 100) + '%';
+        const displayLabel = _dimDisplayLabel[d.key] || d.label;
+        const tooltip = _dimTooltips[d.key] || '';
+        const rationale = ds.rationale || 'No data available';
+        const signals = (ds.signals || []).map(sig => `<span class="icp-signal-tag">${escHtml(sig)}</span>`).join('');
+
+        return `<div class="icp-dim-card">
+            <div class="icp-dim-card-header">
+                <span class="icp-dim-name">
+                    ${escHtml(displayLabel)}
+                    <span class="dim-weight">(${wPct})</span>
+                    ${tooltip ? `<span class="icp-dim-tooltip-icon">i<span class="dim-tooltip">${escHtml(tooltip)}</span></span>` : ''}
+                </span>
+                <span class="icp-dim-score-pill" style="color:${color}">${s}</span>
+            </div>
+            <div class="icp-dim-bar"><div class="icp-dim-fill" style="width:${s}%;background:${color}"></div></div>
+            <div class="icp-dim-rationale">${escHtml(rationale)}</div>
+            ${signals ? `<div class="icp-dim-signals">${signals}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    let snapHtml = '';
+    const _pillColors = [
+        { bg: 'rgba(59,130,246,0.12)', color: '#60a5fa' },
+        { bg: 'rgba(168,85,247,0.12)', color: '#c084fc' },
+        { bg: 'rgba(22,163,74,0.12)', color: '#4ade80' },
+        { bg: 'rgba(234,179,8,0.12)', color: '#facc15' },
+        { bg: 'rgba(239,68,68,0.12)', color: '#f87171' },
+        { bg: 'rgba(20,184,166,0.12)', color: '#2dd4bf' },
+    ];
+    function _toPills(arr) {
+        return `<div class="snap-pills">${arr.map((v, i) => {
+            const c = _pillColors[i % _pillColors.length];
+            return `<span class="snap-pill" style="background:${c.bg};color:${c.color}">${escHtml(v)}</span>`;
+        }).join('')}</div>`;
+    }
+
+    const snapPlain = [
+        ['Website', snap.website],
+        ['Revenue', snap.estimated_revenue],
+        ['Employees', snap.estimated_employees],
+        ['Recent Funding', snap.recent_funding],
+    ];
+    const snapPillFields = [
+        ['E-com Platform', snap.ecom_platform ? [snap.ecom_platform] : null],
+        ['Ad Channels', snap.primary_ad_channels],
+        ['Ad Pixels', snap.ad_pixels_detected],
+    ];
+    snapHtml = snapPlain.filter(f => f[1]).map(f =>
+        `<div class="icp-snap-item">${f[0]}<span>${escHtml(String(f[1]))}</span></div>`
+    ).join('');
+    const pillRows = snapPillFields.filter(f => f[1] && f[1].length).map(f =>
+        `<div class="icp-snap-item" style="grid-column:1/-1">${f[0]}${_toPills(f[1])}</div>`
+    ).join('');
+    snapHtml += pillRows;
+
+    let risksHtml = (fit.key_risks || []).map(r => `<li>${escHtml(r)}</li>`).join('');
+
+    const cov = fit.signal_coverage || {};
+    const confLabel = cov.confidence || '?';
+    const confColor = confLabel === 'high' ? 'var(--green)' : confLabel === 'moderate' ? 'var(--yellow)' : 'var(--red)';
+
+    const analysisLabels = { techstack: 'Tech Stack', financial: 'Financial', brand_ad: 'Brand & Ad Intel' };
+    let methHtml = '';
+    if (Object.keys(analysesUsed).length > 0) {
+        const sourceRows = Object.entries(analysesUsed).map(([atype, path]) => {
+            const label = analysisLabels[atype] || atype;
+            const shortPath = path ? path.split(/[\\/]/).pop() : 'N/A';
+            return `<div style="font-size:12px;color:var(--text-secondary);padding:4px 0;display:flex;gap:8px;align-items:baseline">
+                <span style="color:var(--text-muted);min-width:70px">${escHtml(label)}</span>
+                <span style="font-family:monospace;font-size:11px;color:var(--accent)">${escHtml(shortPath)}</span>
+            </div>`;
+        }).join('');
+        methHtml = `<div class="icp-section">
+            <div class="icp-section-title">Analysis Sources</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
+                ${dims.length} dimensions &bull; Confidence: <span style="color:${confColor}">${confLabel}</span>
+                &bull; ${Object.keys(analysesUsed).length}/3 analyses
+            </div>
+            ${sourceRows}
+        </div>`;
+    } else {
+        methHtml = `<div class="icp-section">
+            <div class="icp-section-title">Analysis Sources</div>
+            <div style="font-size:12px;color:var(--text-muted);padding:12px;background:var(--bg-tertiary);border-radius:8px;border:1px solid var(--border)">
+                No analysis data available. Re-score to run fresh analyses.
+            </div>
+        </div>`;
+    }
+
+    // Render into Pane 4
+    if (!detContent) return;
+
+    detContent.innerHTML = `<div class="icp-detail">
+        <div class="icp-detail-header">
+            <div style="text-align:center">
+                <div class="icp-big-score ${tier}">
+                    <span class="num">${score}</span>
+                    <span class="lbl">/100</span>
+                </div>
+                <div class="icp-score-label-row">
+                    <span class="icp-score-type-label">CTV Propensity</span>
+                    <span class="icp-info-icon">i
+                        <span class="icp-info-tooltip">Calculated based on social ad exhaustion, visual asset readiness, and financial capacity to scale to premium video (Connected TV).</span>
+                    </span>
+                </div>
+            </div>
+            <div class="icp-detail-meta">
+                <h2>${escHtml(companyName)}</h2>
+                <span class="icp-label-badge" style="color:${_dimColor(score)}">${escHtml(fit.overall_label || '?')}</span>
+                <span style="font-size:11px;color:var(--text-muted);margin-left:8px">Confidence: <span style="color:${confColor}">${confLabel}</span> &bull; ${cov.categories_with_data || 0}/${cov.categories_total || 3} analyses</span>
+            </div>
+            <div class="icp-actions-row">
+                <button class="icp-action-btn" onclick="alert('CRM sync coming soon')" title="Sync prospect to CRM"><span class="btn-icon">&#9741;</span> Sync to CRM</button>
+                <button class="icp-action-btn" onclick="alert('Beeswax bidder integration coming soon')" title="Add to Beeswax programmatic bidder"><span class="btn-icon">&#9881;</span> Add to Beeswax</button>
+                <button class="icp-rescore-btn" id="icp-rescore-btn" onclick="rescoreProspect('${encodeURIComponent(companyName)}')">&#8635; Re-score</button>
+            </div>
+        </div>
+
+        ${fit.recommended_angle ? `<div class="icp-playbook">
+            <div class="icp-playbook-header">
+                <span class="icp-playbook-icon">&#128218;</span>
+                <span class="icp-playbook-label">Outbound Strategy Playbook</span>
+            </div>
+            <div class="icp-playbook-text">${escHtml(fit.recommended_angle)}</div>
+        </div>` : ''}
+
+        <div class="icp-section">
+            <div class="icp-section-title">CTV Propensity Dimensions</div>
+            ${dimCardsHtml}
+        </div>
+
+        ${snapHtml ? `<div class="icp-section">
+            <div class="icp-section-title">Company Snapshot</div>
+            <div class="icp-snapshot">${snapHtml}</div>
+        </div>` : ''}
+
+        ${risksHtml ? `<div class="icp-section">
+            <div class="icp-section-title">Key Risks</div>
+            <ul class="icp-risks">${risksHtml}</ul>
+        </div>` : ''}
+
+        ${methHtml}
+    </div>`;
+
+    const pane = document.getElementById('pane-detail-body');
+    if (pane) pane.scrollTop = 0;
+    focusPane('pane-detail');
+}
+
+async function rescoreProspect(encodedName) {
+    const companyName = decodeURIComponent(encodedName);
+    const btn = document.getElementById('icp-rescore-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.innerHTML = '&#8635; Scoring...';
+    btn.style.opacity = '0.6';
+
+    // Get website from existing data
+    const p = _prospectsByName[companyName];
+    const website = p?.ua_fit?.company_snapshot?.website || '';
+
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/ua-fit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ website_url: website }),
+        });
+        if (!resp.ok) throw new Error('Re-score failed');
+        // Reload campaigns and re-open this company
+        await loadCampaigns();
+        openProspectDetail(companyName);
+    } catch (e) {
+        console.error('Re-score failed:', e);
+        btn.innerHTML = '&#8635; Failed — retry';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+    }
+}
+
+// ===================== PIPELINE MAP =====================
+let _pipelineState = {
+    niche: '', companies: [],
+    companyStatus: {}, companyScores: {}, companyAnalysisProgress: {},
+    phase: 'idle',
+};
+
+function _safeName(name) {
+    return name.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+// Responsive: focus a single pane on narrow screens
+function focusPane(paneId) {
+    if (window.innerWidth >= 1440) return; // no-op on wide screens
+    document.querySelectorAll('.prospect-pane').forEach(p => p.classList.remove('pane-focused'));
+    const target = document.getElementById(paneId);
+    if (target) target.classList.add('pane-focused');
+}
+
+// Pane header clicks for responsive expand
+document.addEventListener('click', function(e) {
+    const header = e.target.closest('.prospect-pane .pane-header');
+    if (!header) return;
+    const pane = header.closest('.prospect-pane');
+    if (pane && !pane.classList.contains('pane-focused') && window.innerWidth < 1440) {
+        focusPane(pane.id);
+    }
+});
+
+// Remove pane-focused on resize above breakpoint
+window.addEventListener('resize', function() {
+    if (window.innerWidth >= 1440) {
+        document.querySelectorAll('.prospect-pane.pane-focused').forEach(p => p.classList.remove('pane-focused'));
+    }
+});
+
+// Pane resize handles — drag to resize adjacent panes
+(function initPaneResizers() {
+    document.querySelectorAll('.pane-resize-handle').forEach(handle => {
+        handle.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            const leftPane = document.getElementById(handle.dataset.left);
+            const rightPane = document.getElementById(handle.dataset.right);
+            if (!leftPane || !rightPane) return;
+
+            handle.classList.add('dragging');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+
+            const startX = e.clientX;
+            const startLeftW = leftPane.getBoundingClientRect().width;
+            const startRightW = rightPane.getBoundingClientRect().width;
+
+            function onMove(e2) {
+                const dx = e2.clientX - startX;
+                const newLeft = Math.max(200, startLeftW + dx);
+                const newRight = Math.max(200, startRightW - dx);
+                // Only apply if both stay above minimum
+                if (newLeft >= 200 && newRight >= 200) {
+                    leftPane.style.width = newLeft + 'px';
+                    leftPane.style.flex = '0 0 ' + newLeft + 'px';
+                    leftPane.style.minWidth = '0';
+                    rightPane.style.width = newRight + 'px';
+                    rightPane.style.flex = '0 0 ' + newRight + 'px';
+                    rightPane.style.minWidth = '0';
+                }
+            }
+
+            function onUp() {
+                handle.classList.remove('dragging');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+            }
+
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+    });
+})();
+
+function _scrollPipelineBottom() {
+    const pane = document.getElementById('pane-execution-body');
+    if (pane) pane.scrollTo({ top: pane.scrollHeight, behavior: 'smooth' });
+}
+
+function initPipelineMap(niche) {
+    const emptyEl = document.getElementById('pane-execution-empty');
+    const mapEl = document.getElementById('pipeline-map');
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (mapEl) mapEl.style.display = 'block';
+
+    _pipelineState = {
+        niche, companies: [],
+        companyStatus: {}, companyScores: {}, companyAnalysisProgress: {},
+        phase: 'discovering',
+    };
+
+    mapEl.innerHTML = `
+        <div class="pipeline-node running" id="pm-input">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon">&#128269;</div>
+                <div class="pipeline-node-label">Discovery</div>
+            </div>
+            <div class="pipeline-node-meta">
+                Niche: <strong style="color:var(--text-primary)">${escHtml(niche)}</strong>
+            </div>
+        </div>
+        <div class="pipeline-connector" id="pm-conn-discovery"></div>
+        <div class="pipeline-node running" id="pm-discovery">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon"><div class="company-card-spinner"></div></div>
+                <div class="pipeline-node-label">Searching...</div>
+            </div>
+            <div class="pipeline-node-meta" id="pm-discovery-meta">Querying web, news, Reddit...</div>
+        </div>
+    `;
+}
+
+function handlePipelineSSE(ev) {
+    const mapEl = document.getElementById('pipeline-map');
+    if (!mapEl) return;
+
+    if (ev.type === 'status') {
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) metaEl.textContent = ev.text;
+
+    } else if (ev.type === 'discovered') {
+        const companies = ev.companies || [];
+        _pipelineState.companies = companies;
+        _pipelineState.phase = 'scoring';
+        if (ev.campaign_id) {
+            _pipelineState.campaignId = ev.campaign_id;
+            _currentRunCampaignId = ev.campaign_id;
+            activeCampaignId = ev.campaign_id;
+            // Immediately show new campaign in sidebar so it doesn't look merged with old one
+            loadCampaigns();
+        }
+
+        // Mark discovery as done
+        const discNode = document.getElementById('pm-discovery');
+        if (discNode) {
+            discNode.classList.remove('running');
+            discNode.classList.add('done');
+            discNode.querySelector('.pipeline-node-icon').innerHTML = '&#10003;';
+            discNode.querySelector('.pipeline-node-label').textContent = `Found ${companies.length} companies`;
+        }
+        const discConn = document.getElementById('pm-conn-discovery');
+        if (discConn) discConn.classList.add('done');
+
+        // Mark input node as done
+        const inputNode = document.getElementById('pm-input');
+        if (inputNode) { inputNode.classList.remove('running'); inputNode.classList.add('done'); }
+
+        // Add connector + company grid
+        mapEl.insertAdjacentHTML('beforeend', `
+            <div class="pipeline-connector done"></div>
+            <div class="pipeline-node done" style="border-color:rgba(168,85,247,0.2);padding:12px">
+                <div class="pipeline-node-header">
+                    <div class="pipeline-node-icon" style="background:rgba(168,85,247,0.15)">&#127919;</div>
+                    <div class="pipeline-node-label" style="color:var(--purple)">Scoring ${companies.length} companies</div>
+                </div>
+            </div>
+            <div class="pipeline-connector"></div>
+            <div class="pipeline-company-grid" id="pm-grid"></div>
+        `);
+
+        // Populate company cards
+        const gridEl = document.getElementById('pm-grid');
+        gridEl.innerHTML = companies.map((c, i) => {
+            const name = c.name || '?';
+            _pipelineState.companyStatus[name] = 'pending';
+            return `<div class="company-card pending" id="pm-card-${_safeName(name)}" data-company-name="${escHtml(name)}" style="animation-delay:${i * 50}ms">
+                <div class="company-card-header">
+                    <div class="company-card-name">${escHtml(name)}</div>
+                    <div class="company-card-ring">—</div>
+                </div>
+                <div class="company-card-meta">${escHtml(c.description || c.estimated_size || '')}</div>
+            </div>`;
+        }).join('');
+        setTimeout(_scrollPipelineBottom, 100);
+
+    } else if (ev.type === 'validating') {
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) metaEl.textContent = `Validating ${ev.total} company websites...`;
+
+    } else if (ev.type === 'validated') {
+        const name = ev.company;
+        const card = document.getElementById('pm-card-' + _safeName(name));
+        if (card) {
+            if (!ev.valid) {
+                card.className = 'company-card error';
+                card.style.opacity = '0.45';
+                const meta = card.querySelector('.company-card-meta');
+                if (meta) meta.innerHTML = `<span style="color:var(--red);font-size:10px">${escHtml(ev.reason || 'Invalid')}</span>`;
+            } else if (ev.limited) {
+                card.className = 'company-card limited';
+                const meta = card.querySelector('.company-card-meta');
+                if (meta) meta.innerHTML = `<span class="limited-badge">Limited Data</span> <span style="font-size:10px;color:var(--text-muted)">${escHtml(ev.reason || '')}</span>`;
+            }
+        }
+
+    } else if (ev.type === 'validation_complete') {
+        // Insert validation summary node between discovery and scoring
+        const conn = document.getElementById('pm-conn-discovery');
+        if (conn) {
+            conn.insertAdjacentHTML('afterend', `
+                <div class="pipeline-node done" id="pm-validation" style="padding:10px 14px">
+                    <div class="pipeline-node-header">
+                        <div class="pipeline-node-icon" style="font-size:14px">&#10003;</div>
+                        <div class="pipeline-node-label">Validation</div>
+                    </div>
+                    <div class="pipeline-node-meta">${ev.valid_count} valid${ev.limited_count ? ` (${ev.limited_count} limited)` : ''} &mdash; ${ev.rejected_count} rejected</div>
+                </div>
+                <div class="pipeline-connector done"></div>
+            `);
+        }
+
+    } else if (ev.type === 'analyzing') {
+        // Fires at start of score_ua_fit() — BEFORE analyses run — so card + rows exist
+        const name = ev.company;
+        _pipelineState.companyStatus[name] = 'scoring';
+        _pipelineState.companyAnalysisProgress[name] = {};
+        const card = document.getElementById('pm-card-' + _safeName(name));
+        if (card) {
+            card.className = 'company-card scoring';
+            const ring = card.querySelector('.company-card-ring');
+            if (ring) ring.innerHTML = '<div class="company-card-spinner"></div>';
+            // Build full-name analysis rows
+            const analyses = ev.has_website
+                ? [['techstack','Tech Stack'],['financial','Financial'],['brand_ad','Brand & Ad Intel']]
+                : [['financial','Financial'],['brand_ad','Brand & Ad Intel']];
+            const rowsHtml = analyses.map(([atype, label]) =>
+                `<div class="analysis-row">
+                    <div class="analysis-row-icon" id="pm-icon-${_safeName(name)}-${atype}"></div>
+                    <span class="analysis-row-name">${label}</span>
+                    <span class="analysis-row-status" id="pm-status-${_safeName(name)}-${atype}">Queued</span>
+                </div>`
+            ).join('');
+            card.insertAdjacentHTML('beforeend',
+                `<div class="analysis-list" id="pm-list-${_safeName(name)}">${rowsHtml}</div>`);
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+    } else if (ev.type === 'scoring') {
+        // LLM scoring starting — analyses are done
+        const name = ev.company;
+        const card = document.getElementById('pm-card-' + _safeName(name));
+        if (card) {
+            const ring = card.querySelector('.company-card-ring');
+            if (ring) ring.title = 'AI scoring in progress...';
+        }
+
+    } else if (ev.type === 'analysis_start') {
+        const name = ev.company;
+        const atype = ev.analysis_type;
+        if (!_pipelineState.companyAnalysisProgress[name]) {
+            _pipelineState.companyAnalysisProgress[name] = {};
+        }
+        _pipelineState.companyAnalysisProgress[name][atype] = 'running';
+        const icon = document.getElementById(`pm-icon-${_safeName(name)}-${atype}`);
+        const status = document.getElementById(`pm-status-${_safeName(name)}-${atype}`);
+        if (icon) icon.className = 'analysis-row-icon running';
+        if (status) { status.className = 'analysis-row-status running'; status.textContent = 'Running...'; }
+
+    } else if (ev.type === 'analysis_done') {
+        const name = ev.company;
+        const atype = ev.analysis_type;
+        const state = ev.reused ? 'cached' : (ev.report_path ? 'done' : 'error');
+        const symbol = state === 'done' ? '✓' : (state === 'cached' ? '↩' : '!');
+        const statusText = ev.reused ? '↩ Cached' : (ev.report_path ? 'Done' : 'Failed');
+        if (_pipelineState.companyAnalysisProgress[name]) {
+            _pipelineState.companyAnalysisProgress[name][atype] = state;
+        }
+        const icon = document.getElementById(`pm-icon-${_safeName(name)}-${atype}`);
+        const status = document.getElementById(`pm-status-${_safeName(name)}-${atype}`);
+        if (icon) { icon.className = `analysis-row-icon ${state}`; icon.textContent = symbol; }
+        if (status) { status.className = `analysis-row-status ${state}`; status.textContent = statusText; }
+
+    } else if (ev.type === 'scored') {
+        const name = ev.company;
+        _pipelineState.companyStatus[name] = 'scored';
+        _pipelineState.companyScores[name] = { score: ev.overall_score, label: ev.label };
+        // Pre-fetch full prospect data so Pane 4 clicks work immediately
+        fetch('/api/ua-targets').then(r => r.ok ? r.json() : []).then(targets => {
+            const t = targets.find(x => x.company_name === name);
+            if (t) _prospectsByName[name] = t;
+        }).catch(() => {});
+        const card = document.getElementById('pm-card-' + _safeName(name));
+        if (card) {
+            const color = _dimColor(ev.overall_score);
+            card.className = 'company-card scored';
+            card.style.borderColor = color;
+            const ring = card.querySelector('.company-card-ring');
+            if (ring) {
+                ring.style.borderColor = color;
+                ring.style.color = color;
+                ring.textContent = ev.overall_score;
+            }
+            const meta = card.querySelector('.company-card-meta');
+            if (meta) meta.innerHTML = `<span style="color:${color}">${escHtml(ev.label)}</span>`;
+            // Keep the vertical analysis list as-is (rows already updated with Done/Cached status)
+        }
+        // Real-time Pane 3 update
+        _updateLiveSummary(ev);
+
+    } else if (ev.type === 'score_error') {
+        const name = ev.company;
+        _pipelineState.companyStatus[name] = 'error';
+        const card = document.getElementById('pm-card-' + _safeName(name));
+        if (card) {
+            card.className = 'company-card error';
+            const ring = card.querySelector('.company-card-ring');
+            if (ring) { ring.textContent = '!'; ring.style.borderColor = 'var(--red)'; ring.style.color = 'var(--red)'; }
+            const meta = card.querySelector('.company-card-meta');
+            if (meta) meta.innerHTML = `<span style="color:var(--red)">Error</span>`;
+        }
+
+    } else if (ev.type === 'complete') {
+        _pipelineState.phase = 'complete';
+        const mapEl2 = document.getElementById('pipeline-map');
+        if (mapEl2) {
+            mapEl2.insertAdjacentHTML('beforeend', `
+                <div class="pipeline-connector done"></div>
+                <div class="pipeline-complete-node">
+                    <span class="check">&#10003;</span>
+                    Pipeline complete &mdash; ${ev.total_scored} companies scored
+                </div>
+            `);
+            setTimeout(_scrollPipelineBottom, 100);
+        }
+        // Set Pane 2 badge to Complete
+        const badge = document.getElementById('pane-execution-status');
+        if (badge) { badge.textContent = 'Complete'; badge.className = 'pane-status-badge complete'; }
+
+        // Reload campaigns, update sidebar, render full Pane 3 summary (replaces live list)
+        const cid = ev.campaign_id || _pipelineState.campaignId;
+        if (cid) {
+            loadCampaigns().then(() => {
+                activeCampaignId = cid;
+                renderCampaignSidebar();
+                renderSummaryPane(cid);
+                // Highlight active sidebar item
+                document.querySelectorAll('.search-query-item').forEach(el => {
+                    const id = parseInt(el.dataset.campaignId, 10);
+                    el.classList.toggle('active', id === cid);
+                });
+            });
+        }
+
+    } else if (ev.type === 'error') {
+        const mapEl2 = document.getElementById('pipeline-map');
+        if (mapEl2) {
+            mapEl2.insertAdjacentHTML('beforeend', `
+                <div class="pipeline-connector"></div>
+                <div class="pipeline-node" style="border-color:var(--red);color:var(--red)">
+                    <div class="pipeline-node-header">
+                        <div class="pipeline-node-icon" style="background:rgba(239,68,68,0.15)">&#9888;</div>
+                        <div class="pipeline-node-label" style="color:var(--red)">Error</div>
+                    </div>
+                    <div class="pipeline-node-meta" style="color:var(--red)">${escHtml(ev.text)}</div>
+                </div>
+            `);
+        }
+        const badge = document.getElementById('pane-execution-status');
+        if (badge) { badge.textContent = 'Error'; badge.className = 'pane-status-badge error'; }
+    }
+}
+
+// Pipeline map company card clicks
+document.getElementById('pipeline-map').addEventListener('click', function(e) {
+    const card = e.target.closest('.company-card.scored');
+    if (!card) return;
+    const name = card.dataset.companyName;
+    if (name) openProspectDetail(name);
+});
+
+// Result row clicks in summary pane (delegated to handle apostrophes/special chars in names)
+document.getElementById('pane-summary-content').addEventListener('click', function(e) {
+    const row = e.target.closest('.cv-result-row');
+    if (!row) return;
+    const name = row.dataset.company;
+    if (name) openProspectDetail(name);
+});
+
+function runProspectPipeline() {
+    if (_prospectPipelineRunning) return;
+    const nicheInput = document.getElementById('prospect-niche-input');
+    const niche = (nicheInput.value || '').trim();
+    if (!niche) {
+        nicheInput.classList.add('shake');
+        nicheInput.placeholder = 'Type a niche first, e.g. "DTC beauty brands"';
+        setTimeout(() => nicheInput.classList.remove('shake'), 600);
+        nicheInput.focus();
+        return;
+    }
+    const topN = parseInt(document.getElementById('prospect-topn').value) || 10;
+
+    _prospectPipelineRunning = true;
+    _currentRunCampaignId = null; // will be set on 'discovered' event
+    const btn = document.getElementById('prospect-run-btn');
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+
+    // Set Pane 2 badge to Running
+    const badge = document.getElementById('pane-execution-status');
+    if (badge) { badge.textContent = 'Running'; badge.className = 'pane-status-badge running'; }
+
+    // Clear Panes 3 & 4
+    clearDetailPane();
+    const sumContent = document.getElementById('pane-summary-content');
+    const sumEmpty = document.getElementById('pane-summary-empty');
+    if (sumContent) { sumContent.style.display = 'none'; sumContent.innerHTML = ''; }
+    if (sumEmpty) sumEmpty.style.display = 'block';
+
+    // Init pipeline map in Pane 2
+    initPipelineMap(niche);
+    focusPane('pane-execution');
+
+    fetch('/api/ua-pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ niche, top_n: topN }),
+    }).then(async resp => {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const ev = JSON.parse(line.slice(6));
+                    handlePipelineSSE(ev);
+                } catch {}
+            }
+        }
+    }).catch(e => {
+        console.error('Pipeline error:', e);
+        handlePipelineSSE({ type: 'error', text: 'Connection error: ' + e.message });
+    }).finally(() => {
+        _prospectPipelineRunning = false;
+        _currentRunCampaignId = null;
+        btn.disabled = false;
+        btn.textContent = 'Discover';
+        loadCampaigns();
+    });
+}
+
+// ===================== ICP PROFILES =====================
+let allIcpProfiles = [];
+let activeIcpProfileId = null;
+let _icpWizardStep = 0;
+let _icpWizardMode = 'create'; // 'create' or 'edit'
+let _icpEditData = null; // populated in edit mode
+let _icpGeneratedConfig = null; // config from LLM generation
+let _icpCustomerType = ''; // 'B2B', 'B2C', 'Both'
+
+const _INDUSTRY_TREE = {
+    B2B: {
+        'Technology':              ['SaaS', 'Cybersecurity', 'AI / ML', 'DevTools', 'Cloud / Infra', 'E-commerce Platform', 'Other'],
+        'Finance & Banking':       ['Banking / Sell Side', 'Asset Mgmt / Buy Side', 'Insurance', 'Payments / Fintech', 'Other'],
+        'Professional Services':   ['Strategy Consulting', 'IT Consulting / SI', 'Legal', 'Accounting', 'Staffing / Recruiting', 'Other'],
+        'Marketing & Advertising': ['Agency', 'Brand / In-house', 'AdTech', 'MarTech', 'PR / Communications', 'Other'],
+        'Healthcare':              ['Pharma / Biotech', 'MedTech', 'Health IT', 'Providers', 'Payers', 'Other'],
+        'Manufacturing':           ['Automotive', 'Aerospace', 'Electronics', 'Industrial', 'Other'],
+        'Real Estate':             ['Commercial', 'Residential', 'PropTech', 'Other'],
+        'Education':               ['EdTech', 'Higher Ed', 'K-12', 'Corporate Training', 'Other'],
+    },
+    B2C: {
+        'Retail & E-commerce':     ['Fashion / Apparel', 'Beauty / Personal Care', 'Home Goods', 'Electronics', 'Other'],
+        'Food & Beverage':         ['Restaurants / QSR', 'CPG Food', 'Beverage', 'D2C Food', 'Other'],
+        'Health & Wellness':       ['Fitness', 'Supplements', 'Mental Health', 'Telehealth', 'Other'],
+        'Entertainment & Media':   ['Streaming', 'Gaming', 'Publishing', 'Events', 'Other'],
+        'Travel & Hospitality':    ['Hotels', 'Airlines', 'Tourism', 'Other'],
+        'Financial Services':      ['Banking', 'Insurance', 'Investing / Wealth', 'Lending', 'Other'],
+    },
+};
+// "Both" merges both trees
+_INDUSTRY_TREE.Both = { ..._INDUSTRY_TREE.B2B, ..._INDUSTRY_TREE.B2C };
+
+// Niche-detail placeholders based on sub-industry
+const _NICHE_HINTS = {
+    'SaaS': 'e.g. HR Tech, payroll automation, CRM',
+    'Cybersecurity': 'e.g. endpoint security, identity management',
+    'AI / ML': 'e.g. computer vision, NLP, MLOps',
+    'DevTools': 'e.g. CI/CD, observability, testing',
+    'Banking / Sell Side': 'e.g. investment banking, commercial lending',
+    'Asset Mgmt / Buy Side': 'e.g. hedge funds, PE, wealth management',
+    'Payments / Fintech': 'e.g. payment processing, neobanks, BNPL',
+    'Strategy Consulting': 'e.g. MBB, boutique strategy firms',
+    'IT Consulting / SI': 'e.g. Big 4, systems integrators',
+    'Agency': 'e.g. creative agency, media buying, performance marketing',
+    'Brand / In-house': 'e.g. demand gen, growth marketing teams',
+    'AdTech': 'e.g. DSP, SSP, CTV advertising',
+    'MarTech': 'e.g. email platforms, CDPs, analytics',
+    'Fashion / Apparel': 'e.g. DTC fashion, streetwear, luxury',
+    'Beauty / Personal Care': 'e.g. skincare, cosmetics, clean beauty',
+    'Restaurants / QSR': 'e.g. fast-casual chains, ghost kitchens',
+    'CPG Food': 'e.g. snack brands, organic food, frozen meals',
+    'Fitness': 'e.g. gym chains, at-home fitness, wearables',
+};
+
+function _renderIndustryChips(containerId, items, savedVal, singleSelect) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const onclick = singleSelect
+        ? `this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected');_onIndustrySelect('${containerId}',this.textContent)`
+        : `this.classList.toggle('selected')`;
+    el.innerHTML = items.map(s => {
+        const sel = s === savedVal ? ' selected' : '';
+        return `<div class="icp-chip${sel}" onclick="${onclick}">${s}</div>`;
+    }).join('');
+}
+
+function _onIndustrySelect(containerId, value) {
+    if (containerId === 'icp-q-customer-type') {
+        _icpCustomerType = value;
+        // Re-render industry chips
+        const industries = Object.keys(_INDUSTRY_TREE[value] || {});
+        industries.push('Other');
+        _renderIndustryChips('icp-q-industry', industries, '', true);
+        document.getElementById('icp-q-sub-industry').innerHTML = '';
+        document.getElementById('icp-q-niche-detail').placeholder = 'e.g. anything more specific about your area';
+        _updateAdaptiveSteps();
+    } else if (containerId === 'icp-q-industry') {
+        // Re-render sub-industry chips
+        const tree = _INDUSTRY_TREE[_icpCustomerType] || _INDUSTRY_TREE.B2B;
+        const subs = tree[value] || ['Other'];
+        _renderIndustryChips('icp-q-sub-industry', subs, '', true);
+        document.getElementById('icp-q-niche-detail').placeholder = 'e.g. anything more specific about your area';
+    } else if (containerId === 'icp-q-sub-industry') {
+        const hint = _NICHE_HINTS[value] || 'e.g. anything more specific about your area';
+        document.getElementById('icp-q-niche-detail').placeholder = hint;
+    }
+}
+
+function _updateAdaptiveSteps() {
+    // Show/hide B2B vs B2C content in steps 2 and 3
+    const isB2C = _icpCustomerType === 'B2C';
+    document.querySelectorAll('.icp-b2b-content').forEach(el => el.style.display = isB2C ? 'none' : '');
+    document.querySelectorAll('.icp-b2c-content').forEach(el => el.style.display = isB2C ? '' : 'none');
+}
+
+async function loadIcpProfiles() {
+    try {
+        const resp = await fetch('/api/icp-profiles');
+        if (resp.ok) allIcpProfiles = await resp.json();
+        else allIcpProfiles = [];
+    } catch (e) { console.error('loadIcpProfiles failed:', e); allIcpProfiles = []; }
+
+    const active = allIcpProfiles.find(p => p.is_active);
+    activeIcpProfileId = active ? active.id : null;
+
+    // Update indicator name
+    const nameEl = document.getElementById('icp-indicator-name');
+    nameEl.textContent = active ? active.name : 'No profile';
+    nameEl.dataset.profileId = active ? active.id : '';
+
+    // Build popover list
+    const listEl = document.getElementById('icp-popover-list');
+    if (allIcpProfiles.length) {
+        listEl.innerHTML = allIcpProfiles.map(p =>
+            `<div class="icp-popover-item${p.is_active ? ' active' : ''}" onclick="closeIcpPopover(); switchIcpProfile(${p.id});">` +
+            `<span class="icp-popover-dot"></span>` +
+            `<span class="icp-popover-item-name">${escHtml(p.name)}${p.is_default ? ' (default)' : ''}</span></div>`
+        ).join('');
+    } else {
+        listEl.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text-muted);text-align:center;">No ICP profiles yet</div>';
+    }
+
+    // Render niche suggestions from active profile config
+    _renderNicheSuggestions(active);
+}
+
+function _renderNicheSuggestions(profile) {
+    const container = document.getElementById('niche-suggestions');
+    if (!container) return;
+    const niches = profile?.config?.suggested_niches || [];
+    if (!niches.length) { container.style.display = 'none'; return; }
+    container.style.display = '';
+    container.innerHTML = '<span class="niche-suggestion-label">Try:</span> ' +
+        niches.map(n => `<span class="niche-chip" onclick="document.getElementById('prospect-niche-input').value='${escHtml(n)}';this.parentElement.style.display='none'">${escHtml(n)}</span>`).join('');
+}
+
+async function switchIcpProfile(id) {
+    if (!id) return;
+    id = parseInt(id);
+    if (id === activeIcpProfileId) return;
+    try {
+        await fetch(`/api/icp-profiles/${id}/activate`, { method: 'POST' });
+        activeIcpProfileId = id;
+        await loadIcpProfiles();
+        await loadCampaigns();
+        // Clear all panes
+        _resetAllPanes();
+    } catch (e) { console.error('switchIcpProfile failed:', e); }
+}
+
+function toggleIcpPopover() {
+    document.getElementById('icp-indicator-wrap').classList.toggle('open');
+}
+function closeIcpPopover() {
+    document.getElementById('icp-indicator-wrap').classList.remove('open');
+}
+// Close popover on outside click
+document.addEventListener('click', function(e) {
+    const wrap = document.getElementById('icp-indicator-wrap');
+    if (wrap && !wrap.contains(e.target)) closeIcpPopover();
+});
+
+function togglePreRevenue() {
+    const wrap = document.getElementById('icp-best-customers-wrap');
+    const label = document.getElementById('icp-best-customers-label');
+    const check = document.getElementById('icp-pre-revenue-check');
+    const isOn = wrap.dataset.preRevenue === 'true';
+    wrap.dataset.preRevenue = isOn ? 'false' : 'true';
+    label.textContent = isOn ? "Describe 2-3 of your best customers, or the type of company you'd love to sell to" : 'Describe your dream customers';
+    check.innerHTML = isOn ? '' : '&#10003; ';
+}
+
+function openIcpWizard() {
+    _icpWizardMode = 'create';
+    _icpWizardStep = 0;
+    _icpEditData = null;
+    _icpGeneratedConfig = null;
+    _renderIcpWizard();
+}
+
+function openIcpEditor() {
+    const active = allIcpProfiles.find(p => p.id === activeIcpProfileId);
+    if (!active) return;
+    _icpWizardMode = 'edit';
+    _icpWizardStep = 0;
+    _icpEditData = active;
+    _icpGeneratedConfig = active.config || null;
+    _renderIcpWizard();
+}
+
+function _renderIcpWizard() {
+    // Remove existing wizard if any
+    const existing = document.querySelector('.icp-wizard-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'icp-wizard-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeIcpWizard(); });
+
+    const isEdit = _icpWizardMode === 'edit';
+    const sa = isEdit && _icpEditData?.survey_answers ? _icpEditData.survey_answers : {};
+    const title = isEdit ? 'Edit ICP Profile' : 'New ICP Profile';
+
+    overlay.innerHTML = `<div class="icp-wizard">
+        <div class="icp-wizard-header">
+            <h2>${title}</h2>
+            <button class="icp-wizard-close" onclick="closeIcpWizard()">&times;</button>
+        </div>
+        <div class="icp-wizard-steps">
+            <div class="icp-step-dot active"></div>
+            <div class="icp-step-dot"></div>
+            <div class="icp-step-dot"></div>
+            <div class="icp-step-dot"></div>
+            <div class="icp-step-dot"></div>
+        </div>
+        <div class="icp-wizard-body">
+            <!-- Step 0: Your Business (THE FUNNEL) -->
+            <div class="icp-wizard-step active" data-step="0">
+                <h3>Your Business</h3>
+                <div class="step-desc">Let's narrow things down — a few clicks and we'll know your world.</div>
+                <div class="icp-field">
+                    <label>Who do you sell to?</label>
+                    <div class="icp-chips" id="icp-q-customer-type">
+                        ${['B2B', 'B2C', 'Both'].map(s => {
+                            const sel = sa.customer_type === s ? ' selected' : '';
+                            const desc = s === 'B2B' ? 'Businesses' : s === 'B2C' ? 'Consumers' : 'Both';
+                            return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected');_onIndustrySelect('icp-q-customer-type','${s}')">${s} <span style="opacity:.5;font-size:10px">(${desc})</span></div>`;
+                        }).join('')}
+                    </div>
+                </div>
+                <div class="icp-field">
+                    <label>What industry are you in?</label>
+                    <div class="icp-chips" id="icp-q-industry"></div>
+                </div>
+                <div class="icp-field">
+                    <label>What's your specific area?</label>
+                    <div class="icp-chips" id="icp-q-sub-industry"></div>
+                </div>
+                <div class="icp-field">
+                    <label>Anything more specific?</label>
+                    <div class="field-hint">Optional — helps the AI generate a more precise profile.</div>
+                    <input type="text" id="icp-q-niche-detail" placeholder="e.g. anything more specific about your area" value="${escHtml(sa.niche_detail || '')}">
+                </div>
+            </div>
+
+            <!-- Step 1: Your Offer -->
+            <div class="icp-wizard-step" data-step="1">
+                <h3>Your Offer</h3>
+                <div class="step-desc">No jargon needed — just tell us what you do.</div>
+                <div class="icp-field">
+                    <label>What does your company do?</label>
+                    <div class="field-hint">Describe it like you would to a friend.</div>
+                    <textarea id="icp-q-product" placeholder="e.g. We help restaurants manage their online orders and delivery from one dashboard...">${escHtml(sa.product || '')}</textarea>
+                </div>
+                <div class="icp-field">
+                    <label>What problem does it solve?</label>
+                    <div class="field-hint">What was happening before they used you? What changes after?</div>
+                    <textarea id="icp-q-problem" placeholder="e.g. They were juggling 5 different tablets for UberEats, DoorDash, etc. and losing orders...">${escHtml(sa.problem || '')}</textarea>
+                </div>
+            </div>
+
+            <!-- Step 2: Your Customers (B2B + B2C adaptive) -->
+            <div class="icp-wizard-step" data-step="2">
+                <h3>Your Customers</h3>
+                <div class="step-desc">Help us understand who you sell to — or want to sell to.</div>
+
+                <!-- B2B content -->
+                <div class="icp-b2b-content">
+                    <div class="icp-field" id="icp-best-customers-wrap" data-pre-revenue="${sa.pre_revenue ? 'true' : 'false'}">
+                        <label id="icp-best-customers-label">${sa.pre_revenue ? 'Describe your dream customers' : 'Describe 2-3 of your best customers or dream customers'}</label>
+                        <textarea id="icp-q-best-customers" placeholder="e.g. Glossier, Warby Parker — DTC brands doing $5-50M that are scaling their ad spend">${escHtml(sa.best_customers || '')}</textarea>
+                        <div class="icp-escape-hatch" onclick="togglePreRevenue()">
+                            <span id="icp-pre-revenue-check">${sa.pre_revenue ? '&#10003; ' : ''}</span>I haven't sold yet / I'm pre-revenue
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>How big are they typically?</label>
+                        <div class="icp-chips" id="icp-q-sizes">
+                            ${['Startup (<$1M)', 'Small biz ($1M-$10M)', 'Mid-market ($10M-$200M)', 'Enterprise ($200M+)', 'Not sure'].map(s => {
+                                const sel = (sa.sizes || []).includes(s) ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.classList.toggle('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>What do they have in common?</label>
+                        <div class="icp-chips" id="icp-q-commonalities">
+                            ${['Growing fast', 'VC-backed', 'Hiring aggressively', 'Modernizing tech stack', 'Heavy ad spend', 'Compliance-driven', 'Digital-native'].map(s => {
+                                const sel = (sa.commonalities || []).includes(s) ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.classList.toggle('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                        <textarea id="icp-q-commonalities-other" placeholder="Anything else they have in common?" style="margin-top:8px;min-height:40px">${escHtml(sa.commonalities_other || '')}</textarea>
+                    </div>
+                </div>
+
+                <!-- B2C content (hidden by default) -->
+                <div class="icp-b2c-content" style="display:none">
+                    <div class="icp-field">
+                        <label>Describe your ideal customer</label>
+                        <textarea id="icp-q-ideal-consumer" placeholder="e.g. Health-conscious millennials who shop online and care about ingredients...">${escHtml(sa.ideal_consumer || '')}</textarea>
+                    </div>
+                    <div class="icp-field">
+                        <label>What's your typical price point?</label>
+                        <div class="icp-chips" id="icp-q-price-point">
+                            ${['Under $25', '$25 - $100', '$100 - $500', '$500+', 'Varies'].map(s => {
+                                const sel = sa.price_point === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>Where do they buy?</label>
+                        <div class="icp-chips" id="icp-q-where-they-buy">
+                            ${['Your website', 'Amazon / marketplace', 'Retail stores', 'Subscription', 'App', 'Other'].map(s => {
+                                const sel = (sa.where_they_buy || []).includes(s) ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.classList.toggle('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>What do they have in common?</label>
+                        <div class="icp-chips" id="icp-q-consumer-traits">
+                            ${['Health-conscious', 'Premium buyers', 'Budget-conscious', 'Trend followers', 'Eco-conscious', 'Tech-savvy', 'Young adults (18-35)', 'Parents'].map(s => {
+                                const sel = (sa.consumer_traits || []).includes(s) ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.classList.toggle('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: How You Sell (B2B + B2C adaptive) -->
+            <div class="icp-wizard-step" data-step="3">
+                <h3>How You Sell</h3>
+                <div class="step-desc">Last step — tell us about your sales process.</div>
+
+                <!-- B2B content -->
+                <div class="icp-b2b-content">
+                    <div class="icp-field">
+                        <label>How do customers buy from you?</label>
+                        <div class="icp-chips" id="icp-q-how-they-buy">
+                            ${['Self-serve', 'Demos / sales calls', 'Enterprise sales', 'Partners / referrals', 'Mix', 'Haven\'t sold yet'].map(s => {
+                                const sel = sa.how_they_buy === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>Typical deal size?</label>
+                        <div class="icp-chips" id="icp-q-deal-size">
+                            ${['Under $5K', '$5K - $25K', '$25K - $100K', '$100K - $500K', '$500K+', 'Not sure'].map(s => {
+                                const sel = sa.deal_size === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>How long to close a deal?</label>
+                        <div class="icp-chips" id="icp-q-sales-cycle">
+                            ${['Days', 'Weeks', 'Months', '6+ months', 'Not sure'].map(s => {
+                                const sel = sa.sales_cycle === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- B2C content (hidden by default) -->
+                <div class="icp-b2c-content" style="display:none">
+                    <div class="icp-field">
+                        <label>How do customers find you?</label>
+                        <div class="icp-chips" id="icp-q-acquisition-channels">
+                            ${['Social media', 'Search / SEO', 'Word of mouth', 'Paid ads', 'Retail / in-store', 'Influencers', 'Other'].map(s => {
+                                const sel = (sa.acquisition_channels || []).includes(s) ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.classList.toggle('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>How often do they buy?</label>
+                        <div class="icp-chips" id="icp-q-purchase-frequency">
+                            ${['One-time', 'Monthly', 'Quarterly', 'Yearly', 'Varies'].map(s => {
+                                const sel = sa.purchase_frequency === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>Average order value?</label>
+                        <div class="icp-chips" id="icp-q-avg-order-value">
+                            ${['Under $25', '$25 - $100', '$100 - $500', '$500+', 'Not sure'].map(s => {
+                                const sel = sa.avg_order_value === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Review -->
+            <div class="icp-wizard-step" data-step="4">
+                <div id="icp-review-content">
+                    ${_icpGeneratedConfig ? _renderReviewStep(_icpGeneratedConfig, isEdit ? _icpEditData.name : '') : `
+                    <h3>Generate ICP Config</h3>
+                    <div class="step-desc">We'll use AI to generate your scoring dimensions, weights, and rubrics from your answers.</div>
+                    <div style="text-align:center;padding:20px 0">
+                        <button class="icp-wizard-btn-next" onclick="icpWizardGenerate()" id="icp-generate-btn">Generate ICP Config</button>
+                    </div>`}
+                </div>
+            </div>
+        </div>
+        <div class="icp-wizard-nav">
+            <button class="icp-wizard-btn-back" onclick="icpWizardBack()" id="icp-back-btn" style="visibility:hidden">Back</button>
+            <div id="icp-nav-right">
+                <button class="icp-wizard-btn-next" onclick="icpWizardNext()" id="icp-next-btn">Next</button>
+            </div>
+        </div>
+    </div>`;
+
+    document.body.appendChild(overlay);
+    _updateWizardStepUI();
+
+    // Initialize funnel chips from saved state (edit mode) or default
+    if (sa.customer_type) {
+        _icpCustomerType = sa.customer_type;
+        const industries = Object.keys(_INDUSTRY_TREE[sa.customer_type] || {});
+        industries.push('Other');
+        _renderIndustryChips('icp-q-industry', industries, sa.industry || '', true);
+        if (sa.industry) {
+            const tree = _INDUSTRY_TREE[sa.customer_type] || {};
+            const subs = tree[sa.industry] || ['Other'];
+            _renderIndustryChips('icp-q-sub-industry', subs, sa.sub_industry || '', true);
+            if (sa.sub_industry) {
+                const hint = _NICHE_HINTS[sa.sub_industry] || 'e.g. anything more specific about your area';
+                document.getElementById('icp-q-niche-detail').placeholder = hint;
+            }
+        }
+        _updateAdaptiveSteps();
+    } else {
+        _icpCustomerType = '';
+    }
+
+    // Escape key to close
+    overlay._escHandler = (e) => { if (e.key === 'Escape') closeIcpWizard(); };
+    document.addEventListener('keydown', overlay._escHandler);
+}
+
+function _renderReviewStep(config, profileName) {
+    const dims = config.dimensions || [];
+    let dimSliders = dims.map((d, i) => `<div class="icp-dim-edit">
+        <span class="dim-name" title="${escHtml(d.label)}">${escHtml(d.label)}</span>
+        <input type="range" min="5" max="50" value="${Math.round(d.weight * 100)}" oninput="this.nextElementSibling.textContent=this.value+'%'" data-dim-idx="${i}">
+        <span class="dim-weight">${Math.round(d.weight * 100)}%</span>
+    </div>`).join('');
+
+    const filters = config.discovery_filters || {};
+    return `
+        <h3>Review & Customize</h3>
+        <div class="step-desc">Fine-tune your ICP before saving. Adjust weights, edit the definition, and tweak filters.</div>
+        <div class="icp-field">
+            <label>Profile Name</label>
+            <input type="text" id="icp-review-name" value="${escHtml(profileName || '')}" placeholder="e.g. DTC Beauty Brands">
+        </div>
+        <div class="icp-field">
+            <label>ICP Definition (editable)</label>
+            <textarea id="icp-review-definition" style="min-height:90px">${escHtml(config.icp_definition || '')}</textarea>
+        </div>
+        <div class="icp-field">
+            <label>Scoring Dimensions & Weights</label>
+            <div id="icp-review-dims">${dimSliders}</div>
+        </div>
+        <div class="icp-field">
+            <label>Discovery Include Filter</label>
+            <textarea id="icp-review-include" style="min-height:50px">${escHtml(filters.include_description || '')}</textarea>
+        </div>
+        <div class="icp-field">
+            <label>Discovery Exclude Filter</label>
+            <textarea id="icp-review-exclude" style="min-height:50px">${escHtml(filters.exclude_description || '')}</textarea>
+        </div>`;
+}
+
+function closeIcpWizard() {
+    const overlay = document.querySelector('.icp-wizard-overlay');
+    if (overlay) {
+        if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
+        overlay.remove();
+    }
+}
+
+// ===================== NICHE BUILDER MODAL =====================
+
+function _nbSingleSelect(chipEl) {
+    const wasSelected = chipEl.classList.contains('selected');
+    chipEl.parentElement.querySelectorAll('.icp-chip').forEach(c => c.classList.remove('selected'));
+    if (!wasSelected) chipEl.classList.add('selected');
+}
+
+function buildNicheString() {
+    const parts = [];
+    const sizeChip = document.querySelector('#nb-company-size .icp-chip.selected');
+    if (sizeChip) parts.push(sizeChip.dataset.value);
+    const modelChip = document.querySelector('#nb-business-model .icp-chip.selected');
+    if (modelChip) {
+        const val = modelChip.dataset.value;
+        parts.push(val === 'Both' ? 'B2B/B2C' : val);
+    }
+    const vertical = (document.getElementById('nb-vertical')?.value || '').trim();
+    if (vertical) parts.push(vertical);
+    const geoCustom = (document.getElementById('nb-geography-custom')?.value || '').trim();
+    const geoChip = document.querySelector('#nb-geography .icp-chip.selected');
+    if (geoCustom) parts.push(geoCustom);
+    else if (geoChip) parts.push(geoChip.dataset.value);
+    const qualifiers = (document.getElementById('nb-qualifiers')?.value || '').trim();
+    if (qualifiers) parts.push(qualifiers);
+    return parts.join(' ');
+}
+
+function applyNicheBuilder() {
+    const niche = buildNicheString();
+    if (niche) document.getElementById('prospect-niche-input').value = niche;
+    closeNicheBuilder();
+    document.getElementById('prospect-niche-input').focus();
+}
+
+function closeNicheBuilder() {
+    const overlay = document.querySelector('.niche-builder-overlay');
+    if (overlay) {
+        if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
+        overlay.remove();
+    }
+}
+
+function openNicheBuilder() {
+    const existing = document.querySelector('.niche-builder-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'niche-builder-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeNicheBuilder(); });
+
+    const chipRow = (items) => items.map(s =>
+        `<div class="icp-chip" data-value="${s}">${s}</div>`
+    ).join('');
+
+    overlay.innerHTML = `<div class="niche-builder-modal">
+        <div class="niche-builder-header">
+            <h2>Niche Builder</h2>
+            <button class="icp-wizard-close" onclick="closeNicheBuilder()">&times;</button>
+        </div>
+        <div class="niche-builder-body">
+            <div class="icp-field">
+                <label>Business Model</label>
+                <div class="icp-chips" id="nb-business-model">${chipRow(['B2B', 'B2C', 'Both'])}</div>
+            </div>
+            <div class="icp-field">
+                <label>Company Size</label>
+                <div class="icp-chips" id="nb-company-size">${chipRow(['Startup', 'SMB', 'Midmarket', 'Enterprise'])}</div>
+            </div>
+            <div class="icp-field">
+                <label>Vertical / Industry</label>
+                <input type="text" id="nb-vertical" placeholder="e.g. pet health, fintech, beauty, SaaS">
+            </div>
+            <div class="icp-field">
+                <label>Geography</label>
+                <div class="icp-chips" id="nb-geography">${chipRow(['US', 'North America', 'Europe', 'Global'])}</div>
+                <input type="text" id="nb-geography-custom" placeholder="Or type a specific region..." style="margin-top:6px">
+            </div>
+            <div class="icp-field">
+                <label>Additional Qualifiers</label>
+                <input type="text" id="nb-qualifiers" placeholder="e.g. DTC only, VC-backed, subscription model">
+            </div>
+            <div class="niche-builder-preview-label">Preview</div>
+            <div class="niche-builder-preview" id="nb-preview">Select options above to build a niche query...</div>
+        </div>
+        <div class="niche-builder-footer">
+            <button class="icp-wizard-btn-back" onclick="closeNicheBuilder()">Cancel</button>
+            <button class="icp-wizard-btn-next" onclick="applyNicheBuilder()">Build Niche</button>
+        </div>
+    </div>`;
+
+    document.body.appendChild(overlay);
+
+    // Live preview: update on chip clicks and text input
+    const updatePreview = () => {
+        const el = document.getElementById('nb-preview');
+        if (el) el.textContent = buildNicheString() || 'Select options above to build a niche query...';
+    };
+    overlay.querySelectorAll('.icp-chip').forEach(chip => {
+        chip.addEventListener('click', function() { _nbSingleSelect(this); updatePreview(); });
+    });
+    ['nb-vertical', 'nb-geography-custom', 'nb-qualifiers'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', updatePreview);
+    });
+
+    // Focus the vertical input for quick typing
+    const vertInput = document.getElementById('nb-vertical');
+    if (vertInput) setTimeout(() => vertInput.focus(), 50);
+
+    // Escape to close
+    overlay._escHandler = (e) => { if (e.key === 'Escape') closeNicheBuilder(); };
+    document.addEventListener('keydown', overlay._escHandler);
+}
+
+function icpWizardNext() {
+    if (_icpWizardStep >= 4) return;
+    _icpWizardStep++;
+    _updateWizardStepUI();
+}
+
+function icpWizardBack() {
+    if (_icpWizardStep <= 0) return;
+    _icpWizardStep--;
+    _updateWizardStepUI();
+}
+
+function _updateWizardStepUI() {
+    const overlay = document.querySelector('.icp-wizard-overlay');
+    if (!overlay) return;
+
+    // Update step dots
+    overlay.querySelectorAll('.icp-step-dot').forEach((dot, i) => {
+        dot.className = 'icp-step-dot';
+        if (i < _icpWizardStep) dot.classList.add('done');
+        if (i === _icpWizardStep) dot.classList.add('active');
+    });
+
+    // Show/hide steps
+    overlay.querySelectorAll('.icp-wizard-step').forEach(s => {
+        s.classList.toggle('active', parseInt(s.dataset.step) === _icpWizardStep);
+    });
+
+    // Back button
+    const backBtn = document.getElementById('icp-back-btn');
+    if (backBtn) backBtn.style.visibility = _icpWizardStep === 0 ? 'hidden' : 'visible';
+
+    // Nav right: show Next for steps 0-3, Save for step 4
+    const navRight = document.getElementById('icp-nav-right');
+    if (navRight) {
+        if (_icpWizardStep < 4) {
+            navRight.innerHTML = '<button class="icp-wizard-btn-next" onclick="icpWizardNext()" id="icp-next-btn">Next</button>';
+        } else if (_icpGeneratedConfig) {
+            navRight.innerHTML = '<button class="icp-wizard-btn-save" onclick="icpWizardSave()" id="icp-save-btn">Save & Activate</button>';
+        } else {
+            navRight.innerHTML = '';
+        }
+    }
+}
+
+function _gatherSurveyAnswers() {
+    const overlay = document.querySelector('.icp-wizard-overlay');
+    if (!overlay) return {};
+    const _chips = (id) => { const arr = []; overlay.querySelectorAll(`#${id} .icp-chip.selected`).forEach(c => { let t = c.textContent.trim(); if (c.querySelector('span')) t = c.childNodes[0].textContent.trim(); arr.push(t); }); return arr; };
+    const _chip1 = (id) => { const el = overlay.querySelector(`#${id} .icp-chip.selected`); if (!el) return ''; let t = el.textContent.trim(); if (el.querySelector('span')) t = el.childNodes[0].textContent.trim(); return t; };
+    const _val = (id) => (document.getElementById(id)?.value || '').trim();
+    const preRev = document.getElementById('icp-best-customers-wrap')?.dataset.preRevenue === 'true';
+    const isB2C = _icpCustomerType === 'B2C';
+    return {
+        // Step 0 — funnel
+        customer_type: _icpCustomerType,
+        industry: _chip1('icp-q-industry'),
+        sub_industry: _chip1('icp-q-sub-industry'),
+        niche_detail: _val('icp-q-niche-detail'),
+        // Step 1 — offer
+        product: _val('icp-q-product'),
+        problem: _val('icp-q-problem'),
+        // Step 2 — B2B customers
+        best_customers: _val('icp-q-best-customers'),
+        pre_revenue: preRev,
+        sizes: _chips('icp-q-sizes'),
+        commonalities: _chips('icp-q-commonalities'),
+        commonalities_other: _val('icp-q-commonalities-other'),
+        // Step 2 — B2C customers
+        ideal_consumer: _val('icp-q-ideal-consumer'),
+        price_point: _chip1('icp-q-price-point'),
+        where_they_buy: _chips('icp-q-where-they-buy'),
+        consumer_traits: _chips('icp-q-consumer-traits'),
+        // Step 3 — B2B sales
+        how_they_buy: _chip1('icp-q-how-they-buy'),
+        deal_size: _chip1('icp-q-deal-size'),
+        sales_cycle: _chip1('icp-q-sales-cycle'),
+        // Step 3 — B2C sales
+        acquisition_channels: _chips('icp-q-acquisition-channels'),
+        purchase_frequency: _chip1('icp-q-purchase-frequency'),
+        avg_order_value: _chip1('icp-q-avg-order-value'),
+    };
+}
+
+async function icpWizardGenerate() {
+    const answers = _gatherSurveyAnswers();
+    if (!answers.customer_type) { alert('Please select who you sell to (B2B, B2C, or Both).'); _icpWizardStep = 0; _updateWizardStepUI(); return; }
+    if (!answers.product) { alert('Please describe what your company does.'); _icpWizardStep = 1; _updateWizardStepUI(); return; }
+
+    const genBtn = document.getElementById('icp-generate-btn');
+    const reviewContent = document.getElementById('icp-review-content');
+    reviewContent.innerHTML = `<div class="icp-generate-spinner">
+        <div class="spinner"></div>
+        Generating your ICP scoring config...
+    </div>`;
+
+    try {
+        const resp = await fetch('/api/icp-profiles/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ survey_answers: answers }),
+        });
+        if (!resp.ok) throw new Error('Generation failed');
+        const data = await resp.json();
+        _icpGeneratedConfig = data.config;
+
+        // Auto-generate a name suggestion from product
+        const autoName = answers.product.substring(0, 40).split(/[.,;]/)[0].trim();
+
+        reviewContent.innerHTML = _renderReviewStep(_icpGeneratedConfig, autoName);
+        _updateWizardStepUI();
+    } catch (e) {
+        console.error('ICP generation failed:', e);
+        reviewContent.innerHTML = `<h3>Generation Failed</h3>
+            <div class="step-desc" style="color:var(--red)">Could not generate ICP config. Please try again.</div>
+            <div style="text-align:center;padding:20px 0">
+                <button class="icp-wizard-btn-next" onclick="icpWizardGenerate()" id="icp-generate-btn">Retry</button>
+            </div>`;
+    }
+}
+
+async function icpWizardSave() {
+    if (!_icpGeneratedConfig) return;
+
+    // Read user edits from the review step
+    const name = (document.getElementById('icp-review-name')?.value || '').trim();
+    if (!name) { alert('Please enter a profile name.'); return; }
+
+    const config = JSON.parse(JSON.stringify(_icpGeneratedConfig)); // deep copy
+    config.icp_definition = document.getElementById('icp-review-definition')?.value || config.icp_definition;
+
+    // Read dimension weight adjustments
+    const sliders = document.querySelectorAll('#icp-review-dims input[type="range"]');
+    let totalWeight = 0;
+    sliders.forEach(s => { totalWeight += parseInt(s.value); });
+    if (totalWeight > 0) {
+        sliders.forEach(s => {
+            const idx = parseInt(s.dataset.dimIdx);
+            if (config.dimensions[idx]) {
+                config.dimensions[idx].weight = Math.round((parseInt(s.value) / totalWeight) * 100) / 100;
+            }
+        });
+    }
+
+    // Read discovery filter edits
+    if (!config.discovery_filters) config.discovery_filters = {};
+    config.discovery_filters.include_description = document.getElementById('icp-review-include')?.value || '';
+    config.discovery_filters.exclude_description = document.getElementById('icp-review-exclude')?.value || '';
+
+    const survey_answers = _gatherSurveyAnswers();
+    const saveBtn = document.getElementById('icp-save-btn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+
+    try {
+        let resp;
+        if (_icpWizardMode === 'edit' && _icpEditData) {
+            resp = await fetch(`/api/icp-profiles/${_icpEditData.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, config, survey_answers }),
+            });
+        } else {
+            resp = await fetch('/api/icp-profiles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, config, survey_answers }),
+            });
+        }
+        if (!resp.ok) throw new Error('Save failed');
+        const data = await resp.json();
+
+        // Activate the new/edited profile
+        if (data.id) {
+            await fetch(`/api/icp-profiles/${data.id}/activate`, { method: 'POST' });
+        }
+
+        closeIcpWizard();
+        await loadIcpProfiles();
+        await loadCampaigns();
+    } catch (e) {
+        console.error('ICP save failed:', e);
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save & Activate'; }
+        alert('Failed to save ICP profile. Please try again.');
     }
 }
 
