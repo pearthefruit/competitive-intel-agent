@@ -3389,7 +3389,6 @@
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
             border-radius: 12px;
-            overflow: hidden;
         }
         .dash-hero-left {
             display: flex;
@@ -3495,7 +3494,6 @@
             border: 1px solid var(--border);
             border-radius: 10px;
             padding: 16px 20px;
-            overflow: hidden;
         }
         .dash-card-title {
             font-size: 14px;
@@ -7807,6 +7805,13 @@ function _buildProspectDashboard(container) {
         'advertising_maturity': 'Paid Media Footprint',
         'creative_readiness': 'Video Asset Readiness',
     };
+    const _dimTooltips = {
+        'financial_capacity': 'Evaluates revenue, funding, and budget capacity for $10K\u2013$100K/month CTV campaigns.',
+        'advertising_maturity': 'Checks for Meta/TikTok/Google Ads pixels and active paid media infrastructure.',
+        'growth_trajectory': 'Assesses revenue growth rate, expansion news, and hiring momentum.',
+        'creative_readiness': 'Looks for existing video content, social media visuals, and brand assets that translate to TV spots.',
+        'channel_expansion_intent': 'Detects signals of exploring new ad channels beyond current social/search spend.',
+    };
 
     const dims = (fit._dimensions || [
         { key: 'financial_capacity',      label: 'Financial Capacity',      weight: 0.25 },
@@ -7834,8 +7839,10 @@ function _buildProspectDashboard(container) {
         const color = _dimColor(s);
         const displayLabel = _dimDisplayLabel[d.key] || d.label;
         const wPct = Math.round((d.weight || 0) * 100);
+        const tooltip = _dimTooltips[d.key] || '';
+        const tipHtml = tooltip ? ` <span class="icp-dim-tooltip-icon" onclick="event.stopPropagation()">i<span class="dim-tooltip">${escHtml(tooltip)}</span></span>` : '';
         return `<div style="display:flex;align-items:center;gap:10px">
-            <span style="font-size:12px;color:var(--text-secondary);min-width:150px">${escHtml(displayLabel)} <span style="color:var(--text-muted);font-size:10px">(${wPct}%)</span></span>
+            <span style="font-size:12px;color:var(--text-secondary);min-width:180px">${escHtml(displayLabel)} <span style="color:var(--text-muted);font-size:10px">(${wPct}%)</span>${tipHtml}</span>
             <div style="flex:1;height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden">
                 <div style="height:100%;width:${s}%;background:${color};border-radius:4px;transition:width 0.8s"></div>
             </div>
@@ -7871,8 +7878,11 @@ function _buildProspectDashboard(container) {
                 : `<span class="icp-signal-tag">${escHtml(text)}</span>`;
         }).join('');
 
+        const tooltip = _dimTooltips[d.key] || '';
+        const tipHtml = tooltip ? ` <span class="icp-dim-tooltip-icon" onclick="event.stopPropagation()">i<span class="dim-tooltip">${escHtml(tooltip)}</span></span>` : '';
+
         return `<div class="dash-card">
-            <div class="dash-card-title">${escHtml(displayLabel)} <span style="color:${color};float:right;font-size:16px">${s}</span></div>
+            <div class="dash-card-title">${escHtml(displayLabel)}${tipHtml} <span style="color:${color};float:right;font-size:16px">${s}</span></div>
             <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;margin-bottom:10px">
                 <div style="height:100%;width:${s}%;background:${color};border-radius:3px"></div>
             </div>
@@ -7926,7 +7936,7 @@ function _buildProspectDashboard(container) {
                         <span class="num">${score}</span>
                         <span class="lbl">/100</span>
                     </div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:4px">CTV Propensity</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:4px">CTV Propensity <span class="icp-info-icon" style="font-size:10px">i<span class="icp-info-tooltip">Calculated based on social ad exhaustion, visual asset readiness, and financial capacity to scale to premium video (Connected TV).</span></span></div>
                 </div>
             </div>
             <div class="dash-hero-right">
