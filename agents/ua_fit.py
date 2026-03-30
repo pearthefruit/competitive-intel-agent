@@ -109,10 +109,14 @@ def validate_websites(companies, timeout=5, progress_cb=None):
             parked = False
             for indicator in _PARKED_INDICATORS:
                 if indicator in body_lower:
-                    reason = f"Parked domain ('{indicator}')"
-                    results.append({"name": name, "website": website, "valid": False, "reason": reason})
+                    reason = f"Parked domain ('{indicator}') — will skip techstack"
+                    company["_website_accessible"] = False
+                    results.append({"name": name, "website": website, "valid": True,
+                                     "reason": reason, "limited": True})
+                    valid.append(company)
                     if progress_cb:
-                        progress_cb("validated", {"company": name, "valid": False, "reason": reason})
+                        progress_cb("validated", {"company": name, "valid": True,
+                                                  "reason": reason, "limited": True})
                     parked = True
                     break
 

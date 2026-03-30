@@ -14,27 +14,27 @@ _FIT_SCHEMA = {
         "financial_capacity": {
             "score": "0-100",
             "rationale": "2-3 sentences citing specific evidence from the financial report",
-            "signals": ["list of specific signals: revenue figures, funding rounds, growth rates"],
+            "signals": [{"text": "short signal description", "url": "source URL or null"}],
         },
         "advertising_maturity": {
             "score": "0-100",
             "rationale": "2-3 sentences citing specific ad pixels, marketing tools, or channels detected",
-            "signals": ["list of specific ad pixels or marketing tools found"],
+            "signals": [{"text": "short signal description", "url": "source URL or null"}],
         },
         "growth_trajectory": {
             "score": "0-100",
             "rationale": "2-3 sentences citing revenue growth, expansion news, or hiring trends",
-            "signals": ["list of specific growth signals: YoY %, expansion announcements, headcount"],
+            "signals": [{"text": "short signal description", "url": "source URL or null"}],
         },
         "creative_readiness": {
             "score": "0-100",
             "rationale": "2-3 sentences citing brand presence, social media activity, or video content",
-            "signals": ["list of specific creative signals: social platforms, video content, brand campaigns"],
+            "signals": [{"text": "short signal description", "url": "source URL or null"}],
         },
         "channel_expansion_intent": {
             "score": "0-100",
             "rationale": "2-3 sentences citing signals of intent to explore new ad channels",
-            "signals": ["list of specific intent signals: new channel mentions, marketing hires, campaign launches"],
+            "signals": [{"text": "short signal description", "url": "source URL or null"}],
         },
     },
     "recommended_angle": "1-2 sentence sales approach grounded in the specific evidence above",
@@ -174,6 +174,7 @@ Return a JSON object matching this exact schema:
 3. If a report is missing for a dimension, score it **50** (neutral) and write "Analysis not available" in the rationale.
 4. `ad_pixels_detected` in `company_snapshot` must list the specific pixels found in the tech stack report's "Advertising Pixels" section. If none found, use empty array.
 5. `recommended_angle` must reference the company's actual situation — not generic boilerplate.
+6. **Signal sources:** Each signal object must have a `text` (short description) and `url` (the source URL where this data was found). Extract URLs from the citation links in the reports above (e.g. `[¹](https://example.com)` → use `https://example.com`). If a signal has no identifiable source URL, set `url` to `null`. Include article/page titles in the `text` field when available (e.g. "PHLUR - 2026 Company Profile - Tracxn").
 
 Return ONLY the JSON object. No explanation, no markdown fences."""
 
