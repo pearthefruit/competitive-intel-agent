@@ -1167,6 +1167,19 @@ def create_app(db_path="intel.db"):
 
                 yield f"data: {json.dumps({'type': 'complete', 'total_scored': scored_count[0], 'campaign_id': campaign_id})}\n\n"
 
+                # Generate vertical insight in background thread so the SSE stream
+                # closes immediately — prevents Flask from buffering the 'complete' event
+                _insight_cid = campaign_id
+                _insight_db = db_path
+                def _gen_insight_bg():
+                    try:
+                        from agents.ua_fit import generate_vertical_insight
+                        generate_vertical_insight(_insight_cid, db_path=_insight_db)
+                        print(f"[pipeline] Insight generated for campaign {_insight_cid}")
+                    except Exception as ie:
+                        print(f"[pipeline] Insight generation failed: {ie}")
+                threading.Thread(target=_gen_insight_bg, daemon=True).start()
+
             except Exception as e:
                 import traceback
                 traceback.print_exc()

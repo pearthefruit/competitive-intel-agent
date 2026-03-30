@@ -133,6 +133,7 @@
         /* === PROSPECTING: 4-PANE HORIZONTAL PIPELINE LAYOUT === */
         #workspace-prospecting {
             zoom: 1.15;
+            overflow: hidden;
         }
         .prospect-sidebar {
             width: 250px;
@@ -219,13 +220,14 @@
         }
         .search-query-actions .campaign-group-action:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); }
 
-        /* Content area: 3 panes in a row with horizontal overflow */
+        /* Content area: 3 panes in a row, shared horizontal scrollbar */
         .prospect-content {
             flex: 1;
             display: flex;
             flex-direction: row;
             overflow-x: auto;
             min-width: 0;
+            min-height: 0;
             background: var(--bg-primary);
         }
         .prospect-pane {
@@ -236,9 +238,26 @@
             flex-shrink: 0;
         }
         .prospect-pane:last-child { border-right: none; }
-        .pane-execution { width: 420px; min-width: 320px; }
-        .pane-summary { flex: 1; min-width: 300px; }
-        .pane-detail { flex: 1; min-width: 300px; }
+        .pane-execution { flex: 0 0 420px; min-width: 420px; }
+        .pane-summary { flex: 1 0 350px; min-width: 350px; }
+        .pane-detail { flex: 1 0 420px; min-width: 420px; }
+
+        /* Fullscreen overlay for Company Detail */
+        .pane-detail.fullscreen {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 9999;
+            background: var(--bg-primary);
+            border: none;
+            min-width: unset;
+        }
+        .pane-detail.fullscreen .pane-body { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+        .pane-expand-btn {
+            background: none; border: 1px solid var(--border); border-radius: 4px;
+            color: var(--text-muted); cursor: pointer; padding: 0 5px; font-size: 11px;
+            line-height: 18px; transition: color 0.15s, border-color 0.15s;
+        }
+        .pane-expand-btn:hover { color: var(--accent); border-color: var(--accent); }
 
         /* Pane resize handles */
         .pane-resize-handle {
@@ -262,7 +281,8 @@
 
         /* Pane headers */
         .pane-header {
-            padding: 8px 16px;
+            padding: 0 16px;
+            height: 36px;
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
@@ -1259,6 +1279,7 @@
         .source-pricing { background: rgba(139,92,246,0.18); color: #a78bfa; }
         .source-profile { background: rgba(107,114,128,0.18); color: #9ca3af; }
         .source-landscape { background: rgba(14,165,233,0.18); color: #38bdf8; }
+        .source-brand_ad { background: rgba(236,72,153,0.18); color: #f472b6; }
         .source-compare { background: rgba(251,191,36,0.18); color: #fbbf24; }
         .source-analysis { background: rgba(107,114,128,0.18); color: #9ca3af; }
 
@@ -2809,14 +2830,28 @@
             padding: 12px 14px;
             margin-bottom: 8px;
             transition: border-color 0.15s;
+            cursor: pointer;
         }
         .icp-dim-card:hover { border-color: var(--border-strong); }
         .icp-dim-card-header {
             display: flex;
             align-items: center;
             gap: 10px;
-            margin-bottom: 8px;
+            margin-bottom: 0;
+            transition: margin-bottom 0.2s;
         }
+        .icp-dim-card.expanded .icp-dim-card-header { margin-bottom: 8px; }
+        .icp-dim-card-header .dim-chevron {
+            font-size: 10px;
+            color: var(--text-muted);
+            transition: transform 0.2s;
+            flex-shrink: 0;
+        }
+        .icp-dim-card.expanded .dim-chevron { transform: rotate(90deg); }
+        .icp-dim-card-body {
+            display: none;
+        }
+        .icp-dim-card.expanded .icp-dim-card-body { display: block; }
         .icp-dim-name {
             font-size: 13px;
             font-weight: 600;
@@ -2878,8 +2913,10 @@
             background: rgba(255,255,255,0.06);
             border-radius: 3px;
             overflow: hidden;
-            margin-bottom: 8px;
+            margin-top: 8px;
+            margin-bottom: 0;
         }
+        .icp-dim-card.expanded .icp-dim-bar { margin-bottom: 8px; }
         .icp-dim-fill {
             height: 100%;
             border-radius: 3px;
@@ -2904,6 +2941,15 @@
             border: 1px solid var(--border);
             border-radius: 4px;
             color: var(--text-muted);
+        }
+        a.icp-signal-tag {
+            text-decoration: none;
+            cursor: pointer;
+            transition: border-color 0.15s, color 0.15s;
+        }
+        a.icp-signal-tag:hover {
+            border-color: var(--accent);
+            color: var(--accent);
         }
 
         .icp-snapshot {
@@ -3262,10 +3308,16 @@
         .msg-assistant .msg-bubble a:hover { color: #93c5fd; text-decoration-color: rgba(147,197,253,0.6); }
 
         /* Scrollbar */
-        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar { width: 5px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--bg-active); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        /* Shared horizontal scrollbar for prospect panes */
+        .prospect-content::-webkit-scrollbar { height: 8px; }
+        .prospect-content::-webkit-scrollbar-track { background: var(--bg-secondary); }
+        .prospect-content::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 4px; }
+        .prospect-content::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
         /* Typing */
         .typing-indicator { display: flex; gap: 4px; padding: 10px 14px; }
@@ -3537,24 +3589,69 @@
             body { background: white !important; }
         }
 
-        /* Responsive: collapsible panes on narrow screens */
+        /* Responsive: 2-pane accordion on narrow screens */
         @media (max-width: 1439px) {
             .pane-resize-handle { display: none; }
-            .prospect-sidebar { width: 200px; min-width: 200px; }
+
+            /* Sidebar collapses to icon-width strip */
+            .prospect-sidebar {
+                width: 48px; min-width: 48px;
+                transition: width 0.25s ease, min-width 0.25s ease;
+            }
+            .prospect-sidebar .prospect-sidebar-header,
+            .prospect-sidebar .prospect-header {
+                display: none;
+            }
+            .prospect-sidebar .prospect-search-list {
+                padding: 4px 2px;
+            }
+            .prospect-sidebar .search-query-item {
+                padding: 6px 4px;
+                justify-content: center;
+                gap: 0;
+            }
+            .prospect-sidebar .search-query-info { display: none; }
+            .prospect-sidebar .search-query-actions { display: none; }
+            .prospect-sidebar .search-query-score { width: 32px; height: 32px; font-size: 10px; }
+
+            /* Sidebar expands on hover */
+            .prospect-sidebar:hover {
+                width: 220px; min-width: 220px;
+                z-index: 20;
+                position: relative;
+                box-shadow: 4px 0 20px rgba(0,0,0,0.4);
+            }
+            .prospect-sidebar:hover .prospect-sidebar-header,
+            .prospect-sidebar:hover .prospect-header {
+                display: block;
+            }
+            .prospect-sidebar:hover .search-query-item {
+                padding: 10px 12px;
+                justify-content: flex-start;
+                gap: 8px;
+            }
+            .prospect-sidebar:hover .search-query-info { display: block; }
+            .prospect-sidebar:hover .search-query-score { width: 28px; height: 28px; }
+
+            /* Collapsed panes: thin vertical accordion strip */
             .prospect-pane {
-                width: 44px; min-width: 44px; flex: 0 0 44px;
+                width: 36px; min-width: 36px; flex: 0 0 36px;
                 overflow: hidden;
-                transition: all 0.3s ease;
+                transition: all 0.25s ease;
             }
             .prospect-pane .pane-header {
                 writing-mode: vertical-rl; text-orientation: mixed;
-                cursor: pointer; padding: 12px 8px;
+                cursor: pointer; padding: 12px 6px;
                 white-space: nowrap;
+                min-height: 0;
             }
+            .prospect-pane .pane-header .pane-expand-btn { display: none; }
             .prospect-pane .pane-body { display: none; }
             .prospect-pane .pane-header .pane-status-badge { display: none; }
+
+            /* Focused panes: wide enough to force horizontal overflow on narrow screens */
             .prospect-pane.pane-focused {
-                width: auto; min-width: 400px; flex: 1 1 auto;
+                width: auto; min-width: 620px; flex: 1 0 620px;
             }
             .prospect-pane.pane-focused .pane-header {
                 writing-mode: horizontal-tb; text-orientation: initial;
@@ -3562,8 +3659,10 @@
             }
             .prospect-pane.pane-focused .pane-body {
                 display: flex; flex-direction: column; flex: 1;
+                overflow-y: auto;
             }
             .prospect-pane.pane-focused .pane-header .pane-status-badge { display: inline-block; }
+            .prospect-pane.pane-focused .pane-header .pane-expand-btn { display: inline-flex; }
         }
 
         /* Toast notifications */
@@ -3788,6 +3887,7 @@
             <div class="prospect-pane pane-detail" id="pane-detail">
                 <div class="pane-header">
                     <span class="pane-header-title">Company Detail</span>
+                    <button class="pane-expand-btn" id="detail-expand-btn" onclick="toggleDetailFullscreen()" title="Expand to fullscreen">&#x26F6;</button>
                 </div>
                 <div class="pane-body" id="pane-detail-body">
                     <div class="pane-empty" id="pane-detail-empty">
@@ -6374,6 +6474,13 @@ document.addEventListener('keydown', function(e) {
             e.preventDefault();
             return;
         }
+        // Exit prospect detail fullscreen
+        const detailPane = document.getElementById('pane-detail');
+        if (detailPane && detailPane.classList.contains('fullscreen')) {
+            toggleDetailFullscreen();
+            e.preventDefault();
+            return;
+        }
         // Exit split view first if active
         if (_splitActive) {
             toggleExpandReport(); // reuses the "exit split" logic
@@ -6851,6 +6958,7 @@ let activeCampaignId = null;
 let activeProspectName = null;
 let _prospectPipelineRunning = false;
 let _currentRunCampaignId = null; // tracks which campaign owns the live pipeline DOM in Pane 2
+let _savedLivePipelineDOM = null; // stashed live pipeline DOM when user views another campaign
 
 // Flat prospect lookup — built from campaigns for detail view
 let _prospectsByName = {};
@@ -6927,11 +7035,22 @@ function renderCampaignSidebar() {
 }
 
 function selectCampaign(campaignId) {
-    // Block switching while pipeline is running (protects live DOM)
-    if (_prospectPipelineRunning && _currentRunCampaignId && _currentRunCampaignId !== campaignId) return;
-
     const wasActive = activeCampaignId === campaignId;
-    if (wasActive) return; // already selected, no-op
+    if (wasActive) {
+        // Re-trigger insight generation if missing on re-click
+        const c = allCampaigns.find(x => x.id === campaignId);
+        if (c && !c.insight && c.status === 'complete') {
+            _autoGenerateInsight(campaignId);
+        }
+        return;
+    }
+
+    const mapEl = document.getElementById('pipeline-map');
+
+    // If pipeline is running and we're leaving the live campaign, stash its DOM
+    if (_prospectPipelineRunning && _currentRunCampaignId && activeCampaignId === _currentRunCampaignId && mapEl) {
+        _savedLivePipelineDOM = mapEl.innerHTML;
+    }
 
     activeCampaignId = campaignId;
     // Highlight sidebar item
@@ -6939,8 +7058,20 @@ function selectCampaign(campaignId) {
         const id = parseInt(el.dataset.campaignId, 10);
         el.classList.toggle('active', id === campaignId);
     });
-    // Populate panes 2 + 3, clear pane 4
-    renderExecutionPane(campaignId);
+
+    // If switching back to the running campaign, restore its live DOM
+    if (_prospectPipelineRunning && _currentRunCampaignId === campaignId && _savedLivePipelineDOM && mapEl) {
+        mapEl.innerHTML = _savedLivePipelineDOM;
+        mapEl.style.display = 'block';
+        const emptyEl = document.getElementById('pane-execution-empty');
+        if (emptyEl) emptyEl.style.display = 'none';
+        const badge = document.getElementById('pane-execution-status');
+        if (badge) { badge.textContent = 'Running'; badge.className = 'pane-status-badge running'; }
+        _savedLivePipelineDOM = null;
+    } else {
+        renderExecutionPane(campaignId);
+    }
+
     renderSummaryPane(campaignId);
     clearDetailPane();
     focusPane('pane-execution');
@@ -6993,10 +7124,16 @@ function _resetAllPanes() {
 
 function clearDetailPane() {
     activeProspectName = null;
+    _savedDetailHTML = null;
     const detContent = document.getElementById('pane-detail-content');
     const detEmpty = document.getElementById('pane-detail-empty');
     if (detContent) { detContent.style.display = 'none'; detContent.innerHTML = ''; }
     if (detEmpty) detEmpty.style.display = 'block';
+    // Exit fullscreen if active
+    const pane = document.getElementById('pane-detail');
+    if (pane) pane.classList.remove('fullscreen');
+    const btn = document.getElementById('detail-expand-btn');
+    if (btn) { btn.innerHTML = '&#x26F6;'; btn.title = 'Expand to fullscreen'; }
     // Remove highlights from Pane 2 cards and Pane 3 rows
     document.querySelectorAll('.company-card.active').forEach(c => c.classList.remove('active'));
     document.querySelectorAll('.cv-result-row.active').forEach(r => r.classList.remove('active'));
@@ -7208,12 +7345,14 @@ function renderSummaryPane(campaignId) {
                 <div class="signal-diagnostics">${signalHtml}</div>
             </div>`;
     } else if (scored.length > 0) {
+        const willGenerate = c.status === 'complete';
         insightHtml = `
             <div class="cv-section">
                 <div class="cv-section-title">Agent Insights</div>
                 <div id="agent-insights-placeholder" class="agent-insights-loading">
-                    <div class="spinner"></div>
-                    Generating insights...
+                    ${willGenerate
+                        ? '<div class="spinner"></div> Generating insights...'
+                        : '<span style="color:var(--text-muted);font-size:12px">Insights will generate once pipeline completes</span>'}
                 </div>
             </div>`;
     }
@@ -7269,9 +7408,18 @@ function _buildRankedListHtml(scored) {
     }).join('');
 }
 
+let _insightGenerating = {};
 async function _autoGenerateInsight(campaignId) {
+    if (_insightGenerating[campaignId]) return; // prevent duplicate concurrent calls
+    _insightGenerating[campaignId] = true;
     try {
-        const resp = await fetch(`/api/campaigns/${campaignId}/insight`, { method: 'POST' });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 min client timeout
+        const resp = await fetch(`/api/campaigns/${campaignId}/insight`, {
+            method: 'POST',
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         // Update local cache
@@ -7284,7 +7432,14 @@ async function _autoGenerateInsight(campaignId) {
     } catch (err) {
         console.error('Failed to generate insight:', err);
         const ph = document.getElementById('agent-insights-placeholder');
-        if (ph) ph.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Insights unavailable</span>';
+        if (ph) {
+            const msg = err.name === 'AbortError'
+                ? 'Insight generation timed out. Click campaign again to retry.'
+                : 'Insights unavailable. Click campaign again to retry.';
+            ph.innerHTML = `<span style="color:var(--text-muted);font-size:12px">${msg}</span>`;
+        }
+    } finally {
+        delete _insightGenerating[campaignId];
     }
 }
 
@@ -7411,6 +7566,23 @@ async function openProspectDetail(companyName) {
         'channel_expansion_intent': 'Detects signals of exploring new ad channels beyond current social/search spend.',
     };
 
+    // Collect all sources across dimensions for the Analysis Sources section
+    const allSources = [];
+
+    function _renderSignal(sig) {
+        // Handle both old (string) and new ({text, url}) formats
+        if (typeof sig === 'string') {
+            return `<span class="icp-signal-tag">${escHtml(sig)}</span>`;
+        }
+        const text = sig.text || sig;
+        const url = sig.url;
+        if (url) {
+            allSources.push({ text, url });
+            return `<a class="icp-signal-tag" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(text)}</a>`;
+        }
+        return `<span class="icp-signal-tag">${escHtml(text)}</span>`;
+    }
+
     let dimCardsHtml = dims.map(d => {
         const ds = sub[d.key] || {};
         const s = ds.score || 0;
@@ -7419,20 +7591,23 @@ async function openProspectDetail(companyName) {
         const displayLabel = _dimDisplayLabel[d.key] || d.label;
         const tooltip = _dimTooltips[d.key] || '';
         const rationale = ds.rationale || 'No data available';
-        const signals = (ds.signals || []).map(sig => `<span class="icp-signal-tag">${escHtml(sig)}</span>`).join('');
+        const signals = (ds.signals || []).map(sig => _renderSignal(sig)).join('');
 
-        return `<div class="icp-dim-card">
+        return `<div class="icp-dim-card" onclick="if(!event.target.closest('a')){this.classList.toggle('expanded')}">
             <div class="icp-dim-card-header">
+                <span class="dim-chevron">&#9654;</span>
                 <span class="icp-dim-name">
                     ${escHtml(displayLabel)}
                     <span class="dim-weight">(${wPct})</span>
-                    ${tooltip ? `<span class="icp-dim-tooltip-icon">i<span class="dim-tooltip">${escHtml(tooltip)}</span></span>` : ''}
+                    ${tooltip ? `<span class="icp-dim-tooltip-icon" onclick="event.stopPropagation()">i<span class="dim-tooltip">${escHtml(tooltip)}</span></span>` : ''}
                 </span>
                 <span class="icp-dim-score-pill" style="color:${color}">${s}</span>
             </div>
             <div class="icp-dim-bar"><div class="icp-dim-fill" style="width:${s}%;background:${color}"></div></div>
-            <div class="icp-dim-rationale">${escHtml(rationale)}</div>
-            ${signals ? `<div class="icp-dim-signals">${signals}</div>` : ''}
+            <div class="icp-dim-card-body">
+                <div class="icp-dim-rationale">${escHtml(rationale)}</div>
+                ${signals ? `<div class="icp-dim-signals">${signals}</div>` : ''}
+            </div>
         </div>`;
     }).join('');
 
@@ -7477,24 +7652,42 @@ async function openProspectDetail(companyName) {
     const confLabel = cov.confidence || '?';
     const confColor = confLabel === 'high' ? 'var(--green)' : confLabel === 'moderate' ? 'var(--yellow)' : 'var(--red)';
 
-    const analysisLabels = { techstack: 'Tech Stack', financial: 'Financial', brand_ad: 'Brand & Ad Intel' };
+    const analysisLabels = { techstack: 'Tech Stack', financial: 'Financial', brand_ad: 'Brand & Ad Intel', sentiment: 'Brand & Ad Intel' };
     let methHtml = '';
-    if (Object.keys(analysesUsed).length > 0) {
-        const sourceRows = Object.entries(analysesUsed).map(([atype, path]) => {
-            const label = analysisLabels[atype] || atype;
-            const shortPath = path ? path.split(/[\\/]/).pop() : 'N/A';
-            return `<div style="font-size:12px;color:var(--text-secondary);padding:4px 0;display:flex;gap:8px;align-items:baseline">
-                <span style="color:var(--text-muted);min-width:70px">${escHtml(label)}</span>
-                <span style="font-family:monospace;font-size:11px;color:var(--accent)">${escHtml(shortPath)}</span>
-            </div>`;
-        }).join('');
+
+    // Deduplicate allSources by URL
+    const seenUrls = new Set();
+    const uniqueSources = allSources.filter(s => {
+        if (seenUrls.has(s.url)) return false;
+        seenUrls.add(s.url);
+        return true;
+    });
+
+    const sourceListHtml = uniqueSources.map(s => `<div style="font-size:12px;padding:4px 0;display:flex;gap:6px;align-items:baseline">
+        <span style="color:var(--text-muted);flex-shrink:0">&#8226;</span>
+        <a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;word-break:break-all;font-size:11px">${escHtml(s.text)}</a>
+    </div>`).join('');
+
+    // Internal analysis report badges — clickable to open report in Research module
+    const reportBadgesHtml = Object.entries(analysesUsed).map(([atype, path]) => {
+        const label = analysisLabels[atype] || atype;
+        const filename = path ? path.replace(/^reports[\\/\\\\]/, '') : '';
+        if (!filename) return '';
+        return `<span class="source-badge source-${atype}" style="cursor:pointer;font-size:12px;padding:3px 10px;margin:2px" onclick="event.stopPropagation();switchModule('research');openReport('${escHtml(filename)}')" title="View ${escHtml(label)} report">${escHtml(label)}</span>`;
+    }).join('');
+
+    if (uniqueSources.length > 0 || Object.keys(analysesUsed).length > 0) {
         methHtml = `<div class="icp-section">
             <div class="icp-section-title">Analysis Sources</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
-                ${dims.length} dimensions &bull; Confidence: <span style="color:${confColor}">${confLabel}</span>
-                &bull; ${Object.keys(analysesUsed).length}/3 analyses
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">
+                Confidence: <span style="color:${confColor}">${confLabel}</span>
+                &bull; ${Object.keys(analysesUsed).length}/3 analyses completed
             </div>
-            ${sourceRows}
+            ${reportBadgesHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">${reportBadgesHtml}</div>` : ''}
+            ${uniqueSources.length > 0 ? `<div style="margin-top:4px;padding-top:8px;border-top:1px solid var(--border)">
+                <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;font-weight:600">External Sources (${uniqueSources.length})</div>
+                ${sourceListHtml}
+            </div>` : ''}
         </div>`;
     } else {
         methHtml = `<div class="icp-section">
@@ -7565,6 +7758,193 @@ async function openProspectDetail(companyName) {
     focusPane('pane-detail');
 }
 
+let _savedDetailHTML = null;
+
+function toggleDetailFullscreen() {
+    const pane = document.getElementById('pane-detail');
+    const btn = document.getElementById('detail-expand-btn');
+    const detContent = document.getElementById('pane-detail-content');
+    if (!pane || !detContent) return;
+
+    const isFs = pane.classList.contains('fullscreen');
+    if (isFs) {
+        // Exit fullscreen — restore original narrow layout
+        pane.classList.remove('fullscreen');
+        btn.innerHTML = '&#x26F6;';
+        btn.title = 'Expand to fullscreen';
+        if (_savedDetailHTML) {
+            detContent.innerHTML = _savedDetailHTML;
+            _savedDetailHTML = null;
+        }
+    } else {
+        // Enter fullscreen — save original, rebuild as dashboard
+        _savedDetailHTML = detContent.innerHTML;
+        pane.classList.add('fullscreen');
+        btn.innerHTML = '&#x2716;';
+        btn.title = 'Exit fullscreen (Esc)';
+        _buildProspectDashboard(detContent);
+    }
+}
+
+function _buildProspectDashboard(container) {
+    if (!activeProspectName) return;
+    const p = _prospectsByName[activeProspectName];
+    if (!p || !p.ua_fit) return;
+
+    const fit = p.ua_fit;
+    const score = fit.overall_score || 0;
+    const tier = _prospectTierClass(score);
+    const sub = fit.sub_scores || {};
+    const snap = fit.company_snapshot || {};
+    const cov = fit.signal_coverage || {};
+    const confLabel = cov.confidence || '?';
+    const confColor = confLabel === 'high' ? 'var(--green)' : confLabel === 'moderate' ? 'var(--yellow)' : 'var(--red)';
+    const analysesUsed = fit._analyses_used || {};
+    const analysisLabels = { techstack: 'Tech Stack', financial: 'Financial', brand_ad: 'Brand & Ad Intel', sentiment: 'Brand & Ad Intel' };
+
+    const _dimDisplayLabel = {
+        'advertising_maturity': 'Paid Media Footprint',
+        'creative_readiness': 'Video Asset Readiness',
+    };
+
+    const dims = (fit._dimensions || [
+        { key: 'financial_capacity',      label: 'Financial Capacity',      weight: 0.25 },
+        { key: 'advertising_maturity',    label: 'Paid Media Footprint',    weight: 0.20 },
+        { key: 'growth_trajectory',       label: 'Growth Trajectory',       weight: 0.20 },
+        { key: 'creative_readiness',      label: 'Video Asset Readiness',   weight: 0.20 },
+        { key: 'channel_expansion_intent',label: 'Channel Expansion Intent',weight: 0.15 },
+    ]);
+
+    // Collect all sources for the sources card
+    const allSrc = [];
+    dims.forEach(d => {
+        const ds = sub[d.key] || {};
+        (ds.signals || []).forEach(sig => {
+            if (typeof sig === 'object' && sig.url) {
+                if (!allSrc.some(s => s.url === sig.url)) allSrc.push(sig);
+            }
+        });
+    });
+
+    // Hero row: score donut + company meta | dimension bars
+    let barsHtml = dims.map(d => {
+        const ds = sub[d.key] || {};
+        const s = ds.score || 0;
+        const color = _dimColor(s);
+        const displayLabel = _dimDisplayLabel[d.key] || d.label;
+        const wPct = Math.round((d.weight || 0) * 100);
+        return `<div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:12px;color:var(--text-secondary);min-width:150px">${escHtml(displayLabel)} <span style="color:var(--text-muted);font-size:10px">(${wPct}%)</span></span>
+            <div style="flex:1;height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden">
+                <div style="height:100%;width:${s}%;background:${color};border-radius:4px;transition:width 0.8s"></div>
+            </div>
+            <span style="font-size:13px;font-weight:700;color:${color};min-width:28px;text-align:right">${s}</span>
+        </div>`;
+    }).join('');
+
+    // Report badges
+    const reportBadgesHtml = Object.entries(analysesUsed).map(([atype, path]) => {
+        const label = analysisLabels[atype] || atype;
+        const filename = path ? path.replace(/^reports[\\/\\\\]/, '') : '';
+        if (!filename) return '';
+        return `<span class="source-badge source-${atype}" style="cursor:pointer;font-size:12px;padding:3px 10px;margin:2px" onclick="event.stopPropagation();switchModule('research');openReport('${escHtml(filename)}')" title="View ${escHtml(label)} report">${escHtml(label)}</span>`;
+    }).join('');
+
+    // Playbook card
+    const playbookCard = fit.recommended_angle ? _dashCard('Outbound Strategy Playbook',
+        `<div style="font-size:13px;color:var(--text-secondary);line-height:1.5">${escHtml(fit.recommended_angle)}</div>`, true) : '';
+
+    // Dimension detail cards — each dimension gets its own card
+    const dimCards = dims.map(d => {
+        const ds = sub[d.key] || {};
+        const s = ds.score || 0;
+        const color = _dimColor(s);
+        const displayLabel = _dimDisplayLabel[d.key] || d.label;
+        const rationale = ds.rationale || 'No data available';
+        const signals = (ds.signals || []).map(sig => {
+            if (typeof sig === 'string') return `<span class="icp-signal-tag">${escHtml(sig)}</span>`;
+            const text = sig.text || sig;
+            const url = sig.url;
+            return url
+                ? `<a class="icp-signal-tag" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(text)}</a>`
+                : `<span class="icp-signal-tag">${escHtml(text)}</span>`;
+        }).join('');
+
+        return `<div class="dash-card">
+            <div class="dash-card-title">${escHtml(displayLabel)} <span style="color:${color};float:right;font-size:16px">${s}</span></div>
+            <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;margin-bottom:10px">
+                <div style="height:100%;width:${s}%;background:${color};border-radius:3px"></div>
+            </div>
+            <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:8px">${escHtml(rationale)}</div>
+            ${signals ? `<div class="icp-dim-signals">${signals}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    // Company snapshot card
+    const snapFields = [
+        ['Website', snap.website], ['Revenue', snap.estimated_revenue],
+        ['Employees', snap.estimated_employees], ['Recent Funding', snap.recent_funding],
+    ].filter(f => f[1]);
+    const snapCard = snapFields.length ? _dashCard('Company Snapshot',
+        `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            ${snapFields.map(f => `<div style="font-size:12px;color:var(--text-muted)">${f[0]}<div style="font-size:13px;color:var(--text-primary);font-weight:500">${escHtml(String(f[1]))}</div></div>`).join('')}
+        </div>
+        ${(snap.primary_ad_channels || []).length ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Ad Channels<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${snap.primary_ad_channels.map((v, i) => {
+            const c2 = [{bg:'rgba(59,130,246,0.12)',color:'#60a5fa'},{bg:'rgba(168,85,247,0.12)',color:'#c084fc'},{bg:'rgba(22,163,74,0.12)',color:'#4ade80'},{bg:'rgba(234,179,8,0.12)',color:'#facc15'},{bg:'rgba(239,68,68,0.12)',color:'#f87171'}][i%5];
+            return `<span style="display:inline-block;font-size:11px;padding:2px 8px;border-radius:4px;background:${c2.bg};color:${c2.color}">${escHtml(v)}</span>`;
+        }).join('')}</div></div>` : ''}`, false) : '';
+
+    // Risks card
+    const risksCard = (fit.key_risks || []).length ? _dashCard('Key Risks',
+        `<ul class="icp-risks">${(fit.key_risks || []).map(r => `<li>${escHtml(r)}</li>`).join('')}</ul>`, false) : '';
+
+    // Sources card
+    const sourcesCard = _dashCard('Analysis Sources',
+        `${reportBadgesHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">${reportBadgesHtml}</div>` : ''}
+        ${allSrc.length > 0 ? `<div style="padding-top:8px;border-top:1px solid var(--border)">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;font-weight:600">External Sources (${allSrc.length})</div>
+            ${allSrc.map(s => `<div style="font-size:11px;padding:3px 0"><a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">${escHtml(s.text)}</a></div>`).join('')}
+        </div>` : '<div style="font-size:12px;color:var(--text-muted)">Re-score to generate source citations.</div>'}`, false);
+
+    container.innerHTML = `<div class="icp-detail" style="padding:24px 32px">
+        <div class="dash-hero-row">
+            <div class="dash-hero-left">
+                <div class="dash-hero-identity" style="border-right:none;padding-right:0">
+                    <div class="dash-hero-company">${escHtml(activeProspectName)}</div>
+                    <div style="margin-top:4px">
+                        <span class="icp-label-badge" style="color:${_dimColor(score)};font-size:12px">${escHtml(fit.overall_label || '?')}</span>
+                    </div>
+                    <div class="dash-hero-detail">Confidence: <span style="color:${confColor}">${confLabel}</span> &bull; ${cov.categories_with_data || 0}/${cov.categories_total || 3} analyses</div>
+                    <div class="icp-actions-row" style="margin-top:8px">
+                        <button class="icp-action-btn" onclick="alert('CRM sync coming soon')" style="font-size:11px;padding:4px 10px"><span class="btn-icon">&#9741;</span> Sync to CRM</button>
+                        <button class="icp-rescore-btn" id="icp-rescore-btn" onclick="rescoreProspect('${encodeURIComponent(activeProspectName)}')" style="font-size:11px;padding:4px 10px">&#8635; Re-score</button>
+                    </div>
+                </div>
+                <div class="dash-hero-score">
+                    <div class="icp-big-score ${tier}" style="width:90px;height:90px;font-size:28px">
+                        <span class="num">${score}</span>
+                        <span class="lbl">/100</span>
+                    </div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:4px">CTV Propensity</div>
+                </div>
+            </div>
+            <div class="dash-hero-right">
+                <div class="dash-hero-right-title">Dimension Scores</div>
+                <div style="display:flex;flex-direction:column;gap:10px">${barsHtml}</div>
+            </div>
+        </div>
+
+        ${playbookCard}
+
+        <div class="dash-grid">
+            ${dimCards}
+            ${snapCard}
+            ${risksCard}
+            ${sourcesCard}
+        </div>
+    </div>`;
+}
+
 async function rescoreProspect(encodedName) {
     const companyName = decodeURIComponent(encodedName);
     const btn = document.getElementById('icp-rescore-btn');
@@ -7607,11 +7987,24 @@ function _safeName(name) {
 }
 
 // Responsive: focus a single pane on narrow screens
+// Pane order for adjacency logic (the pane you click + its predecessor are shown)
+const _paneOrder = ['pane-execution', 'pane-summary', 'pane-detail'];
+
 function focusPane(paneId) {
     if (window.innerWidth >= 1440) return; // no-op on wide screens
     document.querySelectorAll('.prospect-pane').forEach(p => p.classList.remove('pane-focused'));
+
+    const idx = _paneOrder.indexOf(paneId);
+    if (idx < 0) return;
+
+    // Show the target pane + the one before it (2 panes visible)
     const target = document.getElementById(paneId);
     if (target) target.classList.add('pane-focused');
+
+    if (idx > 0) {
+        const prev = document.getElementById(_paneOrder[idx - 1]);
+        if (prev) prev.classList.add('pane-focused');
+    }
 }
 
 // Pane header clicks for responsive expand
@@ -7619,7 +8012,7 @@ document.addEventListener('click', function(e) {
     const header = e.target.closest('.prospect-pane .pane-header');
     if (!header) return;
     const pane = header.closest('.prospect-pane');
-    if (pane && !pane.classList.contains('pane-focused') && window.innerWidth < 1440) {
+    if (pane && window.innerWidth < 1440) {
         focusPane(pane.id);
     }
 });
@@ -7897,7 +8290,20 @@ function handlePipelineSSE(ev) {
             }
             const meta = card.querySelector('.company-card-meta');
             if (meta) meta.innerHTML = `<span style="color:${color}">${escHtml(ev.label)}</span>`;
-            // Keep the vertical analysis list as-is (rows already updated with Done/Cached status)
+            // Ensure analysis rows exist — rebuild from scored event if analyzing event was missed
+            const existingList = card.querySelector('.analysis-list');
+            if (!existingList && ev.analyses_used && ev.analyses_used.length > 0) {
+                const aLabels = { techstack: 'Tech Stack', financial: 'Financial', brand_ad: 'Brand & Ad Intel' };
+                const rowsHtml = ev.analyses_used.map(k =>
+                    `<div class="analysis-row">
+                        <div class="analysis-row-icon done">&#10003;</div>
+                        <span class="analysis-row-name">${escHtml(aLabels[k] || k)}</span>
+                        <span class="analysis-row-status done">Done</span>
+                    </div>`
+                ).join('');
+                card.insertAdjacentHTML('beforeend',
+                    `<div class="analysis-list">${rowsHtml}</div>`);
+            }
         }
         // Real-time Pane 3 update
         _updateLiveSummary(ev);
@@ -7931,6 +8337,19 @@ function handlePipelineSSE(ev) {
         const badge = document.getElementById('pane-execution-status');
         if (badge) { badge.textContent = 'Complete'; badge.className = 'pane-status-badge complete'; }
 
+        // Mark orphaned companies (never scored or errored) as failed
+        const gridEl2 = document.getElementById('pm-grid');
+        if (gridEl2) {
+            gridEl2.querySelectorAll('.company-card.pending, .company-card.scoring').forEach(card => {
+                card.className = 'company-card error';
+                card.style.opacity = '0.7';
+                const ring = card.querySelector('.company-card-ring');
+                if (ring) { ring.textContent = '!'; ring.style.borderColor = 'var(--red)'; ring.style.color = 'var(--red)'; }
+                const meta = card.querySelector('.company-card-meta');
+                if (meta) meta.innerHTML = '<span style="color:var(--red);font-size:10px">No score returned</span>';
+            });
+        }
+
         // Reload campaigns, update sidebar, render full Pane 3 summary (replaces live list)
         const cid = ev.campaign_id || _pipelineState.campaignId;
         if (cid) {
@@ -7943,6 +8362,20 @@ function handlePipelineSSE(ev) {
                     const id = parseInt(el.dataset.campaignId, 10);
                     el.classList.toggle('active', id === cid);
                 });
+            });
+
+            // Poll for vertical insight (generated in background thread on server)
+            _pollForInsight(cid);
+        }
+
+    } else if (ev.type === 'insight_ready') {
+        // Server generated insight — reload campaign data and re-render summary
+        const insightCid = ev.campaign_id || _pipelineState.campaignId;
+        if (insightCid) {
+            loadCampaigns().then(() => {
+                if (activeCampaignId === insightCid) {
+                    renderSummaryPane(insightCid);
+                }
             });
         }
 
@@ -7963,6 +8396,25 @@ function handlePipelineSSE(ev) {
         const badge = document.getElementById('pane-execution-status');
         if (badge) { badge.textContent = 'Error'; badge.className = 'pane-status-badge error'; }
     }
+}
+
+// Poll for vertical insight after pipeline completes (insight generates in background thread)
+function _pollForInsight(campaignId, attempts = 0) {
+    if (attempts >= 12) return; // stop after ~60s
+    setTimeout(() => {
+        fetch(`/api/campaigns/${campaignId}`).then(r => r.ok ? r.json() : null).then(data => {
+            if (data && data.insight_json) {
+                // Insight ready — update cache and re-render
+                loadCampaigns().then(() => {
+                    if (activeCampaignId === campaignId) {
+                        renderSummaryPane(campaignId);
+                    }
+                });
+            } else {
+                _pollForInsight(campaignId, attempts + 1);
+            }
+        }).catch(() => _pollForInsight(campaignId, attempts + 1));
+    }, 5000);
 }
 
 // Pipeline map company card clicks
@@ -8044,6 +8496,7 @@ function runProspectPipeline() {
     }).finally(() => {
         _prospectPipelineRunning = false;
         _currentRunCampaignId = null;
+        _savedLivePipelineDOM = null;
         btn.disabled = false;
         btn.textContent = 'Discover';
         loadCampaigns();
