@@ -4,7 +4,8 @@ from datetime import datetime
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
-from scraper.web_search import search_web, search_news, search_reddit, search_tiktok, format_search_results
+from scraper.web_search import search_web, search_news, search_reddit, search_tiktok, format_search_results, dedup_results
+from scraper.google_news import search_google_news
 from scraper.hackernews import search_hackernews
 from scraper.reddit_rss import search_reddit_rss
 from scraper.onepoint3acres import search_1point3acres
@@ -54,9 +55,12 @@ def sentiment_analysis(company):
     if fishbowl:
         print(f"[sentiment] Fishbowl returned {len(fishbowl)} results")
 
-    # News about workplace/culture
+    # News about workplace/culture (DDG + Google News)
     news = search_news(f"{company} employees workplace culture", max_results=3)
     all_results.extend(news)
+    print("[sentiment] Searching Google News for workplace/culture coverage...")
+    gnews = search_google_news(f"{company} employees workplace culture", max_results=5, days_back=30)
+    all_results.extend(gnews)
 
     # Reddit — general search + targeted career subreddits
     print("[sentiment] Searching Reddit for candid employee perspectives...")
@@ -122,14 +126,8 @@ def sentiment_analysis(company):
         print("[sentiment] No results from any source (web, news, Reddit, Blind, Fishbowl, HN, 1P3A, TikTok)")
         return None
 
-    # Deduplicate
-    seen = set()
-    unique = []
-    for r in all_results:
-        title = r.get("title", "")
-        if title not in seen:
-            seen.add(title)
-            unique.append(r)
+    # Deduplicate (normalized title matching, keeps highest-quality source)
+    unique = dedup_results(all_results)
 
     search_text = format_search_results(unique)
 

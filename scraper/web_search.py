@@ -4,9 +4,11 @@ Primary: DuckDuckGo (no API key required).
 Fallback: Reddit RSS feeds (direct, no DDG dependency).
 """
 
+import re
 import time
 import threading
 import concurrent.futures
+from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 from ddgs import DDGS
@@ -36,22 +38,43 @@ REQUEST_HEADERS = {
 }
 
 def fetch_page_text(url, max_chars=3000):
+    """Fetch and extract article text from a URL.
+
+    Uses trafilatura for clean article extraction (strips nav, ads, footers).
+    Falls back to BS4 text stripping if trafilatura fails or isn't installed.
+    """
     try:
         if not url.startswith("http"):
             return ""
         with httpx.Client(headers=REQUEST_HEADERS, timeout=12, follow_redirects=True) as client:
             resp = client.get(url)
             ct = resp.headers.get("content-type", "").lower()
-            if resp.status_code == 200 and "text/html" in ct:
-                soup = BeautifulSoup(resp.text, "html.parser")
-                for tag in soup(["script", "style", "noscript"]):
-                    tag.decompose()
-                text = soup.get_text(separator=" ", strip=True)[:max_chars]
-                if text:
-                    print(f"[search] Fetched {len(text)} chars from {url[:80]}")
-                return text
-            else:
+            if resp.status_code != 200 or "text/html" not in ct:
                 print(f"[search] Skip {url[:80]} — status={resp.status_code} ct={ct[:40]}")
+                return ""
+
+            html = resp.text
+
+            # Try trafilatura first (clean article extraction)
+            try:
+                import trafilatura
+                result = trafilatura.extract(html, include_comments=False, include_tables=True)
+                if result and len(result) > 100:
+                    text = result[:max_chars]
+                    print(f"[search] Trafilatura extracted {len(text)} chars from {url[:80]}")
+                    return text
+            except Exception as e:
+                print(f"[search] Trafilatura failed for {url[:80]}: {e}")
+
+            # Fallback: BS4 text stripping (existing behavior)
+            soup = BeautifulSoup(html, "html.parser")
+            for tag in soup(["script", "style", "noscript"]):
+                tag.decompose()
+            text = soup.get_text(separator=" ", strip=True)[:max_chars]
+            if text:
+                print(f"[search] BS4 fallback extracted {len(text)} chars from {url[:80]}")
+            return text
+
     except Exception as e:
         print(f"[search] Failed to fetch {url[:80]}: {e}")
     return ""
@@ -219,3 +242,82 @@ def format_search_results(results, max_body_chars=2000):
         lines.append(line)
 
     return "\n\n".join(lines)
+
+
+# --- Dedup utilities ---
+
+_STRIP_PREFIXES = re.compile(
+    r"^(breaking:\s*|exclusive:\s*|update:\s*|just in:\s*|watch:\s*|"
+    r"analysis:\s*|opinion:\s*|report:\s*)",
+    re.IGNORECASE,
+)
+
+# Source quality ranking — higher is better (wire services > outlets > blogs)
+_SOURCE_QUALITY = {
+    "reuters.com": 10, "bloomberg.com": 10,
+    "wsj.com": 9, "ft.com": 9, "apnews.com": 9,
+    "nytimes.com": 8, "washingtonpost.com": 8,
+    "cnbc.com": 7, "bbc.com": 7, "bbc.co.uk": 7,
+    "seekingalpha.com": 6, "techcrunch.com": 6, "theinformation.com": 6,
+    "theverge.com": 5, "arstechnica.com": 5, "wired.com": 5,
+}
+
+
+def _normalize_title(title):
+    """Normalize a title for dedup: strip prefixes, punctuation, lowercase."""
+    t = _STRIP_PREFIXES.sub("", title.strip())
+    t = re.sub(r"[^\w\s]", "", t).lower()
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _source_quality(result):
+    """Score a result by source domain quality (higher = better)."""
+    url = result.get("url") or result.get("href", "")
+    if not url:
+        return 3
+    try:
+        host = urlparse(url).netloc.lower()
+        host = re.sub(r"^(www\d?\.|m\.|mobile\.)", "", host)
+        return _SOURCE_QUALITY.get(host, 3)
+    except Exception:
+        return 3
+
+
+def dedup_results(results):
+    """Deduplicate search results using normalized title matching.
+
+    For wire stories reprinted across outlets, keeps the highest-quality source.
+    Returns deduplicated list preserving original order of kept items.
+    """
+    if not results:
+        return []
+
+    clusters = {}  # normalized_title -> list of (index, result)
+    for i, r in enumerate(results):
+        title = r.get("title", "")
+        if not title:
+            continue
+        norm = _normalize_title(title)
+        if not norm:
+            continue
+        clusters.setdefault(norm, []).append((i, r))
+
+    keep_indices = set()
+    for norm_title, group in clusters.items():
+        if len(group) == 1:
+            keep_indices.add(group[0][0])
+        else:
+            # Keep the highest-quality source
+            group.sort(key=lambda x: _source_quality(x[1]), reverse=True)
+            keep_indices.add(group[0][0])
+
+    # Also keep results with no title (rare)
+    for i, r in enumerate(results):
+        if not r.get("title"):
+            keep_indices.add(i)
+
+    deduped = [results[i] for i in sorted(keep_indices)]
+    if len(deduped) < len(results):
+        print(f"[search] Dedup: {len(results)} → {len(deduped)} results")
+    return deduped

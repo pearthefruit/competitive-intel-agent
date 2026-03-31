@@ -4,9 +4,10 @@ from datetime import datetime
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
-from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, get_recent_filings, format_financials_for_prompt
+from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, get_recent_filings, format_financials_for_prompt, get_8k_filings, format_8k_for_prompt
 from scraper.stock_data import get_stock_data, format_stock_data_for_prompt, get_extended_financials, format_extended_financials_for_prompt
-from scraper.web_search import search_web, search_news, format_search_results
+from scraper.web_search import search_web, search_news, format_search_results, dedup_results
+from scraper.google_news import search_google_news
 from prompts.financial import build_financial_prompt, build_financial_prompt_private
 
 
@@ -89,6 +90,13 @@ def _analyze_public(company, cik_info):
             financials_text += "\n" + ext_text
             print(f"[financial] Added analyst estimates and news")
 
+    # Fetch recent 8-K filings (material business events)
+    print(f"[financial] Fetching recent 8-K filing events...")
+    eight_k = get_8k_filings(cik)
+    if eight_k:
+        financials_text += "\n" + format_8k_for_prompt(eight_k)
+        print(f"[financial] Added {len(eight_k)} 8-K filing events")
+
     # Generate report
     prompt = build_financial_prompt(company, ticker, financials_text)
     prompt += get_temporal_context(company, "financial")
@@ -157,20 +165,16 @@ def _analyze_non_sec(company):
         all_results.extend(results)
         news = search_news(query, max_results=3, fetch_content=True)
         all_results.extend(news)
+        gnews = search_google_news(query, max_results=3, days_back=30)
+        all_results.extend(gnews)
 
     if not all_results:
         print("[financial] No web search results found — company may be too obscure, newly formed, or using a different public-facing name")
         print("[financial] Try searching with the parent company name, or check Crunchbase/PitchBook manually")
         return None
 
-    # Deduplicate by title
-    seen_titles = set()
-    unique_results = []
-    for r in all_results:
-        title = r.get("title", "")
-        if title not in seen_titles:
-            seen_titles.add(title)
-            unique_results.append(r)
+    # Deduplicate (normalized title matching, keeps highest-quality source)
+    unique_results = dedup_results(all_results)
 
     # Log fetch stats so we can see how much content actually made it through
     fetched = [r for r in unique_results if len(r.get("body", "")) > 300]

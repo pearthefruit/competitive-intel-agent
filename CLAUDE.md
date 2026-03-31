@@ -11,9 +11,9 @@ A competitive intelligence platform that scrapes, classifies, and analyzes compa
 - **Backend:** Python, Flask, SQLite (WAL mode)
 - **Frontend:** Single-page app in vanilla JS (no framework), Jinja2 template (`web/templates/base.html`)
 - **AI:** Multi-provider rotation — 5 providers with 17+ model fallbacks. Report providers: Gemini (primary, multi-key rotation), Groq, Cerebras, Mistral, OpenRouter (free models). Chat providers: Gemini (primary, native function calling), Groq, Cerebras, Mistral, OpenRouter. Separate provider lists for reports (`REPORT_PROVIDERS`) and chat (`CHAT_PROVIDERS`).
-- **Scraping:** httpx + BeautifulSoup, SEC EDGAR, USPTO patents, Reddit RSS, HackerNews, YouTube transcripts
+- **Scraping:** httpx + BeautifulSoup + trafilatura, SEC EDGAR (XBRL + 8-K filings), USPTO patents, Reddit RSS, HackerNews, YouTube transcripts, Google News RSS, Blind, TikTok (yt-dlp), 1Point3Acres
 - **CLI:** Click-based (`main.py`), also serves web UI via `python main.py web --port 5001`
-- **DB:** `intel.db` — 11 tables: companies, jobs, classifications, dossiers, dossier_analyses, dossier_events, hiring_snapshots, llm_usage, icp_profiles, lenses, lens_scores
+- **DB:** `intel.db` — 13 tables: companies, jobs, classifications, dossiers, dossier_analyses, dossier_events, hiring_snapshots, llm_usage, icp_profiles, lenses, lens_scores, campaigns, campaign_prospects
 
 ## Commands
 
@@ -91,8 +91,9 @@ competitive-intel-agent/
 ├── scraper/
 │   ├── site_crawler.py      # General website crawler (httpx + BS4)
 │   ├── tech_detect.py       # Technology fingerprinting from HTML/headers/scripts
-│   ├── web_search.py        # Multi-source web search (news, reddit, youtube via DuckDuckGo)
-│   ├── sec_edgar.py         # SEC EDGAR XBRL API for public company financials
+│   ├── web_search.py        # Multi-source web search (news, reddit, youtube via DuckDuckGo) + dedup_results()
+│   ├── google_news.py       # Google News RSS scraper (date filtering, redirect resolution)
+│   ├── sec_edgar.py         # SEC EDGAR XBRL API + 8-K filings for public company financials
 │   ├── stock_data.py        # Stock price data via yfinance
 │   ├── patents.py           # USPTO PatentsView + Google Patents search
 │   ├── ats_api.py           # ATS board scrapers (Greenhouse, Lever, Ashby, Workday, etc.)
@@ -102,11 +103,14 @@ competitive-intel-agent/
 │   ├── reddit_rss.py        # Reddit RSS feed scraper with comment fetching (direct, bypasses DDG)
 │   ├── hackernews.py        # HackerNews Algolia API search + comment fetching
 │   ├── onepoint3acres.py    # 1Point3Acres (一亩三分地) interview experience scraper (Chinese tech community)
+│   ├── blind.py             # Blind direct scraper (JSON-LD reviews + RSC stream + post links)
+│   ├── tiktok.py            # TikTok video metadata + captions via yt-dlp
+│   ├── nonprofit.py         # ProPublica Nonprofit Explorer API (IRS Form 990 data)
 │   └── youtube.py           # YouTube search + transcript extraction
 ├── web/
 │   ├── app.py               # Flask app factory, API routes, SSE chat endpoint, tool result summarization
 │   └── templates/
-│       └── base.html         # Entire SPA — HTML + CSS + JS in one file (~7100 lines)
+│       └── base.html         # Entire SPA — HTML + CSS + JS in one file (~8700+ lines)
 ├── reports/                  # Generated markdown reports (gitignored)
 └── .env                      # API keys (gitignored)
 ```

@@ -14,7 +14,8 @@ from db import init_db, get_connection
 from agents.collect import collect
 from agents.classify import classify
 from agents.analyze import analyze
-from scraper.web_search import search_news, search_web, search_reddit, search_youtube, format_search_results
+from scraper.web_search import search_news, search_web, search_reddit, search_youtube, format_search_results, dedup_results
+from scraper.google_news import search_google_news
 from scraper.reddit_rss import search_reddit_rss
 from scraper.hackernews import search_hackernews
 from scraper.youtube import get_video_transcript, fetch_transcripts_from_search_results, format_transcripts_for_prompt
@@ -636,8 +637,9 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             old_stdout = None
             query = args["query"]
             news = search_news(f"{query} earnings revenue funding site:reuters.com OR site:bloomberg.com OR site:ft.com OR site:wsj.com OR site:seekingalpha.com", max_results=8)
+            gnews = search_google_news(f"{query} earnings revenue", max_results=5, days_back=30)
             web = search_web(f"{query} financials earnings revenue", max_results=5)
-            all_results = news + web
+            all_results = dedup_results(news + gnews + web)
             if not all_results:
                 return f"No financial news found for '{query}'. Try broadening the search or checking if the company name is correct."
             return format_search_results(all_results)
@@ -781,8 +783,9 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             old_stdout = None
             query = args["query"]
             news = search_news(query, max_results=5)
+            gnews = search_google_news(query, max_results=5, days_back=7)
             web = search_web(query, max_results=5)
-            all_results = news + web
+            all_results = dedup_results(news + gnews + web)
             return format_search_results(all_results) if all_results else "No results found."
 
         elif name == "reddit_search":

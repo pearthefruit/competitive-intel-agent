@@ -10,12 +10,13 @@ from datetime import datetime
 from pathlib import Path
 
 from agents.llm import generate_json, unique_report_path
-from scraper.web_search import search_web, search_news, search_reddit, format_search_results
+from scraper.web_search import search_web, search_news, search_reddit, format_search_results, dedup_results
+from scraper.google_news import search_google_news
 from prompts.ua_discover import build_discovery_prompt
 from db import get_connection, get_or_create_dossier
 
 
-_SOURCE_LABELS = {"web": "Web Search", "news": "News", "reddit": "Reddit"}
+_SOURCE_LABELS = {"web": "Web Search", "news": "News", "reddit": "Reddit", "gnews": "Google News"}
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +93,10 @@ def _build_queries(niche, context):
     queries.append(("news", f"{core} companies{geo_q} funding growth 2026"))
     queries.append(("news", f"{core}{geo_q} brands expansion"))
 
+    # --- Google News queries (supplement DDG with broader coverage) ---
+    queries.append(("gnews", f"{core} companies{geo_q} funding growth 2026"))
+    queries.append(("gnews", f"{core}{geo_q} acquisition expansion"))
+
     # --- Reddit queries (community signals) ---
     queries.append(("reddit", f"{core} companies recommendations{geo_q}"))
     if model == "B2C":
@@ -133,6 +138,7 @@ def discover_prospects(niche, top_n=15, db_path="intel.db", context=None, progre
         "total_queries": total_queries,
         "web": len([q for q in queries if q[0] == "web"]),
         "news": len([q for q in queries if q[0] == "news"]),
+        "gnews": len([q for q in queries if q[0] == "gnews"]),
         "reddit": len([q for q in queries if q[0] == "reddit"]),
     })
 
@@ -154,6 +160,8 @@ def discover_prospects(niche, top_n=15, db_path="intel.db", context=None, progre
             results = search_news(query, max_results=5, fetch_content=True)
         elif source == "reddit":
             results = search_reddit(query, max_results=5)
+        elif source == "gnews":
+            results = search_google_news(query, max_results=5, days_back=30)
         else:
             continue
 
@@ -172,14 +180,8 @@ def discover_prospects(niche, top_n=15, db_path="intel.db", context=None, progre
         print("[discover] No search results found. Try a different niche description.")
         return []
 
-    # Deduplicate by title
-    seen = set()
-    unique = []
-    for r in all_results:
-        title = r.get("title", "")
-        if title and title not in seen:
-            seen.add(title)
-            unique.append(r)
+    # Deduplicate (normalized title matching, keeps highest-quality source)
+    unique = dedup_results(all_results)
 
     print(f"[discover] {len(unique)} unique results from {len(all_results)} total")
     _cb("search_complete", {

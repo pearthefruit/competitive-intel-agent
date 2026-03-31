@@ -365,3 +365,80 @@ def format_financials_for_prompt(financials, filings):
             lines.append(line)
 
     return "\n".join(lines)
+
+
+def get_8k_filings(cik, max_filings=15):
+    """Fetch recent 8-K filings for a company from the submissions API.
+
+    8-K filings disclose material business events: acquisitions, executive
+    changes, material agreements, earnings, impairments, etc.
+
+    Returns list of {form, date, description, url}.
+    """
+    cik_padded = str(cik).zfill(10)
+    url = SUBMISSIONS_URL.format(cik=cik_padded)
+
+    http = httpx.Client(headers=EDGAR_HEADERS, timeout=15)
+    try:
+        print(f"[edgar] Fetching 8-K filings...")
+        resp = http.get(url)
+        if resp.status_code != 200:
+            print(f"[edgar] Submissions API returned {resp.status_code}")
+            return []
+
+        data = resp.json()
+        recent = data.get("filings", {}).get("recent", {})
+
+        forms = recent.get("form", [])
+        dates = recent.get("filingDate", [])
+        docs = recent.get("primaryDocument", [])
+        descriptions = recent.get("primaryDocDescription", [])
+        accessions = recent.get("accessionNumber", [])
+
+        filings = []
+        for i in range(len(forms)):
+            if forms[i] != "8-K":
+                continue
+
+            accession = accessions[i] if i < len(accessions) else ""
+            doc = docs[i] if i < len(docs) else ""
+            filing_url = ""
+            if accession and doc:
+                acc_no_dashes = accession.replace("-", "")
+                filing_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{doc}"
+
+            filings.append({
+                "form": "8-K",
+                "date": dates[i] if i < len(dates) else "",
+                "description": descriptions[i] if i < len(descriptions) else "",
+                "url": filing_url,
+            })
+            if len(filings) >= max_filings:
+                break
+
+        print(f"[edgar] Found {len(filings)} 8-K filings")
+        return filings
+
+    except Exception as e:
+        print(f"[edgar] 8-K fetch failed: {e}")
+        return []
+    finally:
+        http.close()
+
+
+def format_8k_for_prompt(filings):
+    """Format 8-K filing events for LLM context."""
+    if not filings:
+        return ""
+
+    lines = ["\n### Recent 8-K Filings (Business Events)"]
+    for f in filings:
+        line = f"  {f['date']}: {f['form']}"
+        desc = f.get("description", "")
+        if desc:
+            line += f" — {desc}"
+        if f.get("url"):
+            line += f"\n    URL: {f['url']}"
+        lines.append(line)
+
+    return "\n".join(lines)

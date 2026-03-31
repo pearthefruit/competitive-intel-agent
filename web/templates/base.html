@@ -1295,6 +1295,7 @@
         .source-brand_ad { background: rgba(236,72,153,0.18); color: #f472b6; }
         .source-compare { background: rgba(251,191,36,0.18); color: #fbbf24; }
         .source-analysis { background: rgba(107,114,128,0.18); color: #9ca3af; }
+        .source-lens { background: rgba(6,182,212,0.18); color: #22d3ee; }
 
         /* Source reference popover */
         .source-popover {
@@ -2112,13 +2113,14 @@
         }
         .prospect-trigger input[type="text"] {
             width: 100%;
-            padding: 8px 44px 8px 12px;
+            padding: 8px 12px;
             background: var(--bg-primary);
             border: 1px solid var(--border);
             border-radius: 6px;
             color: var(--text-primary);
             font-size: 13px;
             outline: none;
+            box-sizing: border-box;
         }
         .prospect-trigger input[type="text"]:focus { border-color: var(--accent); }
         .prospect-trigger input[type="text"]::placeholder { color: var(--text-muted); }
@@ -4919,8 +4921,18 @@ function _isSourceTag(tag) {
 function _sourceBadgeClass(tag) {
     // Map to a known source class for coloring, or fall back to generic
     if (_VALID_SOURCES.includes(tag)) return `source-${tag}`;
-    if (tag.startsWith('lens_')) return 'source-analysis';
+    if (tag.startsWith('lens_')) return 'source-lens';
     return 'source-profile';
+}
+
+function _sourceBadgeDisplayName(tag) {
+    return tag.replace(/^lens_/, '').replace(/[-_]/g, ' ');
+}
+
+function _renderSourceBadge(tag) {
+    const cls = _sourceBadgeClass(tag);
+    const name = _sourceBadgeDisplayName(tag);
+    return `<span class="source-badge ${cls}" onclick="event.stopPropagation();showSourcePopover(event,'${tag}')" title="Click to see evidence from ${name} analysis">${name}</span>`;
 }
 
 function _renderCitedText(text) {
@@ -4930,14 +4942,7 @@ function _renderCitedText(text) {
         const sources = inner.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
         const badges = sources
             .filter(s => _isSourceTag(s))
-            .map(s => {
-                const cls = _sourceBadgeClass(s);
-                const displayName = s.replace(/^lens_/, '').replace(/[-_]/g, ' ');
-                if (_VALID_SOURCES.includes(s)) {
-                    return `<span class="source-badge ${cls}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${displayName}</span>`;
-                }
-                return `<span class="source-badge ${cls}" title="${escHtml(s)}">${displayName}</span>`;
-            });
+            .map(s => _renderSourceBadge(s));
         return badges.length ? badges.join(' ') : match;
     });
 }
@@ -5002,8 +5007,10 @@ function showSourcePopover(event, type) {
     pop.className = 'source-popover';
     pop.id = 'active-source-popover';
 
-    const label = _SOURCE_LABELS[type] || (type.charAt(0).toUpperCase() + type.slice(1));
-    let html = `<div class="source-popover-header"><span class="source-badge source-${type}">${type}</span> ${escHtml(label)}</div>`;
+    const displayName = _sourceBadgeDisplayName(type);
+    const label = _SOURCE_LABELS[type] || (displayName.charAt(0).toUpperCase() + displayName.slice(1));
+    const badgeCls = _sourceBadgeClass(type);
+    let html = `<div class="source-popover-header"><span class="source-badge ${badgeCls}">${escHtml(displayName)}</span> ${escHtml(label)}</div>`;
 
     if (facts && Object.keys(facts).length) {
         // Sort entries by priority for this source type
@@ -5277,7 +5284,7 @@ function _renderScoringSection(scoring, isFullBriefing) {
         if (sub.rationale) {
             const sources = _extractSources(sub.rationale);
             const badges = sources.map(s =>
-                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
+                _renderSourceBadge(s)
             ).join(' ');
             html += `<div style="margin-bottom:6px"><span style="font-size:15px;font-weight:600;color:var(--text-secondary)">${escHtml(d.label)}:</span> <span style="font-size:15px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
         }
@@ -5298,7 +5305,7 @@ function _renderOpportunitiesSection(opps) {
         const inlineSources = _extractSources((opp.evidence || '') + ' ' + (opp.detail || ''));
         const allSources = [...new Set([...explicitSources, ...inlineSources])];
         const sourceBadges = allSources.map(s =>
-            `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
+            _renderSourceBadge(s)
         ).join(' ');
         oppHtml += `<div class="opp-card" onclick="this.classList.toggle('expanded')">
             <div class="opp-card-header">
@@ -7110,7 +7117,7 @@ function _buildBriefingDashboard(content) {
         if (sub.rationale) {
             const sources = _extractSources(sub.rationale);
             const badges = sources.map(s =>
-                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
+                _renderSourceBadge(s)
             ).join(' ');
             rationaleHtml += `<div style="margin-bottom:8px"><span style="font-size:15px;font-weight:600;color:var(--text-secondary)">${escHtml(d.label)}:</span> <span style="font-size:15px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
         }
@@ -7177,7 +7184,7 @@ function _buildBriefingDashboard(content) {
             const inlineSources = _extractSources((opp.evidence || '') + ' ' + (opp.detail || ''));
             const allSources = [...new Set([...explicitSources, ...inlineSources])];
             const sourceBadges = allSources.map(s =>
-                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
+                _renderSourceBadge(s)
             ).join(' ');
             oppHtml += `<div class="opp-card" onclick="this.classList.toggle('expanded')">
                 <div class="opp-card-header"><span class="opp-service">${escHtml(opp.service || '')}</span><span class="opp-priority ${pClass}">${escHtml(opp.priority || '')}</span></div>
@@ -8080,6 +8087,8 @@ function renderCampaignSidebar() {
             ? '<span class="pane-status-badge running">Running</span>'
             : c.status === 'error'
             ? '<span class="pane-status-badge error">Error</span>'
+            : c.status === 'empty'
+            ? '<span class="pane-status-badge" style="background:rgba(107,114,128,0.15);color:#9ca3af">No results</span>'
             : '';
 
         return `<div class="search-query-item${isActive}" data-campaign-id="${c.id}" onclick="selectCampaign(${c.id})">
@@ -8223,15 +8232,42 @@ function renderExecutionPane(campaignId) {
     if (badge) {
         if (c.status === 'complete') { badge.textContent = 'Complete'; badge.className = 'pane-status-badge complete'; }
         else if (c.status === 'error') { badge.textContent = 'Error'; badge.className = 'pane-status-badge error'; }
+        else if (c.status === 'empty') { badge.textContent = 'No Results'; badge.className = 'pane-status-badge'; badge.style.cssText = 'background:rgba(107,114,128,0.15);color:#9ca3af'; }
         else { badge.textContent = ''; badge.className = 'pane-status-badge'; }
     }
 
     const prospects = (c.prospects || []).sort((a, b) =>
         (b.ua_fit?.overall_score || 0) - (a.ua_fit?.overall_score || 0));
+
+    // Handle empty campaigns (no companies found)
+    if (c.status === 'empty' || (!prospects.length && c.status !== 'running')) {
+        emptyEl.style.display = 'none';
+        mapEl.style.display = 'block';
+        mapEl.innerHTML = `
+            <div class="pipeline-node done" style="padding:10px 14px">
+                <div class="pipeline-node-header">
+                    <div class="pipeline-node-icon">&#128269;</div>
+                    <div class="pipeline-node-label">Discovery</div>
+                </div>
+                <div class="pipeline-node-meta">Niche: <strong style="color:var(--text-primary)">${escHtml(c.niche || c.name)}</strong></div>
+            </div>
+            <div class="pipeline-connector"></div>
+            <div class="pipeline-node" style="border-color:rgba(107,114,128,0.3);padding:12px">
+                <div class="pipeline-node-header">
+                    <div class="pipeline-node-icon" style="background:rgba(107,114,128,0.15)">&#128269;</div>
+                    <div class="pipeline-node-label" style="color:#9ca3af">No Results</div>
+                </div>
+                <div class="pipeline-node-meta" style="margin-top:4px;color:var(--text-muted)">No companies matched this niche. Try broadening the search terms.</div>
+            </div>
+        `;
+        return;
+    }
+
     const scored = prospects.filter(p => p.ua_fit);
+    const _limitedStatuses = ['limited', 'http_403', 'connection_failed'];
     const valid = prospects.filter(p => p.validation_status === 'valid').length;
-    const limited = prospects.filter(p => p.validation_status && p.validation_status !== 'valid' && p.ua_fit).length;
-    const skipped = prospects.filter(p => !p.ua_fit && p.validation_status && p.validation_status !== 'valid').length;
+    const limited = prospects.filter(p => _limitedStatuses.includes(p.validation_status)).length;
+    const skipped = prospects.filter(p => p.validation_status && p.validation_status !== 'valid' && !_limitedStatuses.includes(p.validation_status)).length;
 
     // Build static pipeline reconstruction — pipeline steps only, no company cards
     emptyEl.style.display = 'none';
@@ -8284,6 +8320,17 @@ function renderSummaryPane(campaignId) {
     const prospects = (c.prospects || []).sort((a, b) =>
         (b.ua_fit?.overall_score || 0) - (a.ua_fit?.overall_score || 0));
     const scored = prospects.filter(p => p.ua_fit);
+
+    // Handle empty campaigns
+    if (c.status === 'empty' || (!prospects.length && c.status !== 'running')) {
+        if (sumEmpty) sumEmpty.style.display = 'none';
+        sumContent.innerHTML = `<div class="pane-empty">
+            <div class="icon">&#128269;</div>
+            <div>No companies found</div>
+            <div class="subtitle">Try different search terms or broaden the niche.</div>
+        </div>`;
+        return;
+    }
 
     const statusText = c.status === 'complete' ? 'Complete' : c.status === 'running' ? 'Running...' : c.status === 'error' ? 'Error' : c.status;
     let createdDate = '';
@@ -8427,9 +8474,12 @@ function _buildDiscoveryListHtml(prospects) {
         const size = disc.estimated_size || '';
         const evidence = disc.evidence || [];
         const vstatus = p.validation_status || 'valid';
-        const isSkipped = vstatus !== 'valid' && vstatus !== 'limited';
-        const vIcon = vstatus === 'valid' ? '&#10003;' : vstatus === 'limited' ? '&#9888;' : '';
-        const vColor = vstatus === 'valid' ? 'var(--green)' : vstatus === 'limited' ? 'var(--yellow)' : '';
+        const vreason = p.validation_reason || '';
+        const isLimited = vstatus === 'limited' || vstatus === 'http_403' || vstatus === 'connection_failed';
+        const isSkipped = vstatus !== 'valid' && !isLimited;
+        const vIcon = vstatus === 'valid' ? '&#10003;' : isLimited ? '&#9888;' : '';
+        const vColor = vstatus === 'valid' ? 'var(--green)' : isLimited ? 'var(--yellow)' : '';
+        const limitedMsg = isLimited ? (vstatus === 'http_403' ? 'Website blocked (403)' : vstatus === 'connection_failed' ? 'Website unreachable' : vreason || 'Limited data') : '';
         const dataPayload = JSON.stringify({name, description: desc, evidence}).replace(/'/g, '&#39;');
         return `<div class="discovery-list-item${isSkipped ? ' skipped' : ''}" data-company-name="${escHtml(name)}" data-company-payload='${dataPayload}' style="cursor:pointer;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;position:relative${isSkipped ? ';opacity:0.5' : ''}">
             ${!isSkipped ? `<input type="checkbox" class="discovery-select-cb" onclick="event.stopPropagation();_toggleResearchSelection('${escHtml(name).replace(/'/g, "\\'")}', this)" style="position:absolute;top:10px;right:10px;width:16px;height:16px;accent-color:var(--purple);cursor:pointer">` : ''}
@@ -8437,9 +8487,9 @@ function _buildDiscoveryListHtml(prospects) {
                 ${vIcon ? `<span style="color:${vColor};font-size:12px">${vIcon}</span>` : ''}
                 <span style="font-weight:600;font-size:13px;color:var(--text-primary)">${escHtml(name)}</span>
                 ${size ? `<span class="company-card-size" style="margin:0">${escHtml(size)}</span>` : ''}
-                ${vstatus === 'limited' ? '<span class="limited-badge" style="margin-left:4px">Limited</span>' : ''}
             </div>
             ${desc ? `<div style="font-size:11px;color:var(--text-muted);line-height:1.4;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;${!isSkipped ? 'padding-right:28px' : ''}">${escHtml(desc)}</div>` : ''}
+            ${isLimited ? `<div style="font-size:10px;color:var(--yellow);margin-top:2px">&#9888; ${escHtml(limitedMsg)} &mdash; financial &amp; sentiment analysis still available</div>` : ''}
             ${isSkipped ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">No valid website found</div>` : ''}
         </div>`;
     }).join('');
@@ -9619,21 +9669,36 @@ function handlePipelineSSE(ev) {
         }
 
     } else if (ev.type === 'error') {
+        const isEmptyResult = !!ev.campaign_id;
         const mapEl2 = document.getElementById('pipeline-map');
         if (mapEl2) {
+            const color = isEmptyResult ? 'var(--text-secondary)' : 'var(--red)';
+            const icon = isEmptyResult ? '&#128269;' : '&#9888;';
+            const label = isEmptyResult ? 'No Results' : 'Error';
+            const bgColor = isEmptyResult ? 'rgba(107,114,128,0.15)' : 'rgba(239,68,68,0.15)';
             mapEl2.insertAdjacentHTML('beforeend', `
                 <div class="pipeline-connector"></div>
-                <div class="pipeline-node" style="border-color:var(--red);color:var(--red)">
+                <div class="pipeline-node" style="border-color:${color};color:${color}">
                     <div class="pipeline-node-header">
-                        <div class="pipeline-node-icon" style="background:rgba(239,68,68,0.15)">&#9888;</div>
-                        <div class="pipeline-node-label" style="color:var(--red)">Error</div>
+                        <div class="pipeline-node-icon" style="background:${bgColor}">${icon}</div>
+                        <div class="pipeline-node-label" style="color:${color}">${label}</div>
                     </div>
-                    <div class="pipeline-node-meta" style="color:var(--red)">${escHtml(ev.text)}</div>
+                    <div class="pipeline-node-meta" style="color:${color}">${escHtml(ev.text)}</div>
                 </div>
             `);
         }
         const badge = document.getElementById('pane-execution-status');
-        if (badge) { badge.textContent = 'Error'; badge.className = 'pane-status-badge error'; }
+        if (badge) {
+            if (isEmptyResult) {
+                badge.textContent = 'No Results';
+                badge.className = 'pane-status-badge';
+                badge.style.cssText = 'background:rgba(107,114,128,0.15);color:#9ca3af';
+            } else {
+                badge.textContent = 'Error';
+                badge.className = 'pane-status-badge error';
+            }
+        }
+        if (ev.campaign_id) _currentRunCampaignId = ev.campaign_id;
     }
 }
 

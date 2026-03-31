@@ -4,7 +4,8 @@ from datetime import datetime
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
-from scraper.web_search import search_web, search_news, search_reddit, search_youtube, format_search_results
+from scraper.web_search import search_web, search_news, search_reddit, search_youtube, format_search_results, dedup_results
+from scraper.google_news import search_google_news
 from scraper.hackernews import search_hackernews
 from prompts.competitors import build_competitor_prompt
 
@@ -30,9 +31,12 @@ def competitor_analysis(company):
         print(f"[competitors] Only {web_count} web results — company may operate in a niche market, be a subsidiary, or use a name that's hard to search for")
         print(f"[competitors] Expanding search to Reddit, YouTube, and Hacker News for community-sourced competitive data...")
 
-    # Also check news
+    # Also check news (DDG + Google News)
     news = search_news(f"{company} competition market", max_results=3)
     all_results.extend(news)
+    print("[competitors] Searching Google News for competitive news...")
+    gnews = search_google_news(f"{company} competition market share", max_results=5, days_back=30)
+    all_results.extend(gnews)
 
     # Reddit discussions (often mention competitors by name)
     print("[competitors] Searching Reddit for community competitor mentions...")
@@ -54,14 +58,8 @@ def competitor_analysis(company):
         print("[competitors] Try searching with the company's product category instead of its name (e.g., 'CRM software competitors' instead of 'Acme competitors')")
         return None
 
-    # Deduplicate
-    seen = set()
-    unique = []
-    for r in all_results:
-        title = r.get("title", "")
-        if title not in seen:
-            seen.add(title)
-            unique.append(r)
+    # Deduplicate (normalized title matching, keeps highest-quality source)
+    unique = dedup_results(all_results)
 
     search_text = format_search_results(unique)
 

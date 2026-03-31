@@ -9,3 +9,4 @@ youtube-transcript-api
 yt-dlp
 flask
 yfinance
+trafilatura

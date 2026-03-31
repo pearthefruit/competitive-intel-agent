@@ -1258,15 +1258,18 @@ def create_app(db_path="intel.db"):
                 dt.join(timeout=300)
                 companies = disc_holder[0] or []
 
-                if not companies:
-                    yield f"data: {json.dumps({'type': 'error', 'text': 'No companies found for this niche.'})}\n\n"
-                    return
-
-                # Create campaign record
+                # Create campaign record (before early-return so failed searches persist)
                 from db import (create_campaign, add_campaign_prospect,
                                 update_campaign_status, get_or_create_dossier)
                 conn = get_connection(db_path)
                 campaign_id = create_campaign(conn, niche, top_n)
+
+                if not companies:
+                    update_campaign_status(conn, campaign_id, "empty")
+                    conn.close()
+                    yield f"data: {json.dumps({'type': 'error', 'text': 'No companies found for this niche.', 'campaign_id': campaign_id})}\n\n"
+                    return
+
                 conn.close()
 
                 yield f"data: {json.dumps({'type': 'discovered', 'companies': companies, 'campaign_id': campaign_id})}\n\n"
@@ -1350,11 +1353,17 @@ def create_app(db_path="intel.db"):
                     return
 
                 # ---- Phase 3: Save website URLs + Complete ----
+                # Only save websites that actually validated — skip bad URLs
+                bad_websites = {
+                    vr.get("name", "").strip().lower()
+                    for vr in (validation_results or [])
+                    if vr.get("limited")
+                }
                 conn = get_connection(db_path)
                 for company in valid_companies:
                     name = company.get("name", "")
                     website = company.get("website")
-                    if name and website:
+                    if name and website and name.strip().lower() not in bad_websites:
                         dossier_id = get_or_create_dossier(conn, name)
                         conn.execute(
                             "UPDATE dossiers SET website_url = ? WHERE id = ? AND (website_url IS NULL OR website_url = '')",
