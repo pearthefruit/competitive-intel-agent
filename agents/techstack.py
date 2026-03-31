@@ -168,12 +168,22 @@ def _build_hiring_tech_section(company_name, db_path):
         return None, None
 
 
-def techstack_analysis(url, max_pages=5, company_name=None, db_path=None):
+def techstack_analysis(url, max_pages=5, company_name=None, db_path=None, progress_cb=None):
     """Crawl a website and analyze its technology stack. Returns report path or None.
 
     When db_path and company_name are provided, the report is enriched with
     technology signals extracted from the company's classified job listings.
+
+    Args:
+        url: Website URL to analyze
+        max_pages: Maximum pages to crawl
+        company_name: Optional company name for dossier linking
+        db_path: Optional path to SQLite DB for hiring data enrichment
+        progress_cb: Optional callback(event_type, event_data) for structured progress.
+            Events emitted: source_start, source_done, generating, report_saved
     """
+    _cb = progress_cb or (lambda *a: None)
+
     # Ensure URL has scheme
     if not url.startswith("http"):
         url = f"https://{url}"
@@ -182,15 +192,20 @@ def techstack_analysis(url, max_pages=5, company_name=None, db_path=None):
     print(f"\n[techstack] Analyzing tech stack for {domain}...")
 
     # Crawl the site
+    _cb("source_start", {"source": "crawl", "label": "Site Crawl", "detail": f"Crawling {domain}"})
     pages = crawl_site(url, max_pages=max_pages)
     if not pages:
         print("[techstack] No pages crawled — site may block automated requests, require JS rendering, or be behind authentication")
+        _cb("source_done", {"source": "crawl", "status": "error", "summary": "No pages crawled"})
         return None
+    _cb("source_done", {"source": "crawl", "status": "done", "summary": f"{len(pages)} pages crawled"})
 
     # Detect technologies
+    _cb("source_start", {"source": "tech_detect", "label": "Tech Detection", "detail": f"Fingerprinting technologies on {domain}"})
     tech = detect_technologies(pages)
     total_techs = sum(len(v) for v in tech.values())
     print(f"[techstack] Detected {total_techs} technologies across {len(tech)} categories")
+    _cb("source_done", {"source": "tech_detect", "status": "done", "summary": f"{total_techs} technologies across {len(tech)} categories"})
 
     if total_techs == 0:
         print("[techstack] No technologies detected — possible reasons:")
@@ -209,17 +224,21 @@ def techstack_analysis(url, max_pages=5, company_name=None, db_path=None):
     hiring_section = None
     hiring_stats = None
     if db_path and company_name:
+        _cb("source_start", {"source": "hiring_data", "label": "Hiring Data", "detail": f"Looking up tech signals from {company_name} job listings"})
         hiring_section, hiring_stats = _build_hiring_tech_section(company_name, db_path)
         if hiring_section:
             print(f"[techstack] Hiring data found: {hiring_stats['total_roles']} roles, "
                   f"{len(hiring_stats.get('top_skills', []))} skills identified")
+            _cb("source_done", {"source": "hiring_data", "status": "done", "summary": f"{hiring_stats['total_roles']} roles, {len(hiring_stats.get('top_skills', []))} skills"})
         else:
             print(f"[techstack] No hiring data found for '{company_name}' — report will cover website stack only")
+            _cb("source_done", {"source": "hiring_data", "status": "skipped", "summary": f"No data for '{company_name}'"})
 
     # Generate report
     prompt = build_techstack_prompt(url, tech_summary, len(pages), hiring_section=hiring_section)
     prompt += get_temporal_context(company_name or domain, "techstack")
 
+    _cb("generating", {"detail": "LLM synthesizing tech stack report"})
     print("[techstack] Generating report...")
     text, model = generate_text(prompt)
 
@@ -253,4 +272,5 @@ def techstack_analysis(url, max_pages=5, company_name=None, db_path=None):
     print(f"[techstack] Report saved to {filename}")
     dossier_name = company_name or domain
     save_to_dossier(dossier_name, "techstack", report_file=str(filename), report_text=report, model_used=model)
+    _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)

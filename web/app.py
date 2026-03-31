@@ -1673,11 +1673,20 @@ def create_app(db_path="intel.db"):
                         progress_q = queue.Queue()
                         result_box = [None]
 
+                        def _structured_cb(*args):
+                            """Handle both string progress and structured (event_type, data) callbacks."""
+                            if len(args) == 1:
+                                progress_q.put(args[0])  # plain string
+                            elif len(args) >= 2:
+                                # Structured event: (event_type, data_dict)
+                                evt, data = args[0], args[1] if len(args) > 1 else {}
+                                progress_q.put({"_structured": True, "event": evt, **(data if isinstance(data, dict) else {"detail": str(data)})})
+
                         def _run(name=fn_name, args=fn_args):
                             try:
                                 result_box[0] = _execute_tool(
                                     name, args, db_path,
-                                    progress_callback=lambda msg: progress_q.put(msg),
+                                    progress_callback=_structured_cb,
                                 )
                             except Exception as e:
                                 result_box[0] = f"Tool error: {e}"
@@ -1685,10 +1694,19 @@ def create_app(db_path="intel.db"):
                         t = threading.Thread(target=_run)
                         t.start()
 
+                        def _emit_progress(msg):
+                            """Emit a progress message as SSE, handling both strings and structured dicts."""
+                            if isinstance(msg, dict) and msg.get("_structured"):
+                                # Structured event from analysis agents — emit as tool_progress_structured
+                                payload = {k: v for k, v in msg.items() if k != "_structured"}
+                                return f"data: {json.dumps({'type': 'tool_progress', 'name': fn_name, 'structured': True, **payload})}\n\n"
+                            else:
+                                return f"data: {json.dumps({'type': 'tool_progress', 'name': fn_name, 'text': str(msg)})}\n\n"
+
                         while t.is_alive():
                             try:
                                 msg = progress_q.get(timeout=2)
-                                yield f"data: {json.dumps({'type': 'tool_progress', 'name': fn_name, 'text': msg})}\n\n"
+                                yield _emit_progress(msg)
                             except queue.Empty:
                                 # Send SSE keepalive comment to prevent connection timeout
                                 yield ": keepalive\n\n"
@@ -1697,7 +1715,7 @@ def create_app(db_path="intel.db"):
                         while not progress_q.empty():
                             try:
                                 msg = progress_q.get_nowait()
-                                yield f"data: {json.dumps({'type': 'tool_progress', 'name': fn_name, 'text': msg})}\n\n"
+                                yield _emit_progress(msg)
                             except queue.Empty:
                                 break
 

@@ -14,11 +14,19 @@ from scraper.tiktok import fetch_tiktok_from_search_results, format_tiktok_for_p
 from prompts.sentiment import build_sentiment_prompt
 
 
-def sentiment_analysis(company):
-    """Analyze employee sentiment for a company. Returns report path or None."""
+def sentiment_analysis(company, progress_cb=None):
+    """Analyze employee sentiment for a company. Returns report path or None.
+
+    Args:
+        company: Company name
+        progress_cb: Optional callback(event_type, event_data) for structured progress.
+            Events emitted: source_start, source_done, generating, report_saved
+    """
+    _cb = progress_cb or (lambda *a: None)
     print(f"\n[sentiment] Analyzing employee sentiment for {company}...")
 
     # Multiple targeted searches
+    _cb("source_start", {"source": "glassdoor_web", "label": "Glassdoor / Web", "detail": "Searching employee review sites"})
     queries = [
         f"{company} glassdoor reviews",
         f"{company} employee reviews workplace",
@@ -34,8 +42,12 @@ def sentiment_analysis(company):
     web_count = len(all_results)
     if web_count == 0:
         print(f"[sentiment] No Glassdoor/web results — company may be too small, too new, or using an unusual name that search engines don't associate with employer reviews")
+        _cb("source_done", {"source": "glassdoor_web", "status": "skipped", "summary": "No results"})
+    else:
+        _cb("source_done", {"source": "glassdoor_web", "status": "done", "summary": f"{web_count} results"})
 
     # Blind / TeamBlind (anonymous, verified-employee reviews — strong for tech)
+    _cb("source_start", {"source": "blind", "label": "Blind", "detail": "Scraping employee reviews"})
     print("[sentiment] Scraping Blind for employee reviews and discussions...")
     blind = search_blind(company, max_results=15)
     if not blind:
@@ -45,8 +57,12 @@ def sentiment_analysis(company):
     all_results.extend(blind)
     if blind:
         print(f"[sentiment] Blind returned {len(blind)} results")
+        _cb("source_done", {"source": "blind", "status": "done", "summary": f"{len(blind)} results"})
+    else:
+        _cb("source_done", {"source": "blind", "status": "skipped", "summary": "No results"})
 
     # Fishbowl (anonymous professional community — strong for finance/consulting)
+    _cb("source_start", {"source": "fishbowl", "label": "Fishbowl", "detail": "Searching professional community posts"})
     print("[sentiment] Searching Fishbowl for professional community posts...")
     fishbowl = search_web(f"site:fishbowlapp.com {company}", max_results=3)
     if not fishbowl:
@@ -54,22 +70,37 @@ def sentiment_analysis(company):
     all_results.extend(fishbowl)
     if fishbowl:
         print(f"[sentiment] Fishbowl returned {len(fishbowl)} results")
+        _cb("source_done", {"source": "fishbowl", "status": "done", "summary": f"{len(fishbowl)} results"})
+    else:
+        _cb("source_done", {"source": "fishbowl", "status": "skipped", "summary": "No results"})
 
     # News about workplace/culture (DDG + Google News)
+    _cb("source_start", {"source": "news", "label": "News", "detail": "DDG news + Google News for workplace coverage"})
     news = search_news(f"{company} employees workplace culture", max_results=3)
     all_results.extend(news)
     print("[sentiment] Searching Google News for workplace/culture coverage...")
     gnews = search_google_news(f"{company} employees workplace culture", max_results=5, days_back=30)
     all_results.extend(gnews)
+    news_count = len(news) + len(gnews)
+    if news_count:
+        _cb("source_done", {"source": "news", "status": "done", "summary": f"{news_count} results"})
+    else:
+        _cb("source_done", {"source": "news", "status": "skipped", "summary": "No results"})
 
     # Reddit — general search + targeted career subreddits
+    _cb("source_start", {"source": "reddit", "label": "Reddit", "detail": "Searching for candid employee perspectives"})
     print("[sentiment] Searching Reddit for candid employee perspectives...")
     reddit = search_reddit(f"{company} working at employee experience", max_results=5)
     all_results.extend(reddit)
     if web_count == 0 and reddit:
         print(f"[sentiment] Reddit returned {len(reddit)} results — these tend to be more candid than formal review sites")
+    if reddit:
+        _cb("source_done", {"source": "reddit", "status": "done", "summary": f"{len(reddit)} results"})
+    else:
+        _cb("source_done", {"source": "reddit", "status": "skipped", "summary": "No results"})
 
     # Reddit — career-specific subreddits (finance, consulting, accounting, tech, CS)
+    _cb("source_start", {"source": "reddit_rss", "label": "Reddit RSS", "detail": "Searching career subreddits"})
     career_subs = [
         "FinancialCareers", "consulting", "Big4",
         "cscareerquestions", "ExperiencedDevs",
@@ -85,22 +116,35 @@ def sentiment_analysis(company):
     all_results.extend(career_reddit)
     if career_reddit:
         print(f"[sentiment] Career subreddits returned {len(career_reddit)} results")
+        _cb("source_done", {"source": "reddit_rss", "status": "done", "summary": f"{len(career_reddit)} results"})
+    else:
+        _cb("source_done", {"source": "reddit_rss", "status": "skipped", "summary": "No results"})
 
     # Hacker News (tech community — candid takes on companies)
+    _cb("source_start", {"source": "hackernews", "label": "Hacker News", "detail": "Searching tech community perspectives"})
     print("[sentiment] Searching Hacker News for tech community perspectives...")
     hn = search_hackernews(f"{company} working culture employees", max_results=5, fetch_comments_top_n=3)
     all_results.extend(hn)
     if web_count == 0 and hn:
         print(f"[sentiment] Hacker News returned {len(hn)} results — useful for tech industry sentiment")
+    if hn:
+        _cb("source_done", {"source": "hackernews", "status": "done", "summary": f"{len(hn)} results"})
+    else:
+        _cb("source_done", {"source": "hackernews", "status": "skipped", "summary": "No results"})
 
     # 1Point3Acres (Chinese tech community — interview experiences, hiring signals)
+    _cb("source_start", {"source": "1point3acres", "label": "1Point3Acres", "detail": "Searching interview experiences"})
     print("[sentiment] Searching 1Point3Acres for interview experiences...")
     onepoint3 = search_1point3acres(company, max_results=15)
     all_results.extend(onepoint3)
     if onepoint3:
         print(f"[sentiment] 1Point3Acres returned {len(onepoint3)} interview posts")
+        _cb("source_done", {"source": "1point3acres", "status": "done", "summary": f"{len(onepoint3)} results"})
+    else:
+        _cb("source_done", {"source": "1point3acres", "status": "skipped", "summary": "No results"})
 
     # TikTok (employee culture content, day-in-the-life, company reviews)
+    _cb("source_start", {"source": "tiktok", "label": "TikTok", "detail": "Searching employee/culture content"})
     tiktok_text = ""
     try:
         print("[sentiment] Searching TikTok for employee/culture content...")
@@ -110,6 +154,7 @@ def sentiment_analysis(company):
             if tiktok_items:
                 tiktok_text = format_tiktok_for_prompt(tiktok_items)
                 print(f"[sentiment] TikTok returned {len(tiktok_items)} videos with content")
+                _cb("source_done", {"source": "tiktok", "status": "done", "summary": f"{len(tiktok_items)} videos"})
                 # Also add as search results for dedup/formatting
                 for t in tiktok_items:
                     all_results.append({
@@ -119,8 +164,13 @@ def sentiment_analysis(company):
                         "date": t.get("date", ""),
                         "source": "tiktok",
                     })
+            else:
+                _cb("source_done", {"source": "tiktok", "status": "skipped", "summary": "No video content"})
+        else:
+            _cb("source_done", {"source": "tiktok", "status": "skipped", "summary": "No results"})
     except Exception as e:
         print(f"[sentiment] TikTok search failed (yt-dlp may not be installed): {e}")
+        _cb("source_done", {"source": "tiktok", "status": "error", "summary": str(e)[:80]})
 
     if not all_results:
         print("[sentiment] No results from any source (web, news, Reddit, Blind, Fishbowl, HN, 1P3A, TikTok)")
@@ -139,6 +189,7 @@ def sentiment_analysis(company):
     prompt = build_sentiment_prompt(company, search_text)
     prompt += get_temporal_context(company, "sentiment")
 
+    _cb("generating", {"detail": "LLM synthesizing sentiment report"})
     print("[sentiment] Generating report...")
     text, model = generate_text(prompt)
 
@@ -163,4 +214,5 @@ def sentiment_analysis(company):
 
     print(f"[sentiment] Report saved to {filename}")
     save_to_dossier(company, "sentiment", report_file=str(filename), report_text=report, model_used=model)
+    _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)

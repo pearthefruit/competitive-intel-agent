@@ -11,11 +11,19 @@ from scraper.google_news import search_google_news
 from prompts.financial import build_financial_prompt, build_financial_prompt_private
 
 
-def financial_analysis(company):
-    """Run financial analysis for a company. Returns path to saved report or None."""
+def financial_analysis(company, progress_cb=None):
+    """Run financial analysis for a company. Returns path to saved report or None.
+
+    Args:
+        company: Company name
+        progress_cb: Optional callback(event_type, event_data) for structured progress.
+            Events emitted: source_start, source_done, generating, report_saved
+    """
+    _cb = progress_cb or (lambda *a: None)
     print(f"\n[financial] Analyzing {company}...")
 
     # Step 1: Try SEC EDGAR (public company)
+    _cb("source_start", {"source": "sec_edgar", "label": "SEC EDGAR", "detail": f"Looking up {company}"})
     cik_result = lookup_cik(company)
 
     if isinstance(cik_result, list):
@@ -25,7 +33,8 @@ def financial_analysis(company):
             print(f"  {i}. {c['company_name']} (ticker: {c['ticker']}, match: {c['match_type']})")
         cik_info = cik_result[0]
         print(f"[financial] Auto-selecting: {cik_info['company_name']}")
-        return _analyze_public(company, cik_info)
+        _cb("source_done", {"source": "sec_edgar", "status": "done", "summary": f"Found: {cik_info['company_name']} (ticker: {cik_info['ticker']})"})
+        return _analyze_public(company, cik_info, _cb)
 
     elif cik_result:
         # If match is only via ticker and name doesn't match, fall back to web search
@@ -34,17 +43,21 @@ def financial_analysis(company):
             name_upper = cik_result["company_name"].upper()
             if search_upper not in name_upper:
                 print(f"[financial] Ticker '{cik_result['ticker']}' matches {cik_result['company_name']} — name mismatch, using web search instead")
-                return _analyze_non_sec(company)
-        return _analyze_public(company, cik_result)
+                _cb("source_done", {"source": "sec_edgar", "status": "skipped", "summary": "Ticker mismatch"})
+                return _analyze_non_sec(company, _cb)
+        _cb("source_done", {"source": "sec_edgar", "status": "done", "summary": f"Found: {cik_result['company_name']} (ticker: {cik_result['ticker']})"})
+        return _analyze_public(company, cik_result, _cb)
     else:
         print(f"[financial] {company} not found in SEC EDGAR — could be private, foreign-listed, or filed under a different entity name")
         print(f"[financial] Falling back to web search — financial data will be less precise without official SEC filings")
         print(f"[financial] For better data, try checking Bloomberg, PitchBook, or the company's investor relations page directly")
-        return _analyze_non_sec(company)
+        _cb("source_done", {"source": "sec_edgar", "status": "skipped", "summary": "Not found (private or foreign)"})
+        return _analyze_non_sec(company, _cb)
 
 
-def _analyze_public(company, cik_info):
+def _analyze_public(company, cik_info, _cb=None):
     """Analyze a public company using SEC EDGAR data."""
+    _cb = _cb or (lambda *a: None)
     cik = cik_info["cik"]
     ticker = cik_info["ticker"]
     edgar_name = cik_info["company_name"]
@@ -52,35 +65,43 @@ def _analyze_public(company, cik_info):
     print(f"[financial] Found: {edgar_name} (ticker: {ticker}, CIK: {cik})")
 
     # Fetch EDGAR data
+    _cb("source_start", {"source": "xbrl", "label": "XBRL Financials", "detail": f"Fetching company facts for CIK {cik}"})
     facts = get_company_facts(cik)
     if not facts:
         print("[financial] Could not fetch XBRL company facts — SEC EDGAR API may be rate-limited or this entity hasn't filed in XBRL format")
         print("[financial] Falling back to web search — results will lack the precision of structured SEC data")
-        return _analyze_non_sec(company)
+        _cb("source_done", {"source": "xbrl", "status": "error", "summary": "API unavailable"})
+        return _analyze_non_sec(company, _cb)
 
     financials = extract_financials(facts)
     if not financials:
         print("[financial] XBRL data exists but no standard financial metrics (revenue, net income, etc.) could be extracted")
         print("[financial] This sometimes happens with holding companies or entities that file non-standard XBRL taxonomies")
         print("[financial] Falling back to web search for financial data")
-        return _analyze_non_sec(company)
+        _cb("source_done", {"source": "xbrl", "status": "error", "summary": "No extractable metrics"})
+        return _analyze_non_sec(company, _cb)
 
     filings = get_recent_filings(cik)
     financials_text = format_financials_for_prompt(financials, filings)
+    _cb("source_done", {"source": "xbrl", "status": "done", "summary": f"{len(financials)} metrics, {len(filings)} filings"})
 
     # Fetch live market data (stock price, market cap, valuation ratios)
+    _cb("source_start", {"source": "yahoo_finance", "label": "Yahoo Finance", "detail": f"Market data for {ticker}"})
     print(f"[financial] Fetching live market data for {ticker}...")
     stock_data = get_stock_data(ticker)
     if stock_data:
         market_text = format_stock_data_for_prompt(stock_data)
         financials_text += "\n" + market_text
         print(f"[financial] Got market data: price={stock_data.get('price')}, market_cap={stock_data.get('market_cap')}")
+        _cb("source_done", {"source": "yahoo_finance", "status": "done", "summary": f"price={stock_data.get('price')}, cap={stock_data.get('market_cap')}"})
     else:
         print(f"[financial] Could not fetch live market data for {ticker} — report will use SEC data only")
+        _cb("source_done", {"source": "yahoo_finance", "status": "skipped", "summary": "Unavailable"})
 
     print(f"[financial] Extracted {len(financials)} financial metrics, {len(filings)} recent filings")
 
     # Fetch extended data (analyst estimates, upgrades, news — not statements since SEC has those)
+    _cb("source_start", {"source": "analyst", "label": "Analyst Estimates", "detail": f"Estimates + news for {ticker}"})
     print(f"[financial] Fetching analyst estimates and news for {ticker}...")
     extended = get_extended_financials(ticker)
     if extended:
@@ -89,18 +110,26 @@ def _analyze_public(company, cik_info):
         if ext_text:
             financials_text += "\n" + ext_text
             print(f"[financial] Added analyst estimates and news")
+            _cb("source_done", {"source": "analyst", "status": "done", "summary": "Analyst estimates added"})
+    else:
+        _cb("source_done", {"source": "analyst", "status": "skipped", "summary": "No data"})
 
     # Fetch recent 8-K filings (material business events)
+    _cb("source_start", {"source": "8k_filings", "label": "8-K Filings", "detail": "Material business events"})
     print(f"[financial] Fetching recent 8-K filing events...")
     eight_k = get_8k_filings(cik)
     if eight_k:
         financials_text += "\n" + format_8k_for_prompt(eight_k)
         print(f"[financial] Added {len(eight_k)} 8-K filing events")
+        _cb("source_done", {"source": "8k_filings", "status": "done", "summary": f"{len(eight_k)} events"})
+    else:
+        _cb("source_done", {"source": "8k_filings", "status": "skipped", "summary": "None found"})
 
     # Generate report
     prompt = build_financial_prompt(company, ticker, financials_text)
     prompt += get_temporal_context(company, "financial")
 
+    _cb("generating", {"detail": "LLM synthesizing financial report"})
     print("[financial] Generating report...")
     text, model = generate_text(prompt)
 
@@ -125,14 +154,17 @@ def _analyze_public(company, cik_info):
 
     print(f"[financial] Report saved to {filename}")
     save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model)
+    _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)
 
 
-def _analyze_non_sec(company):
+def _analyze_non_sec(company, _cb=None):
     """Analyze a company not in SEC EDGAR using ProPublica 990 + Yahoo Finance + web search."""
+    _cb = _cb or (lambda *a: None)
     print(f"[financial] Searching for financial data on {company}...")
 
     # Try ProPublica Nonprofit Explorer first (free, no auth, structured 990 data)
+    _cb("source_start", {"source": "propublica", "label": "ProPublica 990", "detail": f"Nonprofit lookup for {company}"})
     nonprofit_data = None
     try:
         from scraper.nonprofit import search_nonprofit, get_nonprofit_financials, format_990_for_prompt
@@ -143,12 +175,18 @@ def _analyze_non_sec(company):
             if financials and financials.get("filings"):
                 nonprofit_data = format_990_for_prompt(financials)
                 print(f"[financial] Got Form 990 data — {len(financials['filings'])} years of filings")
+                _cb("source_done", {"source": "propublica", "status": "done", "summary": f"{len(financials['filings'])} years of 990 filings"})
             else:
                 print(f"[financial] Nonprofit matched but no 990 filings found")
+                _cb("source_done", {"source": "propublica", "status": "skipped", "summary": "Matched but no filings"})
+        else:
+            _cb("source_done", {"source": "propublica", "status": "skipped", "summary": "Not a nonprofit"})
     except Exception as e:
         print(f"[financial] ProPublica lookup failed: {e}")
+        _cb("source_done", {"source": "propublica", "status": "error", "summary": str(e)[:80]})
 
     # Multiple targeted searches (cover both private and foreign-listed companies)
+    _cb("source_start", {"source": "web_search", "label": "Web Search", "detail": f"5 financial queries for {company}"})
     year = datetime.now().year
     queries = [
         f"{company} revenue earnings financial results {year - 1} {year}",
@@ -171,6 +209,7 @@ def _analyze_non_sec(company):
     if not all_results:
         print("[financial] No web search results found — company may be too obscure, newly formed, or using a different public-facing name")
         print("[financial] Try searching with the parent company name, or check Crunchbase/PitchBook manually")
+        _cb("source_done", {"source": "web_search", "status": "error", "summary": "No results"})
         return None
 
     # Deduplicate (normalized title matching, keeps highest-quality source)
@@ -181,10 +220,12 @@ def _analyze_non_sec(company):
     snippet_only = [r for r in unique_results if 0 < len(r.get("body", "")) <= 300]
     no_body = [r for r in unique_results if not r.get("body")]
     print(f"[financial] Search results: {len(unique_results)} unique ({len(fetched)} with fetched content, {len(snippet_only)} snippet-only, {len(no_body)} no body)")
+    _cb("source_done", {"source": "web_search", "status": "done", "summary": f"{len(unique_results)} unique results ({len(queries)} queries)"})
 
     search_text = format_search_results(unique_results)
 
     # Try to find a ticker and get live market data (works for foreign-listed companies)
+    _cb("source_start", {"source": "yahoo_finance", "label": "Yahoo Finance", "detail": f"Ticker lookup for {company}"})
     from scraper.stock_data import lookup_ticker
     ticker = lookup_ticker(company)
     has_statements = False
@@ -207,6 +248,9 @@ def _analyze_non_sec(company):
                 has_statements = "income_stmt" in extended
                 if has_statements:
                     print(f"[financial] Got full financial statements — this company has structured data comparable to SEC filers")
+        _cb("source_done", {"source": "yahoo_finance", "status": "done", "summary": f"ticker={ticker}, statements={'yes' if has_statements else 'no'}"})
+    else:
+        _cb("source_done", {"source": "yahoo_finance", "status": "skipped", "summary": "No ticker found"})
 
     # Prepend 990 data if available — gives LLM structured financials for nonprofits
     if nonprofit_data:
@@ -217,6 +261,7 @@ def _analyze_non_sec(company):
     prompt = build_financial_prompt_private(company, search_text, has_statements=has_statements)
     prompt += get_temporal_context(company, "financial")
 
+    _cb("generating", {"detail": "LLM synthesizing financial report"})
     print("[financial] Generating report...")
     text, model = generate_text(prompt)
 
@@ -249,4 +294,5 @@ def _analyze_non_sec(company):
 
     print(f"[financial] Report saved to {filename}")
     save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model)
+    _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)

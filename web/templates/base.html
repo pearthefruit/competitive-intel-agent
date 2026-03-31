@@ -6799,14 +6799,32 @@ function handleSSE(event, chat) {
 
     } else if (event.type === 'tool_progress') {
         // Accumulate progress steps in the tool_call message data
-        const cleaned = cleanProgress(event.text);
+        const isStructured = event.structured === true;
+        const cleaned = isStructured ? null : cleanProgress(event.text);
         for (let i = chat.messages.length - 1; i >= 0; i--) {
             if (chat.messages[i].role === 'tool_call' && !chat.messages[i].result) {
                 if (!chat.messages[i].steps) chat.messages[i].steps = [];
-                // Avoid duplicate consecutive steps
-                const steps = chat.messages[i].steps;
-                if (!steps.length || steps[steps.length - 1] !== cleaned) {
-                    steps.push(cleaned);
+                if (!chat.messages[i].structuredSteps) chat.messages[i].structuredSteps = [];
+                if (isStructured) {
+                    // Store structured event for tree rendering
+                    chat.messages[i].structuredSteps.push({
+                        event: event.event,
+                        source: event.source,
+                        label: event.label,
+                        status: event.status,
+                        summary: event.summary,
+                        detail: event.detail,
+                        company: event.company,
+                        analysis_type: event.analysis_type,
+                        path: event.path,
+                        model: event.model,
+                    });
+                } else {
+                    // Legacy flat string step
+                    const steps = chat.messages[i].steps;
+                    if (!steps.length || steps[steps.length - 1] !== cleaned) {
+                        steps.push(cleaned);
+                    }
                 }
                 break;
             }
@@ -6822,13 +6840,29 @@ function handleSSE(event, chat) {
                 const status = bubble.querySelector('.tool-call-status');
                 if (status) status.after(log);
             }
-            const step = document.createElement('div');
-            step.className = 'tool-progress-step';
-            step.innerHTML = `<span class="tool-step-check">&#10003;</span> ${escHtml(cleaned)}`;
-            log.appendChild(step);
-            // Update the spinner status text to show current step
-            const statusText = bubble.querySelector('.tool-status-text');
-            if (statusText) statusText.textContent = cleaned;
+            if (isStructured) {
+                // Render structured event as a styled step
+                const evType = event.event || '';
+                const src = event.label || event.source || evType;
+                const summary = event.summary || event.detail || '';
+                const statusCls = event.status === 'done' ? 'color:var(--green)' : event.status === 'skipped' ? 'color:var(--yellow)' : event.status === 'error' ? 'color:var(--red)' : 'color:var(--purple)';
+                const icon = event.status === 'done' ? '&#10003;' : event.status === 'skipped' ? '&#8212;' : event.status === 'error' ? '&#10007;' : '&#9654;';
+                const step = document.createElement('div');
+                step.className = 'tool-progress-step';
+                step.innerHTML = `<span style="${statusCls};font-size:10px">${icon}</span> <strong style="font-size:10px">${escHtml(src)}</strong>${summary ? ` <span style="color:var(--text-muted);font-size:10px">${escHtml(summary)}</span>` : ''}`;
+                log.appendChild(step);
+                // Update spinner text
+                const statusText = bubble.querySelector('.tool-status-text');
+                if (statusText) statusText.textContent = `${src}${summary ? ' — ' + summary : ''}`;
+            } else {
+                const step = document.createElement('div');
+                step.className = 'tool-progress-step';
+                step.innerHTML = `<span class="tool-step-check">&#10003;</span> ${escHtml(cleaned)}`;
+                log.appendChild(step);
+                // Update the spinner status text to show current step
+                const statusText = bubble.querySelector('.tool-status-text');
+                if (statusText) statusText.textContent = cleaned;
+            }
         }
         // Auto-scroll the tool-group internally; only scroll chat if user hasn't scrolled up
         const runningGroup = document.querySelector('.tool-call-bubble.running')?.closest('.tool-group');

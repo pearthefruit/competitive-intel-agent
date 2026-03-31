@@ -717,7 +717,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
 
         # --- Analysis Reports ---
         elif name == "financial_analysis":
-            path = financial_analysis(args["company"])
+            path = financial_analysis(args["company"], progress_cb=progress_callback)
             if path:
                 return f"Financial analysis saved to: {path}"
             return "Financial analysis failed — no data found."
@@ -735,7 +735,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             return "Competitor analysis failed — no data found."
 
         elif name == "sentiment_analysis":
-            path = sentiment_analysis(args["company"])
+            path = sentiment_analysis(args["company"], progress_cb=progress_callback)
             if path:
                 return f"Sentiment analysis saved to: {path}"
             return "Sentiment analysis failed — no data found."
@@ -747,7 +747,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             return "SEO audit failed — could not crawl the site."
 
         elif name == "techstack_analysis":
-            path = techstack_analysis(args["url"], args.get("max_pages", 5), company_name=args.get("company_name"), db_path=db_path)
+            path = techstack_analysis(args["url"], args.get("max_pages", 5), company_name=args.get("company_name"), db_path=db_path, progress_cb=progress_callback)
             if path:
                 return f"Tech stack analysis saved to: {path}"
             return "Tech stack analysis failed — could not crawl the site."
@@ -1159,7 +1159,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             conn.close()
             if not lens:
                 return f"Lens '{lens_ref}' not found. Use `list_lenses` to see available lenses."
-            score_data = score_with_lens(company, lens["id"], db_path=db_path, website_url=website_url)
+            score_data = score_with_lens(company, lens["id"], db_path=db_path, website_url=website_url, progress_cb=progress_callback)
             if not score_data:
                 return f"Failed to score {company} through {lens['name']} lens."
             sub = score_data.get("sub_scores", {})

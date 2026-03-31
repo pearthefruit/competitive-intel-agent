@@ -47,7 +47,7 @@ def _get_analysis_fn(analysis_type):
     return getattr(mod, fn_name), label, needs_website
 
 
-def _run_analysis(analysis_type, company_name, website_url=None, db_path="intel.db"):
+def _run_analysis(analysis_type, company_name, website_url=None, db_path="intel.db", progress_cb=None):
     """Run a single analysis, handling the different function signatures."""
     fn, label, needs_website = _get_analysis_fn(analysis_type)
     if fn is None:
@@ -59,15 +59,17 @@ def _run_analysis(analysis_type, company_name, website_url=None, db_path="intel.
         return None
 
     if analysis_type == "techstack":
-        return fn(website_url, max_pages=3, company_name=company_name, db_path=db_path)
+        return fn(website_url, max_pages=3, company_name=company_name, db_path=db_path, progress_cb=progress_cb)
     elif analysis_type == "seo":
         return fn(website_url, max_pages=5, company_name=company_name)
     elif analysis_type == "pricing":
         return fn(website_url, company_name=company_name)
     elif analysis_type == "hiring":
         return fn(company_name, db_path=db_path)
+    elif analysis_type in ("financial", "sentiment"):
+        return fn(company_name, progress_cb=progress_cb)
     else:
-        # financial, brand_ad, sentiment, competitors, patents — all take (company)
+        # brand_ad, competitors, patents — no progress_cb yet
         return fn(company_name)
 
 
@@ -211,7 +213,7 @@ def score_with_lens(company_name, lens_id, db_path="intel.db", website_url=None,
 
         try:
             print(f"[lens] {company_name}/{analysis_type}: running fresh...")
-            path = _run_analysis(analysis_type, company_name, website_url, db_path)
+            path = _run_analysis(analysis_type, company_name, website_url, db_path, progress_cb=progress_cb)
             if path:
                 report_paths[analysis_type] = path
                 print(f"[lens] {company_name}/{analysis_type}: done → {path}")
