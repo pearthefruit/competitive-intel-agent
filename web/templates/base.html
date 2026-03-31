@@ -1867,16 +1867,16 @@
         .exec-overlay.visible { display: block; }
         @keyframes exec-overlay-in { from { opacity: 0; } to { opacity: 1; } }
         .exec-overlay-inner {
-            max-width: 860px; margin: 40px auto; padding: 0 32px 60px;
+            max-width: 960px; margin: 32px auto; padding: 0 40px 60px;
         }
         .exec-overlay-header {
-            display: flex; align-items: center; gap: 12px;
-            padding: 20px 0 16px; border-bottom: 1px solid var(--border);
-            margin-bottom: 20px;
+            display: flex; align-items: center; gap: 14px;
+            padding: 24px 0 20px; border-bottom: 1px solid var(--border);
+            margin-bottom: 24px;
         }
-        .exec-overlay-header .tool-call-icon { width: 36px; height: 36px; font-size: 18px; }
-        .exec-overlay-title { font-size: 18px; font-weight: 700; color: var(--text-primary); }
-        .exec-overlay-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+        .exec-overlay-header .tool-call-icon { width: 44px; height: 44px; font-size: 22px; }
+        .exec-overlay-title { font-size: 22px; font-weight: 700; color: var(--text-primary); }
+        .exec-overlay-subtitle { font-size: 14px; color: var(--text-muted); margin-top: 3px; }
         .exec-overlay-close {
             margin-left: auto; width: 32px; height: 32px; border-radius: 6px;
             background: rgba(255,255,255,0.06); border: 1px solid var(--border);
@@ -1886,9 +1886,24 @@
         }
         .exec-overlay-close:hover { background: rgba(255,255,255,0.12); }
         .exec-overlay-meta {
-            font-size: 11px; color: var(--text-muted); margin-bottom: 16px;
+            font-size: 13px; color: var(--text-muted); margin-bottom: 20px;
             display: flex; gap: 12px;
         }
+        /* Scale up tree nodes inside the overlay */
+        .exec-overlay .ptree { font-size: 14px; }
+        .exec-overlay .ptree-card { padding: 16px 20px; border-radius: 12px; }
+        .exec-overlay .ptree-card-icon { width: 34px; height: 34px; border-radius: 8px; font-size: 17px; }
+        .exec-overlay .ptree-card-label { font-size: 16px; }
+        .exec-overlay .ptree-card-summary { font-size: 13px; padding-left: 42px; margin-top: 6px; }
+        .exec-overlay .ptree-status { font-size: 10px; padding: 3px 9px; }
+        .exec-overlay .ptree-arrow { height: 28px; }
+        .exec-overlay .ptree-mini { padding: 8px 14px; border-radius: 9px; min-width: 80px; }
+        .exec-overlay .ptree-mini-label { font-size: 12px; }
+        .exec-overlay .ptree-mini-value { font-size: 13px; margin-top: 3px; }
+        .exec-overlay .ptree-fanout { padding: 16px 0 6px; }
+        .exec-overlay .ptree-fanout-items { gap: 8px; }
+        .exec-overlay .ptree-card-detail { font-size: 12px; padding: 10px 14px 8px 42px; line-height: 1.7; }
+        .exec-overlay .ptree-card-chevron { font-size: 11px; }
 
         /* Scrollable container for tool call sequences */
         .tool-group {
