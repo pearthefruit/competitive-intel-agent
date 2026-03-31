@@ -6,5 +6,6 @@ lxml
 python-dotenv
 ddgs
 youtube-transcript-api
+yt-dlp
 flask
 yfinance

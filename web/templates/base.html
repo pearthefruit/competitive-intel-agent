@@ -1188,14 +1188,26 @@
             transition: opacity 0.15s;
         }
         .score-info-icon:hover { opacity: 1; }
+        .score-tooltip-wrap {
+            position: relative;
+            display: inline-block;
+        }
         .score-tooltip {
-            margin: 8px 0 4px;
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            width: max-content;
+            max-width: 420px;
+            margin-top: 6px;
             padding: 12px 14px;
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
             border-radius: 8px;
             text-align: left;
             animation: popover-in 0.15s ease;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
         }
         .score-tooltip-title {
             font-size: 13px;
@@ -4893,14 +4905,39 @@ let _activeDashboardLens = null; // lens override for expanded dashboard view
 
 const _VALID_SOURCES = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis'];
 
+// Match source tags including hyphens (e.g. [lens_ctv-ad-sales], [brand_ad])
+const _SOURCE_TAG_RE = /\[([\w][\w,\s-]*)\]/g;
+
+function _isSourceTag(tag) {
+    // Accept known sources, lens_ prefixed tags, and any underscore/hyphen tag that looks like a source
+    if (_VALID_SOURCES.includes(tag)) return true;
+    if (tag.startsWith('lens_')) return true;
+    if (/^[a-z][a-z0-9_-]+$/.test(tag)) return true;
+    return false;
+}
+
+function _sourceBadgeClass(tag) {
+    // Map to a known source class for coloring, or fall back to generic
+    if (_VALID_SOURCES.includes(tag)) return `source-${tag}`;
+    if (tag.startsWith('lens_')) return 'source-analysis';
+    return 'source-profile';
+}
+
 function _renderCitedText(text) {
     // Replace [source] and [source1, source2] tags with clickable badges
     if (!text) return '';
-    return escHtml(text).replace(/\[([\w,\s]+)\]/g, (match, inner) => {
+    return escHtml(text).replace(_SOURCE_TAG_RE, (match, inner) => {
         const sources = inner.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
         const badges = sources
-            .filter(s => _VALID_SOURCES.includes(s))
-            .map(s => `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`);
+            .filter(s => _isSourceTag(s))
+            .map(s => {
+                const cls = _sourceBadgeClass(s);
+                const displayName = s.replace(/^lens_/, '').replace(/[-_]/g, ' ');
+                if (_VALID_SOURCES.includes(s)) {
+                    return `<span class="source-badge ${cls}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${displayName}</span>`;
+                }
+                return `<span class="source-badge ${cls}" title="${escHtml(s)}">${displayName}</span>`;
+            });
         return badges.length ? badges.join(' ') : match;
     });
 }
@@ -4908,9 +4945,9 @@ function _renderCitedText(text) {
 function _stripCitations(text) {
     // Remove [source] tags from text, return clean prose
     if (!text) return '';
-    return escHtml(text).replace(/\s*\[([\w,\s]+)\]/g, (match, inner) => {
+    return escHtml(text).replace(new RegExp('\\s*' + _SOURCE_TAG_RE.source, 'g'), (match, inner) => {
         const sources = inner.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
-        const allValid = sources.every(s => _VALID_SOURCES.includes(s));
+        const allValid = sources.every(s => _isSourceTag(s));
         return allValid ? '' : match;
     }).replace(/\s{2,}/g, ' ').trim();
 }
@@ -4919,8 +4956,8 @@ function _extractSources(text) {
     // Extract unique source tags from text, return as array
     if (!text) return [];
     const found = new Set();
-    text.replace(/\[([\w,\s]+)\]/g, (match, inner) => {
-        inner.split(',').map(s => s.trim().toLowerCase()).filter(s => _VALID_SOURCES.includes(s)).forEach(s => found.add(s));
+    text.replace(_SOURCE_TAG_RE, (match, inner) => {
+        inner.split(',').map(s => s.trim().toLowerCase()).filter(s => _isSourceTag(s)).forEach(s => found.add(s));
     });
     return [...found];
 }
@@ -5047,7 +5084,18 @@ function toggleScoreTooltip(icon) {
     if (!parent) return;
     const tooltip = parent.nextElementSibling;
     if (tooltip && tooltip.classList.contains('score-tooltip')) {
-        tooltip.style.display = tooltip.style.display === 'none' ? 'block' : 'none';
+        const showing = tooltip.style.display === 'none';
+        tooltip.style.display = showing ? 'block' : 'none';
+        if (showing) {
+            setTimeout(() => {
+                document.addEventListener('click', function _dismiss(e) {
+                    if (!tooltip.contains(e.target) && e.target !== icon) {
+                        tooltip.style.display = 'none';
+                        document.removeEventListener('click', _dismiss);
+                    }
+                });
+            }, 10);
+        }
     }
 }
 
@@ -5195,7 +5243,7 @@ function _renderScoringSection(scoring, isFullBriefing) {
 
     let html = '';
     html += renderScoreRing(score, 120);
-    html += `<div class="maturity-label score-${_scoreColorClass(score)}">${escHtml(label)} <span class="score-info-icon" onclick="event.stopPropagation();toggleScoreTooltip(this)">&#9432;</span></div>
+    html += `<div class="score-tooltip-wrap"><div class="maturity-label score-${_scoreColorClass(score)}">${escHtml(label)} <span class="score-info-icon" onclick="event.stopPropagation();toggleScoreTooltip(this)">&#9432;</span></div>
     <div class="score-tooltip" style="display:none">
         <div class="score-tooltip-title">${escHtml(scoringLabel)}</div>
         <div class="score-tooltip-body">
@@ -5210,7 +5258,7 @@ function _renderScoringSection(scoring, isFullBriefing) {
         const cc = _scoreColorClass(tier.min_score);
         html += `<span class="score-${cc}">&#9679;</span> ${tier.min_score}+ ${escHtml(tier.label)} &nbsp;`;
     });
-    html += `</div></div></div>`;
+    html += `</div></div></div></div>`;
 
     if (!isFullBriefing) {
         html += `<div style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:4px;font-style:italic">Scoring overlay — briefing content reflects a different lens</div>`;
@@ -7099,7 +7147,7 @@ function _buildBriefingDashboard(content) {
             </div>
             <div class="dash-hero-score">
                 ${renderScoreRing(score, 100)}
-                <div class="dash-hero-label score-${_scoreColorClass(score)}">${escHtml(label)} <span class="score-info-icon" onclick="event.stopPropagation();toggleScoreTooltip(this)">&#9432;</span></div>
+                <div class="score-tooltip-wrap"><div class="dash-hero-label score-${_scoreColorClass(score)}">${escHtml(label)} <span class="score-info-icon" onclick="event.stopPropagation();toggleScoreTooltip(this)">&#9432;</span></div>
                 <div class="score-tooltip" style="display:none">
                     <div class="score-tooltip-title">${escHtml(scoringLabel)}</div>
                     <div class="score-tooltip-body">
@@ -7107,7 +7155,7 @@ function _buildBriefingDashboard(content) {
                         <div class="score-tooltip-dims">${tooltipDims}</div>
                         <div class="score-tooltip-tiers">${tooltipTiers}</div>
                     </div>
-                </div>
+                </div></div>
                 ${confLine ? `<div class="dash-hero-meta">${escHtml(confLine)}</div>` : ''}
             </div>
             <div class="dash-hero-bars">${barsHtml}</div>

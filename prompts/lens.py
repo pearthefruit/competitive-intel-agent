@@ -89,6 +89,7 @@ def build_lens_scoring_prompt(company_name, lens_config, reports, website_url=No
                 "evidence": "string with [source] tags — specific data points",
                 "detail": "2-3 sentences — why this is a real need",
                 "estimated_scope": "e.g. '$1-3M, 6-12 months'",
+                "why_now": "1-2 sentences — company-specific timing trigger explaining urgency",
                 "source_analyses": ["analysis_type1", "analysis_type2"],
             }
         ],

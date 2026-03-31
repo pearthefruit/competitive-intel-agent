@@ -152,6 +152,14 @@ def search_youtube(query, max_results=5):
     return search_web(f"site:youtube.com {query}", max_results=max_results)
 
 
+def search_tiktok(query, max_results=5):
+    """Search TikTok via DuckDuckGo site-scoped query.
+
+    Returns list of dicts with: title, href, body.
+    """
+    return search_web(f"site:tiktok.com {query}", max_results=max_results)
+
+
 def format_news_for_prompt(articles, max_chars=2000):
     """Format news articles into a compact string for LLM context."""
     if not articles:
