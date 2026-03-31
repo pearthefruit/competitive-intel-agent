@@ -1867,7 +1867,7 @@
         .exec-overlay.visible { display: block; }
         @keyframes exec-overlay-in { from { opacity: 0; } to { opacity: 1; } }
         .exec-overlay-inner {
-            max-width: 700px; margin: 40px auto; padding: 0 24px 60px;
+            max-width: 860px; margin: 40px auto; padding: 0 32px 60px;
         }
         .exec-overlay-header {
             display: flex; align-items: center; gap: 12px;
@@ -4077,8 +4077,8 @@
             display: flex; align-items: center; justify-content: center;
             font-size: 14px; flex-shrink: 0;
         }
-        .ptree-card-label { font-weight: 700; color: var(--text-primary); font-size: 12px; }
-        .ptree-card-summary { color: var(--text-muted); font-size: 10px; margin-top: 4px; padding-left: 36px; }
+        .ptree-card-label { font-weight: 700; color: var(--text-primary); font-size: 13px; }
+        .ptree-card-summary { color: var(--text-muted); font-size: 11px; margin-top: 4px; padding-left: 36px; }
 
         .ptree-status {
             font-size: 8px; padding: 2px 7px; border-radius: 4px;
@@ -4125,8 +4125,8 @@
             content: ''; position: absolute; left: 50%; top: -9px;
             width: 1px; height: 8px; background: rgba(168,85,247,0.25);
         }
-        .ptree-mini-label { font-size: 9px; font-weight: 600; color: var(--text-secondary); text-align: center; white-space: nowrap; }
-        .ptree-mini-value { font-size: 10px; font-weight: 700; margin-top: 1px; }
+        .ptree-mini-label { font-size: 10px; font-weight: 600; color: var(--text-secondary); text-align: center; white-space: nowrap; }
+        .ptree-mini-value { font-size: 11px; font-weight: 700; margin-top: 2px; }
         .ptree-mini.done .ptree-mini-value { color: var(--green); }
         .ptree-mini.cached .ptree-mini-value { color: var(--accent); }
         .ptree-mini.error .ptree-mini-value { color: var(--red); }
@@ -7995,14 +7995,28 @@ function openExecOverlay(msgIdx) {
     metaEl.innerHTML = `<span>&#10003; Done &mdash; ${(m.steps || []).length} steps</span>`;
 
     // Render the flowchart tree in the overlay body
+    // Prefer structuredSteps (proper tree data) over flat string parsing
+    const structuredSteps = m.structuredSteps || [];
     const steps = m.steps || [];
-    const isTreeTool = ['score_lens', 'ua_fit_score', 'full_analysis', 'financial_analysis',
-                        'sentiment_analysis', 'techstack_analysis', 'competitor_analysis',
-                        'patent_analysis'].includes(m.name);
-    if (steps.length && isTreeTool) {
-        bodyEl.innerHTML = _buildToolStepsTree(steps, m.name);
+
+    if (structuredSteps.length > 0) {
+        // Use structured events → proper flowchart
+        const treeNodes = _structuredStepsToTree(structuredSteps, m.name, m.args);
+        if (treeNodes) {
+            renderPipelineTree(treeNodes, bodyEl);
+        } else {
+            bodyEl.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">No structured execution data.</div>';
+        }
     } else if (steps.length) {
-        bodyEl.innerHTML = `<div class="tool-progress-log" style="max-height:none;padding-left:0">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(cleanProgress(s))}</div>`).join('')}</div>`;
+        // Fallback: bridge parser for tools without structured events
+        const isTreeTool = ['score_lens', 'ua_fit_score', 'full_analysis', 'financial_analysis',
+                            'sentiment_analysis', 'techstack_analysis', 'competitor_analysis',
+                            'patent_analysis'].includes(m.name);
+        if (isTreeTool) {
+            bodyEl.innerHTML = _buildToolStepsTree(steps, m.name);
+        } else {
+            bodyEl.innerHTML = `<div class="tool-progress-log" style="max-height:none;padding-left:0">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(cleanProgress(s))}</div>`).join('')}</div>`;
+        }
     } else {
         bodyEl.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">No execution steps recorded.</div>';
     }
@@ -9243,7 +9257,105 @@ const _agentMeta = {
 };
 
 /**
- * Parse flat tool_progress step strings into a PipelineTree structure.
+ * Convert structuredSteps (from progress_cb events) into PipelineTree nodes.
+ * This produces a proper flowchart because the data carries real tree structure.
+ */
+function _structuredStepsToTree(structuredSteps, toolName, args) {
+    if (!structuredSteps || !structuredSteps.length) return null;
+
+    const root = {
+        id: 'root', label: toolName ? toolLabel(toolName) : 'Execution',
+        status: 'done', kind: 'root', icon: toolIcon(toolName),
+        iconBg: 'rgba(168,85,247,0.15)',
+        summary: args ? formatArgs(args) : '', children: [],
+    };
+
+    // Group events by analysis_type to build stage nodes
+    // Flow: analyzing → (analysis_start → source_start/source_done... → analysis_done)* → scoring
+    const stages = {};
+    const stageOrder = [];
+    let currentStage = null;
+
+    structuredSteps.forEach(ev => {
+        if (ev.event === 'analyzing') {
+            // Root-level info — which analyses are planned
+            root.summary = `${(ev.analyses || []).length} analyses for ${ev.company || ''}`;
+        } else if (ev.event === 'analysis_start') {
+            const at = ev.analysis_type || 'unknown';
+            const meta = _agentMeta[at] || { icon: '&#9654;', label: ev.label || at, bg: 'rgba(255,255,255,0.06)' };
+            currentStage = {
+                id: at, label: meta.label, status: 'running', kind: 'stage',
+                icon: meta.icon, iconBg: meta.bg,
+                summary: '', children: [], _sources: [],
+            };
+            stages[at] = currentStage;
+            stageOrder.push(at);
+        } else if (ev.event === 'analysis_done') {
+            const at = ev.analysis_type || currentStage?.id;
+            if (at && stages[at]) {
+                stages[at].status = ev.reused ? 'cached' : (ev.report_path ? 'done' : 'error');
+                if (ev.reused) stages[at].summary = 'Cached (< 7 days old)';
+                else if (ev.report_path) stages[at].summary = 'Report saved';
+                else stages[at].summary = 'Failed';
+            }
+        } else if (ev.event === 'source_start' && currentStage) {
+            // Track that a source is being queried
+            currentStage._sources.push({
+                source: ev.source, label: ev.label || ev.source,
+                status: 'running', summary: ev.detail || '',
+            });
+        } else if (ev.event === 'source_done' && currentStage) {
+            // Update the source with result
+            const src = currentStage._sources.find(s => s.source === ev.source);
+            if (src) {
+                src.status = ev.status || 'done';
+                src.summary = ev.summary || '';
+            } else {
+                currentStage._sources.push({
+                    source: ev.source, label: ev.label || ev.source,
+                    status: ev.status || 'done', summary: ev.summary || '',
+                });
+            }
+        } else if (ev.event === 'generating' && currentStage) {
+            currentStage._sources.push({
+                source: 'llm', label: 'LLM Synthesis',
+                status: 'done', summary: ev.detail || 'Generating report',
+            });
+        } else if (ev.event === 'report_saved' && currentStage) {
+            currentStage._sources.push({
+                source: 'report', label: 'Report',
+                status: 'done', summary: ev.path || 'Saved',
+            });
+        } else if (ev.event === 'scoring') {
+            const scoringNode = {
+                id: 'scoring', label: 'Lens Scoring', status: 'done', kind: 'stage',
+                icon: '&#127919;', iconBg: 'rgba(168,85,247,0.15)',
+                summary: `${ev.lens || 'Lens'} evaluation`, children: [],
+            };
+            stages['scoring'] = scoringNode;
+            stageOrder.push('scoring');
+        }
+    });
+
+    // Convert source arrays into children nodes
+    stageOrder.forEach(at => {
+        const stage = stages[at];
+        if (stage._sources) {
+            stage.children = stage._sources.map((src, i) => ({
+                id: `${at}.${src.source || i}`, label: src.label,
+                status: src.status, kind: 'operation',
+                summary: src.summary, children: [],
+            }));
+            delete stage._sources;
+        }
+        root.children.push(stage);
+    });
+
+    return [root];
+}
+
+/**
+ * Parse flat tool_progress step strings into a PipelineTree structure (bridge/fallback).
  * Groups steps by [agent_prefix] into stage branches with operations as children.
  */
 function _buildToolStepsTree(steps, toolName) {
