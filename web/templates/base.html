@@ -1867,7 +1867,7 @@
         .exec-overlay.visible { display: block; }
         @keyframes exec-overlay-in { from { opacity: 0; } to { opacity: 1; } }
         .exec-overlay-inner {
-            max-width: 960px; margin: 32px auto; padding: 0 40px 60px;
+            max-width: 1200px; margin: 24px auto; padding: 0 48px 60px;
         }
         .exec-overlay-header {
             display: flex; align-items: center; gap: 14px;
@@ -1890,20 +1890,32 @@
             display: flex; gap: 12px;
         }
         /* Scale up tree nodes inside the overlay */
-        .exec-overlay .ptree { font-size: 14px; }
-        .exec-overlay .ptree-card { padding: 16px 20px; border-radius: 12px; }
-        .exec-overlay .ptree-card-icon { width: 34px; height: 34px; border-radius: 8px; font-size: 17px; }
-        .exec-overlay .ptree-card-label { font-size: 16px; }
-        .exec-overlay .ptree-card-summary { font-size: 13px; padding-left: 42px; margin-top: 6px; }
-        .exec-overlay .ptree-status { font-size: 10px; padding: 3px 9px; }
-        .exec-overlay .ptree-arrow { height: 28px; }
-        .exec-overlay .ptree-mini { padding: 8px 14px; border-radius: 9px; min-width: 80px; }
-        .exec-overlay .ptree-mini-label { font-size: 12px; }
-        .exec-overlay .ptree-mini-value { font-size: 13px; margin-top: 3px; }
-        .exec-overlay .ptree-fanout { padding: 16px 0 6px; }
-        .exec-overlay .ptree-fanout-items { gap: 8px; }
-        .exec-overlay .ptree-card-detail { font-size: 12px; padding: 10px 14px 8px 42px; line-height: 1.7; }
-        .exec-overlay .ptree-card-chevron { font-size: 11px; }
+        .exec-overlay .ptree { font-size: 15px; }
+        .exec-overlay .ptree-card {
+            padding: 20px 24px; border-radius: 14px;
+            cursor: default; pointer-events: none;
+        }
+        .exec-overlay .ptree-card:hover { border-color: var(--border); box-shadow: none; }
+        .exec-overlay .ptree-card-icon { width: 38px; height: 38px; border-radius: 9px; font-size: 19px; }
+        .exec-overlay .ptree-card-label { font-size: 18px; }
+        .exec-overlay .ptree-card-summary { font-size: 14px; padding-left: 46px; margin-top: 8px; }
+        .exec-overlay .ptree-status { font-size: 11px; padding: 3px 10px; border-radius: 5px; }
+        .exec-overlay .ptree-arrow { height: 32px; }
+        .exec-overlay .ptree-arrow::before { width: 2px; }
+        .exec-overlay .ptree-arrow::after { border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 7px solid rgba(168,85,247,0.4); }
+        .exec-overlay .ptree-mini {
+            padding: 10px 16px; border-radius: 10px; min-width: 90px;
+            pointer-events: none;
+        }
+        .exec-overlay .ptree-mini:hover { border-color: var(--border); box-shadow: none; }
+        .exec-overlay .ptree-mini-label { font-size: 13px; }
+        .exec-overlay .ptree-mini-value { font-size: 14px; margin-top: 3px; }
+        .exec-overlay .ptree-mini::before { top: -11px; height: 10px; }
+        .exec-overlay .ptree-fanout { padding: 18px 0 8px; }
+        .exec-overlay .ptree-fanout-items { gap: 10px; }
+        .exec-overlay .ptree-fanout-rail { margin: 0 24px 10px; }
+        .exec-overlay .ptree-card-detail { font-size: 13px; padding: 12px 16px 10px 46px; line-height: 1.8; pointer-events: auto; }
+        .exec-overlay .ptree-card-chevron { display: none; }
 
         /* Scrollable container for tool call sequences */
         .tool-group {
@@ -4140,8 +4152,8 @@
             content: ''; position: absolute; left: 50%; top: -9px;
             width: 1px; height: 8px; background: rgba(168,85,247,0.25);
         }
-        .ptree-mini-label { font-size: 10px; font-weight: 600; color: var(--text-secondary); text-align: center; white-space: nowrap; }
-        .ptree-mini-value { font-size: 11px; font-weight: 700; margin-top: 2px; }
+        .ptree-mini-label { font-size: 10px; font-weight: 600; color: var(--text-secondary); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+        .ptree-mini-value { font-size: 11px; font-weight: 700; margin-top: 2px; text-align: center; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
         .ptree-mini.done .ptree-mini-value { color: var(--green); }
         .ptree-mini.cached .ptree-mini-value { color: var(--accent); }
         .ptree-mini.error .ptree-mini-value { color: var(--red); }
