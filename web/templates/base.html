@@ -4004,29 +4004,95 @@
         .breadcrumb-seg.current { color: var(--text-primary); cursor: default; font-weight: 600; }
         .breadcrumb-sep { color: var(--text-muted); margin: 0 4px; }
 
-        /* === PIPELINE TREE RENDERER === */
-        .ptree { font-size: 11px; }
-        .ptree-node { position: relative; margin-left: 18px; }
-        .ptree-node.depth-0 { margin-left: 0; }
-        .ptree-connector { position: absolute; left: -14px; top: 0; bottom: 0; width: 1px; background: var(--border); }
-        .ptree-node:last-child > .ptree-connector { bottom: 50%; }
-        .ptree-connector-h { position: absolute; left: -14px; top: 13px; width: 10px; height: 1px; background: var(--border); }
-        .ptree-head { display: flex; align-items: center; gap: 5px; padding: 4px 6px; border-radius: 5px; cursor: pointer; transition: background 0.15s; }
-        .ptree-head:hover { background: rgba(255,255,255,0.04); }
-        .ptree-icon { width: 18px; height: 18px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; }
-        .ptree-label { font-weight: 600; color: var(--text-secondary); white-space: nowrap; font-size: 11px; }
-        .ptree-summary { color: var(--text-muted); font-size: 10px; margin-left: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .ptree-badge { font-size: 8px; padding: 1px 5px; border-radius: 3px; font-weight: 600; white-space: nowrap; margin-left: auto; }
-        .ptree-badge.done { background: rgba(22,163,74,0.12); color: var(--green); }
-        .ptree-badge.cached { background: rgba(59,130,246,0.12); color: var(--accent); }
-        .ptree-badge.running { background: rgba(168,85,247,0.12); color: var(--purple); }
-        .ptree-badge.error { background: rgba(239,68,68,0.12); color: var(--red); }
-        .ptree-badge.skipped { background: rgba(107,114,128,0.12); color: #9ca3af; }
-        .ptree-children { overflow: hidden; }
-        .ptree-children.collapsed { display: none; }
-        .ptree-detail { margin: 2px 0 4px 24px; padding: 6px 8px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 5px; font-size: 10px; color: var(--text-muted); line-height: 1.5; display: none; }
-        .ptree-chevron { font-size: 8px; color: var(--text-muted); transition: transform 0.15s; flex-shrink: 0; width: 10px; text-align: center; }
-        .ptree-chevron.open { transform: rotate(90deg); }
+        /* === PIPELINE TREE RENDERER — Flowchart Style === */
+        .ptree { font-size: 11px; display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+
+        /* Arrow connector between stage cards */
+        .ptree-arrow {
+            display: flex; align-items: center; justify-content: center;
+            height: 20px; position: relative;
+        }
+        .ptree-arrow::before {
+            content: ''; position: absolute; left: 50%; top: 0; bottom: 6px;
+            width: 1px; background: linear-gradient(to bottom, rgba(168,85,247,0.3), rgba(168,85,247,0.15));
+        }
+        .ptree-arrow::after {
+            content: ''; position: absolute; left: 50%; bottom: 2px;
+            transform: translateX(-50%);
+            border-left: 4px solid transparent; border-right: 4px solid transparent;
+            border-top: 5px solid rgba(168,85,247,0.35);
+        }
+
+        /* Stage card — the main "node" in the flowchart */
+        .ptree-card {
+            background: var(--bg-tertiary); border: 1px solid var(--border);
+            border-radius: 10px; padding: 10px 14px; position: relative;
+            transition: border-color 0.2s, box-shadow 0.2s; cursor: pointer;
+        }
+        .ptree-card:hover { border-color: rgba(168,85,247,0.4); box-shadow: 0 0 12px rgba(168,85,247,0.08); }
+        .ptree-card.status-done { border-left: 3px solid var(--green); }
+        .ptree-card.status-cached { border-left: 3px solid var(--accent); }
+        .ptree-card.status-running { border-left: 3px solid var(--purple); }
+        .ptree-card.status-error { border-left: 3px solid var(--red); }
+        .ptree-card.status-skipped { border-left: 3px solid #6b7280; opacity: 0.7; }
+
+        /* Card header — icon + label + status badge */
+        .ptree-card-header {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .ptree-card-icon {
+            width: 26px; height: 26px; border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; flex-shrink: 0;
+        }
+        .ptree-card-label { font-weight: 700; color: var(--text-primary); font-size: 12px; }
+        .ptree-card-summary { color: var(--text-muted); font-size: 10px; margin-top: 3px; padding-left: 34px; }
+
+        /* Status badge (top-right) */
+        .ptree-status {
+            font-size: 8px; padding: 2px 7px; border-radius: 4px;
+            font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+            margin-left: auto; white-space: nowrap;
+        }
+        .ptree-status.done { background: rgba(22,163,74,0.15); color: var(--green); }
+        .ptree-status.cached { background: rgba(59,130,246,0.15); color: var(--accent); }
+        .ptree-status.running { background: rgba(168,85,247,0.15); color: var(--purple); }
+        .ptree-status.error { background: rgba(239,68,68,0.15); color: var(--red); }
+        .ptree-status.skipped { background: rgba(107,114,128,0.15); color: #9ca3af; }
+
+        /* Source chips — inline badges inside the card showing data sources */
+        .ptree-chips {
+            display: flex; flex-wrap: wrap; gap: 5px;
+            margin-top: 8px; padding-left: 34px;
+        }
+        .ptree-chip {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 3px 8px; border-radius: 5px; font-size: 10px;
+            background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+            color: var(--text-secondary); transition: border-color 0.15s;
+        }
+        .ptree-chip:hover { border-color: rgba(168,85,247,0.3); }
+        .ptree-chip-count { font-weight: 700; font-size: 10px; }
+        .ptree-chip.done .ptree-chip-count { color: var(--green); }
+        .ptree-chip.cached .ptree-chip-count { color: var(--accent); }
+        .ptree-chip.error .ptree-chip-count { color: var(--red); }
+        .ptree-chip.skipped { opacity: 0.5; }
+
+        /* Expandable detail inside card — shown on click */
+        .ptree-card-detail {
+            margin-top: 8px; padding: 8px 10px 6px 34px;
+            border-top: 1px solid var(--border);
+            font-size: 10px; color: var(--text-muted); line-height: 1.6;
+            display: none;
+        }
+        .ptree-card.expanded .ptree-card-detail { display: block; }
+
+        /* Chevron on cards */
+        .ptree-card-chevron {
+            font-size: 9px; color: var(--text-muted); transition: transform 0.15s;
+            margin-left: 4px;
+        }
+        .ptree-card.expanded .ptree-card-chevron { transform: rotate(180deg); }
 
         /* Legacy exec-step compat */
         .exec-step { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); }
@@ -8784,28 +8850,35 @@ function _buildBreadcrumb(campaignId) {
     }).join('<span class="breadcrumb-sep">/</span>')}</div>`;
 }
 
-// ===================== SHARED PIPELINE TREE RENDERER =====================
+// ===================== SHARED PIPELINE TREE RENDERER (Flowchart Cards) =====================
 //
-// Universal tree node schema: {id, parent_id, label, status, kind, icon, iconBg, summary, detail, children[]}
-// - kind: root | stage | operation | result
-// - status: done | running | cached | error | skipped | pending
-// - children are assembled from parent_id references or provided inline
+// Renders pipeline stages as visual card nodes connected by arrows.
+// Stage children are shown as inline chips (source badges) inside the card.
+// Click a card to expand/collapse its detail section.
 //
 
+function _ptreeStatusBg(status) {
+    const m = { done: 'rgba(22,163,74,0.15)', running: 'rgba(168,85,247,0.15)', cached: 'rgba(59,130,246,0.15)', error: 'rgba(239,68,68,0.15)', skipped: 'rgba(107,114,128,0.15)' };
+    return m[status] || 'rgba(255,255,255,0.06)';
+}
+
 /**
- * Render a tree of pipeline nodes into a container element.
- * @param {Array} nodes — flat array of node objects with parent_id references, OR nested with .children
- * @param {HTMLElement} container — DOM element to render into
+ * Render a tree of pipeline nodes as a flowchart into a container element.
+ * Each top-level node is a card. Children become chips inside the card.
  */
 function renderPipelineTree(nodes, container) {
     if (!container || !nodes || !nodes.length) return;
-    // If nodes have parent_id, assemble tree; otherwise assume already nested
-    const tree = nodes[0].children ? nodes : _assembleTree(nodes);
-    container.innerHTML = `<div class="ptree">${tree.map(n => _renderPTreeNode(n, 0)).join('')}</div>`;
+    const tree = nodes[0].children ? nodes : _assembleTreePT(nodes);
+    let html = '<div class="ptree">';
+    tree.forEach((node, i) => {
+        if (i > 0) html += '<div class="ptree-arrow"></div>';
+        html += _renderCard(node);
+    });
+    html += '</div>';
+    container.innerHTML = html;
 }
 
-/** Assemble flat node array into nested tree via parent_id. */
-function _assembleTree(nodes) {
+function _assembleTreePT(nodes) {
     const map = {};
     nodes.forEach(n => { map[n.id] = { ...n, children: [] }; });
     const roots = [];
@@ -8819,71 +8892,85 @@ function _assembleTree(nodes) {
     return roots;
 }
 
-/** Render a single tree node + its children recursively. */
-function _renderPTreeNode(node, depth) {
-    const hasChildren = node.children && node.children.length > 0;
-    const hasDetail = !!node.detail;
-    const isExpandable = hasChildren || hasDetail;
-    const defaultOpen = depth < 2; // auto-expand first 2 levels
-    const chevron = isExpandable
-        ? `<span class="ptree-chevron${defaultOpen ? ' open' : ''}" onclick="event.stopPropagation();_togglePTreeNode(this)">&#9654;</span>`
-        : '<span style="width:10px;display:inline-block"></span>';
-
-    const iconBg = node.iconBg || _ptreeStatusBg(node.status);
-    const iconEl = node.icon
-        ? `<div class="ptree-icon" style="background:${iconBg}">${node.icon}</div>`
+/** Render a single card node with optional source chips and detail. */
+function _renderCard(node) {
+    const status = node.status || 'done';
+    const iconBg = node.iconBg || _ptreeStatusBg(status);
+    const iconHtml = node.icon
+        ? `<div class="ptree-card-icon" style="background:${iconBg}">${node.icon}</div>`
+        : '';
+    const statusHtml = status !== 'done'
+        ? `<span class="ptree-status ${status}">${status}</span>`
+        : '';
+    const summaryHtml = node.summary
+        ? `<div class="ptree-card-summary">${escHtml(node.summary)}</div>`
         : '';
 
-    const badge = node.status && node.status !== 'done' && depth > 0
-        ? `<span class="ptree-badge ${node.status}">${node.status}</span>`
+    // Build chips from children (operations/results shown as inline badges)
+    const children = node.children || [];
+    let chipsHtml = '';
+    if (children.length > 0) {
+        const chips = children.map(child => {
+            const cStatus = child.status || 'done';
+            const cLabel = child.label || '?';
+            const cSummary = child.summary || '';
+            // If child has its own children (sub-operations), count them
+            const subCount = (child.children || []).length;
+            const countText = cSummary || (subCount > 0 ? `${subCount} steps` : '');
+            return `<span class="ptree-chip ${cStatus}" title="${escHtml(cLabel)}${countText ? ': ' + escHtml(countText) : ''}">
+                <span>${escHtml(cLabel)}</span>
+                ${countText ? `<span class="ptree-chip-count">${escHtml(countText)}</span>` : ''}
+            </span>`;
+        }).join('');
+        chipsHtml = `<div class="ptree-chips">${chips}</div>`;
+    }
+
+    // Build expandable detail — show all children's detail + grandchildren
+    let detailHtml = '';
+    const hasExpandable = children.some(c => (c.children && c.children.length) || c.detail) || node.detail;
+    if (hasExpandable) {
+        let detailContent = '';
+        if (node.detail) {
+            detailContent += `<div style="margin-bottom:6px">${node.detail}</div>`;
+        }
+        children.forEach(child => {
+            const grandkids = child.children || [];
+            if (grandkids.length > 0) {
+                detailContent += `<div style="margin-bottom:6px"><strong style="color:var(--text-secondary)">${escHtml(child.label)}</strong>`;
+                grandkids.forEach(gk => {
+                    const gkIcon = gk.status === 'done' ? '&#10003;' : gk.status === 'skipped' ? '&#8212;' : gk.status === 'error' ? '&#10007;' : '&#9654;';
+                    const gkColor = gk.status === 'done' ? 'var(--green)' : gk.status === 'error' ? 'var(--red)' : gk.status === 'skipped' ? 'var(--yellow)' : 'var(--text-muted)';
+                    detailContent += `<div style="display:flex;align-items:center;gap:5px;margin-left:8px;line-height:1.8">
+                        <span style="color:${gkColor};font-size:9px">${gkIcon}</span>
+                        <span>${escHtml(gk.label || '')}</span>
+                        ${gk.summary ? `<span style="color:var(--text-muted);margin-left:auto;white-space:nowrap">${escHtml(gk.summary)}</span>` : ''}
+                    </div>`;
+                });
+                detailContent += '</div>';
+            } else if (child.detail) {
+                detailContent += `<div style="margin-bottom:4px"><strong style="color:var(--text-secondary)">${escHtml(child.label)}:</strong> ${child.detail}</div>`;
+            }
+        });
+        if (detailContent) {
+            detailHtml = `<div class="ptree-card-detail">${detailContent}</div>`;
+        }
+    }
+
+    const chevronHtml = hasExpandable
+        ? '<span class="ptree-card-chevron">&#9660;</span>'
         : '';
 
-    const summaryEl = node.summary
-        ? `<span class="ptree-summary">${escHtml(node.summary)}</span>`
-        : '';
-
-    const detailEl = hasDetail
-        ? `<div class="ptree-detail"${defaultOpen ? '' : ' style="display:none"'}>${node.detail}</div>`
-        : '';
-
-    const childrenHtml = hasChildren
-        ? `<div class="ptree-children${defaultOpen ? '' : ' collapsed'}">${node.children.map(c => _renderPTreeNode(c, depth + 1)).join('')}</div>`
-        : '';
-
-    return `<div class="ptree-node depth-${depth}" data-node-id="${escHtml(node.id || '')}">
-        ${depth > 0 ? '<div class="ptree-connector"></div><div class="ptree-connector-h"></div>' : ''}
-        <div class="ptree-head" ${hasDetail ? `ondblclick="_togglePTreeDetail(this)"` : ''}>
-            ${chevron}
-            ${iconEl}
-            <span class="ptree-label">${escHtml(node.label || '')}</span>
-            ${summaryEl}
-            ${badge}
+    return `<div class="ptree-card status-${status}" onclick="this.classList.toggle('expanded')">
+        <div class="ptree-card-header">
+            ${iconHtml}
+            <span class="ptree-card-label">${escHtml(node.label || '')}</span>
+            ${statusHtml}
+            ${chevronHtml}
         </div>
-        ${detailEl}
-        ${childrenHtml}
+        ${summaryHtml}
+        ${chipsHtml}
+        ${detailHtml}
     </div>`;
-}
-
-function _ptreeStatusBg(status) {
-    const m = { done: 'rgba(22,163,74,0.15)', running: 'rgba(168,85,247,0.15)', cached: 'rgba(59,130,246,0.15)', error: 'rgba(239,68,68,0.15)', skipped: 'rgba(107,114,128,0.15)' };
-    return m[status] || 'rgba(255,255,255,0.06)';
-}
-
-/** Toggle children visibility when clicking chevron. */
-function _togglePTreeNode(chevronEl) {
-    chevronEl.classList.toggle('open');
-    const nodeEl = chevronEl.closest('.ptree-node');
-    const children = nodeEl.querySelector(':scope > .ptree-children');
-    if (children) children.classList.toggle('collapsed');
-    const detail = nodeEl.querySelector(':scope > .ptree-detail');
-    if (detail && !children) detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
-}
-
-/** Toggle detail section on double-click of the head. */
-function _togglePTreeDetail(headEl) {
-    const nodeEl = headEl.closest('.ptree-node');
-    const detail = nodeEl.querySelector(':scope > .ptree-detail');
-    if (detail) detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
 }
 
 // ===================== DISCOVER EXECUTION LOG → TREE NODES =====================
