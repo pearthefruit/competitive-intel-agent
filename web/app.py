@@ -74,16 +74,24 @@ def _parse_report_filename(filename):
     return {"company": company, "type": analysis_type, "date": date, "filename": filename}
 
 
-def _build_report_type_map(db_path="intel.db"):
-    """Build a mapping of report filename → analysis_type from the DB."""
+def _build_report_meta_map(db_path="intel.db"):
+    """Build a mapping of report filename → {type, company} from the DB."""
     try:
         conn = get_connection(db_path)
         rows = conn.execute(
-            "SELECT report_file, analysis_type FROM dossier_analyses WHERE report_file IS NOT NULL"
+            """SELECT da.report_file, da.analysis_type, d.company_name
+               FROM dossier_analyses da
+               JOIN dossiers d ON d.id = da.dossier_id
+               WHERE da.report_file IS NOT NULL"""
         ).fetchall()
         conn.close()
-        # Normalize paths: store just the filename portion as key
-        return {Path(r["report_file"]).name: r["analysis_type"] for r in rows}
+        return {
+            Path(r["report_file"]).name: {
+                "type": r["analysis_type"],
+                "company": r["company_name"],
+            }
+            for r in rows
+        }
     except Exception:
         return {}
 
@@ -93,12 +101,13 @@ def _get_all_reports():
     reports_dir = Path("reports")
     reports = []
     if reports_dir.exists():
-        type_map = _build_report_type_map()
+        meta_map = _build_report_meta_map()
         for f in sorted(reports_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
             info = _parse_report_filename(f.name)
-            # Override fallback types with the actual type from DB
-            if info["type"] in ("analysis", "report") and f.name in type_map:
-                info["type"] = type_map[f.name]
+            db_meta = meta_map.get(f.name)
+            if db_meta:
+                info["type"] = db_meta["type"]
+                info["company"] = db_meta["company"]
             info["size"] = f.stat().st_size
             reports.append(info)
     return reports
@@ -230,12 +239,16 @@ def create_app(db_path="intel.db"):
     @app.route("/api/reports/<path:filename>/content")
     def report_content(filename):
         filepath = Path("reports") / filename
+        info = _parse_report_filename(filename)
+        # Override with DB metadata (correct company name for lens reports etc.)
+        db_meta = _build_report_meta_map().get(Path(filename).name)
+        if db_meta:
+            info["type"] = db_meta["type"]
+            info["company"] = db_meta["company"]
         if not filepath.exists():
             # File missing — return a placeholder instead of 404
-            info = _parse_report_filename(filename)
             return jsonify({"content": f"*Report file not found on disk.* The analysis ran but the file `{filename}` is missing — it may have been moved or deleted.", **info})
         content = filepath.read_text(encoding="utf-8")
-        info = _parse_report_filename(filename)
         return jsonify({"content": content, **info})
 
     @app.route("/api/reports/<path:filename>/pdf")
@@ -251,6 +264,10 @@ def create_app(db_path="intel.db"):
 
         content = filepath.read_text(encoding="utf-8")
         info = _parse_report_filename(filename)
+        db_meta = _build_report_meta_map().get(Path(filename).name)
+        if db_meta:
+            info["type"] = db_meta["type"]
+            info["company"] = db_meta["company"]
         company = info.get("company", "Report")
         report_type = info.get("type", "analysis").replace("_", " ").title()
         report_date = info.get("date", "")
@@ -519,6 +536,14 @@ def create_app(db_path="intel.db"):
             except Exception:
                 pass
 
+        # Attach lens scores
+        from db import get_lens_scores_for_dossier
+        lens_scores = get_lens_scores_for_dossier(conn, dossier["id"])
+        for s in lens_scores:
+            s.pop("score_json", None)
+            s.pop("lens_config_json", None)
+        dossier["lens_scores"] = lens_scores
+
         conn.close()
         return jsonify(dossier)
 
@@ -557,8 +582,11 @@ def create_app(db_path="intel.db"):
         """Generate or refresh the intelligence briefing for a company."""
         from agents.briefing import generate_briefing
 
+        data = request.json or {}
+        lens_id = data.get("lens_id")
+
         try:
-            briefing = generate_briefing(company_name, db_path)
+            briefing = generate_briefing(company_name, db_path, lens_id=lens_id)
             return jsonify({"ok": True, "briefing": briefing})
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
@@ -582,19 +610,31 @@ def create_app(db_path="intel.db"):
         if isinstance(briefing, str):
             briefing = json.loads(briefing)
 
-        dm = briefing.get("digital_maturity", {})
+        # Support both new "scoring" key and legacy "digital_maturity" key
+        dm = briefing.get("scoring") or briefing.get("digital_maturity", {})
         overall = dm.get("overall_score", "N/A")
         label = dm.get("overall_label", "")
         score_val = overall if isinstance(overall, int) else 0
         score_color = "#22c55e" if score_val >= 80 else "#3b82f6" if score_val >= 60 else "#f59e0b" if score_val >= 40 else "#ef4444" if score_val >= 20 else "#dc2626"
         subs = dm.get("sub_scores", {})
 
-        # Build sub-scores table rows
+        # Dynamic score label from lens metadata, fallback for legacy briefings
+        lens_info = dm.get("_lens", {})
+        score_title = lens_info.get("score_label", "Digital Maturity Score")
+
+        # Dynamic dimensions from lens metadata, fallback for legacy briefings
+        dims = dm.get("_dimensions") or [
+            {"key": "tech_modernity", "label": "Tech Modernity", "weight": 0.30},
+            {"key": "data_analytics", "label": "Data & Analytics", "weight": 0.25},
+            {"key": "ai_readiness", "label": "AI Readiness", "weight": 0.25},
+            {"key": "organizational_readiness", "label": "Org Readiness", "weight": 0.20},
+        ]
+
+        # Build sub-scores table rows from dynamic dimensions
         sub_rows = ""
-        for key, name in [("tech_modernity", "Tech Modernity"), ("data_analytics", "Data & Analytics"),
-                          ("ai_readiness", "AI Readiness"), ("organizational_readiness", "Org Readiness")]:
-            s = subs.get(key, {})
-            sub_rows += f"<tr><td>{name}</td><td><strong>{s.get('score', 'N/A')}</strong>/100</td><td>{s.get('rationale', '')}</td></tr>"
+        for dim in dims:
+            s = subs.get(dim["key"], {})
+            sub_rows += f"<tr><td>{dim['label']}</td><td><strong>{s.get('score', 'N/A')}</strong>/100</td><td>{s.get('rationale', '')}</td></tr>"
 
         # Engagement opportunities
         opps_html = ""
@@ -713,7 +753,7 @@ def create_app(db_path="intel.db"):
     <div class="score-box">
         <div class="score-number">{overall}</div>
         <div class="score-label">{label}</div>
-        <div style="font-size:9px;color:#666;margin-top:4px">Digital Maturity Score</div>
+        <div style="font-size:9px;color:#666;margin-top:4px">{score_title}</div>
     </div>
 
     <h2>Sub-Scores</h2>
@@ -758,6 +798,141 @@ def create_app(db_path="intel.db"):
                 "Content-Type": "application/pdf",
             },
         )
+
+    # --- Lens API ---
+
+    @app.route("/api/lenses")
+    def list_lenses_api():
+        """List all available lenses."""
+        from db import get_all_lenses
+        conn = get_connection(db_path)
+        lenses = get_all_lenses(conn)
+        conn.close()
+        # Strip heavy config_json from list response, keep config parsed
+        for l in lenses:
+            l.pop("config_json", None)
+        return jsonify(lenses)
+
+    @app.route("/api/lenses/<int:lens_id>")
+    def get_lens_api(lens_id):
+        """Get a single lens with full config."""
+        from db import get_lens
+        conn = get_connection(db_path)
+        lens = get_lens(conn, lens_id)
+        conn.close()
+        if not lens:
+            return jsonify({"error": "Lens not found"}), 404
+        return jsonify(lens)
+
+    @app.route("/api/lenses", methods=["POST"])
+    def create_lens_api():
+        """Create a new lens. Body: {name, slug, description, config}"""
+        from db import create_lens
+        data = request.json or {}
+        name = data.get("name", "").strip()
+        slug = data.get("slug", "").strip()
+        description = data.get("description", "")
+        config = data.get("config")
+        if not name or not slug or not config:
+            return jsonify({"error": "name, slug, and config are required"}), 400
+        try:
+            conn = get_connection(db_path)
+            lens_id = create_lens(conn, name, slug, description, config)
+            conn.close()
+            return jsonify({"ok": True, "id": lens_id})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/lenses/generate", methods=["POST"])
+    def generate_lens_api():
+        """LLM-generate a lens config from name + description."""
+        from agents.llm import generate_json
+        from prompts.lens import build_lens_generation_prompt
+        from db import create_lens, get_lens
+        data = request.json or {}
+        name = data.get("name", "").strip()
+        description = data.get("description", "").strip()
+        if not name or not description:
+            return jsonify({"error": "name and description are required"}), 400
+        try:
+            prompt = build_lens_generation_prompt(name, description)
+            config = generate_json(prompt, timeout=60)
+            if not isinstance(config, dict) or "dimensions" not in config:
+                return jsonify({"error": "LLM did not produce a valid lens config"}), 500
+            # Validate weights sum to ~1.0
+            total_weight = sum(d.get("weight", 0) for d in config.get("dimensions", []))
+            if abs(total_weight - 1.0) > 0.05:
+                # Normalize
+                for d in config["dimensions"]:
+                    d["weight"] = round(d["weight"] / total_weight, 2)
+            slug = name.lower().replace(" ", "-").replace("_", "-")
+            slug = "".join(c for c in slug if c.isalnum() or c == "-")[:50]
+            conn = get_connection(db_path)
+            lens_id = create_lens(conn, name, slug, description, config)
+            lens = get_lens(conn, lens_id)
+            conn.close()
+            return jsonify({"ok": True, "lens": lens})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/lenses/<int:lens_id>", methods=["PUT"])
+    def update_lens_api(lens_id):
+        """Update a lens config."""
+        from db import update_lens
+        data = request.json or {}
+        try:
+            conn = get_connection(db_path)
+            update_lens(conn, lens_id,
+                       name=data.get("name"), description=data.get("description"),
+                       config_json=data.get("config"))
+            conn.close()
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/lenses/<int:lens_id>", methods=["DELETE"])
+    def delete_lens_api(lens_id):
+        """Delete a non-preset lens."""
+        from db import delete_lens
+        conn = get_connection(db_path)
+        deleted = delete_lens(conn, lens_id)
+        conn.close()
+        if not deleted:
+            return jsonify({"error": "Cannot delete preset lens"}), 400
+        return jsonify({"ok": True})
+
+    @app.route("/api/dossiers/<path:company_name>/score-lens", methods=["POST"])
+    def score_lens_api(company_name):
+        """Score a company through a lens. Body: {lens_id, website_url?}"""
+        from agents.lens import score_with_lens
+        data = request.json or {}
+        lens_id = data.get("lens_id")
+        if not lens_id:
+            return jsonify({"error": "lens_id is required"}), 400
+        website_url = data.get("website_url")
+        try:
+            score_data = score_with_lens(
+                company_name, lens_id, db_path=db_path, website_url=website_url
+            )
+            if score_data:
+                return jsonify({"ok": True, "score": score_data})
+            return jsonify({"error": "Failed to generate lens score"}), 500
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/dossiers/<path:company_name>/lens-scores")
+    def get_dossier_lens_scores(company_name):
+        """Get all lens scores for a company."""
+        from db import get_lens_scores_for_dossier, get_or_create_dossier
+        conn = get_connection(db_path)
+        dossier_id = get_or_create_dossier(conn, company_name)
+        scores = get_lens_scores_for_dossier(conn, dossier_id)
+        conn.close()
+        # Clean up heavy fields for JSON response
+        for s in scores:
+            s.pop("score_json", None)
+            s.pop("lens_config_json", None)
+        return jsonify(scores)
 
     # --- ICP Profile API ---
 
@@ -993,17 +1168,46 @@ def create_app(db_path="intel.db"):
             return jsonify({"error": "Could not generate brief"}), 500
         return jsonify(brief)
 
+    @app.route("/api/send-to-research", methods=["POST"])
+    def send_to_research():
+        """Mark selected companies from discovery for research.
+        Ensures dossiers exist and saves website_url if present.
+        """
+        from db import get_or_create_dossier
+        data = request.json or {}
+        companies = data.get("companies", [])
+        if not companies or len(companies) > 3:
+            return jsonify({"error": "Select 1-3 companies"}), 400
+
+        conn = get_connection(db_path)
+        dossier_names = []
+        for c in companies:
+            name = (c.get("name") or "").strip()
+            if not name:
+                continue
+            dossier_id = get_or_create_dossier(conn, name)
+            website = c.get("website_url") or c.get("website")
+            if website:
+                conn.execute(
+                    "UPDATE dossiers SET website_url = ? WHERE id = ? AND (website_url IS NULL OR website_url = '')",
+                    (website, dossier_id),
+                )
+            dossier_names.append(name)
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "companies": dossier_names})
+
     @app.route("/api/ua-pipeline", methods=["POST"])
     def ua_pipeline_api():
-        """Run the full prospecting pipeline with SSE progress streaming.
+        """Run the prospecting pipeline with SSE progress streaming.
 
-        Pipeline: Discover -> Validate websites -> Analyze + Score (3 companies in parallel).
-        Each company's analyses run sequentially (techstack -> financial -> sentiment) to
-        avoid nested ThreadPoolExecutor deadlocks with ddgs.
+        Pipeline: Discover -> Validate websites -> Save & Complete.
+        Scoring happens separately in Research via lens system.
         """
         data = request.json or {}
         niche = data.get("niche", "").strip()
         top_n = min(data.get("top_n", 10), 20)
+        niche_context = data.get("context", {})  # structured fields from Niche Builder
         if not niche:
             return jsonify({"error": "niche is required"}), 400
 
@@ -1015,11 +1219,44 @@ def create_app(db_path="intel.db"):
             campaign_id = None
 
             try:
-                # ---- Phase 1: Discovery ----
+                # ---- Phase 1: Discovery (with progress streaming) ----
                 yield f"data: {json.dumps({'type': 'status', 'text': f'Discovering companies in: {niche}...'})}\n\n"
 
                 from agents.ua_discover import discover_prospects
-                companies = discover_prospects(niche, top_n=top_n, db_path=db_path)
+
+                disc_q = queue.Queue()
+                disc_holder = [None]
+
+                def _disc_cb(event_type, ev_data):
+                    disc_q.put((event_type, ev_data))
+
+                def _run_discovery():
+                    try:
+                        result = discover_prospects(
+                            niche, top_n=top_n, db_path=db_path,
+                            context=niche_context, progress_cb=_disc_cb,
+                        )
+                        disc_holder[0] = result
+                    except Exception as exc:
+                        print(f"[pipeline] Discovery error: {exc}")
+                        disc_holder[0] = []
+                    finally:
+                        disc_q.put(("_done", None))
+
+                dt = threading.Thread(target=_run_discovery, daemon=True)
+                dt.start()
+
+                while True:
+                    try:
+                        ev_type, ev_data = disc_q.get(timeout=0.2)
+                    except queue.Empty:
+                        continue
+                    if ev_type == "_done":
+                        break
+                    yield f"data: {json.dumps({'type': ev_type, **(ev_data or {})})}\n\n"
+
+                dt.join(timeout=300)
+                companies = disc_holder[0] or []
 
                 if not companies:
                     yield f"data: {json.dumps({'type': 'error', 'text': 'No companies found for this niche.'})}\n\n"
@@ -1037,7 +1274,7 @@ def create_app(db_path="intel.db"):
                 # ---- Phase 2: Website Validation ----
                 yield f"data: {json.dumps({'type': 'status', 'text': f'Validating {len(companies)} company websites...'})}\n\n"
 
-                from agents.ua_fit import validate_websites, score_ua_fit
+                from agents.ua_fit import validate_websites
 
                 valid_q = queue.Queue()
                 valid_holder = [None]
@@ -1072,7 +1309,20 @@ def create_app(db_path="intel.db"):
                 valid_companies, validation_results = valid_holder[0]
                 rejected = [v for v in (validation_results or []) if not v.get("valid")]
 
-                # Persist campaign_prospects with validation status
+                # Build discovery lookup for persistence
+                discovery_lookup = {}
+                for c in companies:
+                    cname = (c.get("name") or "").strip()
+                    if cname:
+                        discovery_lookup[cname.lower()] = json.dumps({
+                            "description": c.get("description", ""),
+                            "estimated_size": c.get("estimated_size", ""),
+                            "why_included": c.get("why_included", ""),
+                            "evidence": c.get("evidence", []),
+                            "website": c.get("website", ""),
+                        })
+
+                # Persist campaign_prospects with validation status + discovery data
                 conn = get_connection(db_path)
                 for vr in (validation_results or []):
                     name = vr.get("name", "")
@@ -1085,7 +1335,8 @@ def create_app(db_path="intel.db"):
                         vstatus = "valid"
                     add_campaign_prospect(conn, campaign_id, dossier_id,
                                           validation_status=vstatus,
-                                          validation_reason=vr.get("reason"))
+                                          validation_reason=vr.get("reason"),
+                                          discovery_json=discovery_lookup.get(name.strip().lower()))
                 conn.close()
 
                 limited_count = sum(1 for v in (validation_results or []) if v.get("limited"))
@@ -1098,87 +1349,22 @@ def create_app(db_path="intel.db"):
                     yield f"data: {json.dumps({'type': 'error', 'text': 'No valid companies after website validation.'})}\n\n"
                     return
 
-                # ---- Phase 3: Parallel Scoring ----
-                yield f"data: {json.dumps({'type': 'status', 'text': f'Analyzing and scoring {len(valid_companies)} companies (3 at a time)...'})}\n\n"
-
-                score_q = queue.Queue()
-                scored_count = [0]
-
-                def _score_cb(event_type, ev_data):
-                    score_q.put((event_type, ev_data))
-
-                def _run_parallel_scoring():
-                    def _score_one(company):
-                        name = company.get("name", "?")
-                        website = company.get("website")
-                        # Skip techstack if website is inaccessible (403, connection failed)
-                        if not company.get("_website_accessible", True):
-                            website = None
-                        try:
-                            fit = score_ua_fit(name, website_url=website,
-                                               db_path=db_path, progress_cb=_score_cb)
-                            if fit:
-                                _score_cb("scored", {
-                                    "company": name,
-                                    "overall_score": fit.get("overall_score", 0),
-                                    "label": fit.get("overall_label", "?"),
-                                    "angle": fit.get("recommended_angle", ""),
-                                    "analyses_used": list(fit.get("_analyses_used", {}).keys()),
-                                })
-                                scored_count[0] += 1
-                            else:
-                                _score_cb("score_error", {"company": name,
-                                                          "error": "No score returned"})
-                        except Exception as exc:
-                            _score_cb("score_error", {"company": name,
-                                                      "error": str(exc)[:200]})
-
-                    try:
-                        with ThreadPoolExecutor(max_workers=3) as executor:
-                            futures = [executor.submit(_score_one, c)
-                                       for c in valid_companies]
-                            for future in as_completed(futures):
-                                future.result()  # propagate unexpected exceptions
-                    except Exception as exc:
-                        import traceback
-                        traceback.print_exc()
-                        _score_cb("error", {"text": f"Scoring error: {str(exc)[:300]}"})
-                    finally:
-                        score_q.put(("_done", None))
-
-                st = threading.Thread(target=_run_parallel_scoring, daemon=True)
-                st.start()
-
-                while True:
-                    try:
-                        ev_type, ev_data = score_q.get(timeout=0.5)
-                    except queue.Empty:
-                        continue
-                    if ev_type == "_done":
-                        break
-                    yield f"data: {json.dumps({'type': ev_type, **ev_data})}\n\n"
-
-                st.join(timeout=900)
-
-                # Mark campaign complete
+                # ---- Phase 3: Save website URLs + Complete ----
                 conn = get_connection(db_path)
+                for company in valid_companies:
+                    name = company.get("name", "")
+                    website = company.get("website")
+                    if name and website:
+                        dossier_id = get_or_create_dossier(conn, name)
+                        conn.execute(
+                            "UPDATE dossiers SET website_url = ? WHERE id = ? AND (website_url IS NULL OR website_url = '')",
+                            (website, dossier_id),
+                        )
+                conn.commit()
                 update_campaign_status(conn, campaign_id, 'complete')
                 conn.close()
 
-                yield f"data: {json.dumps({'type': 'complete', 'total_scored': scored_count[0], 'campaign_id': campaign_id})}\n\n"
-
-                # Generate vertical insight in background thread so the SSE stream
-                # closes immediately — prevents Flask from buffering the 'complete' event
-                _insight_cid = campaign_id
-                _insight_db = db_path
-                def _gen_insight_bg():
-                    try:
-                        from agents.ua_fit import generate_vertical_insight
-                        generate_vertical_insight(_insight_cid, db_path=_insight_db)
-                        print(f"[pipeline] Insight generated for campaign {_insight_cid}")
-                    except Exception as ie:
-                        print(f"[pipeline] Insight generation failed: {ie}")
-                threading.Thread(target=_gen_insight_bg, daemon=True).start()
+                yield f"data: {json.dumps({'type': 'complete', 'total_discovered': len(valid_companies), 'campaign_id': campaign_id})}\n\n"
 
             except Exception as e:
                 import traceback

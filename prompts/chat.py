@@ -74,12 +74,12 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
 ### Company Dossiers
 - **get_dossier**: Get the accumulated dossier for a company — all past analyses, key facts, recent changes detected between scans, timeline events, and staleness per analysis type. **Always call this before running a new analysis** to see what we already know, what changed, and what's stale.
 - **save_dossier_event**: Add a strategic event to a company's timeline (e.g. acquisition, product launch, leadership change, regulatory action). Use this when you discover notable events during research.
-- **generate_briefing**: Generate a consulting-ready intelligence briefing with Digital Maturity Score (0-100), engagement opportunity map, budget/appetite signals, competitive pressure assessment, and strategic assessment. Requires at least 2 analyses in the dossier. Use after building up a company dossier.
+- **generate_briefing**: Generate a consulting-ready intelligence briefing scored through a configurable lens (defaults to Digital Transformation), with engagement opportunity map, budget/appetite signals, competitive pressure assessment, and strategic assessment. Optionally accepts a `lens_id` to score through a different lens. Requires at least 2 analyses in the dossier. Use after building up a company dossier.
 
 ### Prospecting (Lead Discovery & Prospect Fit Scoring)
 - **ua_discover**: Discover prospective companies in a target niche/vertical. Searches web, Reddit, and news to find SMB-to-midmarket companies suited for premium video/streaming TV advertising. Returns a list of discovered companies.
-- **ua_fit_score**: Score a company's prospect fit for Universal Ads (premium video advertising). Runs techstack, financial, and sentiment analyses, then scores 5 fixed dimensions (Financial Capacity, Advertising Maturity, Growth Trajectory, Creative Readiness, Channel Expansion Intent) 0-100 with evidence-backed rationale. Use when someone asks "is this a good prospect?" or "score this lead."
-- **get_ua_targets**: Get all companies with prospect fit scores, sorted by score. Use to answer "who are our best prospects?" or "show me the pipeline."
+- **ua_fit_score**: Score a company using the CTV Ad Sales lens (routes through the lens scoring system). Runs required analyses, then scores weighted dimensions 0-100 with evidence-backed rationale. Use when someone asks "is this a good prospect?" or "score this lead."
+- **get_ua_targets**: Get all companies scored with the CTV Ad Sales lens, sorted by score. Falls back to legacy scores if lens not found. Use to answer "who are our best prospects?" or "show me the pipeline."
 
 ### Reasoning
 - **think**: Record your step-by-step reasoning. The user can see this. Use it liberally — before decisions, after unexpected results, when evaluating data quality.
@@ -139,6 +139,7 @@ FOLLOW_UP_TOOL_NAMES = CORE_TOOL_NAMES | {
     "techstack_analysis", "pricing_analysis", "compare_companies",
     "landscape_analysis", "collect", "classify", "analyze",
     "ua_discover", "ua_fit_score", "get_ua_targets",
+    "score_lens", "list_lenses", "get_lens_scores",
 }
 
 
@@ -628,11 +629,12 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "generate_briefing",
-            "description": "Generate a consulting-ready intelligence briefing for a company's dossier. Synthesizes all available analyses into a Digital Maturity Score (0-100), engagement opportunity map, budget signals, competitive pressure assessment, risk profile, and strategic assessment. The briefing is stored on the dossier and rendered in the right pane. IMPORTANT: Requires hiring analysis (classified job data). If it fails because hiring data is missing, you MUST automatically run hiring_pipeline for the company first, then retry generate_briefing. Also requires at least 2 total analyses.",
+            "description": "Generate a consulting-ready intelligence briefing for a company's dossier. Synthesizes all available analyses into a scored evaluation (0-100) through a configurable lens, plus engagement opportunity map, budget signals, competitive pressure assessment, risk profile, and strategic assessment. The scoring dimensions and rubric are driven by the selected lens (defaults to Digital Transformation if none specified). The briefing is stored on the dossier and rendered in the right pane. IMPORTANT: Requires hiring analysis (classified job data). If it fails because hiring data is missing, you MUST automatically run hiring_pipeline for the company first, then retry generate_briefing. Also requires at least 2 total analyses.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "company": {"type": "string", "description": "Company name (must have an existing dossier with at least 2 analyses)"}
+                    "company": {"type": "string", "description": "Company name (must have an existing dossier with at least 2 analyses)"},
+                    "lens_id": {"type": "integer", "description": "Optional lens ID to score through. Defaults to Digital Transformation lens if not specified."}
                 },
                 "required": ["company"]
             }
@@ -699,7 +701,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "ua_fit_score",
-            "description": "Score a company's prospect fit for Universal Ads (premium video/streaming TV advertising). Runs techstack, financial, and sentiment research analyses, then scores 5 fixed dimensions (Financial Capacity 25%, Advertising Maturity 20%, Growth Trajectory 20%, Creative Readiness 20%, Channel Expansion Intent 15%) 0-100 with evidence-backed rationale. Use when someone asks 'is this a good prospect?', 'score this company', or 'how well does X fit our criteria?'",
+            "description": "Score a company using the CTV Ad Sales lens (routes through the configurable lens scoring system). Runs required analyses based on lens dimensions, then scores each dimension 0-100 with evidence-backed rationale. Use when someone asks 'is this a good prospect?', 'score this company', or 'how well does X fit our criteria?'",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -714,10 +716,67 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_ua_targets",
-            "description": "Get all companies with ICP fit scores, sorted by score descending. Returns the full prospect pipeline. Use when the user asks 'show me our prospects', 'who are the best leads?', 'what's in the pipeline?', or 'list scored companies'.",
+            "description": "Get all companies scored with the CTV Ad Sales lens, sorted by score descending. Falls back to legacy scores if lens not found. Use when the user asks 'show me our prospects', 'who are the best leads?', 'what's in the pipeline?', or 'list scored companies'.",
             "parameters": {
                 "type": "object",
                 "properties": {},
+            }
+        }
+    },
+    # --- Lens Scoring ---
+    {
+        "type": "function",
+        "function": {
+            "name": "create_lens",
+            "description": "Create a new evaluation lens (scoring framework). Lenses define weighted dimensions for evaluating companies. Use when the user says 'create a lens for...', 'make a scoring framework for...', 'I want to evaluate companies on...', or 'build a lens'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Lens name (e.g. 'Workforce Management', 'Strategy Consulting')"},
+                    "description": {"type": "string", "description": "What this lens evaluates — 1-2 sentences describing the use case"},
+                },
+                "required": ["name", "description"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "score_lens",
+            "description": "Score a company through a specific evaluation lens. Runs required analyses and scores against the lens dimensions. Available lenses include presets (CTV Ad Sales, Digital Transformation, Workforce Management) plus any user-created lenses. Use when someone asks 'score X through Y lens', 'evaluate X for Y', 'how does X rate on Y', or 'run the workforce lens on X'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "company": {"type": "string", "description": "Company name to score"},
+                    "lens": {"type": "string", "description": "Lens name or slug (e.g. 'Digital Transformation', 'workforce-management')"},
+                    "website_url": {"type": "string", "description": "Company website URL (optional, enables tech stack analysis)"},
+                },
+                "required": ["company", "lens"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_lenses",
+            "description": "List all available evaluation lenses with their names, descriptions, and dimension summaries. Use when the user asks 'what lenses do I have?', 'show me scoring frameworks', 'what can I evaluate companies on?', or 'list lenses'.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_lens_scores",
+            "description": "Get all lens scores for a company — shows how the company rates across all lenses it has been scored through. Use when the user asks 'what scores does X have?', 'show me X's evaluations', or 'how has X been rated?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "company": {"type": "string", "description": "Company name"},
+                },
+                "required": ["company"]
             }
         }
     },

@@ -5,6 +5,9 @@ import sqlite3
 import hashlib
 from datetime import datetime, timezone
 
+# Default lens slug — used as fallback when no lens_id specified for briefing
+DT_LENS_SLUG = "digital-transformation"
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS companies (
@@ -149,6 +152,29 @@ CREATE TABLE IF NOT EXISTS campaign_prospects (
     discovered_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(campaign_id, dossier_id)
 );
+
+CREATE TABLE IF NOT EXISTS lenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    description TEXT,
+    config_json TEXT NOT NULL,
+    is_preset INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS lens_scores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dossier_id INTEGER NOT NULL REFERENCES dossiers(id),
+    lens_id INTEGER NOT NULL REFERENCES lenses(id),
+    overall_score INTEGER,
+    overall_label TEXT,
+    score_json TEXT NOT NULL,
+    analyses_used TEXT,
+    scored_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(dossier_id, lens_id)
+);
 """
 
 
@@ -175,6 +201,9 @@ def _migrate_db(conn):
         ("dossiers", "ua_fit_json", "TEXT"),
         ("dossiers", "ua_fit_generated_at", "TEXT"),
         ("dossiers", "icp_profile_id", "INTEGER"),
+        ("dossiers", "website_url", "TEXT"),
+        ("campaign_prospects", "discovery_json", "TEXT"),
+        ("dossiers", "briefing_lens_id", "INTEGER"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -189,6 +218,7 @@ def init_db(db_path="intel.db"):
     conn.executescript(SCHEMA)
     _migrate_db(conn)
     ensure_default_icp_profile(conn)
+    ensure_preset_lenses(conn)
     conn.commit()
     conn.close()
 
@@ -801,15 +831,18 @@ def update_campaign_status(conn, campaign_id, status):
     conn.commit()
 
 
-def add_campaign_prospect(conn, campaign_id, dossier_id, validation_status=None, validation_reason=None):
+def add_campaign_prospect(conn, campaign_id, dossier_id, validation_status=None,
+                          validation_reason=None, discovery_json=None):
     """Add a prospect to a campaign. Upserts on (campaign_id, dossier_id)."""
     conn.execute(
-        """INSERT INTO campaign_prospects (campaign_id, dossier_id, validation_status, validation_reason)
-           VALUES (?, ?, ?, ?)
+        """INSERT INTO campaign_prospects (campaign_id, dossier_id, validation_status,
+              validation_reason, discovery_json)
+           VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(campaign_id, dossier_id) DO UPDATE SET
              validation_status = excluded.validation_status,
-             validation_reason = excluded.validation_reason""",
-        (campaign_id, dossier_id, validation_status, validation_reason),
+             validation_reason = excluded.validation_reason,
+             discovery_json = COALESCE(excluded.discovery_json, campaign_prospects.discovery_json)""",
+        (campaign_id, dossier_id, validation_status, validation_reason, discovery_json),
     )
     conn.commit()
 
@@ -845,7 +878,7 @@ def get_campaign_detail(conn, campaign_id):
     campaign = dict(campaign)
     rows = conn.execute(
         """SELECT cp.*, d.company_name, d.sector, d.description as company_description,
-                  d.ua_fit_json, d.ua_fit_generated_at
+                  d.website_url, d.ua_fit_json, d.ua_fit_generated_at
            FROM campaign_prospects cp
            JOIN dossiers d ON cp.dossier_id = d.id
            WHERE cp.campaign_id = ?
@@ -870,6 +903,13 @@ def get_campaign_detail(conn, campaign_id):
                 p["brief"] = None
         else:
             p["brief"] = None
+        if p.get("discovery_json"):
+            try:
+                p["discovery"] = json.loads(p["discovery_json"])
+            except (json.JSONDecodeError, TypeError):
+                p["discovery"] = None
+        else:
+            p["discovery"] = None
         prospects.append(p)
     campaign["prospects"] = prospects
     if campaign.get("insight_json"):
@@ -1115,11 +1155,11 @@ _DEFAULT_ICP_CONFIG = {
         },
     ],
     "labels": [
-        {"min_score": 80, "label": "Prime Prospect"},
-        {"min_score": 60, "label": "Strong Candidate"},
-        {"min_score": 40, "label": "Possible Fit"},
-        {"min_score": 20, "label": "Weak Fit"},
-        {"min_score": 0, "label": "Not a Fit"},
+        {"min_score": 80, "label": "CTV Vanguard"},
+        {"min_score": 60, "label": "CTV Contender"},
+        {"min_score": 40, "label": "CTV Explorer"},
+        {"min_score": 20, "label": "CTV Laggard"},
+        {"min_score": 0, "label": "CTV Dark Spot"},
     ],
     "discovery_filters": {
         "include_description": "Focus on companies with real marketing operations, website, social presence, SMB-to-midmarket range.",
@@ -1158,3 +1198,467 @@ def ensure_default_icp_profile(conn):
     )
     conn.commit()
     return cur.lastrowid
+
+
+# =========================================================================
+# Lens system — configurable evaluation frameworks
+# =========================================================================
+
+_PRESET_LENSES = [
+    {
+        "name": "CTV Ad Sales",
+        "slug": "ctv-ad-sales",
+        "description": "Evaluate prospect fit for premium video / streaming TV advertising (Comcast Universal Ads use case)",
+        "config": {
+            "dimensions": [
+                {
+                    "key": "financial_capacity",
+                    "label": "Financial Capacity",
+                    "weight": 0.25,
+                    "sources": ["financial"],
+                    "rubric": (
+                        "80-100: Clear evidence of $10M+ revenue or recent Series B+ funding. Has budget headroom for new channels.\n"
+                        "60-79: Revenue/funding suggests moderate capacity. Could allocate $10K-50K/month without strain.\n"
+                        "40-59: Financial signals ambiguous or limited. Early-stage, unclear revenue, or tight margins.\n"
+                        "20-39: Resource-constrained. Minimal funding, small team, or financial difficulty evident.\n"
+                        "0-19: Clearly cannot afford new ad channels. Pre-revenue or in distress."
+                    ),
+                },
+                {
+                    "key": "advertising_maturity",
+                    "label": "Paid Media Footprint",
+                    "weight": 0.20,
+                    "sources": ["techstack"],
+                    "rubric": (
+                        "80-100: 2+ ad pixels detected (Facebook, TikTok, Google Ads). Marketing automation present. Heavy digital buyer but NOT yet on TV/CTV.\n"
+                        "60-79: 1 ad pixel detected OR strong social presence indicating paid activity.\n"
+                        "40-59: Basic analytics (GA4) only — tracking but not necessarily buying ads.\n"
+                        "20-39: Almost no ad infrastructure. Likely organic/word-of-mouth only.\n"
+                        "0-19: No advertising tools detected, OR already a major TV advertiser at scale."
+                    ),
+                },
+                {
+                    "key": "growth_trajectory",
+                    "label": "Growth Trajectory",
+                    "weight": 0.20,
+                    "sources": ["financial", "brand_ad"],
+                    "rubric": (
+                        "80-100: Strong growth (>20% YoY revenue, or recent funding round), expansion announcements, active hiring.\n"
+                        "60-79: Moderate growth signals. Stable and expanding, not explosive.\n"
+                        "40-59: Flat or unclear trajectory. No meaningful growth or decline signals.\n"
+                        "20-39: Concerning signals — layoffs, revenue decline, market contraction.\n"
+                        "0-19: Company clearly shrinking, in distress, or going through strategic wind-down."
+                    ),
+                },
+                {
+                    "key": "creative_readiness",
+                    "label": "Video Asset Readiness",
+                    "weight": 0.20,
+                    "sources": ["brand_ad"],
+                    "rubric": (
+                        "80-100: Strong social/video presence (YouTube, TikTok, Reels). Existing brand campaigns. Product visually demonstrable.\n"
+                        "60-79: Good brand presence, photo-heavy or text-heavy. Could transition to video.\n"
+                        "40-59: Basic digital presence, limited content output.\n"
+                        "20-39: Minimal brand presence. Highly technical B2B or invisible online.\n"
+                        "0-19: No creative presence, or product fundamentally unsuited for video."
+                    ),
+                },
+                {
+                    "key": "channel_expansion_intent",
+                    "label": "Channel Expansion Intent",
+                    "weight": 0.15,
+                    "sources": ["brand_ad", "financial"],
+                    "rubric": (
+                        "80-100: Explicit mentions of CTV, streaming, or 'beyond social'. Hiring brand/media roles.\n"
+                        "60-79: Implicit intent — entering new markets, increasing budgets, peers are diversifying.\n"
+                        "40-59: No specific intent signals. Profile suggests receptivity but no evidence.\n"
+                        "20-39: Content with existing channels. No diversification signals.\n"
+                        "0-19: Actively cutting marketing spend or focused away from broadcast."
+                    ),
+                },
+            ],
+            "labels": [
+                {"min_score": 80, "label": "CTV Vanguard"},
+                {"min_score": 60, "label": "CTV Contender"},
+                {"min_score": 40, "label": "CTV Explorer"},
+                {"min_score": 20, "label": "CTV Laggard"},
+                {"min_score": 0, "label": "CTV Dark Spot"},
+            ],
+            "score_label": "CTV Propensity Score",
+            "scoring_context": "You are a GTM intelligence analyst scoring a company's suitability as a prospect for a premium video / streaming TV advertising platform (similar to Comcast Universal Ads).",
+            "angle_guidance": "Focus on their current paid media spend, growth trajectory, and the gap between their digital and TV presence.",
+            "risk_focus": "budget concerns, existing vendor lock-in, lack of video assets, already doing TV at scale",
+        },
+    },
+    {
+        "name": "Digital Transformation",
+        "slug": "digital-transformation",
+        "description": "Evaluate digital maturity and transformation consulting opportunity for technology advisory firms",
+        "config": {
+            "dimensions": [
+                {
+                    "key": "tech_modernity",
+                    "label": "Tech Modernity",
+                    "weight": 0.30,
+                    "sources": ["techstack", "hiring"],
+                    "rubric": (
+                        "Primary signals: hiring data (what technologies they hire for), sector/product (what they build), engineering ratio.\n"
+                        "Secondary signals: website tech stack (what's on their public site — this is a weak signal for internal capability).\n\n"
+                        "CRITICAL DISTINCTION — 'uses SaaS tools' vs 'is a SaaS company':\n"
+                        "A non-tech company (food, retail, manufacturing) whose public website uses SaaS tools like Algolia, Cloudflare, or Shopify is NOT a SaaS/software company. "
+                        "Using off-the-shelf SaaS products on a marketing website is a PURCHASING decision, not an engineering capability. "
+                        "Only score website SaaS usage positively if the company's CORE BUSINESS is technology/software.\n\n"
+                        "80-100: Company IS a technology/software/AI company (core product is technology), OR hiring data shows modern stack "
+                        "(React/Go/Rust/K8s/cloud-native/microservices roles dominate), high engineering ratio (>50%). "
+                        "If a company literally BUILDS software, LLMs, cloud infrastructure, or AI products, floor at 80.\n"
+                        "60-79: Tech-adjacent company with significant engineering investment (30-50% engineering roles), modern tools in hiring reqs.\n"
+                        "40-59: Non-tech company with modest engineering team (<30% roles). Legacy technologies (COBOL, mainframe, .NET Framework, on-prem).\n"
+                        "20-39: Minimal tech hiring. No engineering culture signals. Basic or outsourced IT.\n"
+                        "0-19: No tech data available or fully pre-digital.\n"
+                        "If no tech stack data AND no hiring data: score 50 and note 'insufficient data' in rationale."
+                    ),
+                },
+                {
+                    "key": "data_analytics",
+                    "label": "Data & Analytics",
+                    "weight": 0.25,
+                    "sources": ["techstack", "hiring"],
+                    "rubric": (
+                        "Primary signals: hiring data (Data Engineers, Data Scientists, ML Ops, Analytics Engineers), data-related strategic tags, company product.\n"
+                        "Secondary signals: analytics tools detected on website (Segment, Amplitude — useful for non-tech companies, irrelevant for data/AI companies).\n\n"
+                        "80-100: Company's core product IS data or AI, OR actively hiring multiple data roles. 'Data Infrastructure' strategic tag present.\n"
+                        "60-79: Some data hiring but not a strategic focus. OR advanced analytics tooling (Segment/Amplitude + A/B testing).\n"
+                        "40-59: No data-specific hiring. Basic website analytics only (GA alone). No experimentation signals.\n"
+                        "20-39: No data signals at all — no data roles, no analytics tools."
+                    ),
+                },
+                {
+                    "key": "ai_readiness",
+                    "label": "AI Readiness",
+                    "weight": 0.25,
+                    "sources": ["hiring", "patents", "techstack"],
+                    "rubric": (
+                        "95-100: Company's core product IS AI/ML (e.g., OpenAI, Anthropic, Google DeepMind, Nvidia AI). AI is the business.\n"
+                        "80-94: Active AI hiring (AI/ML roles >10% of engineering), AI-related patents, AI tools/platforms, 'AI/ML Investment' strategic tag.\n"
+                        "60-79: Some AI hiring (5-10% of engineering) or AI patents exist, but no visible unified AI platform strategy.\n"
+                        "40-59: Minimal AI signals (1-3 AI roles, or 'AI' mentioned in strategy but not a focus).\n"
+                        "20-39: No AI signals — no AI hiring, no AI patents, no AI tools.\n"
+                        "Patent bonus: +5-10 if AI/ML patent areas exist in the IP portfolio."
+                    ),
+                },
+                {
+                    "key": "org_readiness",
+                    "label": "Organizational Readiness",
+                    "weight": 0.20,
+                    "sources": ["sentiment", "hiring"],
+                    "rubric": (
+                        "80-100: Growing hiring trend, high engineering ratio (>50%), strong strategic investment tags "
+                        "(Cloud/Infrastructure, AI/ML Investment, Platform Migration, Automation). Positive employee sentiment.\n"
+                        "60-79: Stable hiring, moderate engineering ratio (30-50%), some strategic investment tags.\n"
+                        "40-59: Mixed signals. Flat or slightly declining hiring. Low engineering ratio (<30%). Few strategic tags.\n"
+                        "20-39: Shrinking hiring, negative sentiment, no strategic investment signals.\n"
+                        "NUANCE: Negative sentiment from rapid growth (burnout, equity complaints during hypergrowth) is NOT the same as "
+                        "organizational resistance to change. Distinguish growing pains from structural dysfunction."
+                    ),
+                },
+            ],
+            "labels": [
+                {"min_score": 80, "label": "Digital Vanguard"},
+                {"min_score": 60, "label": "Digital Contender"},
+                {"min_score": 40, "label": "Digitally Exposed"},
+                {"min_score": 20, "label": "Digital Laggard"},
+                {"min_score": 0, "label": "Digital Liability"},
+            ],
+            "score_label": "Digital Maturity Score",
+            "scoring_context": (
+                "You are a senior management consultant at a top-tier firm (McKinsey, Deloitte, EY Studio+). "
+                "You are preparing a target qualification intelligence briefing to help a consulting partner assess "
+                "whether to pursue this company for digital transformation and AI consulting engagements."
+            ),
+            "angle_guidance": (
+                "Identify non-core pain points: org design for hypergrowth, sales ops, M&A integration, regulatory compliance. "
+                "NEVER suggest services the company is expert in. If it's an AI company, don't suggest AI Strategy. "
+                "If it's a cloud company, don't suggest Cloud Migration. Focus on the messy human/org problems that tech excellence doesn't solve."
+            ),
+            "risk_focus": (
+                "change resistance, budget constraints, leadership gaps, legacy system dependencies, "
+                "engagement risks for the consulting firm (long procurement cycles, recent leadership change)"
+            ),
+            "engagement_service_list": [
+                "Cloud Migration & Architecture",
+                "AI/ML Strategy & Implementation (only for companies ADOPTING AI, not building it)",
+                "Data & Analytics Modernization (only for companies that DON'T have data as their core product)",
+                "Digital Customer Experience",
+                "IT Operating Model Transformation",
+                "Cybersecurity & Compliance",
+                "Legacy Application Modernization",
+                "Change Management & Org Design",
+                "Intelligent Automation / RPA",
+                "Supply Chain Digitization",
+                "AI Governance & Responsible AI (ONLY for companies ADOPTING AI, never for AI-native companies)",
+                "Technology Due Diligence (M&A)",
+                "Engineering Effectiveness & Developer Platform",
+                "Talent Strategy & Organizational Design",
+                "Enterprise Architecture & Technical Debt",
+            ],
+        },
+    },
+    {
+        "name": "Workforce Management",
+        "slug": "workforce-management",
+        "description": "Evaluate workforce management maturity for HR/people consulting engagements (Deloitte, Mercer, etc.)",
+        "config": {
+            "dimensions": [
+                {
+                    "key": "talent_acquisition",
+                    "label": "Talent Acquisition Maturity",
+                    "weight": 0.25,
+                    "sources": ["hiring"],
+                    "rubric": (
+                        "80-100: Sophisticated hiring machine — diverse pipelines, employer branding, competitive comp. High volume, strategic hiring.\n"
+                        "60-79: Functional TA operation. Hiring actively but some process gaps.\n"
+                        "40-59: Basic hiring. Mostly reactive, limited employer brand.\n"
+                        "20-39: Struggling to attract talent. High time-to-fill, limited reach.\n"
+                        "0-19: Minimal hiring activity or severe talent acquisition dysfunction."
+                    ),
+                },
+                {
+                    "key": "employee_experience",
+                    "label": "Employee Experience",
+                    "weight": 0.25,
+                    "sources": ["sentiment"],
+                    "rubric": (
+                        "80-100: Highly rated employer (4.0+ Glassdoor). Strong culture signals. Low voluntary turnover indicators.\n"
+                        "60-79: Generally positive sentiment with some concerns. Glassdoor 3.5-4.0.\n"
+                        "40-59: Mixed signals. Notable complaints about management, culture, or work-life balance.\n"
+                        "20-39: Poor sentiment. Sub-3.0 Glassdoor, high turnover signals, toxic culture indicators.\n"
+                        "0-19: Severe employee experience crisis. Public controversies, mass departures."
+                    ),
+                },
+                {
+                    "key": "workforce_analytics",
+                    "label": "Workforce Analytics",
+                    "weight": 0.20,
+                    "sources": ["techstack", "hiring"],
+                    "rubric": (
+                        "80-100: HR tech stack includes people analytics, HRIS, workforce planning tools. People analytics roles.\n"
+                        "60-79: Basic HRIS in place. Some HR tech but no advanced analytics.\n"
+                        "40-59: Minimal HR tech footprint. Likely spreadsheet-based workforce planning.\n"
+                        "20-39: No evidence of HR technology or people analytics capability.\n"
+                        "0-19: Workforce management appears entirely manual or outsourced."
+                    ),
+                },
+                {
+                    "key": "org_design",
+                    "label": "Organizational Design",
+                    "weight": 0.15,
+                    "sources": ["hiring", "sentiment"],
+                    "rubric": (
+                        "80-100: Well-structured org. Clear departments, balanced seniority, leadership pipeline.\n"
+                        "60-79: Generally functional but some imbalances (top-heavy, missing middle management).\n"
+                        "40-59: Org structure concerns — rapid growth without matching management, department silos.\n"
+                        "20-39: Significant structural issues — seniority skew, leadership gaps, high churn in key roles.\n"
+                        "0-19: Organizational chaos. No clear structure, constant reorgs, mass departures."
+                    ),
+                },
+                {
+                    "key": "change_readiness",
+                    "label": "Change Readiness",
+                    "weight": 0.15,
+                    "sources": ["sentiment", "financial"],
+                    "rubric": (
+                        "80-100: Strong financial position + positive sentiment = can invest in and sustain transformation.\n"
+                        "60-79: Financial capacity exists but cultural readiness uncertain.\n"
+                        "40-59: Either financial or cultural barriers present. Engagement possible but challenging.\n"
+                        "20-39: Both financial strain and cultural resistance. High-risk engagement.\n"
+                        "0-19: Company not in a position to absorb consulting engagement costs or change."
+                    ),
+                },
+            ],
+            "labels": [
+                {"min_score": 80, "label": "Workforce Leader"},
+                {"min_score": 60, "label": "Workforce Builder"},
+                {"min_score": 40, "label": "Workforce Challenger"},
+                {"min_score": 20, "label": "Workforce Laggard"},
+                {"min_score": 0, "label": "Workforce Crisis"},
+            ],
+            "score_label": "Workforce Maturity Score",
+            "scoring_context": "You are a workforce management consultant evaluating a company's people operations maturity for a consulting engagement.",
+            "angle_guidance": "Identify the biggest gaps between their current workforce management and industry best practices.",
+            "risk_focus": "leadership buy-in, budget for HR transformation, change fatigue, competing priorities",
+        },
+    },
+]
+
+
+def ensure_preset_lenses(conn):
+    """Seed preset lenses if they don't exist, and update if config has changed."""
+    for preset in _PRESET_LENSES:
+        config_str = json.dumps(preset["config"], sort_keys=True)
+        config_hash = hashlib.md5(config_str.encode()).hexdigest()
+        existing = conn.execute("SELECT id, config_json FROM lenses WHERE slug = ?", (preset["slug"],)).fetchone()
+        if existing:
+            # Check if config changed — update if so
+            existing_hash = hashlib.md5(
+                json.dumps(json.loads(existing["config_json"]), sort_keys=True).encode()
+            ).hexdigest()
+            if existing_hash != config_hash:
+                now = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    "UPDATE lenses SET config_json = ?, description = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(preset["config"]), preset["description"], now, existing["id"]),
+                )
+                print(f"[db] Updated preset lens '{preset['slug']}' — config changed")
+            continue
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO lenses (name, slug, description, config_json, is_preset, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)",
+            (preset["name"], preset["slug"], preset["description"], json.dumps(preset["config"]), now, now),
+        )
+    conn.commit()
+
+
+# ---- Lens CRUD helpers ----
+
+def create_lens(conn, name, slug, description, config_json):
+    """Create a user-defined lens. Returns lens id."""
+    now = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        "INSERT INTO lenses (name, slug, description, config_json, is_preset, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)",
+        (name, slug, description, json.dumps(config_json) if isinstance(config_json, dict) else config_json, now, now),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_lens(conn, lens_id, name=None, description=None, config_json=None):
+    """Update a lens. Only non-None fields are changed."""
+    updates, params = [], []
+    if name is not None:
+        updates.append("name = ?"); params.append(name)
+    if description is not None:
+        updates.append("description = ?"); params.append(description)
+    if config_json is not None:
+        updates.append("config_json = ?")
+        params.append(json.dumps(config_json) if isinstance(config_json, dict) else config_json)
+    if not updates:
+        return
+    updates.append("updated_at = ?"); params.append(datetime.now(timezone.utc).isoformat())
+    params.append(lens_id)
+    conn.execute(f"UPDATE lenses SET {', '.join(updates)} WHERE id = ?", params)
+    conn.commit()
+
+
+def delete_lens(conn, lens_id):
+    """Delete a non-preset lens. Returns True if deleted."""
+    row = conn.execute("SELECT is_preset FROM lenses WHERE id = ?", (lens_id,)).fetchone()
+    if not row or row["is_preset"]:
+        return False
+    conn.execute("DELETE FROM lens_scores WHERE lens_id = ?", (lens_id,))
+    conn.execute("DELETE FROM lenses WHERE id = ?", (lens_id,))
+    conn.commit()
+    return True
+
+
+def get_lens(conn, lens_id):
+    """Get a single lens by id."""
+    row = conn.execute("SELECT * FROM lenses WHERE id = ?", (lens_id,)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["config"] = json.loads(d["config_json"]) if d.get("config_json") else {}
+    return d
+
+
+def get_lens_by_slug(conn, slug):
+    """Get a single lens by slug."""
+    row = conn.execute("SELECT * FROM lenses WHERE slug = ?", (slug,)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["config"] = json.loads(d["config_json"]) if d.get("config_json") else {}
+    return d
+
+
+def get_all_lenses(conn):
+    """Get all lenses, ordered presets first then by name."""
+    rows = conn.execute("SELECT * FROM lenses ORDER BY is_preset DESC, name").fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["config"] = json.loads(d["config_json"]) if d.get("config_json") else {}
+        result.append(d)
+    return result
+
+
+# ---- Lens Score helpers ----
+
+def save_lens_score(conn, dossier_id, lens_id, overall_score, overall_label, score_json, analyses_used=None):
+    """Upsert a lens score for a dossier. Returns the score id."""
+    now = datetime.now(timezone.utc).isoformat()
+    score_text = json.dumps(score_json) if isinstance(score_json, dict) else score_json
+    analyses_text = json.dumps(analyses_used) if isinstance(analyses_used, dict) else analyses_used
+    existing = conn.execute(
+        "SELECT id FROM lens_scores WHERE dossier_id = ? AND lens_id = ?",
+        (dossier_id, lens_id),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE lens_scores SET overall_score = ?, overall_label = ?, score_json = ?, analyses_used = ?, scored_at = ? WHERE id = ?",
+            (overall_score, overall_label, score_text, analyses_text, now, existing["id"]),
+        )
+        conn.commit()
+        return existing["id"]
+    else:
+        cur = conn.execute(
+            "INSERT INTO lens_scores (dossier_id, lens_id, overall_score, overall_label, score_json, analyses_used, scored_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (dossier_id, lens_id, overall_score, overall_label, score_text, analyses_text, now),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def get_lens_scores_for_dossier(conn, dossier_id):
+    """Get all lens scores for a dossier, joined with lens name/slug."""
+    rows = conn.execute(
+        """SELECT ls.*, l.name as lens_name, l.slug as lens_slug, l.config_json as lens_config_json
+           FROM lens_scores ls JOIN lenses l ON ls.lens_id = l.id
+           WHERE ls.dossier_id = ? ORDER BY ls.scored_at DESC""",
+        (dossier_id,),
+    ).fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["score_data"] = json.loads(d["score_json"]) if d.get("score_json") else {}
+        d["lens_config"] = json.loads(d["lens_config_json"]) if d.get("lens_config_json") else {}
+        result.append(d)
+    return result
+
+
+def get_lens_score(conn, dossier_id, lens_id):
+    """Get a single lens score."""
+    row = conn.execute(
+        "SELECT * FROM lens_scores WHERE dossier_id = ? AND lens_id = ?",
+        (dossier_id, lens_id),
+    ).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["score_data"] = json.loads(d["score_json"]) if d.get("score_json") else {}
+    return d
+
+
+def get_all_scores_for_lens(conn, lens_id):
+    """Get all companies scored through a specific lens, ranked by score."""
+    rows = conn.execute(
+        """SELECT ls.*, d.company_name
+           FROM lens_scores ls JOIN dossiers d ON ls.dossier_id = d.id
+           WHERE ls.lens_id = ? ORDER BY ls.overall_score DESC""",
+        (lens_id,),
+    ).fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["score_data"] = json.loads(d["score_json"]) if d.get("score_json") else {}
+        result.append(d)
+    return result

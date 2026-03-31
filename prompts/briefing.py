@@ -1,9 +1,15 @@
-"""Prompt template for the consulting target intelligence briefing."""
+"""Prompt template for the consulting target intelligence briefing.
+
+Lens-parameterized: the scoring rubric, dimensions, tier labels, and engagement
+opportunity framing are all driven by the lens config passed to build_briefing_prompt().
+"""
 
 import json
 
 
-_BRIEFING_SCHEMA = {
+# ---------- Static schema sections (lens-agnostic) ----------
+
+_STATIC_SCHEMA_SECTIONS = {
     "subject_identity": {
         "name": "string",
         "sector": "string",
@@ -14,50 +20,6 @@ _BRIEFING_SCHEMA = {
         "revenue": "string (e.g. '$50B')",
         "market_cap": "string (e.g. '$2.8T') or 'N/A (private)'",
         "website": "string",
-    },
-    "digital_maturity": {
-        "overall_score": "integer 0-100 (auto-recomputed from sub-scores — your value will be overwritten)",
-        "overall_label": "Digital Vanguard | Digital Contender | Digitally Exposed | Digital Laggard | Digital Liability",
-        "algorithmic_weighted_score": "integer 0-100 (auto-populated — do not set)",
-        "overall_algorithmic_confidence": "float 0-1 (auto-populated — do not set)",
-        "sub_scores": {
-            "tech_modernity": {
-                "score": "integer 0-100 — your score based on all evidence",
-                "rationale": "string with [source] tags — explain what evidence supports the score",
-                "signals": ["string with [source] tag"],
-                "source_analyses": ["string — which analyses informed this score"],
-                "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
-                "algorithmic_confidence": "float 0-1 (auto-populated — do not set)",
-                "signals_used": ["string (auto-populated — do not set)"],
-            },
-            "data_analytics": {
-                "score": "integer 0-100 — your score based on all evidence",
-                "rationale": "string with [source] tags — explain what evidence supports the score",
-                "signals": ["string with [source] tag"],
-                "source_analyses": ["string"],
-                "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
-                "algorithmic_confidence": "float 0-1 (auto-populated — do not set)",
-                "signals_used": ["string (auto-populated — do not set)"],
-            },
-            "ai_readiness": {
-                "score": "integer 0-100 — your score based on all evidence",
-                "rationale": "string with [source] tags — explain what evidence supports the score",
-                "signals": ["string with [source] tag"],
-                "source_analyses": ["string"],
-                "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
-                "algorithmic_confidence": "float 0-1 (auto-populated — do not set)",
-                "signals_used": ["string (auto-populated — do not set)"],
-            },
-            "organizational_readiness": {
-                "score": "integer 0-100 — your score based on all evidence",
-                "rationale": "string with [source] tags — explain what evidence supports the score",
-                "signals": ["string with [source] tag"],
-                "source_analyses": ["string"],
-                "algorithmic_score": "integer 0-100 (auto-populated — do not set)",
-                "algorithmic_confidence": "float 0-1 (auto-populated — do not set)",
-                "signals_used": ["string (auto-populated — do not set)"],
-            },
-        },
     },
     "hiring_trajectory": {
         "trend": "accelerating | growing | stable | decelerating | shrinking",
@@ -72,19 +34,19 @@ _BRIEFING_SCHEMA = {
             "service": "string (consulting service name)",
             "priority": "high | medium | low",
             "evidence": "string with [source] tags (specific data points justifying this)",
-            "detail": "string (2-3 sentences — deeper explanation of why this is needed, what the engagement looks like, expected outcomes)",
+            "detail": "string (2-3 sentences — deeper explanation of why this is needed)",
             "estimated_scope": "string (e.g. '$1-3M, 6-12 months')",
-            "why_now": "string (1-2 sentences — company-specific timing trigger explaining why THIS company needs this NOW, referencing specific data points like recent funding, hiring velocity, sentiment shifts, competitive moves, or regulatory changes)",
+            "why_now": "string (1-2 sentences — company-specific timing trigger)",
             "source_analyses": ["string — which analyses support this opportunity"],
         }
     ],
     "data_confidence": {
         "jobs_analyzed": "integer",
-        "scrape_coverage": "string (e.g. 'full ATS board' or 'LinkedIn sample — 100 of ~500 estimated')",
-        "analyses_available": ["string — list of analysis types completed"],
-        "analyses_missing": ["string — analysis types NOT yet run"],
+        "scrape_coverage": "string",
+        "analyses_available": ["string"],
+        "analyses_missing": ["string"],
         "overall_confidence": "high | medium | low",
-        "caveats": ["string — important limitations or data gaps"],
+        "caveats": ["string"],
     },
     "budget_signals": {
         "can_afford": "boolean",
@@ -125,18 +87,104 @@ _BRIEFING_SCHEMA = {
 }
 
 
-def _format_algo_scores_block(algo_scores):
-    """Format scoring instructions for the LLM.
+def _build_briefing_schema(lens_config, use_algo=False):
+    """Build the full briefing JSON schema dynamically from lens config."""
+    dimensions = lens_config.get("dimensions", [])
+    labels = lens_config.get("labels", [])
+    label_options = " | ".join(l["label"] for l in labels)
 
-    The LLM scores each dimension directly using the rubric and all available
-    evidence. Algorithmic signals are NOT shown to the LLM — they are injected
-    as metadata after the LLM responds (for the info-icon audit trail).
-    """
+    # Build dynamic sub_scores from lens dimensions
+    sub_scores = {}
+    for dim in dimensions:
+        entry = {
+            "score": "integer 0-100 — your score based on all evidence",
+            "rationale": "string with [source] tags — explain what evidence supports the score",
+            "signals": ["string with [source] tag"],
+            "source_analyses": ["string — which analyses informed this score"],
+        }
+        if use_algo:
+            entry["algorithmic_score"] = "integer 0-100 (auto-populated — do not set)"
+            entry["algorithmic_confidence"] = "float 0-1 (auto-populated — do not set)"
+            entry["signals_used"] = ["string (auto-populated — do not set)"]
+        sub_scores[dim["key"]] = entry
+
+    scoring_section = {
+        "overall_score": "integer 0-100 (auto-recomputed from sub-scores — your value will be overwritten)",
+        "overall_label": label_options,
+        "sub_scores": sub_scores,
+    }
+    if use_algo:
+        scoring_section["algorithmic_weighted_score"] = "integer 0-100 (auto-populated — do not set)"
+        scoring_section["overall_algorithmic_confidence"] = "float 0-1 (auto-populated — do not set)"
+
+    schema = {"subject_identity": _STATIC_SCHEMA_SECTIONS["subject_identity"]}
+    schema["scoring"] = scoring_section
+    for key in ("hiring_trajectory", "engagement_opportunities", "data_confidence",
+                "budget_signals", "competitive_pressure", "financial_position",
+                "innovation_ip", "talent_culture", "risk_profile", "strategic_assessment"):
+        schema[key] = _STATIC_SCHEMA_SECTIONS[key]
+
+    return schema
+
+
+# ---------- Scoring rubric builder ----------
+
+def _build_scoring_rubric(lens_config):
+    """Build the scoring rubric section dynamically from lens dimensions."""
+    dimensions = lens_config.get("dimensions", [])
+    labels = lens_config.get("labels", [])
+    score_label = lens_config.get("score_label", "Score")
+
     lines = [
         "",
         "---",
         "",
-        "DIGITAL MATURITY SCORING:",
+        f"SCORING RUBRIC ({score_label}):",
+        "",
+        "IMPORTANT: This score measures the company's ACTUAL capability in these dimensions — "
+        "NOT their attractiveness as a consulting target. Score honestly.",
+        "",
+        "Score each dimension 0-100 based on ALL available evidence.",
+        "",
+    ]
+
+    for dim in dimensions:
+        weight_pct = int(dim["weight"] * 100)
+        sources = ", ".join(s.replace("_", " ").title() for s in dim.get("sources", []))
+        lines.append(f"### {dim['label']} (weight: {weight_pct}%)")
+        if sources:
+            lines.append(f"Primary evidence: {sources}")
+        lines.append("")
+        rubric = dim.get("rubric", "Score 0-100 based on available evidence.")
+        lines.append(rubric)
+        lines.append("")
+
+    # Weight formula
+    weight_parts = []
+    for d in dimensions:
+        weight_parts.append(f"{d['label']}×{d['weight']:.2f}")
+    weight_formula = " + ".join(weight_parts)
+    lines.append(f"**Overall score = weighted average ({weight_formula}).**")
+    lines.append("NOTE: The overall_score will be RECOMPUTED programmatically from your sub-scores — "
+                 "focus on getting each sub-score right rather than the overall arithmetic.")
+    lines.append("")
+
+    # Tier labels
+    lines.append("Labels (direct, no sugarcoating):")
+    for label in labels:
+        lines.append(f'- {label["min_score"]}+: "{label["label"]}"')
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def _build_scoring_rules_block(use_algo):
+    """Build scoring rules instructions for the LLM."""
+    lines = [
+        "",
+        "---",
+        "",
+        "SCORING INSTRUCTIONS:",
         "",
         "Score each dimension 0-100 based on ALL available evidence from the reports, key facts, and hiring data above.",
         "Use the scoring rubric below as your guide. Your scores are final — they will be used directly.",
@@ -147,16 +195,93 @@ def _format_algo_scores_block(algo_scores):
         "- Base your scores on EVIDENCE, not assumptions. Every score must be justified by data from the reports.",
         "- SMALL SAMPLE SIZES: If fewer than 100 roles were analyzed (especially LinkedIn samples), "
         "do NOT treat department percentages as reliable. A 41-role LinkedIn snapshot showing 6% engineering "
-        "does NOT mean the company lacks engineering capability — it means the sample is too small to draw structural conclusions. "
-        "Focus on sector identity, patents, strategic tags, report content, and the company's known products/capabilities.",
-        "- Consider the company's CORE BUSINESS and PRODUCTS when scoring, not just scraped data. Samsung making HBM chips "
-        "is strong AI Readiness evidence even if few 'AI Engineer' titles appear in a small LinkedIn sample.",
+        "does NOT mean the company lacks engineering capability — focus on sector identity, patents, strategic tags, "
+        "report content, and the company's known products/capabilities.",
+        "- Consider the company's CORE BUSINESS and PRODUCTS when scoring, not just scraped data.",
         "- Do NOT restate the score number in the rationale (e.g. 'The score of 53...'). Scores are displayed separately in the UI.",
         "",
     ]
+    return "\n".join(lines)
+
+
+# ---------- Engagement opportunity builder ----------
+
+def _build_engagement_guidance(lens_config):
+    """Build engagement opportunity mapping guidance from lens config."""
+    scoring_context = lens_config.get("scoring_context", "")
+    angle_guidance = lens_config.get("angle_guidance", "")
+    risk_focus = lens_config.get("risk_focus", "")
+    service_list = lens_config.get("engagement_service_list", [])
+
+    lines = [
+        "",
+        "---",
+        "",
+        "ENGAGEMENT OPPORTUNITY MAPPING:",
+        "",
+        "CRITICAL RULE — DO NOT SUGGEST SERVICES THAT ARE THE COMPANY'S CORE COMPETENCY OR ADJACENT EXPERTISE.",
+        "Apply this principle broadly: never sell a company what they already do better than anyone, "
+        "AND never sell them what's adjacent to their core expertise. Think about what they would laugh at if a consultant pitched it.",
+        "",
+        "INSTEAD, focus on their ACTUAL pain points from the data:",
+        "- Hypergrowth scaling problems",
+        "- Non-core operational gaps",
+        "- M&A integration, international expansion, regulatory compliance",
+        "- The messy human/org problems that tech excellence doesn't solve",
+        "",
+    ]
+
+    if angle_guidance:
+        lines.append(f"LENS-SPECIFIC GUIDANCE: {angle_guidance}")
+        lines.append("")
+
+    if risk_focus:
+        lines.append(f"RISK AREAS TO WATCH: {risk_focus}")
+        lines.append("")
+
+    lines.extend([
+        "PRIORITY LEVELS — these reflect how much the company NEEDS external help:",
+        "- HIGH = Clear evidence of a gap or pain point OUTSIDE the company's expertise.",
+        "- MEDIUM = Some evidence of need, company has partial capability.",
+        "- LOW = Minor gap or the company has significant internal capability.",
+        "",
+        "If a company scores 80+ in a scoring dimension, do NOT suggest HIGH priority consulting for that area.",
+        "",
+        "Generate 3-5 prioritized consulting engagement opportunities.",
+    ])
+
+    if service_list:
+        lines.append("Use real consulting service names such as:")
+        for svc in service_list:
+            lines.append(f"- {svc}")
+    else:
+        lines.extend([
+            "Use real consulting service names relevant to the scoring lens context.",
+            f"Lens context: {scoring_context}",
+        ])
+
+    lines.extend([
+        "",
+        "For each opportunity, provide:",
+        "- Specific evidence from the intelligence data WITH [source] tags",
+        "- A 'detail' field: 2-3 sentences expanding on WHY this is a real need",
+        "- Estimated scope (see methodology below)",
+        "- A 'why_now' field: 1-2 sentences explaining the company-specific timing trigger",
+        "- source_analyses: list of which analysis types support this opportunity",
+        "",
+        "SCOPE ESTIMATION METHODOLOGY (Big 4 / MBB blended rate ~$3-5K/consultant/day):",
+        "- $500K-1M, 3-6 months: Small team (2-3 consultants). Assessments, strategy, POC.",
+        "- $1-3M, 6-12 months: Medium team (4-6 consultants). Platform implementation, org redesign.",
+        "- $2-5M, 9-18 months: Large team (6-10 consultants). Multi-workstream programs.",
+        "- $5M+, 12-24 months: Full transformation (10+ consultants). Only for $50B+ companies.",
+        "CRITICAL: Scale to company size. A $2B company does NOT get a $5M engagement.",
+        "",
+    ])
 
     return "\n".join(lines)
 
+
+# ---------- Anomaly signals (lens-agnostic) ----------
 
 def _format_anomaly_signals_block(anomaly_signals):
     """Format structural anomaly signals into a prompt section for the LLM."""
@@ -169,8 +294,8 @@ def _format_anomaly_signals_block(anomaly_signals):
         "",
         "STRUCTURAL ANOMALY SIGNALS (algorithmically detected — use these to inform engagement opportunities):",
         "",
-        "These anomalies were detected from the hiring data INDEPENDENTLY of the Digital Maturity Score.",
-        "A company can score 95 on digital maturity and still have structural problems that create",
+        "These anomalies were detected from the hiring data INDEPENDENTLY of the scoring dimensions.",
+        "A company can score 95 and still have structural problems that create",
         "real consulting opportunities. Use these signals when generating engagement_opportunities.",
         "",
     ]
@@ -188,23 +313,75 @@ def _format_anomaly_signals_block(anomaly_signals):
     return "\n".join(lines)
 
 
+# ---------- Section-to-source mapping builder ----------
+
+def _build_source_mapping(lens_config, all_key_facts, hiring_stats):
+    """Build the section-to-source citation mapping dynamically from lens dimensions."""
+    dimensions = lens_config.get("dimensions", [])
+    valid_sources = list(all_key_facts.keys()) + (["hiring"] if hiring_stats else [])
+
+    lines = [
+        f"Valid source tags: {valid_sources}",
+        "",
+        "Format: \"Company has 142 open roles [hiring]. Revenue reached $20B [financial].\"",
+        "",
+        "If you cannot cite a source for a claim, DO NOT make the claim.",
+        "",
+        "SECTION-TO-SOURCE MAPPING — only cite sources that ACTUALLY provide evidence for a section:",
+        "",
+        "| Section | Primary sources |",
+        "|---------|----------------|",
+    ]
+
+    # Dynamic: scoring dimensions mapped to their sources
+    for dim in dimensions:
+        sources = ", ".join(dim.get("sources", []))
+        lines.append(f"| {dim['key']} | {sources} |")
+
+    # Static sections (lens-agnostic)
+    lines.extend([
+        "| hiring_trajectory | hiring |",
+        "| engagement_opportunities | Depends on service — cite the relevant source |",
+        "| budget_signals | financial, hiring |",
+        "| competitive_pressure | competitors |",
+        "| financial_position | financial |",
+        "| innovation_ip | patents, hiring |",
+        "| talent_culture | hiring, sentiment |",
+        "| risk_profile | Any relevant source |",
+        "",
+        "IMPORTANT: [sentiment] = employee sentiment data (Glassdoor/Reddit reviews). "
+        "Only cite it for dimensions that list sentiment as a source, and for talent_culture. "
+        "NEVER cite [sentiment] for tech/data/AI dimensions unless the lens rubric specifies it.",
+        "",
+        "The source_analyses array for each section MUST match the inline [source] tags used.",
+        "",
+    ])
+
+    return "\n".join(lines)
+
+
+# ---------- Main prompt builder ----------
+
 def build_briefing_prompt(company_name, all_key_facts, report_summaries,
                           hiring_stats=None, hiring_snapshots=None,
                           data_confidence=None, algo_scores=None,
-                          anomaly_signals=None):
+                          anomaly_signals=None, lens_config=None):
     """Build the intelligence briefing prompt.
 
     Args:
         company_name: Target company name
-        all_key_facts: dict of {analysis_type: {fact_key: value}} — merged from all analyses
+        all_key_facts: dict of {analysis_type: {fact_key: value}}
         report_summaries: dict of {analysis_type: truncated_report_text}
         hiring_stats: dict with dept_counts, seniority_counts, etc. or None
         hiring_snapshots: list of historical snapshot dicts (most recent first) or None
-        data_confidence: dict with jobs_analyzed, scrape_source, analyses_available, etc. or None
+        data_confidence: dict with jobs_analyzed, etc. or None
         algo_scores: dict from compute_dms_scores() or None
         anomaly_signals: list of anomaly dicts from compute_anomaly_signals() or None
+        lens_config: dict with dimensions, labels, score_label, scoring_context, etc.
     """
-    # Format key facts with source labels
+    # ---- Format intelligence data (unchanged) ----
+
+    # Key facts
     facts_lines = []
     for atype, facts in all_key_facts.items():
         facts_lines.append(f"### {atype.upper()} ANALYSIS KEY FACTS  [source: {atype}]")
@@ -213,7 +390,7 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries,
         facts_lines.append("")
     formatted_facts = "\n".join(facts_lines) if facts_lines else "No structured key facts available."
 
-    # Format report summaries with source labels
+    # Report summaries
     summary_lines = []
     for atype, text in report_summaries.items():
         summary_lines.append(f"### {atype.upper()} REPORT (excerpt)  [source: {atype}]")
@@ -221,7 +398,7 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries,
         summary_lines.append("\n---\n")
     formatted_summaries = "\n".join(summary_lines) if summary_lines else "No report summaries available."
 
-    # Format hiring stats
+    # Hiring stats
     if hiring_stats:
         hiring_lines = []
         hiring_lines.append(f"Total open roles: {hiring_stats.get('total_roles', 'unknown')}")
@@ -263,10 +440,10 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries,
     else:
         formatted_hiring = "No hiring data available."
 
-    # Format hiring snapshots for temporal analysis
+    # Hiring snapshots
     if hiring_snapshots and len(hiring_snapshots) > 1:
         snap_lines = ["HIRING TREND DATA (historical snapshots):"]
-        for i, snap in enumerate(reversed(hiring_snapshots)):  # chronological order
+        for i, snap in enumerate(reversed(hiring_snapshots)):
             marker = " ← current" if i == len(hiring_snapshots) - 1 else ""
             dept = snap.get("dept_counts", {})
             total = snap.get("total_roles", 0)
@@ -279,8 +456,7 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries,
                 f"AI/ML count: {ai_count}){marker}"
             )
 
-        # Compute trend
-        oldest = hiring_snapshots[-1]  # list is most-recent-first
+        oldest = hiring_snapshots[-1]
         newest = hiring_snapshots[0]
         old_total = oldest.get("total_roles", 0)
         new_total = newest.get("total_roles", 0)
@@ -293,7 +469,7 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries,
     else:
         formatted_snapshots = "No historical hiring snapshots available (only current data)."
 
-    # Format data confidence
+    # Data confidence
     if data_confidence:
         conf_lines = [
             f"- Jobs analyzed: {data_confidence.get('jobs_analyzed', 'unknown')}",
@@ -305,13 +481,37 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries,
     else:
         formatted_confidence = "No confidence metadata available."
 
-    schema_str = json.dumps(_BRIEFING_SCHEMA, indent=2)
+    # ---- Build dynamic sections from lens config ----
 
-    return f"""You are a senior management consultant at a top-tier firm (McKinsey, Deloitte, EY Studio+). You are preparing a **target qualification intelligence briefing** on **{company_name}** to help a consulting partner assess whether to pursue this company for digital transformation and AI consulting engagements.
+    use_algo = algo_scores is not None
+    score_label = lens_config.get("score_label", "Score") if lens_config else "Digital Maturity Score"
+    scoring_context = lens_config.get("scoring_context", "") if lens_config else ""
+
+    schema = _build_briefing_schema(lens_config, use_algo=use_algo) if lens_config else {}
+    schema_str = json.dumps(schema, indent=2)
+
+    scoring_rules = _build_scoring_rules_block(use_algo)
+    scoring_rubric = _build_scoring_rubric(lens_config) if lens_config else ""
+    engagement_guidance = _build_engagement_guidance(lens_config) if lens_config else ""
+    anomaly_block = _format_anomaly_signals_block(anomaly_signals)
+    source_mapping = _build_source_mapping(lens_config, all_key_facts, hiring_stats) if lens_config else ""
+
+    # System prompt intro — lens-aware
+    if scoring_context:
+        system_intro = scoring_context
+    else:
+        system_intro = (
+            "You are a senior management consultant at a top-tier firm (McKinsey, Deloitte, EY Studio+). "
+            "You are preparing a target qualification intelligence briefing."
+        )
+
+    return f"""{system_intro}
+
+You are preparing a **target qualification intelligence briefing** on **{company_name}**.
 
 Your audience is a consulting partner who needs to quickly assess:
 1. Can this company afford consulting? (Budget signals)
-2. What is their actual digital capability? (Honest digital maturity assessment)
+2. What is their actual capability? (Honest {score_label.lower()} assessment)
 3. What specific services can we sell? (Engagement opportunities — independent of maturity score)
 4. Is there urgency? (Competitive pressure + recent changes)
 5. How is their hiring strategy shifting? (Hiring trajectory)
@@ -335,150 +535,7 @@ DATA CONFIDENCE:
 
 CRITICAL CITATION REQUIREMENT:
 
-Every factual claim in rationale, signals, and evidence fields MUST include a source tag in square brackets referencing which analysis produced the data. Valid source tags: {list(all_key_facts.keys()) + (['hiring'] if hiring_stats else [])}
-
-Format: "Company has 142 open roles with 67% in engineering [hiring]. 29 AI-related patents filed [patents]. Revenue reached $20B [financial]."
-
-If you cannot cite a source for a claim, DO NOT make the claim. No unsourced assertions.
-
-SECTION-TO-SOURCE MAPPING — only cite sources that ACTUALLY provide evidence for a section:
-
-| Section | Primary sources | Secondary sources | NEVER cite |
-|---------|----------------|-------------------|------------|
-| tech_modernity | hiring, techstack | patents | sentiment, financial, seo |
-| data_analytics | hiring, techstack | patents | sentiment, financial, seo |
-| ai_readiness | hiring, patents | techstack, competitors | sentiment, financial, seo |
-| organizational_readiness | hiring, sentiment | financial | patents, techstack, seo |
-| hiring_trajectory | hiring ONLY | (none) | sentiment, financial, patents, techstack |
-| engagement_opportunities | Depends on service — cite hiring for hiring-related evidence, financial for budget evidence, patents for IP evidence, techstack for tech evidence, sentiment for culture/org evidence | | Do NOT cite sentiment for tech/data/AI opportunities |
-| budget_signals | financial, hiring | pricing | sentiment, patents, techstack |
-| competitive_pressure | competitors, landscape | hiring | sentiment, financial |
-| financial_position | financial | (none) | sentiment, hiring, patents |
-| innovation_ip | patents | hiring, techstack | sentiment, financial |
-| talent_culture | hiring, sentiment | (none) | patents, financial, techstack |
-| risk_profile | Any source relevant to the specific risk | |
-
-IMPORTANT: [sentiment] = employee sentiment data (Glassdoor/Reddit reviews, sentiment scores). It is ONLY relevant for organizational_readiness, talent_culture, and culture-related engagement opportunities (e.g., Change Management). NEVER cite [sentiment] for tech modernity, data/analytics, AI readiness, hiring trajectory, or budget signals — sentiment has NOTHING to do with those dimensions.
-
-Similarly, [hiring] data should NOT be cited for financial_position or innovation_ip unless directly relevant (e.g., "R&D hiring supports patent activity").
-
-The source_analyses array for each section MUST match the inline [source] tags used in that section's text fields.
-
-{_format_algo_scores_block(algo_scores)}---
-
-DIGITAL CAPABILITY SCORING RUBRIC:
-
-IMPORTANT: This score measures the company's ACTUAL digital and technological capability — NOT their attractiveness as a consulting target. Score honestly. A digitally advanced company can still need consulting help (specialized AI work, org design, M&A integration, etc.).
-
-Score each dimension 0-100 based on ALL available evidence.
-
-### Tech Modernity (weight: 30%)
-Primary signals: hiring data (what technologies they hire for), sector/product (what they build), engineering ratio.
-Secondary signals: website tech stack (what's on their public site — this is a weak signal for internal capability).
-
-CRITICAL DISTINCTION — "uses SaaS tools" vs "is a SaaS company":
-A non-tech company (food, retail, manufacturing, etc.) whose public website uses SaaS tools like Algolia, Cloudflare, or Shopify is NOT a SaaS/software company. Using off-the-shelf SaaS products on a marketing website is a PURCHASING decision, not an engineering capability. If anything, heavy reliance on third-party SaaS for a company's public site suggests they LACK internal engineering depth — it is a neutral-to-negative signal for tech modernity, never a positive one. Only score website SaaS usage positively if the company's CORE BUSINESS is technology/software.
-
-- 80-100: Company IS a technology/software/AI company (core product is technology), OR hiring data shows modern stack (React/Go/Rust/K8s/cloud-native/microservices roles dominate), high engineering ratio (>50% of open roles). If a company literally BUILDS software, LLMs, cloud infrastructure, or AI products, floor at 80 — their tech modernity is self-evident regardless of what's on their marketing website.
-- 60-79: Tech-adjacent company with significant engineering investment (30-50% engineering roles), modern tools in hiring reqs, some legacy maintenance roles. Mixed website tech stack.
-- 40-59: Non-tech company with modest engineering team (<30% roles). Hiring shows legacy technologies (COBOL, mainframe, .NET Framework, on-prem). Website shows dated stack.
-- 20-39: Minimal tech hiring. No engineering culture signals. Basic or outsourced IT.
-- 0-19: No tech data available or fully pre-digital.
-- If no tech stack data AND no hiring data: score 50 and note "insufficient data" in rationale.
-
-### Data & Analytics (weight: 25%)
-Primary signals: hiring data (Data Engineers, Data Scientists, ML Ops, Analytics Engineers — these tell you far more than website trackers), data-related strategic tags, company product.
-Secondary signals: analytics tools detected on website (Segment, Amplitude, etc. — useful for non-tech companies, but irrelevant for companies whose product IS data/AI).
-
-- 80-100: Company's core product IS data or AI, OR actively hiring multiple data roles (Data Engineers, Data Scientists, Analytics Engineers, ML Ops). "Data Infrastructure" strategic tag present. Evidence of data platform investment.
-- 60-79: Some data hiring but not a strategic focus. OR advanced analytics tooling on website (Segment/Amplitude + A/B testing). Marketing automation signals.
-- 40-59: No data-specific hiring. Basic website analytics only (GA alone). No experimentation signals.
-- 20-39: No data signals at all — no data roles, no analytics tools.
-
-### AI Readiness (weight: 25%)
-- 95-100: Company's core product IS AI/ML (e.g., OpenAI, Anthropic, Google DeepMind, Nvidia AI). AI is the business, not a capability being adopted. Score accordingly.
-- 80-94: Active AI hiring (AI/ML roles >10% of engineering), AI-related patents, AI tools/platforms, "AI/ML Investment" strategic tag. AI is a major strategic focus but not the core product.
-- 60-79: Some AI hiring (5-10% of engineering) or AI patents exist, but no visible unified AI platform strategy.
-- 40-59: Minimal AI signals (1-3 AI roles, or "AI" mentioned in strategy but not a focus).
-- 20-39: No AI signals — no AI hiring, no AI patents, no AI tools.
-- Patent bonus: +5-10 if AI/ML patent areas exist in the IP portfolio.
-
-### Organizational Readiness (weight: 20%)
-- 80-100: Growing hiring trend, high engineering ratio (>50%), strong strategic investment tags (Cloud/Infrastructure, AI/ML Investment, Platform Migration, Automation). Positive employee sentiment.
-- 60-79: Stable hiring, moderate engineering ratio (30-50%), some strategic investment tags.
-- 40-59: Mixed signals. Flat or slightly declining hiring. Low engineering ratio (<30%). Few strategic tags.
-- 20-39: Shrinking hiring, negative sentiment, no strategic investment signals.
-- NUANCE: Negative sentiment from rapid growth (burnout, equity complaints during hypergrowth) is NOT the same as organizational resistance to change. Distinguish growing pains from structural dysfunction. A company growing from 1000 to 8000 employees will have cultural friction — that's an org design opportunity, not a sign of low readiness.
-
-**Overall score = weighted average (Tech×0.30 + Data×0.25 + AI×0.25 + Org×0.20). NOTE: The overall_score will be RECOMPUTED programmatically from your sub-scores — focus on getting each sub-score right rather than the overall arithmetic.**
-
-Labels (direct, no sugarcoating — these should make a C-suite exec pay attention):
-- 80-100: "Digital Vanguard"
-- 60-79: "Digital Contender"
-- 40-59: "Digitally Exposed"
-- 20-39: "Digital Laggard"
-- 0-19: "Digital Liability"
-
-{_format_anomaly_signals_block(anomaly_signals)}---
-
-ENGAGEMENT OPPORTUNITY MAPPING:
-
-CRITICAL RULE — DO NOT SUGGEST SERVICES THAT ARE THE COMPANY'S CORE COMPETENCY OR ADJACENT EXPERTISE:
-- If the company IS an AI company (OpenAI, Anthropic, Google DeepMind, etc.), do NOT suggest "AI/ML Strategy & Implementation", "Data & Analytics Modernization", OR "AI Governance & Responsible AI" — they are the world experts in ALL of these. Anthropic literally invented Constitutional AI and leads responsible AI research. OpenAI has its own governance frameworks. These companies don't need consulting help with AI anything.
-- If the company IS a cloud company (AWS, Azure, GCP), do NOT suggest "Cloud Migration" or "Enterprise Architecture."
-- If the company IS a cybersecurity company, do NOT suggest "Cybersecurity & Compliance."
-- Apply this principle broadly and AGGRESSIVELY: never sell a company what they already do better than anyone, AND never sell them what's adjacent to their core expertise either. Think about what they would laugh at if a consultant pitched it.
-
-INSTEAD, focus on their ACTUAL pain points from the data:
-- Hypergrowth scaling problems (99% new roles = organizational chaos)
-- Non-core operational gaps (AI companies still need help with sales ops, supply chain, facilities)
-- M&A integration, international expansion, regulatory compliance in NEW jurisdictions
-- The messy human/org problems that tech excellence doesn't solve
-
-PRIORITY LEVELS — these reflect how much the company NEEDS external help, not how important the category sounds:
-- HIGH = Clear evidence of a gap or pain point in an area OUTSIDE the company's expertise. They can't solve this internally.
-- MEDIUM = Some evidence of need, company has partial capability but could benefit from external expertise.
-- LOW = Minor gap or the company has significant internal capability. Only worth pursuing if the engagement is large or strategic.
-
-If a company scores 80+ in a digital maturity dimension, do NOT suggest HIGH priority consulting for that dimension. A company that IS an AI leader should NEVER have "AI Governance" rated HIGH.
-
-Engagement opportunities should reflect REAL problems the company faces based on evidence, not textbook consulting services. A company can be digitally advanced AND have genuine consulting needs — those needs just won't be in their core domain.
-
-Generate 3-5 prioritized consulting engagement opportunities. Use real consulting service names:
-- Cloud Migration & Architecture
-- AI/ML Strategy & Implementation (only for companies ADOPTING AI, not building it)
-- Data & Analytics Modernization (only for companies that DON'T have data as their core product)
-- Digital Customer Experience
-- IT Operating Model Transformation
-- Cybersecurity & Compliance
-- Legacy Application Modernization
-- Change Management & Org Design
-- Intelligent Automation / RPA
-- Supply Chain Digitization
-- AI Governance & Responsible AI (ONLY for companies ADOPTING AI, never for AI-native companies)
-- Technology Due Diligence (M&A)
-- Engineering Effectiveness & Developer Platform
-- Talent Strategy & Organizational Design
-- Enterprise Architecture & Technical Debt
-
-For each opportunity, provide:
-- Specific evidence from the intelligence data WITH [source] tags (not generic observations)
-- A "detail" field: 2-3 sentences expanding on WHY this is a real need, what the engagement would look like, and what outcomes the client should expect. This is the deeper explanation a partner would want when clicking into the opportunity.
-- Estimated scope using the METHODOLOGY below (not a guess — show your reasoning via the evidence)
-- A "why_now" field: 1-2 sentences explaining the company-specific timing trigger — why THIS company needs this NOW. Reference specific recent events, data points, or inflection points. Examples: "Post-$30B Series G with 99% new roles — the org is scaling faster than its processes can support." or "Revenue grew 29% but sentiment is declining — cultural debt is accumulating during hypergrowth." Make it specific enough that it couldn't apply to a random company.
-- source_analyses: list of which analysis types support this opportunity
-
-SCOPE ESTIMATION METHODOLOGY — these must be defensible to a consulting partner:
-
-Estimates are based on typical Big 4 / MBB engagement structures (blended daily rate ~$3-5K/consultant):
-- **$500K-1M, 3-6 months**: Small team (2-3 consultants). Assessments, strategy design, POC, governance framework. Example: AI readiness assessment for a company with <$5B revenue.
-- **$1-3M, 6-12 months**: Medium team (4-6 consultants). Platform implementation, org redesign, single workstream transformation. Scale to company size — a 5,000-person company's org redesign costs less than a 50,000-person company's.
-- **$2-5M, 9-18 months**: Large team (6-10 consultants). Multi-workstream programs, enterprise-wide platform rollout, M&A integration. Appropriate for $10B+ revenue companies with complex operations.
-- **$5M+, 12-24 months**: Full transformation team (10+ consultants). Company-wide digital transformation, multi-geography rollout. Only appropriate for $50B+ companies with evidence of large-scale transformation need.
-
-CRITICAL: Scale the estimate to the company's size and complexity. A $2B company does NOT get a $5M engagement. Use revenue, headcount, and hiring velocity as sizing inputs. For financial services firms (asset managers, PE, banks), use AUM as a primary size indicator — a $500B AUM firm has different consulting capacity than a $5B boutique. If in doubt, estimate conservatively — an overstated scope destroys credibility faster than an understated one.
-
----
+{source_mapping}{scoring_rules}{scoring_rubric}{anomaly_block}{engagement_guidance}---
 
 HIRING TRAJECTORY:
 
@@ -495,9 +552,9 @@ If no historical data exists, set hiring_trajectory to null.
 DATA CONFIDENCE:
 
 Assess the overall confidence of this briefing based on the data available. Consider:
-- How many jobs were analyzed (>100 = high confidence, 30-100 = medium, <30 = low for hiring signals)
+- How many jobs were analyzed (>100 = high confidence, 30-100 = medium, <30 = low)
 - Whether the scrape covered the full ATS board or was a limited sample
-- How many of the 12 analysis types have been completed
+- How many analysis types have been completed
 - Any significant data gaps that affect specific scores
 
 ---
@@ -509,14 +566,13 @@ Return ONLY valid JSON matching this exact schema. No commentary outside the JSO
 IMPORTANT:
 - Base everything on actual data provided above. Do not fabricate numbers or claims.
 - EVERY factual claim must have a [source] tag. Unsourced claims destroy credibility.
-- If a dimension has no data, score it 50 and note "insufficient data — [analysis type] recommended" in the rationale.
-- The strategic_assessment should be the most opinionated section — give a clear recommendation on whether to pursue this company and why.
-- For engagement_opportunities, identify REAL needs from the evidence. A company that builds AI doesn't need AI strategy, data modernization, OR AI governance — they are experts in all of those. Focus on their non-core pain points: org design for hypergrowth, sales operations, compliance in new jurisdictions, M&A integration.
-- For risk_profile, include both business risks to the target company AND engagement risks for the consulting firm (e.g., "long procurement cycles", "recent leadership change may delay decisions").
-- COMPUTE the overall_score as the exact weighted average. Do not round sub-scores to produce a convenient overall number.
+- If a dimension has no data, score it 50 and note "insufficient data" in the rationale.
+- The strategic_assessment should be the most opinionated section — give a clear recommendation.
+- For engagement_opportunities, identify REAL needs from the evidence. Never sell a company what they already do.
+- For risk_profile, include both business risks AND engagement risks for the consulting firm.
+- COMPUTE the overall_score as the exact weighted average.
 
-MISSING DATA HANDLING — critical for credibility:
-- If patent analysis was NOT run (patents not in analyses_available), set innovation_ip.patent_count to -1 and assessment to "Patent analysis not conducted — run patent_analysis to assess IP portfolio." Do NOT report 0 patents for a Fortune 500 company without evidence.
-- If financial analysis was NOT run, say "Financial data not analyzed" in financial_position.summary — do not fabricate revenue or market cap.
-- If any analysis is missing, note it explicitly rather than inferring or defaulting to zero. A wrong number is worse than admitting incomplete data.
-- In the data_confidence section, clearly list which analyses are missing and how that affects specific scores."""
+MISSING DATA HANDLING:
+- If patent analysis was NOT run, set innovation_ip.patent_count to -1. Do NOT report 0 patents without evidence.
+- If financial analysis was NOT run, say "Financial data not analyzed" — do not fabricate.
+- If any analysis is missing, note it explicitly rather than defaulting to zero."""

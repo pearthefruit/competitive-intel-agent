@@ -862,16 +862,25 @@ def _execute_tool(name, args, db_path, progress_callback=None):
 
         elif name == "generate_briefing":
             from agents.briefing import generate_briefing
-            briefing = generate_briefing(args["company"], db_path)
+            lens_id = args.get("lens_id")
+            briefing = generate_briefing(args["company"], db_path, lens_id=lens_id)
             if briefing:
-                dm = briefing.get("digital_maturity", {})
+                scoring = briefing.get("scoring") or briefing.get("digital_maturity", {})
+                lens_info = scoring.get("_lens", {})
+                score_label = lens_info.get("score_label", "Digital Maturity Score")
+                dims = scoring.get("_dimensions") or [
+                    {"key": "tech_modernity", "label": "Tech Modernity"},
+                    {"key": "data_analytics", "label": "Data & Analytics"},
+                    {"key": "ai_readiness", "label": "AI Readiness"},
+                    {"key": "organizational_readiness", "label": "Org Readiness"},
+                ]
                 opps = briefing.get("engagement_opportunities", [])
                 summary = f"Intelligence briefing generated for {args['company']}.\n\n"
-                summary += f"**Digital Maturity Score:** {dm.get('overall_score', 'N/A')}/100 ({dm.get('overall_label', '')})\n"
-                subs = dm.get("sub_scores", {})
-                for key, lbl in [("tech_modernity", "Tech Modernity"), ("data_analytics", "Data & Analytics"), ("ai_readiness", "AI Readiness"), ("organizational_readiness", "Org Readiness")]:
-                    sub = subs.get(key, {})
-                    summary += f"- {lbl}: {sub.get('score', '?')}/100\n"
+                summary += f"**{score_label}:** {scoring.get('overall_score', 'N/A')}/100 ({scoring.get('overall_label', '')})\n"
+                subs = scoring.get("sub_scores", {})
+                for dim in dims:
+                    sub = subs.get(dim["key"], {})
+                    summary += f"- {dim['label']}: {sub.get('score', '?')}/100\n"
                 summary += f"\n**Engagement Opportunities ({len(opps)}):**\n"
                 for opp in opps:
                     summary += f"- [{opp.get('priority', '?').upper()}] {opp.get('service', '?')} — {opp.get('estimated_scope', '?')}\n"
@@ -926,10 +935,10 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                     try:
                         from agents.briefing import generate_briefing as _gen_briefing
                         briefing = _gen_briefing(company_name, db_path)
-                        dm = briefing.get("digital_maturity", {})
-                        result["dm_score"] = dm.get("overall_score", "N/A")
-                        result["dm_label"] = dm.get("overall_label", "")
-                        subs = dm.get("sub_scores", {})
+                        scoring = briefing.get("scoring") or briefing.get("digital_maturity", {})
+                        result["dm_score"] = scoring.get("overall_score", "N/A")
+                        result["dm_label"] = scoring.get("overall_label", "")
+                        subs = scoring.get("sub_scores", {})
                         result["sub_scores"] = {k: v.get("score", "?") for k, v in subs.items()}
                     except Exception as e:
                         result["briefing_error"] = str(e)[:120]
@@ -998,22 +1007,28 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                     lines.append(f"{i}. **{c.get('name', '?')}** — {c.get('description', 'No description')[:120]}")
                     if c.get("website"):
                         lines.append(f"   Website: {c['website']}")
-                lines.append(f"\nUse `ua_fit_score` to score any of these companies.")
+                lines.append(f"\nUse `ua_fit_score` or `score_lens` to score any of these companies.")
                 return "\n".join(lines)
             return "No companies found for this niche."
 
         elif name == "ua_fit_score":
-            from agents.ua_fit import score_ua_fit
+            from agents.lens import score_with_lens
+            from db import get_connection, get_lens_by_slug
             company = args["company"]
             website_url = args.get("website_url")
             if progress_callback:
                 progress_callback(f"Scoring prospect fit: {company}")
-            fit = score_ua_fit(company, website_url=website_url, db_path=db_path)
+            conn = get_connection(db_path)
+            lens = get_lens_by_slug(conn, "ctv-ad-sales")
+            conn.close()
+            if not lens:
+                return "Error: CTV Ad Sales lens not found. Create it first with `create_lens`."
+            fit = score_with_lens(company, lens["id"], db_path=db_path, website_url=website_url, progress_cb=progress_callback)
             if fit:
-                lines = [f"## ICP Fit Score: {company}\n"]
-                lines.append(f"**Overall: {fit.get('overall_score', 0)}/100 — {fit.get('overall_label', '?')}**\n")
-                sub = fit.get("sub_scores", {})
-                for k, v in sub.items():
+                lines = [f"## {lens['name']} Score: {company}\n"]
+                lines.append(f"**Overall: {fit.get('overall_score', 0)}/100 — {fit.get('tier_label', '?')}**\n")
+                dims = fit.get("dimensions", {})
+                for k, v in dims.items():
                     label = k.replace("_", " ").title()
                     lines.append(f"- **{label}**: {v.get('score', 0)}/100 — {v.get('rationale', '')[:150]}")
                 if fit.get("recommended_angle"):
@@ -1022,25 +1037,150 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                     lines.append("\n**Key Risks:**")
                     for r in fit["key_risks"]:
                         lines.append(f"- {r}")
-                cov = fit.get("signal_coverage", {})
-                lines.append(f"\nConfidence: {cov.get('confidence', '?')} ({cov.get('categories_with_data', 0)}/{cov.get('categories_total', 5)} signal categories)")
+                sig = fit.get("signal_coverage", {})
+                lines.append(f"\nConfidence: {sig.get('confidence', '?')} ({sig.get('categories_with_data', 0)}/{sig.get('categories_total', 0)} signal categories)")
+                if fit.get("_report_file"):
+                    lines.append(f"\nReport saved to: {fit['_report_file']}")
                 return "\n".join(lines)
             return f"Failed to score {company}."
 
         elif name == "get_ua_targets":
-            from db import get_connection, get_ua_targets
+            from db import get_connection, get_lens_by_slug, get_all_scores_for_lens
             conn = get_connection(db_path)
-            targets = get_ua_targets(conn)
+            lens = get_lens_by_slug(conn, "ctv-ad-sales")
+            if lens:
+                scores = get_all_scores_for_lens(conn, lens["id"])
+                conn.close()
+                if scores:
+                    lines = [f"## {lens['name']} Pipeline ({len(scores)} companies)\n"]
+                    lines.append("| Rank | Company | Score | Tier | Angle |")
+                    lines.append("|------|---------|-------|------|-------|")
+                    for i, s in enumerate(scores, 1):
+                        sd = s.get("score_data", {})
+                        lines.append(f"| {i} | {s.get('company_name', '?')} | {s.get('overall_score', 0)}/100 | {sd.get('tier_label', '?')} | {(sd.get('recommended_angle') or 'N/A')[:80]} |")
+                    return "\n".join(lines)
+                return f"No companies scored with {lens['name']} lens yet. Use `ua_discover` to find prospects and `ua_fit_score` to score them."
+            else:
+                # Fallback to legacy ua_fit_json
+                from db import get_ua_targets
+                targets = get_ua_targets(conn)
+                conn.close()
+                if targets:
+                    lines = [f"## Prospect Pipeline ({len(targets)} companies)\n"]
+                    lines.append("| Rank | Company | Score | Label | Angle |")
+                    lines.append("|------|---------|-------|-------|-------|")
+                    for i, t in enumerate(targets, 1):
+                        fit = t.get("ua_fit", {})
+                        lines.append(f"| {i} | {t.get('company_name', '?')} | {fit.get('overall_score', 0)}/100 | {fit.get('overall_label', '?')} | {(fit.get('recommended_angle') or 'N/A')[:80]} |")
+                    return "\n".join(lines)
+                return "No prospects scored yet. Use `ua_discover` to find prospects and `ua_fit_score` to score them."
+
+        # --- Lens Scoring ---
+
+        elif name == "create_lens":
+            from agents.llm import generate_json as gen_json
+            from prompts.lens import build_lens_generation_prompt
+            from db import get_connection, create_lens, get_lens
+            lens_name = args.get("name", "")
+            description = args.get("description", "")
+            if not lens_name or not description:
+                return "Error: both 'name' and 'description' are required."
+            prompt = build_lens_generation_prompt(lens_name, description)
+            config = gen_json(prompt, timeout=60)
+            if not isinstance(config, dict) or "dimensions" not in config:
+                return "Failed to generate lens config. Try again with a more specific description."
+            # Normalize weights
+            total_w = sum(d.get("weight", 0) for d in config.get("dimensions", []))
+            if total_w > 0 and abs(total_w - 1.0) > 0.05:
+                for d in config["dimensions"]:
+                    d["weight"] = round(d["weight"] / total_w, 2)
+            slug = lens_name.lower().replace(" ", "-").replace("_", "-")
+            slug = "".join(c for c in slug if c.isalnum() or c == "-")[:50]
+            conn = get_connection(db_path)
+            lens_id = create_lens(conn, lens_name, slug, description, config)
+            lens = get_lens(conn, lens_id)
             conn.close()
-            if targets:
-                lines = [f"## Prospect Pipeline ({len(targets)} companies)\n"]
-                lines.append("| Rank | Company | Score | Label | Angle |")
-                lines.append("|------|---------|-------|-------|-------|")
-                for i, t in enumerate(targets, 1):
-                    fit = t.get("ua_fit", {})
-                    lines.append(f"| {i} | {t.get('company_name', '?')} | {fit.get('overall_score', 0)}/100 | {fit.get('overall_label', '?')} | {(fit.get('recommended_angle') or 'N/A')[:80]} |")
-                return "\n".join(lines)
-            return "No prospects scored yet. Use `ua_discover` to find prospects and `ua_fit_score` to score them."
+            dims = config.get("dimensions", [])
+            dim_lines = "\n".join(f"- **{d['label']}** ({int(d['weight']*100)}%) — sources: {', '.join(d.get('sources', []))}" for d in dims)
+            score_label = config.get("score_label", lens_name)
+            return f"## Lens Created: {lens_name}\n\n**Score label:** {score_label}\n**Dimensions:**\n{dim_lines}\n\nYou can now score companies with: `score_lens(company, lens=\"{slug}\")`"
+
+        elif name == "score_lens":
+            from agents.lens import score_with_lens
+            from db import get_connection, get_lens_by_slug, get_all_lenses
+            company = args.get("company", "")
+            lens_ref = args.get("lens", "")
+            website_url = args.get("website_url")
+            if not company or not lens_ref:
+                return "Error: both 'company' and 'lens' are required."
+            conn = get_connection(db_path)
+            # Try slug first, then name match
+            lens = get_lens_by_slug(conn, lens_ref)
+            if not lens:
+                lens = get_lens_by_slug(conn, lens_ref.lower().replace(" ", "-"))
+            if not lens:
+                # Try name match
+                all_lenses = get_all_lenses(conn)
+                for l in all_lenses:
+                    if l["name"].lower() == lens_ref.lower():
+                        lens = l
+                        break
+            conn.close()
+            if not lens:
+                return f"Lens '{lens_ref}' not found. Use `list_lenses` to see available lenses."
+            score_data = score_with_lens(company, lens["id"], db_path=db_path, website_url=website_url)
+            if not score_data:
+                return f"Failed to score {company} through {lens['name']} lens."
+            sub = score_data.get("sub_scores", {})
+            dims = score_data.get("_dimensions", [])
+            dim_lines = "\n".join(
+                f"- **{d['label']}**: {sub.get(d['key'], {}).get('score', '?')}/100"
+                for d in dims
+            )
+            report_line = f"\n\nReport saved to: {score_data['_report_file']}" if score_data.get("_report_file") else ""
+            return (
+                f"## {lens['name']} Score: {company}\n\n"
+                f"**Overall:** {score_data['overall_score']}/100 — {score_data['overall_label']}\n"
+                f"**Confidence:** {score_data.get('signal_coverage', {}).get('confidence', '?')}\n\n"
+                f"**Dimensions:**\n{dim_lines}\n\n"
+                f"**Recommended approach:** {score_data.get('recommended_angle', 'N/A')}\n\n"
+                f"**Key risks:** {', '.join(score_data.get('key_risks', []))}"
+                f"{report_line}"
+            )
+
+        elif name == "list_lenses":
+            from db import get_connection, get_all_lenses
+            conn = get_connection(db_path)
+            lenses = get_all_lenses(conn)
+            conn.close()
+            if not lenses:
+                return "No lenses available."
+            lines = ["## Available Lenses\n"]
+            for l in lenses:
+                preset = " (preset)" if l.get("is_preset") else ""
+                config = l.get("config", {})
+                dims = config.get("dimensions", [])
+                dim_summary = ", ".join(f"{d['label']} ({int(d['weight']*100)}%)" for d in dims)
+                lines.append(f"### {l['name']}{preset}\n{l.get('description', '')}\n**Dimensions:** {dim_summary}\n**Slug:** `{l['slug']}`\n")
+            return "\n".join(lines)
+
+        elif name == "get_lens_scores":
+            from db import get_connection, get_or_create_dossier, get_lens_scores_for_dossier
+            company = args.get("company", "")
+            if not company:
+                return "Error: 'company' is required."
+            conn = get_connection(db_path)
+            dossier_id = get_or_create_dossier(conn, company)
+            scores = get_lens_scores_for_dossier(conn, dossier_id)
+            conn.close()
+            if not scores:
+                return f"No lens scores found for {company}. Use `score_lens` to evaluate through a lens."
+            lines = [f"## Lens Scores for {company}\n"]
+            lines.append("| Lens | Score | Label | Scored |")
+            lines.append("|------|-------|-------|--------|")
+            for s in scores:
+                lines.append(f"| {s.get('lens_name', '?')} | {s.get('overall_score', 0)}/100 | {s.get('overall_label', '?')} | {(s.get('scored_at') or '?')[:10]} |")
+            return "\n".join(lines)
 
         else:
             return f"Unknown tool: {name}"

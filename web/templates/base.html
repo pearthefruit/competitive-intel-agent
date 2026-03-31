@@ -2100,7 +2100,7 @@
         }
         .prospect-trigger input[type="text"] {
             width: 100%;
-            padding: 8px 12px;
+            padding: 8px 44px 8px 12px;
             background: var(--bg-primary);
             border: 1px solid var(--border);
             border-radius: 6px;
@@ -2266,14 +2266,13 @@
         .niche-chip:hover { border-color: var(--accent); color: var(--text-primary); }
 
         /* Niche Builder trigger + modal */
-        .niche-input-wrap { position: relative; }
-        .niche-input-wrap input[type="text"] { padding-right: 34px; }
+        .niche-input-wrap { display: flex; flex-direction: column; gap: 4px; }
         .niche-builder-trigger {
-            position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+            align-self: flex-end;
             background: none; border: none; color: var(--text-muted); cursor: pointer;
-            padding: 4px; border-radius: 4px; font-size: 15px; line-height: 1;
+            padding: 2px 4px; border-radius: 4px; font-size: 15px; line-height: 1;
             transition: color 0.15s, background 0.15s;
-            display: flex; align-items: center; justify-content: center;
+            display: flex; align-items: center; justify-content: center; gap: 4px;
         }
         .niche-builder-trigger:hover { color: var(--accent); background: var(--accent-dim); }
         .niche-builder-overlay {
@@ -3685,6 +3684,343 @@
         .toast-close { background: none; border: none; color: inherit; cursor: pointer; opacity: 0.6; font-size: 16px; line-height: 1; flex-shrink: 0; }
         .toast-close:hover { opacity: 1; }
         @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+        /* === LENS SCORES === */
+        .lens-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        .lens-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 100px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            color: var(--text-secondary);
+        }
+        .lens-pill:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+        .lens-pill.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+        .lens-pill-score {
+            font-weight: 700;
+            font-size: 13px;
+        }
+        .lens-pill-name { font-weight: 500; }
+        .lens-pill-unscored { opacity: 0.5; border-style: dashed; }
+        .lens-pill-unscored:hover { opacity: 0.8; }
+        .lens-pill-loading { opacity: 0.7; pointer-events: none; }
+        .lens-pill-loading .lens-pill-score { display: none; }
+        .lens-pill-loading .lens-pill-name::before {
+            content: ''; display: inline-block; width: 12px; height: 12px;
+            border: 2px solid var(--text-muted); border-top-color: var(--accent);
+            border-radius: 50%; animation: spin 0.6s linear infinite;
+            margin-right: 4px; vertical-align: middle;
+        }
+        .lens-detail-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 8px;
+            animation: popover-in 0.15s ease;
+        }
+        .lens-detail-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 12px;
+        }
+        .lens-detail-meta {
+            flex: 1;
+        }
+        .lens-detail-label {
+            font-size: 16px;
+            font-weight: 700;
+        }
+        .lens-detail-tier {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .lens-detail-scored {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+        .lens-detail-dims { margin-top: 4px; }
+        .lens-detail-footer {
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px solid var(--border);
+        }
+        .lens-footer-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .lens-footer-text {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+        .lens-risks-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .lens-risks-list li {
+            font-size: 13px;
+            color: var(--text-secondary);
+            padding: 2px 0 2px 16px;
+            position: relative;
+        }
+        .lens-risks-list li::before {
+            content: "!";
+            position: absolute;
+            left: 0;
+            color: var(--yellow);
+            font-weight: 700;
+            font-size: 12px;
+        }
+        .lens-score-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            border-radius: 100px;
+            border: 1px dashed var(--border-strong);
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .lens-score-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+        .lens-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            margin-top: 4px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-strong);
+            border-radius: 8px;
+            min-width: 200px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+            z-index: 200;
+            animation: popover-in 0.15s ease;
+            overflow: hidden;
+        }
+        .lens-dropdown-item {
+            padding: 8px 14px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: background 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .lens-dropdown-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .lens-dropdown-item .preset-badge {
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            background: rgba(168,85,247,0.15);
+            color: var(--purple);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .lens-scoring-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 100px;
+            background: var(--accent-dim);
+            border: 1px solid rgba(59,130,246,0.3);
+            font-size: 12px;
+            color: var(--accent);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+        /* === DISCOVERY CARDS (simplified) === */
+        .company-card.discovered {
+            border-color: rgba(168,85,247,0.2);
+        }
+        .company-card.discovered .company-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .company-select-cb {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: var(--purple);
+            flex-shrink: 0;
+        }
+        .company-card-desc {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+            margin-top: 4px;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .company-card-size {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: rgba(168,85,247,0.12);
+            color: var(--purple);
+            margin-top: 4px;
+        }
+        .company-card-website {
+            font-size: 10px;
+            margin-top: 3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .company-card-website a { color: var(--accent); text-decoration: none; }
+        .company-card-website a:hover { text-decoration: underline; }
+        .send-to-research-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            background: var(--bg-tertiary);
+            border: 1px solid rgba(168,85,247,0.3);
+            border-radius: 8px;
+            margin-top: 12px;
+        }
+        .str-count { font-size: 12px; color: var(--text-secondary); }
+        .str-btn {
+            padding: 6px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+        .str-btn:hover { opacity: 0.85; }
+        .str-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* === DISCOVERY LIST SELECTION === */
+        .discovery-list-item {
+            transition: border-color 0.15s, background 0.15s;
+            position: relative;
+        }
+        .discovery-list-item.selected {
+            border-color: rgba(168,85,247,0.5) !important;
+            background: rgba(168,85,247,0.08) !important;
+        }
+        .discovery-list-item.skipped .discovery-select-cb { display: none; }
+
+        /* === EVIDENCE SOURCE BADGES === */
+        .evidence-item {
+            padding: 10px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 6px;
+        }
+        .evidence-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .evidence-header a {
+            color: var(--accent);
+            font-size: 12px;
+            text-decoration: none;
+            line-height: 1.3;
+        }
+        .evidence-header a:hover { text-decoration: underline; }
+        .evidence-snippet {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .evidence-source-badge {
+            font-size: 8px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            flex-shrink: 0;
+        }
+        .evidence-source-badge.web { background: rgba(59,130,246,0.15); color: var(--accent); }
+        .evidence-source-badge.news { background: rgba(168,85,247,0.15); color: var(--purple); }
+        .evidence-source-badge.reddit { background: rgba(249,115,22,0.15); color: #f97316; }
+
+        /* === LENS SELECT === */
+        .lens-select {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-size: 11px;
+            padding: 5px 8px;
+            border-radius: 5px;
+            outline: none;
+            cursor: pointer;
+        }
+        .lens-select:focus { border-color: var(--purple); }
+
+        /* === DETAIL SEND-TO-RESEARCH === */
+        .detail-send-to-research {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 16px;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid rgba(168,85,247,0.2);
+            border-radius: 8px;
+        }
+        .detail-send-to-research .str-btn { flex-shrink: 0; }
+        .detail-send-to-research .lens-select { flex: 1; min-width: 0; }
+
+        /* === WHY INCLUDED BOX === */
+        .why-included-box {
+            font-size: 12px;
+            color: var(--text-secondary);
+            padding: 10px 12px;
+            background: rgba(168,85,247,0.06);
+            border: 1px solid rgba(168,85,247,0.15);
+            border-radius: 8px;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+        .why-included-box strong { color: var(--purple); font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; display: block; margin-bottom: 4px; }
     </style>
 </head>
 <body>
@@ -3693,13 +4029,13 @@
     <!-- MODULE SIDEBAR -->
     <div class="module-sidebar">
         <div class="module-logo">SV</div>
-        <div class="module-item active" data-module="research" onclick="switchModule('research')">
-            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <span>Research</span>
-        </div>
         <div class="module-item" data-module="prospecting" onclick="switchModule('prospecting')">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Discover</span>
+        </div>
+        <div class="module-item active" data-module="research" onclick="switchModule('research')">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
-            <span>Prospects</span>
+            <span>Research</span>
         </div>
     </div>
 
@@ -3826,19 +4162,20 @@
         <!-- PANE 1: Search History Sidebar -->
         <div class="prospect-sidebar" id="prospect-sidebar">
             <div class="prospect-sidebar-header">
-                <div class="prospect-sidebar-title">Prospecting</div>
+                <div class="prospect-sidebar-title">Discover</div>
             </div>
             <div class="prospect-header">
                 <div class="prospect-trigger">
                     <div class="niche-input-wrap">
-                        <input type="text" id="prospect-niche-input" placeholder="Enter a niche to prospect..." onkeydown="if(event.key==='Enter')runProspectPipeline()">
                         <button class="niche-builder-trigger" onclick="openNicheBuilder()" title="Niche Builder">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                            <span style="font-size:10px">Niche Builder</span>
                         </button>
+                        <input type="text" id="prospect-niche-input" placeholder="Enter a niche to discover..." onkeydown="if(event.key==='Enter')runProspectPipeline()">
                     </div>
                     <div class="prospect-trigger-row">
                         <input type="number" class="prospect-topn" id="prospect-topn" value="10" min="3" max="20" title="Max companies">
-                        <button id="prospect-run-btn" onclick="runProspectPipeline()">Discover</button>
+                        <button id="prospect-run-btn" onclick="runProspectPipeline()">Search</button>
                     </div>
                 </div>
             </div>
@@ -3857,7 +4194,7 @@
                     <div class="pane-empty" id="pane-execution-empty">
                         <div class="icon">&#128640;</div>
                         <div>Run a discovery pipeline to see results here</div>
-                        <div class="subtitle">Enter a niche and click Discover to start.</div>
+                        <div class="subtitle">Enter a niche and click Search to start.</div>
                     </div>
                     <div class="pipeline-map" id="pipeline-map" style="display:none"></div>
                 </div>
@@ -3874,7 +4211,7 @@
                     <div class="pane-empty" id="pane-summary-empty">
                         <div class="icon">&#128202;</div>
                         <div>Select a campaign or run a pipeline</div>
-                        <div class="subtitle">Results will appear here as companies are scored.</div>
+                        <div class="subtitle">Results will appear here as companies are discovered.</div>
                     </div>
                     <div id="pane-summary-content" style="display:none"></div>
                 </div>
@@ -4087,7 +4424,7 @@ function switchModule(mod) {
     document.querySelectorAll('.workspace').forEach(w => w.classList.remove('active'));
     document.querySelector(`.module-item[data-module="${mod}"]`).classList.add('active');
     document.getElementById(`workspace-${mod}`).classList.add('active');
-    if (mod === 'prospecting') { loadCampaigns(); }
+    if (mod === 'prospecting') { loadCampaigns(); _loadLenses(); }
 }
 
 // ===================== CHAT LIST =====================
@@ -4444,12 +4781,21 @@ async function openDossier(companyName) {
             return;
         }
 
+        // Pre-fetch available lenses for pill bar
+        if (!_cachedLenses) {
+            try {
+                const lensResp = await fetch('/api/lenses');
+                if (lensResp.ok) _cachedLenses = await lensResp.json();
+            } catch {}
+        }
+
         const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}`);
         if (!resp.ok) return;
         const dossier = await resp.json();
         activeDossierName = companyName;
         openCompanies.add(companyName);
         currentReportFilename = null;
+        _activeDashboardLens = null;
         const dLabel = dossier.briefing_json ? 'intelligence briefing' : 'dossier';
         setContext(companyName, dossier.briefing_json ? 'briefing' : 'dossier', dLabel);
         renderCompanyList();
@@ -4481,7 +4827,7 @@ async function deleteOrphanAnalysis(analysisId, event) {
     try {
         const resp = await fetch(`/api/analyses/${analysisId}`, {method: 'DELETE'});
         if (resp.ok) {
-            loadCompanySidebar();
+            refreshSidebar();
         }
     } catch (e) { console.error('Failed to delete orphan analysis:', e); }
 }
@@ -4543,6 +4889,7 @@ let _sourceAnalysisExists = {};
 // Global store for active briefing data — used by dashboard expand mode
 let _activeBriefingData = null;
 let _activeDossierData = null;
+let _activeDashboardLens = null; // lens override for expanded dashboard view
 
 const _VALID_SOURCES = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis'];
 
@@ -4822,6 +5169,364 @@ function _briefingSection(title, body, open) {
     </div>`;
 }
 
+// ---- Dynamic scoring section (lens-parameterized) ----
+
+function _renderScoringSection(scoring, isFullBriefing) {
+    // Extract lens metadata with legacy fallbacks
+    const lensInfo = scoring._lens || {};
+    const scoringLabel = lensInfo.score_label || 'Digital Maturity Score';
+    const dims = scoring._dimensions || [
+        {key:'tech_modernity', label:'Tech Modernity', weight:0.30},
+        {key:'data_analytics', label:'Data & Analytics', weight:0.25},
+        {key:'ai_readiness', label:'AI Readiness', weight:0.25},
+        {key:'organizational_readiness', label:'Org Readiness', weight:0.20},
+    ];
+    const lensLabels = scoring._lens_labels || [
+        {min_score:80, label:'Digital Vanguard'},
+        {min_score:60, label:'Digital Contender'},
+        {min_score:40, label:'Digitally Exposed'},
+        {min_score:20, label:'Digital Laggard'},
+        {min_score:0, label:'Digital Liability'},
+    ];
+
+    const score = scoring.overall_score || 0;
+    const label = scoring.overall_label || '';
+    const subs = scoring.sub_scores || {};
+
+    let html = '';
+    html += renderScoreRing(score, 120);
+    html += `<div class="maturity-label score-${_scoreColorClass(score)}">${escHtml(label)} <span class="score-info-icon" onclick="event.stopPropagation();toggleScoreTooltip(this)">&#9432;</span></div>
+    <div class="score-tooltip" style="display:none">
+        <div class="score-tooltip-title">${escHtml(scoringLabel)}</div>
+        <div class="score-tooltip-body">
+            ${isFullBriefing ? 'Scores this company across weighted dimensions:' : 'Lens scoring overlay — scores from a separate lens evaluation:'}
+            <div class="score-tooltip-dims">`;
+    dims.forEach(d => {
+        const wPct = Math.round((d.weight || 0) * 100);
+        html += `<div><strong>${escHtml(d.label)} (${wPct}%)</strong></div>`;
+    });
+    html += `</div><div class="score-tooltip-tiers">`;
+    lensLabels.forEach(tier => {
+        const cc = _scoreColorClass(tier.min_score);
+        html += `<span class="score-${cc}">&#9679;</span> ${tier.min_score}+ ${escHtml(tier.label)} &nbsp;`;
+    });
+    html += `</div></div></div>`;
+
+    if (!isFullBriefing) {
+        html += `<div style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:4px;font-style:italic">Scoring overlay — briefing content reflects a different lens</div>`;
+    }
+
+    // Sub-scores
+    dims.forEach(d => {
+        const sub = subs[d.key] || {};
+        html += renderSubScore(d.label, sub.score || 0, sub);
+    });
+
+    // Sub-score rationales with source badges
+    html += `<div style="margin-top:8px">`;
+    dims.forEach(d => {
+        const sub = subs[d.key] || {};
+        if (sub.rationale) {
+            const sources = _extractSources(sub.rationale);
+            const badges = sources.map(s =>
+                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
+            ).join(' ');
+            html += `<div style="margin-bottom:6px"><span style="font-size:15px;font-weight:600;color:var(--text-secondary)">${escHtml(d.label)}:</span> <span style="font-size:15px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
+        }
+    });
+    html += `</div>`;
+
+    return html;
+}
+
+// ---- Extracted render functions for lens-parameterized sections ----
+
+function _renderOpportunitiesSection(opps) {
+    if (!opps || !opps.length) return '';
+    let oppHtml = '';
+    opps.forEach(opp => {
+        const pClass = `opp-priority-${opp.priority || 'medium'}`;
+        const explicitSources = opp.source_analyses || [];
+        const inlineSources = _extractSources((opp.evidence || '') + ' ' + (opp.detail || ''));
+        const allSources = [...new Set([...explicitSources, ...inlineSources])];
+        const sourceBadges = allSources.map(s =>
+            `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
+        ).join(' ');
+        oppHtml += `<div class="opp-card" onclick="this.classList.toggle('expanded')">
+            <div class="opp-card-header">
+                <span class="opp-service">${escHtml(opp.service || '')}</span>
+                <span class="opp-priority ${pClass}">${escHtml(opp.priority || '')}</span>
+            </div>
+            <div class="opp-evidence">${_renderCitedText(opp.evidence || '')}</div>
+            <div class="opp-meta">
+                <span>${escHtml(opp.estimated_scope || '')}</span>
+            </div>
+            ${opp.why_now ? `<div class="opp-why-now">${_renderCitedText(opp.why_now)}</div>` : ''}
+            <div class="opp-detail">
+                ${opp.detail ? `<div class="opp-detail-text">${_renderCitedText(opp.detail)}</div>` : ''}
+                ${allSources.length ? `<div class="opp-source-links"><span style="font-size:14px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
+            </div>
+        </div>`;
+    });
+    return `<div style="padding:0 12px 12px">
+        <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Consulting Opportunities <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('scope-methodology')">&#9432;</span></div>
+        <div class="methodology-tip" id="scope-methodology">
+            <div class="methodology-tip-title">Scope Estimation Methodology</div>
+            Estimates based on typical Big 4 / MBB engagement structures (blended daily rate ~$3-5K/consultant):
+            <div class="methodology-tip-row"><strong>$500K-1M, 3-6 mo</strong> — Small team (2-3). Assessments, strategy design, POC, governance frameworks.</div>
+            <div class="methodology-tip-row"><strong>$1-3M, 6-12 mo</strong> — Medium team (4-6). Platform implementation, org redesign, single workstream.</div>
+            <div class="methodology-tip-row"><strong>$2-5M, 9-18 mo</strong> — Large team (6-10). Multi-workstream programs, enterprise rollout. $10B+ revenue companies.</div>
+            <div class="methodology-tip-row"><strong>$5M+, 12-24 mo</strong> — Full transformation (10+). Company-wide digital transformation. $50B+ companies only.</div>
+            <div class="methodology-tip-note">Scaled to company size using revenue, headcount, and hiring velocity. Conservative estimates preferred.</div>
+        </div>
+        ${oppHtml}</div>`;
+}
+
+function _renderRiskSection(risks) {
+    if (!risks || !risks.length) return '';
+    let riskHtml = '';
+    risks.forEach(r => {
+        const sev = r.severity || 'medium';
+        riskHtml += `<div class="risk-card risk-${sev}">
+            <div class="risk-category">${escHtml(r.category || '')} - ${escHtml(sev)}</div>
+            <div class="risk-desc">${_renderCitedText(r.description || '')}</div>
+        </div>`;
+    });
+    return _briefingSection('Risk Profile', riskHtml, false);
+}
+
+function _renderAssessmentSection(text) {
+    if (!text) return '';
+    return _briefingSection('Strategic Assessment', `<div style="font-size:14px;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap">${_renderCitedText(text)}</div>`, false);
+}
+
+// ---- Lens section swapping ----
+
+function _enrichScoringFromLensData(lensScoreData) {
+    // Build scoring object from lens_scores data, enriching with lens config metadata
+    const scoring = lensScoreData.score_data || lensScoreData;
+    const lc = lensScoreData.lens_config || {};
+    if (!scoring._lens_labels && lc.labels && lc.labels.length) scoring._lens_labels = lc.labels;
+    if (!scoring._lens) scoring._lens = {};
+    if (!scoring._lens.score_label && lc.score_label) scoring._lens.score_label = lc.score_label;
+    if (!scoring._lens.name && lensScoreData.lens_name) scoring._lens.name = lensScoreData.lens_name;
+    if (!scoring._dimensions && lc.dimensions) {
+        scoring._dimensions = lc.dimensions.map(d => ({key: d.key, label: d.label, weight: d.weight}));
+    }
+    return scoring;
+}
+
+function _swapAllLensSections(lensScoreData, briefingData, isFullBriefing) {
+    // 1. Swap scoring
+    const scoringContainer = document.getElementById('scoring-swap-area');
+    if (scoringContainer) {
+        const scoring = isFullBriefing ? (briefingData.scoring || briefingData.digital_maturity || {}) : _enrichScoringFromLensData(lensScoreData);
+        scoringContainer.innerHTML = _renderScoringSection(scoring, isFullBriefing);
+    }
+
+    // 2. Swap opportunities
+    const oppsContainer = document.getElementById('opps-swap-area');
+    if (oppsContainer) {
+        if (isFullBriefing && briefingData) {
+            oppsContainer.innerHTML = _renderOpportunitiesSection(briefingData.engagement_opportunities || []);
+        } else {
+            const sd = lensScoreData.score_data || lensScoreData;
+            const opps = sd.engagement_opportunities || [];
+            if (opps.length) {
+                oppsContainer.innerHTML = _renderOpportunitiesSection(opps);
+            } else {
+                const lensId = lensScoreData.lens_id || (sd._lens || {}).id;
+                const companyName = (_activeDossierData || {}).company_name || '';
+                oppsContainer.innerHTML = `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">
+                    Opportunities not available for this score version.
+                    <span style="color:var(--accent);cursor:pointer" onclick="_scoreLensViaPill('${escHtml(companyName)}', ${lensId})">Rescore to generate.</span>
+                </div>`;
+            }
+        }
+    }
+
+    // 3. Swap risk profile
+    const riskContainer = document.getElementById('risk-swap-area');
+    if (riskContainer) {
+        if (isFullBriefing && briefingData) {
+            riskContainer.innerHTML = _renderRiskSection(briefingData.risk_profile || []);
+        } else {
+            const sd = lensScoreData.score_data || lensScoreData;
+            const risks = sd.risk_profile || [];
+            if (risks.length) {
+                riskContainer.innerHTML = _renderRiskSection(risks);
+            } else {
+                riskContainer.innerHTML = '';
+            }
+        }
+    }
+
+    // 4. Swap strategic assessment
+    const assessContainer = document.getElementById('assessment-swap-area');
+    if (assessContainer) {
+        if (isFullBriefing && briefingData) {
+            assessContainer.innerHTML = _renderAssessmentSection(briefingData.strategic_assessment || '');
+        } else {
+            const sd = lensScoreData.score_data || lensScoreData;
+            const text = sd.strategic_assessment || '';
+            if (text) {
+                assessContainer.innerHTML = _renderAssessmentSection(text);
+            } else {
+                assessContainer.innerHTML = '';
+            }
+        }
+    }
+
+    // 5. Update active pill
+    document.querySelectorAll('#lens-pill-bar .lens-pill').forEach(p => p.classList.remove('active'));
+    if (isFullBriefing) {
+        const bp = document.getElementById('briefing-lens-pill');
+        if (bp) bp.classList.add('active');
+    } else {
+        const lensId = lensScoreData.lens_id || (lensScoreData.score_data || lensScoreData)._lens?.id;
+        const tp = document.getElementById(`lens-pill-${lensId}`);
+        if (tp) tp.classList.add('active');
+    }
+}
+
+// ---- Pill click handlers ----
+
+async function handleLensPillClick(lensId, isFullBriefing) {
+    if (isFullBriefing) {
+        _swapAllLensSections(null, _activeBriefingData, true);
+        return;
+    }
+    const scored = (_activeDossierData.lens_scores || []).find(s => s.lens_id === lensId);
+    if (scored) {
+        _swapAllLensSections(scored, null, false);
+    } else {
+        await _scoreLensViaPill((_activeDossierData || {}).company_name, lensId);
+    }
+}
+
+async function _scoreLensViaPill(companyName, lensId) {
+    const pill = document.getElementById(`lens-pill-${lensId}`);
+    if (!pill || !companyName) return;
+
+    pill.classList.add('lens-pill-loading');
+    const origInner = pill.innerHTML;
+
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/score-lens`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lens_id: lensId })
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showToast(err.error || 'Scoring failed', 'error');
+            pill.classList.remove('lens-pill-loading');
+            pill.innerHTML = origInner;
+            return;
+        }
+
+        const data = await resp.json();
+        const scoreData = data.score;
+
+        // Update pill to scored state
+        pill.classList.remove('lens-pill-loading', 'lens-pill-unscored');
+        pill.style.borderStyle = '';
+        pill.style.opacity = '';
+        const sc = scoreData.overall_score || 0;
+        const cc = _scoreColorClass(sc);
+        const pillScore = pill.querySelector('.lens-pill-score');
+        if (pillScore) {
+            pillScore.textContent = sc;
+            pillScore.className = `lens-pill-score score-${cc}`;
+            pillScore.style.color = '';
+        }
+
+        // Update dossier cache
+        if (!_activeDossierData.lens_scores) _activeDossierData.lens_scores = [];
+        const lensInfo = (_cachedLenses || []).find(l => l.id === lensId);
+        const lsEntry = {
+            lens_id: lensId,
+            lens_name: lensInfo ? lensInfo.name : 'Lens',
+            overall_score: sc,
+            overall_label: scoreData.overall_label,
+            score_data: scoreData,
+            lens_config: lensInfo ? (lensInfo.config || lensInfo) : {},
+        };
+        _activeDossierData.lens_scores = _activeDossierData.lens_scores.filter(s => s.lens_id !== lensId);
+        _activeDossierData.lens_scores.push(lsEntry);
+
+        // Swap to the new lens view
+        _swapAllLensSections(lsEntry, null, false);
+    } catch (e) {
+        showToast('Scoring failed: ' + e.message, 'error');
+        pill.classList.remove('lens-pill-loading');
+        pill.innerHTML = origInner;
+    }
+}
+
+// ---- Dashboard (expanded) lens pill handler ----
+
+async function handleDashLensPillClick(lensId, isFullBriefing) {
+    if (isFullBriefing) {
+        _activeDashboardLens = null;
+    } else {
+        const scored = (_activeDossierData.lens_scores || []).find(s => s.lens_id === lensId);
+        if (scored) {
+            _activeDashboardLens = scored;
+        } else {
+            // Score the unscored lens, then rebuild
+            const companyName = (_activeDossierData || {}).company_name;
+            if (!companyName) return;
+            // Reuse the existing score-via-pill logic but rebuild dashboard after
+            await _scoreLensViaDashPill(companyName, lensId);
+            return;
+        }
+    }
+    // Rebuild the dashboard with the new active lens
+    const content = document.getElementById('right-content');
+    if (content) _buildBriefingDashboard(content);
+}
+
+async function _scoreLensViaDashPill(companyName, lensId) {
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/score-lens`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lens_id: lensId })
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showToast(err.error || 'Scoring failed', 'error');
+            return;
+        }
+        const data = await resp.json();
+        const scoreData = data.score;
+        const sc = scoreData.overall_score || 0;
+
+        // Update dossier cache
+        if (!_activeDossierData.lens_scores) _activeDossierData.lens_scores = [];
+        const lensInfo = (_cachedLenses || []).find(l => l.id === lensId);
+        const lsEntry = {
+            lens_id: lensId,
+            lens_name: lensInfo ? lensInfo.name : 'Lens',
+            overall_score: sc,
+            overall_label: scoreData.overall_label,
+            score_data: scoreData,
+            lens_config: lensInfo ? (lensInfo.config || lensInfo) : {},
+        };
+        _activeDossierData.lens_scores = _activeDossierData.lens_scores.filter(s => s.lens_id !== lensId);
+        _activeDossierData.lens_scores.push(lsEntry);
+
+        // Set as active and rebuild
+        _activeDashboardLens = lsEntry;
+        const content = document.getElementById('right-content');
+        if (content) _buildBriefingDashboard(content);
+    } catch (e) {
+        showToast('Scoring failed: ' + e.message, 'error');
+    }
+}
+
 // Render briefing HTML into a target element (for split panels).
 // Does NOT set global state or update header.
 function _renderBriefingInto(dossier, b, targetEl) {
@@ -4890,37 +5595,52 @@ function showBriefing(dossier, b, _targetEl) {
     }
 
     html += `<div class="briefing-actions">
-        <button class="briefing-btn briefing-btn-primary" onclick="generateBriefing('${escHtml(dossier.company_name)}')">Refresh Briefing</button>
+        <button class="briefing-btn briefing-btn-primary" onclick="generateBriefing('${escHtml(dossier.company_name)}')">Generate Briefing</button>
     </div></div>`;
 
-    // --- Digital Capability Score (always expanded) ---
-    const dm = b.digital_maturity || {};
-    const score = dm.overall_score || 0;
-    const label = dm.overall_label || '';
-    const subs = dm.sub_scores || {};
+    // --- Scoring Section (lens-parameterized) ---
+    const scoring = b.scoring || b.digital_maturity || {};
+    const briefingLensId = (scoring._lens || {}).id;
 
     html += `<div style="padding:16px 12px">`;
-    html += renderScoreRing(score, 120);
-    html += `<div class="maturity-label score-${_scoreColorClass(score)}">${escHtml(label)} <span class="score-info-icon" onclick="event.stopPropagation();toggleScoreTooltip(this)">&#9432;</span></div>
-    <div class="score-tooltip" style="display:none">
-        <div class="score-tooltip-title">Digital Maturity Score</div>
-        <div class="score-tooltip-body">
-            Measures a company's actual digital and technological capability across four dimensions, weighted by strategic importance:
-            <div class="score-tooltip-dims">
-                <div><strong>Tech Modernity (30%)</strong> — Engineering stack, cloud infrastructure, CI/CD practices, modern frameworks</div>
-                <div><strong>Data & Analytics (25%)</strong> — Data platform investment, analytics tooling, experimentation culture</div>
-                <div><strong>AI Readiness (25%)</strong> — AI/ML hiring, patents, product integration, dedicated AI roles</div>
-                <div><strong>Org Readiness (20%)</strong> — Hiring momentum, engineering ratio, strategic investment signals, sentiment</div>
-            </div>
-            <div class="score-tooltip-tiers">
-                <span class="score-vanguard">&#9679;</span> 80-100 Digital Vanguard &nbsp;
-                <span class="score-contender">&#9679;</span> 60-79 Digital Contender &nbsp;
-                <span class="score-exposed">&#9679;</span> 40-59 Digitally Exposed &nbsp;
-                <span class="score-laggard">&#9679;</span> 20-39 Digital Laggard &nbsp;
-                <span class="score-liability">&#9679;</span> 0-19 Digital Liability
-            </div>
-        </div>
+
+    // Lens pill bar — briefing lens + all other lenses (scored & unscored)
+    const lensScores = dossier.lens_scores || [];
+    const allLenses = _cachedLenses || [];
+    const scoredMap = {};
+    lensScores.forEach(ls => { scoredMap[ls.lens_id] = ls; });
+
+    html += `<div id="lens-pill-bar" class="lens-bar" style="margin-bottom:12px">`;
+    // Briefing's own lens pill (always first, marked as active)
+    const briefingLensName = (scoring._lens || {}).name || 'Briefing Score';
+    const briefingScore = scoring.overall_score || 0;
+    const bcc = _scoreColorClass(briefingScore);
+    html += `<div class="lens-pill active" id="briefing-lens-pill" onclick="handleLensPillClick(null, true)">
+        <span class="lens-pill-score score-${bcc}">${briefingScore}</span>
+        <span class="lens-pill-name">${escHtml(briefingLensName)}</span>
+        <span style="font-size:9px;color:var(--green);margin-left:4px">Full</span>
     </div>`;
+    // All other lenses — scored or unscored
+    allLenses.forEach(lens => {
+        if (lens.id === briefingLensId) return; // skip briefing lens (already shown)
+        const scored = scoredMap[lens.id];
+        if (scored) {
+            const lsScore = scored.overall_score || 0;
+            const lcc = _scoreColorClass(lsScore);
+            html += `<div class="lens-pill" id="lens-pill-${lens.id}" onclick="handleLensPillClick(${lens.id}, false)">
+                <span class="lens-pill-score score-${lcc}">${lsScore}</span>
+                <span class="lens-pill-name">${escHtml(lens.name)}</span>
+            </div>`;
+        } else {
+            html += `<div class="lens-pill lens-pill-unscored" id="lens-pill-${lens.id}" onclick="handleLensPillClick(${lens.id}, false)">
+                <span class="lens-pill-score" style="color:var(--text-muted)">--</span>
+                <span class="lens-pill-name">${escHtml(lens.name)}</span>
+            </div>`;
+        }
+    });
+    // "+ New Lens" pseudo-pill
+    html += `<div class="lens-pill" style="border-style:dashed;color:var(--accent);font-size:11px" onclick="openLensBuilder()">+ New Lens</div>`;
+    html += `</div>`;
 
     // Data confidence indicator
     const conf = b.data_confidence || {};
@@ -4936,25 +5656,9 @@ function showBriefing(dossier, b, _targetEl) {
         html += `</div>`;
     }
 
-    // Sub-scores
-    const subLabels = { tech_modernity: 'Tech Modernity', data_analytics: 'Data & Analytics', ai_readiness: 'AI Readiness', organizational_readiness: 'Org Readiness' };
-    Object.entries(subLabels).forEach(([key, lbl]) => {
-        const sub = subs[key] || {};
-        html += renderSubScore(lbl, sub.score || 0, sub);
-    });
-
-    // Sub-score rationales with source badges at end
-    html += `<div style="margin-top:8px">`;
-    Object.entries(subLabels).forEach(([key, lbl]) => {
-        const sub = subs[key] || {};
-        if (sub.rationale) {
-            const sources = _extractSources(sub.rationale);
-            const badges = sources.map(s =>
-                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
-            ).join(' ');
-            html += `<div style="margin-bottom:6px"><span style="font-size:15px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:15px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
-        }
-    });
+    // Swappable scoring area (donut ring, sub-scores, rationales)
+    html += `<div id="scoring-swap-area">`;
+    html += _renderScoringSection(scoring, true);
     html += `</div></div>`;
 
     // --- Hiring Trajectory (if available) ---
@@ -4989,48 +5693,10 @@ function showBriefing(dossier, b, _targetEl) {
         html += _briefingSection('Hiring Trajectory', trajHtml, true);
     }
 
-    // --- Consulting Opportunities (always expanded, cards expandable) ---
-    const opps = b.engagement_opportunities || [];
-    if (opps.length) {
-        let oppHtml = '';
-        opps.forEach(opp => {
-            const pClass = `opp-priority-${opp.priority || 'medium'}`;
-            // Merge explicit source_analyses with any inline [source] tags
-            const explicitSources = opp.source_analyses || [];
-            const inlineSources = _extractSources((opp.evidence || '') + ' ' + (opp.detail || ''));
-            const allSources = [...new Set([...explicitSources, ...inlineSources])];
-            const sourceBadges = allSources.map(s =>
-                `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
-            ).join(' ');
-            oppHtml += `<div class="opp-card" onclick="this.classList.toggle('expanded')">
-                <div class="opp-card-header">
-                    <span class="opp-service">${escHtml(opp.service || '')}</span>
-                    <span class="opp-priority ${pClass}">${escHtml(opp.priority || '')}</span>
-                </div>
-                <div class="opp-evidence">${_renderCitedText(opp.evidence || '')}</div>
-                <div class="opp-meta">
-                    <span>${escHtml(opp.estimated_scope || '')}</span>
-                </div>
-                ${opp.why_now ? `<div class="opp-why-now">${_renderCitedText(opp.why_now)}</div>` : ''}
-                <div class="opp-detail">
-                    ${opp.detail ? `<div class="opp-detail-text">${_renderCitedText(opp.detail)}</div>` : ''}
-                    ${allSources.length ? `<div class="opp-source-links"><span style="font-size:14px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
-                </div>
-            </div>`;
-        });
-        html += `<div style="padding:0 12px 12px">
-            <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Consulting Opportunities <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('scope-methodology')">&#9432;</span></div>
-            <div class="methodology-tip" id="scope-methodology">
-                <div class="methodology-tip-title">Scope Estimation Methodology</div>
-                Estimates based on typical Big 4 / MBB engagement structures (blended daily rate ~$3-5K/consultant):
-                <div class="methodology-tip-row"><strong>$500K-1M, 3-6 mo</strong> — Small team (2-3). Assessments, strategy design, POC, governance frameworks.</div>
-                <div class="methodology-tip-row"><strong>$1-3M, 6-12 mo</strong> — Medium team (4-6). Platform implementation, org redesign, single workstream.</div>
-                <div class="methodology-tip-row"><strong>$2-5M, 9-18 mo</strong> — Large team (6-10). Multi-workstream programs, enterprise rollout. $10B+ revenue companies.</div>
-                <div class="methodology-tip-row"><strong>$5M+, 12-24 mo</strong> — Full transformation (10+). Company-wide digital transformation. $50B+ companies only.</div>
-                <div class="methodology-tip-note">Scaled to company size using revenue, headcount, and hiring velocity. Conservative estimates preferred.</div>
-            </div>
-            ${oppHtml}</div>`;
-    }
+    // --- Consulting Opportunities (lens-parameterized, swappable) ---
+    html += `<div id="opps-swap-area">`;
+    html += _renderOpportunitiesSection(b.engagement_opportunities || []);
+    html += `</div>`;
 
     // --- Budget & Appetite ---
     const budget = b.budget_signals || {};
@@ -5126,24 +5792,15 @@ function showBriefing(dossier, b, _targetEl) {
         html += _briefingSection('Talent & Culture', talHtml, false);
     }
 
-    // --- Risk Profile ---
-    const risks = b.risk_profile || [];
-    if (risks.length) {
-        let riskHtml = '';
-        risks.forEach(r => {
-            const sev = r.severity || 'medium';
-            riskHtml += `<div class="risk-card risk-${sev}">
-                <div class="risk-category">${escHtml(r.category || '')} - ${escHtml(sev)}</div>
-                <div class="risk-desc">${_renderCitedText(r.description || '')}</div>
-            </div>`;
-        });
-        html += _briefingSection('Risk Profile', riskHtml, false);
-    }
+    // --- Risk Profile (lens-parameterized, swappable) ---
+    html += `<div id="risk-swap-area">`;
+    html += _renderRiskSection(b.risk_profile || []);
+    html += `</div>`;
 
-    // --- Strategic Assessment ---
-    if (b.strategic_assessment) {
-        html += _briefingSection('Strategic Assessment', `<div style="font-size:14px;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap">${_renderCitedText(b.strategic_assessment)}</div>`, false);
-    }
+    // --- Strategic Assessment (lens-parameterized, swappable) ---
+    html += `<div id="assessment-swap-area">`;
+    html += _renderAssessmentSection(b.strategic_assessment || '');
+    html += `</div>`;
 
     // --- Intelligence Timeline (from dossier events) ---
     const changeEvents = (dossier.events || []).filter(e => e.event_type === 'change_detected');
@@ -5241,28 +5898,304 @@ function showBriefing(dossier, b, _targetEl) {
     }
 }
 
+// ========== LENS SCORES ==========
+
+let _cachedLenses = null;
+let _activeLensDetail = null;
+
+function _buildLensScoresSection(dossier) {
+    const scores = dossier.lens_scores || [];
+    if (!scores.length) return '';
+
+    let body = '<div class="lens-bar">';
+    scores.forEach((ls, idx) => {
+        const s = ls.overall_score || 0;
+        const cc = _scoreColorClass(s);
+        body += `<div class="lens-pill${idx === 0 ? ' active' : ''}" onclick="expandLensDetail('${escHtml(dossier.company_name)}', ${idx})" data-lens-idx="${idx}">
+            <span class="lens-pill-score score-${cc}">${s}</span>
+            <span class="lens-pill-name">${escHtml(ls.lens_name)}</span>
+        </div>`;
+    });
+    body += '</div>';
+
+    // Auto-expand first lens detail
+    if (scores.length) {
+        body += `<div id="lens-detail-container">${_renderLensDetail(scores[0])}</div>`;
+    }
+
+    return _briefingSection('Lens Scores', body, true);
+}
+
+function _renderLensDetail(ls) {
+    const scoreData = ls.score_data || {};
+    const config = ls.lens_config || {};
+    const dims = config.dimensions || [];
+    const s = scoreData.overall_score || ls.overall_score || 0;
+    const label = scoreData.overall_label || ls.overall_label || '';
+    const cc = _scoreColorClass(s);
+    const scoreLabel = config.score_label || 'Score';
+
+    let html = `<div class="lens-detail-card">
+        <div class="lens-detail-header">
+            ${renderScoreRing(s, 80)}
+            <div class="lens-detail-meta">
+                <div class="lens-detail-label">${escHtml(ls.lens_name)}</div>
+                <div class="lens-detail-tier score-${cc}">${escHtml(label)}</div>
+                ${ls.scored_at ? `<div class="lens-detail-scored">Scored ${_formatLensDate(ls.scored_at)}</div>` : ''}
+            </div>
+        </div>
+        <div class="lens-detail-dims">`;
+
+    // Dimension cards
+    dims.forEach(dim => {
+        const sub = (scoreData.sub_scores || {})[dim.key] || {};
+        const ds = sub.score || 0;
+        const color = _dimColorHex(ds);
+        const wPct = Math.round((dim.weight || 0) * 100) + '%';
+        const rationale = sub.rationale || 'No data available';
+        const signals = (sub.signals || []);
+
+        let signalHtml = signals.map(sig => {
+            if (typeof sig === 'string') return `<span class="icp-signal-tag">${escHtml(sig)}</span>`;
+            const text = sig.text || '';
+            const url = sig.url;
+            if (url) return `<a class="icp-signal-tag" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(text)}</a>`;
+            return `<span class="icp-signal-tag">${escHtml(text)}</span>`;
+        }).join('');
+
+        html += `<div class="icp-dim-card" onclick="if(!event.target.closest('a')){this.classList.toggle('expanded')}">
+            <div class="icp-dim-card-header">
+                <span class="dim-chevron">&#9654;</span>
+                <span class="icp-dim-name">
+                    ${escHtml(dim.label)}
+                    <span class="dim-weight">(${wPct})</span>
+                </span>
+                <span class="icp-dim-score-pill" style="color:${color}">${ds}</span>
+            </div>
+            <div class="icp-dim-bar"><div class="icp-dim-fill" style="width:${ds}%;background:${color}"></div></div>
+            <div class="icp-dim-card-body">
+                <div class="icp-dim-rationale">${escHtml(rationale)}</div>
+                ${signalHtml ? `<div class="icp-dim-signals">${signalHtml}</div>` : ''}
+            </div>
+        </div>`;
+    });
+
+    html += '</div>';
+
+    // Recommended angle
+    if (scoreData.recommended_angle) {
+        html += `<div class="lens-detail-footer">
+            <div class="lens-footer-label">Recommended Angle</div>
+            <div class="lens-footer-text">${escHtml(scoreData.recommended_angle)}</div>
+        </div>`;
+    }
+
+    // Key risks
+    if (scoreData.key_risks && scoreData.key_risks.length) {
+        html += `<div class="lens-detail-footer" style="border-top:none;padding-top:0">
+            <div class="lens-footer-label">Key Risks</div>
+            <ul class="lens-risks-list">${scoreData.key_risks.map(r => `<li>${escHtml(r)}</li>`).join('')}</ul>
+        </div>`;
+    }
+
+    html += '</div>';
+    return html;
+}
+
+function _dimColorHex(score) {
+    if (score >= 80) return '#22c55e';
+    if (score >= 60) return '#3b82f6';
+    if (score >= 40) return '#f59e0b';
+    return '#ef4444';
+}
+
+function _formatLensDate(dateStr) {
+    try {
+        if (!dateStr.includes('T') && dateStr.includes(' ')) dateStr = dateStr.replace(' ', 'T');
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return dateStr;
+        const now = new Date();
+        const days = Math.floor((now - d) / (1000 * 60 * 60 * 24));
+        if (days === 0) return 'today';
+        if (days === 1) return 'yesterday';
+        if (days < 7) return `${days}d ago`;
+        return d.toLocaleDateString();
+    } catch { return dateStr; }
+}
+
+function expandLensDetail(companyName, idx) {
+    // Find the active dossier's lens scores
+    const dossier = _activeDossierData;
+    if (!dossier || !dossier.lens_scores) return;
+    const scores = dossier.lens_scores;
+    if (idx >= scores.length) return;
+
+    // Update active pill
+    document.querySelectorAll('.lens-pill').forEach((p, i) => {
+        p.classList.toggle('active', i === idx);
+    });
+
+    // Render detail
+    const container = document.getElementById('lens-detail-container');
+    if (container) {
+        container.innerHTML = _renderLensDetail(scores[idx]);
+    }
+}
+
+let _briefingInProgress = false;
 async function generateBriefing(companyName) {
-    const btn = event && event.target;
-    if (btn) { btn.disabled = true; btn.textContent = 'Generating...'; }
+    if (_briefingInProgress) return;
+    _briefingInProgress = true;
+
+    // Switch to target company's view first so "Generating..." shows on the right dossier
+    if (activeDossierName !== companyName) {
+        await openDossier(companyName);
+    }
+
+    // Disable all briefing buttons to prevent duplicate clicks
+    const allBtns = document.querySelectorAll('.briefing-btn-primary, .company-gen-briefing-btn');
+    const origTexts = [];
+    allBtns.forEach(b => { origTexts.push(b.textContent); b.disabled = true; b.textContent = 'Generating...'; });
+
+    const resetBtns = () => {
+        allBtns.forEach((b, i) => { b.disabled = false; b.textContent = origTexts[i] || 'Generate Briefing'; });
+        _briefingInProgress = false;
+    };
 
     try {
-        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/briefing`, { method: 'POST' });
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/briefing`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({}),
+        });
         const data = await resp.json();
         if (data.ok) {
-            // Reload companies data so star appears, then open the briefing
+            _briefingInProgress = false;
             await loadCompanies();
             await openDossier(companyName);
         } else {
             showToast(data.error || 'Briefing generation failed', 'error', 8000);
-            if (btn) { btn.disabled = false; btn.textContent = 'Refresh Briefing'; }
+            resetBtns();
         }
     } catch (e) {
         showToast('Error generating briefing: ' + e.message, 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Refresh Briefing'; }
+        resetBtns();
+    }
+}
+
+// ========== LENS BUILDER MODAL ==========
+
+function closeLensBuilder() {
+    const overlay = document.querySelector('.lens-builder-overlay');
+    if (overlay) {
+        if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
+        overlay.remove();
+    }
+}
+
+function openLensBuilder() {
+    document.querySelectorAll('.lens-dropdown').forEach(d => d.remove());
+    const existing = document.querySelector('.lens-builder-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'niche-builder-overlay lens-builder-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeLensBuilder(); });
+
+    overlay.innerHTML = `<div class="niche-builder-modal" style="max-width:520px">
+        <div class="niche-builder-header">
+            <h2>Create New Lens</h2>
+            <button class="icp-wizard-close" onclick="closeLensBuilder()">&times;</button>
+        </div>
+        <div class="niche-builder-body" id="lens-builder-body">
+            <div id="lens-builder-step1">
+                <div class="icp-field">
+                    <label>Lens Name</label>
+                    <input type="text" id="lb-name" placeholder="e.g. CTV Ad Sales Readiness, Cloud Migration Fit">
+                </div>
+                <div class="icp-field">
+                    <label>Description</label>
+                    <textarea id="lb-description" rows="3" placeholder="Describe what this lens evaluates. What dimensions matter? What makes a company score high vs low?" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px;resize:vertical"></textarea>
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:8px">The AI will generate scoring dimensions, weights, rubrics, and tier labels based on your description.</div>
+            </div>
+            <div id="lens-builder-step2" style="display:none">
+                <div id="lb-config-preview"></div>
+            </div>
+        </div>
+        <div class="niche-builder-footer" id="lens-builder-footer">
+            <button class="briefing-btn" onclick="closeLensBuilder()">Cancel</button>
+            <button class="briefing-btn briefing-btn-primary" id="lb-generate-btn" onclick="generateLensConfig()">Generate Lens</button>
+        </div>
+    </div>`;
+
+    document.body.appendChild(overlay);
+    const escHandler = (e) => { if (e.key === 'Escape') closeLensBuilder(); };
+    document.addEventListener('keydown', escHandler);
+    overlay._escHandler = escHandler;
+    setTimeout(() => document.getElementById('lb-name')?.focus(), 100);
+}
+
+async function generateLensConfig() {
+    const name = document.getElementById('lb-name')?.value.trim();
+    const description = document.getElementById('lb-description')?.value.trim();
+    if (!name || !description) { showToast('Please provide a name and description', 'error'); return; }
+
+    const btn = document.getElementById('lb-generate-btn');
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+
+    try {
+        const resp = await fetch('/api/lenses/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, description}),
+        });
+        const data = await resp.json();
+        if (!data.ok || !data.lens) {
+            showToast(data.error || 'Failed to generate lens', 'error');
+            btn.disabled = false; btn.textContent = 'Generate Lens';
+            return;
+        }
+
+        const lens = data.lens;
+        const config = lens.config;
+
+        document.getElementById('lens-builder-step1').style.display = 'none';
+        document.getElementById('lens-builder-step2').style.display = 'block';
+
+        let previewHtml = `<div style="margin-bottom:12px"><strong style="color:var(--text-primary)">${escHtml(lens.name)}</strong> <span style="color:var(--text-muted);font-size:12px">(${escHtml(lens.slug)})</span></div>`;
+        previewHtml += `<div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">${escHtml(config.score_label || 'Score')}</div>`;
+
+        previewHtml += `<div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Dimensions</div>`;
+        (config.dimensions || []).forEach(d => {
+            const wPct = Math.round((d.weight || 0) * 100);
+            previewHtml += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:13px">
+                <span style="color:var(--text-primary);min-width:140px">${escHtml(d.label)}</span>
+                <div class="sub-score-bar" style="flex:1;height:6px"><div class="sub-score-fill" style="width:${wPct}%;background:var(--accent)"></div></div>
+                <span style="color:var(--text-muted);font-size:12px;min-width:30px">${wPct}%</span>
+            </div>`;
+        });
+
+        previewHtml += `<div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-top:12px;margin-bottom:6px">Tier Labels</div>`;
+        (config.labels || []).forEach(tier => {
+            const cc = _scoreColorClass(tier.min_score);
+            previewHtml += `<span class="score-${cc}" style="margin-right:8px;font-size:12px">&#9679; ${tier.min_score}+ ${escHtml(tier.label)}</span>`;
+        });
+
+        document.getElementById('lb-config-preview').innerHTML = previewHtml;
+        document.getElementById('lens-builder-footer').innerHTML = `<button class="briefing-btn" onclick="closeLensBuilder()">Close</button>`;
+
+        _cachedLenses = null;
+        showToast(`Lens "${lens.name}" created successfully`, 'success');
+    } catch (e) {
+        showToast('Error generating lens: ' + e.message, 'error');
+        btn.disabled = false; btn.textContent = 'Generate Lens';
     }
 }
 
 function showLegacyDossierDetail(d) {
+    _activeDossierData = d;
     const rp = document.getElementById('right-pane');
     document.getElementById('right-company').textContent = d.company_name;
     document.getElementById('right-type').textContent = d.sector || 'Company Dossier';
@@ -5378,6 +6311,11 @@ function showLegacyDossierDetail(d) {
         });
         html += '</div>';
     }
+
+    // Lens scores (if any)
+    html += _buildLensScoresSection(d);
+
+    // Lens scoring now handled via pill bar in briefing view
 
     // Timeline events (non-change events)
     const otherEvents = (d.events || []).filter(e => e.event_type !== 'change_detected');
@@ -5865,22 +6803,23 @@ async function openReport(filename) {
         if (ownerCompany) openCompanies.add(ownerCompany.name);
 
         // Add breadcrumb if company is known
+        const typeLabel = displayReportType(meta.type);
         if (meta.company) {
             const breadcrumbHtml = `<div class="report-breadcrumb">
                 <span class="breadcrumb-company" onclick="openDossier('${escHtml(meta.company)}')">${escHtml(meta.company)}</span>
                 <span class="breadcrumb-sep">›</span>
-                <span class="breadcrumb-current">${escHtml(meta.type && meta.type !== 'report' ? meta.type + ' report' : 'report')}</span>
+                <span class="breadcrumb-current">${escHtml(typeLabel !== 'report' ? typeLabel + ' report' : 'report')}</span>
             </div>`;
             contentEl.innerHTML = breadcrumbHtml + contentEl.innerHTML;
         }
 
         // Set header
         document.getElementById('right-company').textContent = meta.company;
-        document.getElementById('right-type').textContent = meta.type;
+        document.getElementById('right-type').textContent = typeLabel;
         document.getElementById('right-date').textContent = meta.date;
 
         openRightPane();
-        setContext(meta.company, 'report', (meta.type || 'report') + ' report');
+        setContext(meta.company, 'report', (typeLabel || 'report') + ' report');
         renderCompanyList();
 
         // If in expanded/focus mode, rebuild card grid for this report
@@ -6029,14 +6968,74 @@ function _buildBriefingDashboard(content) {
     if (!b) return;
 
     const identity = b.subject_identity || {};
-    const dm = b.digital_maturity || {};
-    const score = dm.overall_score || 0;
-    const label = dm.overall_label || '';
-    const subs = dm.sub_scores || {};
+    const briefingScoring = b.scoring || b.digital_maturity || {};
+    const isLensOverride = !!_activeDashboardLens;
+    const activeScoring = isLensOverride ? _enrichScoringFromLensData(_activeDashboardLens) : briefingScoring;
+    const score = activeScoring.overall_score || 0;
+    const label = activeScoring.overall_label || '';
+    const subs = activeScoring.sub_scores || {};
     const conf = b.data_confidence || {};
-    const subLabels = { tech_modernity: 'Tech Modernity', data_analytics: 'Data & Analytics', ai_readiness: 'AI Readiness', organizational_readiness: 'Org Readiness' };
+    const lensInfo = activeScoring._lens || {};
+    const scoringLabel = lensInfo.score_label || (isLensOverride ? (_activeDashboardLens.lens_name || 'Lens Score') : 'Digital Maturity Score');
+    const dims = activeScoring._dimensions || [
+        {key:'tech_modernity', label:'Tech Modernity', weight:0.30},
+        {key:'data_analytics', label:'Data & Analytics', weight:0.25},
+        {key:'ai_readiness', label:'AI Readiness', weight:0.25},
+        {key:'organizational_readiness', label:'Org Readiness', weight:0.20},
+    ];
+    const lensLabels = activeScoring._lens_labels || [
+        {min_score:80, label:'Digital Vanguard'},
+        {min_score:60, label:'Digital Contender'},
+        {min_score:40, label:'Digitally Exposed'},
+        {min_score:20, label:'Digital Laggard'},
+        {min_score:0, label:'Digital Liability'},
+    ];
 
     let html = '';
+
+    // --- Lens pill bar (same as normal view) ---
+    const briefingLensId = (briefingScoring._lens || {}).id;
+    const lensScores = dossier.lens_scores || [];
+    const allLenses = _cachedLenses || [];
+    const scoredMap = {};
+    lensScores.forEach(ls => { scoredMap[ls.lens_id] = ls; });
+
+    html += `<div id="dash-lens-pill-bar" class="lens-bar" style="margin-bottom:12px;padding:0 16px">`;
+    // Briefing's own lens pill
+    const bPillScore = briefingScoring.overall_score || 0;
+    const bPillCC = _scoreColorClass(bPillScore);
+    const bPillName = (briefingScoring._lens || {}).name || 'Briefing Score';
+    html += `<div class="lens-pill${!isLensOverride ? ' active' : ''}" onclick="handleDashLensPillClick(null, true)">
+        <span class="lens-pill-score score-${bPillCC}">${bPillScore}</span>
+        <span class="lens-pill-name">${escHtml(bPillName)}</span>
+        <span style="font-size:9px;color:var(--green);margin-left:4px">Full</span>
+    </div>`;
+    // Other lenses — scored or unscored
+    allLenses.forEach(lens => {
+        if (lens.id === briefingLensId) return;
+        const scored = scoredMap[lens.id];
+        const isActive = isLensOverride && _activeDashboardLens && _activeDashboardLens.lens_id === lens.id;
+        if (scored) {
+            const lsScore = scored.overall_score || 0;
+            const lcc = _scoreColorClass(lsScore);
+            html += `<div class="lens-pill${isActive ? ' active' : ''}" onclick="handleDashLensPillClick(${lens.id}, false)">
+                <span class="lens-pill-score score-${lcc}">${lsScore}</span>
+                <span class="lens-pill-name">${escHtml(lens.name)}</span>
+            </div>`;
+        } else {
+            html += `<div class="lens-pill lens-pill-unscored" onclick="handleDashLensPillClick(${lens.id}, false)">
+                <span class="lens-pill-score" style="color:var(--text-muted)">--</span>
+                <span class="lens-pill-name">${escHtml(lens.name)}</span>
+            </div>`;
+        }
+    });
+    html += `<div class="lens-pill" style="border-style:dashed;color:var(--accent);font-size:11px" onclick="openLensBuilder()">+ New Lens</div>`;
+    html += `</div>`;
+
+    // Lens overlay disclaimer when viewing non-briefing lens
+    if (isLensOverride) {
+        html += `<div style="font-size:11px;color:var(--text-muted);text-align:center;margin-bottom:8px;font-style:italic">Scoring overlay — briefing content reflects a different lens</div>`;
+    }
 
     // --- Hero strip: identity | donut | sub-scores ---
     let metaParts = [];
@@ -6045,9 +7044,9 @@ function _buildBriefingDashboard(content) {
     if (identity.headcount) metaParts.push(identity.headcount + ' employees');
 
     let barsHtml = '';
-    Object.entries(subLabels).forEach(([key, lbl]) => {
-        const sub = subs[key] || {};
-        barsHtml += renderSubScore(lbl, sub.score || 0, sub);
+    dims.forEach(d => {
+        const sub = subs[d.key] || {};
+        barsHtml += renderSubScore(d.label, sub.score || 0, sub);
     });
 
     let confLine = '';
@@ -6058,15 +7057,27 @@ function _buildBriefingDashboard(content) {
 
     // Build rationale HTML for the right half of the hero row
     let rationaleHtml = '';
-    Object.entries(subLabels).forEach(([key, lbl]) => {
-        const sub = subs[key] || {};
+    dims.forEach(d => {
+        const sub = subs[d.key] || {};
         if (sub.rationale) {
             const sources = _extractSources(sub.rationale);
             const badges = sources.map(s =>
                 `<span class="source-badge source-${s}" onclick="event.stopPropagation();showSourcePopover(event,'${s}')" title="Click to see evidence from ${s} analysis">${s}</span>`
             ).join(' ');
-            rationaleHtml += `<div style="margin-bottom:8px"><span style="font-size:15px;font-weight:600;color:var(--text-secondary)">${escHtml(lbl)}:</span> <span style="font-size:15px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
+            rationaleHtml += `<div style="margin-bottom:8px"><span style="font-size:15px;font-weight:600;color:var(--text-secondary)">${escHtml(d.label)}:</span> <span style="font-size:15px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
         }
+    });
+
+    // Build dynamic tooltip
+    let tooltipDims = '';
+    dims.forEach(d => {
+        const wPct = Math.round((d.weight || 0) * 100);
+        tooltipDims += `<div><strong>${escHtml(d.label)} (${wPct}%)</strong></div>`;
+    });
+    let tooltipTiers = '';
+    lensLabels.forEach(tier => {
+        const cc = _scoreColorClass(tier.min_score);
+        tooltipTiers += `<span class="score-${cc}">&#9679;</span> ${tier.min_score}+ ${escHtml(tier.label)} &nbsp;`;
     });
 
     html += `<div class="dash-hero-row">
@@ -6090,22 +7101,11 @@ function _buildBriefingDashboard(content) {
                 ${renderScoreRing(score, 100)}
                 <div class="dash-hero-label score-${_scoreColorClass(score)}">${escHtml(label)} <span class="score-info-icon" onclick="event.stopPropagation();toggleScoreTooltip(this)">&#9432;</span></div>
                 <div class="score-tooltip" style="display:none">
-                    <div class="score-tooltip-title">Digital Maturity Score</div>
+                    <div class="score-tooltip-title">${escHtml(scoringLabel)}</div>
                     <div class="score-tooltip-body">
-                        Measures a company's actual digital and technological capability across four dimensions, weighted by strategic importance:
-                        <div class="score-tooltip-dims">
-                            <div><strong>Tech Modernity (30%)</strong> — Engineering stack, cloud infrastructure, CI/CD practices, modern frameworks</div>
-                            <div><strong>Data & Analytics (25%)</strong> — Data platform investment, analytics tooling, experimentation culture</div>
-                            <div><strong>AI Readiness (25%)</strong> — AI/ML hiring, patents, product integration, dedicated AI roles</div>
-                            <div><strong>Org Readiness (20%)</strong> — Hiring momentum, engineering ratio, strategic investment signals, sentiment</div>
-                        </div>
-                        <div class="score-tooltip-tiers">
-                            <span class="score-vanguard">&#9679;</span> 80-100 Digital Vanguard &nbsp;
-                            <span class="score-contender">&#9679;</span> 60-79 Digital Contender &nbsp;
-                            <span class="score-exposed">&#9679;</span> 40-59 Digitally Exposed &nbsp;
-                            <span class="score-laggard">&#9679;</span> 20-39 Digital Laggard &nbsp;
-                            <span class="score-liability">&#9679;</span> 0-19 Digital Liability
-                        </div>
+                        Scores this company across weighted dimensions:
+                        <div class="score-tooltip-dims">${tooltipDims}</div>
+                        <div class="score-tooltip-tiers">${tooltipTiers}</div>
                     </div>
                 </div>
                 ${confLine ? `<div class="dash-hero-meta">${escHtml(confLine)}</div>` : ''}
@@ -6119,7 +7119,8 @@ function _buildBriefingDashboard(content) {
     </div>`;
 
     // --- Consulting Opportunities (right after hero, before card grid) ---
-    const opps = b.engagement_opportunities || [];
+    const lensSD = isLensOverride ? (_activeDashboardLens.score_data || {}) : null;
+    const opps = isLensOverride ? (lensSD.engagement_opportunities || []) : (b.engagement_opportunities || []);
     if (opps.length) {
         let oppHtml = '<div class="opp-inner-grid">';
         opps.forEach(opp => {
@@ -6155,6 +7156,16 @@ function _buildBriefingDashboard(content) {
         html += `<div class="dash-card" style="margin-bottom:16px">
             <div class="dash-card-title">${oppTitle}</div>
             ${oppHtml}
+        </div>`;
+    } else if (isLensOverride) {
+        const rescoreLensId = _activeDashboardLens.lens_id || '';
+        const rescoreCompany = escHtml((dossier || {}).company_name || '');
+        html += `<div class="dash-card" style="margin-bottom:16px">
+            <div class="dash-card-title">Consulting Opportunities</div>
+            <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">
+                Opportunities not available for this lens score version.
+                <span style="color:var(--accent);cursor:pointer" onclick="_scoreLensViaDashPill('${rescoreCompany}', ${rescoreLensId})">Rescore to generate.</span>
+            </div>
         </div>`;
     }
 
@@ -6261,7 +7272,7 @@ function _buildBriefingDashboard(content) {
     }
 
     // Risk Profile (wide with 2-col inner grid)
-    const risks = b.risk_profile || [];
+    const risks = isLensOverride ? (lensSD.risk_profile || []) : (b.risk_profile || []);
     if (risks.length) {
         let rHtml = '<div class="risk-inner-grid">';
         risks.forEach(r => {
@@ -6273,16 +7284,17 @@ function _buildBriefingDashboard(content) {
     }
 
     // Strategic Assessment (wide, paragraph blocks matching report view)
-    if (b.strategic_assessment) {
+    const stratText = isLensOverride ? (lensSD.strategic_assessment || '') : (b.strategic_assessment || '');
+    if (stratText) {
         // Split on double newlines, or fall back to sentence groups if no double newlines
-        let paras = b.strategic_assessment.split(/\n\s*\n/).filter(p => p.trim());
+        let paras = stratText.split(/\n\s*\n/).filter(p => p.trim());
         if (paras.length <= 1) {
             // No double newlines — split on single newlines
-            paras = b.strategic_assessment.split(/\n/).filter(p => p.trim());
+            paras = stratText.split(/\n/).filter(p => p.trim());
         }
         if (paras.length <= 1) {
             // Still one block — split into ~4 chunks by sentences
-            const sentences = b.strategic_assessment.split(/(?<=[.!?])\s+/).filter(s => s.trim());
+            const sentences = stratText.split(/(?<=[.!?])\s+/).filter(s => s.trim());
             const chunkSize = Math.ceil(sentences.length / 4);
             paras = [];
             for (let i = 0; i < sentences.length; i += chunkSize) {
@@ -6430,6 +7442,7 @@ function collapseReport() {
     document.getElementById('expand-icon-open').style.display = '';
     document.getElementById('expand-icon-close').style.display = 'none';
     document.getElementById('expand-btn').title = 'Focus mode';
+    _activeDashboardLens = null;
     if (!_splitActive) _restoreOriginalReport();
     // Restore saved width
     if (savedRightWidth) {
@@ -6567,6 +7580,12 @@ function cleanProgress(text) {
 function escHtml(s) {
     if (!s) return '';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function displayReportType(t) {
+    if (!t) return 'report';
+    // lens_workforce-management → workforce management
+    if (t.startsWith('lens_')) t = t.slice(5);
+    return t.replace(/[-_]/g, ' ');
 }
 function _fmtTok(n) {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
@@ -6732,7 +7751,7 @@ async function _loadIntoSplitPanel(side, type, identifier) {
         const meta = await _renderReportInto(identifier, contentEl);
         if (!meta) return;
         titleEl.textContent = meta.company;
-        badgeEl.textContent = meta.type;
+        badgeEl.textContent = displayReportType(meta.type);
         _splitPanels[side] = {
             type: 'report', reportFilename: identifier, dossierName: null,
             briefingData: null, dossierData: null,
@@ -7008,8 +8027,6 @@ function renderCampaignSidebar() {
     }
 
     list.innerHTML = allCampaigns.map(c => {
-        const avgScore = c.avg_score ? Math.round(c.avg_score) : 0;
-        const tier = _prospectTierClass(avgScore);
         const isActive = activeCampaignId === c.id ? ' active' : '';
         const statusBadge = c.status === 'running'
             ? '<span class="pane-status-badge running">Running</span>'
@@ -7024,7 +8041,6 @@ function renderCampaignSidebar() {
                     ${c.prospect_count || 0} prospects ${statusBadge}
                 </div>
             </div>
-            <div class="search-query-score" style="border-color:${_dimColor(avgScore)};color:${_dimColor(avgScore)}">${avgScore || '—'}</div>
             <div class="search-query-actions">
                 <button class="campaign-group-action" onclick="event.stopPropagation();renameCampaign(${c.id})" title="Rename">&#9998;</button>
                 <button class="campaign-group-action" onclick="event.stopPropagation();deleteCampaign(${c.id})" title="Delete">&times;</button>
@@ -7167,46 +8183,13 @@ function renderExecutionPane(campaignId) {
     const scored = prospects.filter(p => p.ua_fit);
     const valid = prospects.filter(p => p.validation_status === 'valid').length;
     const limited = prospects.filter(p => p.validation_status && p.validation_status !== 'valid' && p.ua_fit).length;
-    const rejected = prospects.filter(p => !p.ua_fit && p.validation_status && p.validation_status !== 'valid').length;
+    const skipped = prospects.filter(p => !p.ua_fit && p.validation_status && p.validation_status !== 'valid').length;
 
-    // Build static pipeline reconstruction from historical data
+    // Build static pipeline reconstruction — pipeline steps only, no company cards
     emptyEl.style.display = 'none';
     mapEl.style.display = 'block';
 
-    const companyCardsHtml = prospects.map(p => {
-        const fit = p.ua_fit;
-        const s = fit?.overall_score || 0;
-        const label = fit?.overall_label || '';
-        const color = s > 0 ? _dimColor(s) : 'var(--text-muted)';
-        const isRejected = !fit && p.validation_status && p.validation_status !== 'valid';
-        const isLimited = p.validation_status && p.validation_status !== 'valid' && fit;
-        let cls = 'company-card';
-        if (isRejected) cls += ' error';
-        else if (s > 0) cls += ' scored';
-        else cls += ' pending';
-
-        // Analysis steps from historical data (vertical layout matching live scoring style)
-        const analyses = fit?._analyses_used || {};
-        const labels = { techstack: 'Tech Stack', financial: 'Financial', brand_ad: 'Brand & Ad Intel' };
-        const checksHtml = Object.keys(analyses).length > 0
-            ? `<div class="analysis-list">${Object.keys(analyses).map(k =>
-                `<div class="analysis-row">
-                    <div class="analysis-row-icon done">&#10003;</div>
-                    <span class="analysis-row-name">${escHtml(labels[k] || k)}</span>
-                    <span class="analysis-row-status done">Done</span>
-                </div>`
-              ).join('')}</div>`
-            : '';
-
-        return `<div class="${cls}" data-company-name="${escHtml(p.company_name)}" style="${s > 0 ? 'border-color:' + color : ''}">
-            <div class="company-card-header">
-                <div class="company-card-name">${escHtml(p.company_name)}</div>
-                <div class="company-card-ring" style="${s > 0 ? 'border-color:' + color + ';color:' + color : ''}">${s > 0 ? s : (isRejected ? '!' : '—')}</div>
-            </div>
-            <div class="company-card-meta">${s > 0 ? `<span style="color:${color}">${escHtml(label)}</span>` : (isRejected ? '<span style="color:var(--red);font-size:10px">Rejected</span>' : (isLimited ? '<span class="limited-badge">Limited</span>' : ''))}</div>
-            ${checksHtml}
-        </div>`;
-    }).join('');
+    const companyNames = prospects.map(p => p.company_name).join(', ');
 
     mapEl.innerHTML = `
         <div class="pipeline-node done" style="padding:10px 14px">
@@ -7217,33 +8200,25 @@ function renderExecutionPane(campaignId) {
             <div class="pipeline-node-meta">Niche: <strong style="color:var(--text-primary)">${escHtml(c.niche || c.name)}</strong></div>
         </div>
         <div class="pipeline-connector done"></div>
-        <div class="pipeline-node done" style="padding:10px 14px">
-            <div class="pipeline-node-header">
-                <div class="pipeline-node-icon">&#10003;</div>
-                <div class="pipeline-node-label">Found ${prospects.length} companies</div>
-            </div>
-        </div>
-        <div class="pipeline-connector done"></div>
-        <div class="pipeline-node done" style="padding:10px 14px">
-            <div class="pipeline-node-header">
-                <div class="pipeline-node-icon">&#10003;</div>
-                <div class="pipeline-node-label">Validation</div>
-            </div>
-            <div class="pipeline-node-meta">${valid} valid${limited > 0 ? ` (${limited} limited)` : ''} &mdash; ${rejected} rejected</div>
-        </div>
-        <div class="pipeline-connector done"></div>
         <div class="pipeline-node done" style="border-color:rgba(168,85,247,0.2);padding:12px">
             <div class="pipeline-node-header">
                 <div class="pipeline-node-icon" style="background:rgba(168,85,247,0.15)">&#127919;</div>
-                <div class="pipeline-node-label" style="color:var(--purple)">Scored ${scored.length} companies</div>
+                <div class="pipeline-node-label" style="color:var(--purple)">Found ${prospects.length} companies</div>
             </div>
+            <div class="pipeline-node-meta" style="margin-top:4px;font-size:11px;color:var(--text-muted)">${escHtml(companyNames)}</div>
         </div>
         <div class="pipeline-connector done"></div>
-        <div class="pipeline-company-grid">${companyCardsHtml}</div>
+        <div class="pipeline-node done" style="padding:10px 14px">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon" style="font-size:14px">&#10003;</div>
+                <div class="pipeline-node-label">Validation</div>
+            </div>
+            <div class="pipeline-node-meta">${valid} valid${limited > 0 ? ` (${limited} limited)` : ''}${skipped > 0 ? ` &mdash; ${skipped} skipped` : ''}</div>
+        </div>
         <div class="pipeline-connector done"></div>
         <div class="pipeline-complete-node">
             <span class="check">&#10003;</span>
-            Pipeline complete &mdash; ${scored.length} companies scored
+            Pipeline complete &mdash; ${scored.length > 0 ? `${scored.length} companies scored` : `${prospects.length} companies discovered`}
         </div>
     `;
 }
@@ -7261,9 +8236,6 @@ function renderSummaryPane(campaignId) {
     const prospects = (c.prospects || []).sort((a, b) =>
         (b.ua_fit?.overall_score || 0) - (a.ua_fit?.overall_score || 0));
     const scored = prospects.filter(p => p.ua_fit);
-    const avgScore = scored.length
-        ? Math.round(scored.reduce((s, p) => s + (p.ua_fit?.overall_score || 0), 0) / scored.length)
-        : 0;
 
     const statusText = c.status === 'complete' ? 'Complete' : c.status === 'running' ? 'Running...' : c.status === 'error' ? 'Error' : c.status;
     let createdDate = '';
@@ -7364,7 +8336,7 @@ function renderSummaryPane(campaignId) {
                 <div>
                     <h2 class="campaign-view-title">${escHtml(c.name || c.niche)}</h2>
                     <div class="campaign-view-meta">
-                        ${createdDate} &bull; ${statusText} &bull; Avg CTV Propensity: <span style="color:${_dimColor(avgScore)};font-weight:600">${avgScore}/100</span>
+                        ${createdDate} &bull; ${statusText} &bull; ${prospects.length} companies
                     </div>
                 </div>
             </div>
@@ -7383,7 +8355,7 @@ function renderSummaryPane(campaignId) {
                 <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click a company for detailed analysis</div>
                 <div id="pane-summary-ranked-list">${rankedHtml}</div>
             </div>
-            ` : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">No scored prospects yet.</div>'}
+            ` : _buildDiscoveryListHtml(prospects)}
         </div>
     `;
 
@@ -7391,6 +8363,50 @@ function renderSummaryPane(campaignId) {
     if (!insight && scored.length > 0 && c.status === 'complete') {
         _autoGenerateInsight(campaignId);
     }
+}
+
+function _buildDiscoveryListHtml(prospects) {
+    if (!prospects || prospects.length === 0) {
+        return '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">No prospects discovered yet.</div>';
+    }
+    // Clear selection state when rebuilding
+    _selectedForResearch.clear();
+
+    const items = prospects.map(p => {
+        const name = p.company_name || '?';
+        const desc = p.company_description || '';
+        const disc = p.discovery || {};
+        const size = disc.estimated_size || '';
+        const evidence = disc.evidence || [];
+        const vstatus = p.validation_status || 'valid';
+        const isSkipped = vstatus !== 'valid' && vstatus !== 'limited';
+        const vIcon = vstatus === 'valid' ? '&#10003;' : vstatus === 'limited' ? '&#9888;' : '';
+        const vColor = vstatus === 'valid' ? 'var(--green)' : vstatus === 'limited' ? 'var(--yellow)' : '';
+        const dataPayload = JSON.stringify({name, description: desc, evidence}).replace(/'/g, '&#39;');
+        return `<div class="discovery-list-item${isSkipped ? ' skipped' : ''}" data-company-name="${escHtml(name)}" data-company-payload='${dataPayload}' style="cursor:pointer;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;position:relative${isSkipped ? ';opacity:0.5' : ''}">
+            ${!isSkipped ? `<input type="checkbox" class="discovery-select-cb" onclick="event.stopPropagation();_toggleResearchSelection('${escHtml(name).replace(/'/g, "\\'")}', this)" style="position:absolute;top:10px;right:10px;width:16px;height:16px;accent-color:var(--purple);cursor:pointer">` : ''}
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:${desc ? '4px' : '0'};padding-right:${isSkipped ? '0' : '28px'}">
+                ${vIcon ? `<span style="color:${vColor};font-size:12px">${vIcon}</span>` : ''}
+                <span style="font-weight:600;font-size:13px;color:var(--text-primary)">${escHtml(name)}</span>
+                ${size ? `<span class="company-card-size" style="margin:0">${escHtml(size)}</span>` : ''}
+                ${vstatus === 'limited' ? '<span class="limited-badge" style="margin-left:4px">Limited</span>' : ''}
+            </div>
+            ${desc ? `<div style="font-size:11px;color:var(--text-muted);line-height:1.4;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;${!isSkipped ? 'padding-right:28px' : ''}">${escHtml(desc)}</div>` : ''}
+            ${isSkipped ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">No valid website found</div>` : ''}
+        </div>`;
+    }).join('');
+    return `
+        <div class="cv-section">
+            <div class="cv-section-title">Discovered Companies (${prospects.length})</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Select companies to send to Research for scoring.</div>
+            ${items}
+        </div>
+        <div class="send-to-research-bar" id="summary-research-bar" style="display:none">
+            <span class="str-count">0/3 selected</span>
+            <span class="str-label" style="font-size:11px;color:var(--text-muted)">Score with:</span>
+            ${_buildLensSelectHtml('summary-lens-select')}
+            <button class="str-btn" onclick="_sendToResearch('summary-lens-select')" disabled>Send to Research</button>
+        </div>`;
 }
 
 function _buildRankedListHtml(scored) {
@@ -7529,10 +8545,68 @@ async function openProspectDetail(companyName) {
         } catch (e) { /* ignore */ }
     }
     if (!p || !p.ua_fit) {
+        // Show discovery blurb — try live pipeline state first, then campaign prospect data
+        const discoveryCompany = (_pipelineState.companies || []).find(c => c.name === companyName);
+        // Also check campaign data (for sidebar-loaded campaigns)
+        const campaignProspect = !discoveryCompany && activeCampaignId
+            ? (allCampaigns.find(x => x.id === activeCampaignId)?.prospects || []).find(x => x.company_name === companyName)
+            : null;
+
+        const disc = campaignProspect?.discovery || null;
+        const dc = discoveryCompany || (campaignProspect ? {
+            name: campaignProspect.company_name,
+            description: disc?.description || campaignProspect.company_description,
+            website: campaignProspect.website_url || disc?.website,
+            estimated_size: disc?.estimated_size || null,
+            why_included: disc?.why_included || null,
+            evidence: disc?.evidence || [],
+        } : null);
+
+        if (dc && detContent) {
+            const website = dc.website || '';
+            const evidence = dc.evidence || [];
+
+            // Why included (prominent, separate from sources)
+            let whyHtml = '';
+            if (dc.why_included) {
+                whyHtml = `<div class="why-included-box"><strong>Why this company?</strong>${escHtml(dc.why_included)}</div>`;
+            }
+
+            // Evidence sources with type badges
+            let evidenceHtml = '';
+            if (evidence.length > 0) {
+                evidenceHtml = `<div style="margin-top:14px">
+                    <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Sources</div>
+                    ${evidence.map(e => {
+                        const srcType = _inferSourceType(e.source_url);
+                        return `<div class="evidence-item">
+                            <div class="evidence-header">
+                                <span class="evidence-source-badge ${srcType}">${srcType}</span>
+                                ${e.source_url ? `<a href="${escHtml(e.source_url)}" target="_blank" rel="noopener">${escHtml(e.source_title || (() => { try { return new URL(e.source_url).hostname; } catch { return e.source_url; } })())}</a>` : `<span style="color:var(--text-secondary);font-size:12px">${escHtml(e.source_title || 'Unknown source')}</span>`}
+                            </div>
+                            ${e.snippet ? `<div class="evidence-snippet">${escHtml(e.snippet)}</div>` : ''}
+                        </div>`;
+                    }).join('')}
+                </div>`;
+            }
+
+            detContent.innerHTML = `<div style="padding:24px">
+                <h2 style="margin-bottom:8px;font-size:18px">${escHtml(companyName)}</h2>
+                ${dc.description ? `<p style="color:var(--text-secondary);font-size:13px;margin-bottom:10px;line-height:1.5">${escHtml(dc.description)}</p>` : ''}
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                    ${dc.estimated_size ? `<span class="company-card-size">${escHtml(dc.estimated_size)}</span>` : ''}
+                    ${website ? `<a href="${escHtml(website.startsWith('http') ? website : 'https://' + website)}" target="_blank" style="color:var(--accent);font-size:12px">${escHtml(website)}</a>` : ''}
+                </div>
+                ${whyHtml}
+                ${evidenceHtml}
+            </div>`;
+            detEmpty.style.display = 'none';
+            detContent.style.display = 'block';
+            return;
+        }
         if (detContent) detContent.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-muted)">
             <div style="font-size:24px;margin-bottom:8px">&#8987;</div>
-            Score data not yet available for ${escHtml(companyName)}.<br>
-            <span style="font-size:11px">Try again once scoring completes.</span>
+            No discovery data for ${escHtml(companyName)}.
         </div>`;
         return;
     }
@@ -7557,13 +8631,11 @@ async function openProspectDetail(companyName) {
         'advertising_maturity': 'Paid Media Footprint',
         'creative_readiness': 'Video Asset Readiness',
     };
-    const _dimTooltips = {
-        'financial_capacity': 'Evaluates revenue, funding, and budget capacity for $10K\u2013$100K/month CTV campaigns.',
-        'advertising_maturity': 'Checks for Meta/TikTok/Google Ads pixels and active paid media infrastructure.',
-        'growth_trajectory': 'Assesses revenue growth rate, expansion news, and hiring momentum.',
-        'creative_readiness': 'Looks for existing video content, social media visuals, and brand assets that translate to TV spots.',
-        'channel_expansion_intent': 'Detects signals of exploring new ad channels beyond current social/search spend.',
-    };
+    // Tooltips from lens config rubric descriptions (if present), else generic
+    const _dimTooltips = {};
+    dims.forEach(d => {
+        if (d.rubric_description) _dimTooltips[d.key] = d.rubric_description;
+    });
 
     // Collect all sources across dimensions for the Analysis Sources section
     const allSources = [];
@@ -7708,9 +8780,9 @@ async function openProspectDetail(companyName) {
                     <span class="lbl">/100</span>
                 </div>
                 <div class="icp-score-label-row">
-                    <span class="icp-score-type-label">CTV Propensity</span>
+                    <span class="icp-score-type-label">${escHtml(fit._lens_name || 'Prospect Score')}</span>
                     <span class="icp-info-icon">i
-                        <span class="icp-info-tooltip">Calculated based on social ad exhaustion, visual asset readiness, and financial capacity to scale to premium video (Connected TV).</span>
+                        <span class="icp-info-tooltip">Scored using ${escHtml(fit._lens_name || 'the configured lens')} with weighted dimension analysis.</span>
                     </span>
                 </div>
             </div>
@@ -7720,8 +8792,6 @@ async function openProspectDetail(companyName) {
                 <span style="font-size:11px;color:var(--text-muted);margin-left:8px">Confidence: <span style="color:${confColor}">${confLabel}</span> &bull; ${cov.categories_with_data || 0}/${cov.categories_total || 3} analyses</span>
             </div>
             <div class="icp-actions-row">
-                <button class="icp-action-btn" onclick="alert('CRM sync coming soon')" title="Sync prospect to CRM"><span class="btn-icon">&#9741;</span> Sync to CRM</button>
-                <button class="icp-action-btn" onclick="alert('Beeswax bidder integration coming soon')" title="Add to Beeswax programmatic bidder"><span class="btn-icon">&#9881;</span> Add to Beeswax</button>
                 <button class="icp-rescore-btn" id="icp-rescore-btn" onclick="rescoreProspect('${encodeURIComponent(companyName)}')">&#8635; Re-score</button>
             </div>
         </div>
@@ -7735,7 +8805,7 @@ async function openProspectDetail(companyName) {
         </div>` : ''}
 
         <div class="icp-section">
-            <div class="icp-section-title">CTV Propensity Dimensions</div>
+            <div class="icp-section-title">Score Dimensions</div>
             ${dimCardsHtml}
         </div>
 
@@ -7805,14 +8875,6 @@ function _buildProspectDashboard(container) {
         'advertising_maturity': 'Paid Media Footprint',
         'creative_readiness': 'Video Asset Readiness',
     };
-    const _dimTooltips = {
-        'financial_capacity': 'Evaluates revenue, funding, and budget capacity for $10K\u2013$100K/month CTV campaigns.',
-        'advertising_maturity': 'Checks for Meta/TikTok/Google Ads pixels and active paid media infrastructure.',
-        'growth_trajectory': 'Assesses revenue growth rate, expansion news, and hiring momentum.',
-        'creative_readiness': 'Looks for existing video content, social media visuals, and brand assets that translate to TV spots.',
-        'channel_expansion_intent': 'Detects signals of exploring new ad channels beyond current social/search spend.',
-    };
-
     const dims = (fit._dimensions || [
         { key: 'financial_capacity',      label: 'Financial Capacity',      weight: 0.25 },
         { key: 'advertising_maturity',    label: 'Paid Media Footprint',    weight: 0.20 },
@@ -7820,6 +8882,12 @@ function _buildProspectDashboard(container) {
         { key: 'creative_readiness',      label: 'Video Asset Readiness',   weight: 0.20 },
         { key: 'channel_expansion_intent',label: 'Channel Expansion Intent',weight: 0.15 },
     ]);
+
+    // Tooltips from lens config (if present), else empty
+    const _dimTooltips = {};
+    dims.forEach(d => {
+        if (d.rubric_description) _dimTooltips[d.key] = d.rubric_description;
+    });
 
     // Collect all sources for the sources card
     const allSrc = [];
@@ -7927,7 +8995,6 @@ function _buildProspectDashboard(container) {
                     </div>
                     <div class="dash-hero-detail">Confidence: <span style="color:${confColor}">${confLabel}</span> &bull; ${cov.categories_with_data || 0}/${cov.categories_total || 3} analyses</div>
                     <div class="icp-actions-row" style="margin-top:8px">
-                        <button class="icp-action-btn" onclick="alert('CRM sync coming soon')" style="font-size:11px;padding:4px 10px"><span class="btn-icon">&#9741;</span> Sync to CRM</button>
                         <button class="icp-rescore-btn" id="icp-rescore-btn" onclick="rescoreProspect('${encodeURIComponent(activeProspectName)}')" style="font-size:11px;padding:4px 10px">&#8635; Re-score</button>
                     </div>
                 </div>
@@ -7936,7 +9003,7 @@ function _buildProspectDashboard(container) {
                         <span class="num">${score}</span>
                         <span class="lbl">/100</span>
                     </div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:4px">CTV Propensity <span class="icp-info-icon" style="font-size:10px">i<span class="icp-info-tooltip">Calculated based on social ad exhaustion, visual asset readiness, and financial capacity to scale to premium video (Connected TV).</span></span></div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:4px">${escHtml(fit._lens_name || 'Prospect Score')} <span class="icp-info-icon" style="font-size:10px">i<span class="icp-info-tooltip">Scored using ${escHtml(fit._lens_name || 'the configured lens')} with weighted dimension analysis.</span></span></div>
                 </div>
             </div>
             <div class="dash-hero-right">
@@ -8000,6 +9067,91 @@ function _safeName(name) {
 // Responsive: focus a single pane on narrow screens
 // Pane order for adjacency logic (the pane you click + its predecessor are shown)
 const _paneOrder = ['pane-execution', 'pane-summary', 'pane-detail'];
+
+// === Discover → Research selection state ===
+let _selectedForResearch = new Map(); // name → {name, website, description}
+let _availableLenses = []; // [{id, name, slug}, ...]
+
+async function _loadLenses() {
+    try {
+        const resp = await fetch('/api/lenses');
+        if (resp.ok) {
+            _availableLenses = await resp.json();
+        }
+    } catch (e) { console.error('Failed to load lenses:', e); }
+}
+
+function _buildLensSelectHtml(selectId) {
+    if (_availableLenses.length === 0) return `<select class="lens-select" id="${selectId}"><option>Loading...</option></select>`;
+    const opts = _availableLenses.map((l, i) =>
+        `<option value="${escHtml(l.slug || l.name)}" ${i === 0 ? 'selected' : ''}>${escHtml(l.name)}</option>`
+    ).join('');
+    return `<select class="lens-select" id="${selectId}">${opts}</select>`;
+}
+
+function _getSelectedLensName(selectId) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return _availableLenses[0]?.name || 'CTV Ad Sales';
+    const opt = sel.options[sel.selectedIndex];
+    return opt ? opt.textContent : _availableLenses[0]?.name || 'CTV Ad Sales';
+}
+
+function _inferSourceType(url) {
+    if (!url) return 'web';
+    const u = url.toLowerCase();
+    if (u.includes('reddit.com')) return 'reddit';
+    if (u.includes('news.ycombinator.com')) return 'news';
+    if (u.includes('techcrunch.com') || u.includes('bloomberg.com') || u.includes('reuters.com') ||
+        u.includes('cnbc.com') || u.includes('forbes.com') || u.includes('wsj.com') ||
+        u.includes('venturebeat.com') || u.includes('theverge.com') || u.includes('wired.com') ||
+        u.includes('businessinsider.com') || u.includes('axios.com') || u.includes('theinformation.com') ||
+        u.includes('semafor.com') || u.includes('news.') || u.includes('/news/')) return 'news';
+    return 'web';
+}
+
+function _toggleResearchSelection(name, checkboxEl) {
+    // Parse data from the parent list item
+    const item = checkboxEl.closest('.discovery-list-item');
+    let data;
+    try { data = JSON.parse(item?.dataset.companyPayload || '{}'); } catch { data = { name }; }
+
+    if (checkboxEl.checked) {
+        // If at max, prevent checking
+        if (_selectedForResearch.size >= 3) {
+            checkboxEl.checked = false;
+            return;
+        }
+        _selectedForResearch.set(name, data);
+        if (item) item.classList.add('selected');
+    } else {
+        _selectedForResearch.delete(name);
+        if (item) item.classList.remove('selected');
+    }
+    _updateSummaryResearchBar();
+    _updateCheckboxStates();
+}
+
+function _updateCheckboxStates() {
+    const atMax = _selectedForResearch.size >= 3;
+    document.querySelectorAll('.discovery-select-cb').forEach(cb => {
+        if (!cb.checked) {
+            cb.disabled = atMax;
+            cb.style.opacity = atMax ? '0.3' : '1';
+            cb.style.cursor = atMax ? 'not-allowed' : 'pointer';
+        }
+    });
+}
+
+function _updateSummaryResearchBar() {
+    const bar = document.getElementById('summary-research-bar');
+    if (!bar) return;
+    const count = _selectedForResearch.size;
+    bar.style.display = count > 0 ? 'flex' : 'none';
+    const countEl = bar.querySelector('.str-count');
+    if (countEl) countEl.textContent = count >= 3 ? '3/3 selected (max)' : `${count}/3 selected`;
+    const btn = bar.querySelector('.str-btn');
+    if (btn) btn.disabled = count === 0;
+}
 
 function focusPane(paneId) {
     if (window.innerWidth >= 1440) return; // no-op on wide screens
@@ -8127,10 +9279,79 @@ function handlePipelineSSE(ev) {
         const metaEl = document.getElementById('pm-discovery-meta');
         if (metaEl) metaEl.textContent = ev.text;
 
+    } else if (ev.type === 'discovery_plan') {
+        // Show query plan breakdown
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) metaEl.innerHTML = `<span style="color:var(--text-secondary)">Running ${ev.total_queries} targeted queries</span>
+            <span style="color:var(--text-muted);font-size:10px;margin-left:6px">(${ev.web} web, ${ev.news} news, ${ev.reddit} reddit)</span>`;
+        // Add search activity log container
+        const discNode = document.getElementById('pm-discovery');
+        if (discNode && !document.getElementById('pm-search-log')) {
+            discNode.insertAdjacentHTML('beforeend', `<div id="pm-search-log" style="margin-top:8px;max-height:180px;overflow-y:auto;font-size:11px;line-height:1.6"></div>`);
+        }
+
+    } else if (ev.type === 'search_start') {
+        const logEl = document.getElementById('pm-search-log');
+        if (logEl) {
+            const sourceColors = {web: 'var(--accent)', news: 'var(--green)', reddit: 'var(--yellow)'};
+            const color = sourceColors[ev.source] || 'var(--text-muted)';
+            logEl.insertAdjacentHTML('beforeend',
+                `<div id="pm-search-${ev.index}" style="display:flex;align-items:center;gap:6px;padding:2px 0;opacity:0.7">
+                    <div class="company-card-spinner" style="width:10px;height:10px;border-width:1.5px"></div>
+                    <span style="color:${color};font-weight:600;min-width:56px">${escHtml(ev.source_label)}</span>
+                    <span style="color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(ev.query)}</span>
+                </div>`);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        // Update counter
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) {
+            const counterSpan = metaEl.querySelector('.search-counter') || (() => {
+                const s = document.createElement('span');
+                s.className = 'search-counter';
+                s.style.cssText = 'display:block;margin-top:3px;font-size:11px;color:var(--text-muted)';
+                metaEl.appendChild(s);
+                return s;
+            })();
+            counterSpan.textContent = `Search ${ev.index}/${ev.total}...`;
+        }
+
+    } else if (ev.type === 'search_done') {
+        const rowEl = document.getElementById(`pm-search-${ev.index}`);
+        if (rowEl) {
+            rowEl.style.opacity = '1';
+            const spinner = rowEl.querySelector('.company-card-spinner');
+            if (spinner) spinner.outerHTML = `<span style="color:var(--green);font-size:10px">&#10003;</span>`;
+            // Append result count
+            rowEl.insertAdjacentHTML('beforeend',
+                `<span style="color:var(--text-muted);font-size:10px;white-space:nowrap">${ev.results_count} results</span>`);
+        }
+
+    } else if (ev.type === 'search_complete') {
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) {
+            const counterSpan = metaEl.querySelector('.search-counter');
+            if (counterSpan) counterSpan.textContent = `${ev.unique_results} unique results from ${ev.total_results} total`;
+        }
+
+    } else if (ev.type === 'extracting') {
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) {
+            const counterSpan = metaEl.querySelector('.search-counter');
+            if (counterSpan) counterSpan.innerHTML = `<span style="color:var(--purple)">${escHtml(ev.text)}</span>`;
+        }
+
+    } else if (ev.type === 'extracted') {
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) {
+            const counterSpan = metaEl.querySelector('.search-counter');
+            if (counterSpan) counterSpan.innerHTML = `<span style="color:var(--green)">Extracted ${ev.count} companies</span>`;
+        }
+
     } else if (ev.type === 'discovered') {
         const companies = ev.companies || [];
         _pipelineState.companies = companies;
-        _pipelineState.phase = 'scoring';
+        _pipelineState.phase = 'discovered';
         if (ev.campaign_id) {
             _pipelineState.campaignId = ev.campaign_id;
             _currentRunCampaignId = ev.campaign_id;
@@ -8154,32 +9375,18 @@ function handlePipelineSSE(ev) {
         const inputNode = document.getElementById('pm-input');
         if (inputNode) { inputNode.classList.remove('running'); inputNode.classList.add('done'); }
 
-        // Add connector + company grid
+        // Add "companies found" summary node (no company cards — those are in Pane 3)
         mapEl.insertAdjacentHTML('beforeend', `
             <div class="pipeline-connector done"></div>
             <div class="pipeline-node done" style="border-color:rgba(168,85,247,0.2);padding:12px">
                 <div class="pipeline-node-header">
                     <div class="pipeline-node-icon" style="background:rgba(168,85,247,0.15)">&#127919;</div>
-                    <div class="pipeline-node-label" style="color:var(--purple)">Scoring ${companies.length} companies</div>
+                    <div class="pipeline-node-label" style="color:var(--purple)">${companies.length} companies found</div>
                 </div>
+                <div class="pipeline-node-meta" style="margin-top:4px;font-size:11px;color:var(--text-muted)">${companies.map(c => c.name).join(', ')}</div>
             </div>
-            <div class="pipeline-connector"></div>
-            <div class="pipeline-company-grid" id="pm-grid"></div>
         `);
-
-        // Populate company cards
-        const gridEl = document.getElementById('pm-grid');
-        gridEl.innerHTML = companies.map((c, i) => {
-            const name = c.name || '?';
-            _pipelineState.companyStatus[name] = 'pending';
-            return `<div class="company-card pending" id="pm-card-${_safeName(name)}" data-company-name="${escHtml(name)}" style="animation-delay:${i * 50}ms">
-                <div class="company-card-header">
-                    <div class="company-card-name">${escHtml(name)}</div>
-                    <div class="company-card-ring">—</div>
-                </div>
-                <div class="company-card-meta">${escHtml(c.description || c.estimated_size || '')}</div>
-            </div>`;
-        }).join('');
+        companies.forEach(c => { _pipelineState.companyStatus[c.name || '?'] = 'discovered'; });
         setTimeout(_scrollPipelineBottom, 100);
 
     } else if (ev.type === 'validating') {
@@ -8187,23 +9394,12 @@ function handlePipelineSSE(ev) {
         if (metaEl) metaEl.textContent = `Validating ${ev.total} company websites...`;
 
     } else if (ev.type === 'validated') {
-        const name = ev.company;
-        const card = document.getElementById('pm-card-' + _safeName(name));
-        if (card) {
-            if (!ev.valid) {
-                card.className = 'company-card error';
-                card.style.opacity = '0.45';
-                const meta = card.querySelector('.company-card-meta');
-                if (meta) meta.innerHTML = `<span style="color:var(--red);font-size:10px">${escHtml(ev.reason || 'Invalid')}</span>`;
-            } else if (ev.limited) {
-                card.className = 'company-card limited';
-                const meta = card.querySelector('.company-card-meta');
-                if (meta) meta.innerHTML = `<span class="limited-badge">Limited Data</span> <span style="font-size:10px;color:var(--text-muted)">${escHtml(ev.reason || '')}</span>`;
-            }
-        }
+        // No card DOM updates — company cards are in Pane 3 only
+        // Just track validation state for later use
+        _pipelineState.companyStatus[ev.company] = ev.valid ? (ev.limited ? 'limited' : 'valid') : 'skipped';
 
     } else if (ev.type === 'validation_complete') {
-        // Insert validation summary node between discovery and scoring
+        // Insert validation summary node
         const conn = document.getElementById('pm-conn-discovery');
         if (conn) {
             conn.insertAdjacentHTML('afterend', `
@@ -8212,7 +9408,7 @@ function handlePipelineSSE(ev) {
                         <div class="pipeline-node-icon" style="font-size:14px">&#10003;</div>
                         <div class="pipeline-node-label">Validation</div>
                     </div>
-                    <div class="pipeline-node-meta">${ev.valid_count} valid${ev.limited_count ? ` (${ev.limited_count} limited)` : ''} &mdash; ${ev.rejected_count} rejected</div>
+                    <div class="pipeline-node-meta">${ev.valid_count} valid${ev.limited_count ? ` (${ev.limited_count} limited)` : ''}${ev.rejected_count ? ` &mdash; ${ev.rejected_count} skipped` : ''}</div>
                 </div>
                 <div class="pipeline-connector done"></div>
             `);
@@ -8339,7 +9535,7 @@ function handlePipelineSSE(ev) {
                 <div class="pipeline-connector done"></div>
                 <div class="pipeline-complete-node">
                     <span class="check">&#10003;</span>
-                    Pipeline complete &mdash; ${ev.total_scored} companies scored
+                    Discovery complete &mdash; ${ev.total_discovered || ev.total_scored || 0} companies found
                 </div>
             `);
             setTimeout(_scrollPipelineBottom, 100);
@@ -8348,20 +9544,7 @@ function handlePipelineSSE(ev) {
         const badge = document.getElementById('pane-execution-status');
         if (badge) { badge.textContent = 'Complete'; badge.className = 'pane-status-badge complete'; }
 
-        // Mark orphaned companies (never scored or errored) as failed
-        const gridEl2 = document.getElementById('pm-grid');
-        if (gridEl2) {
-            gridEl2.querySelectorAll('.company-card.pending, .company-card.scoring').forEach(card => {
-                card.className = 'company-card error';
-                card.style.opacity = '0.7';
-                const ring = card.querySelector('.company-card-ring');
-                if (ring) { ring.textContent = '!'; ring.style.borderColor = 'var(--red)'; ring.style.color = 'var(--red)'; }
-                const meta = card.querySelector('.company-card-meta');
-                if (meta) meta.innerHTML = '<span style="color:var(--red);font-size:10px">No score returned</span>';
-            });
-        }
-
-        // Reload campaigns, update sidebar, render full Pane 3 summary (replaces live list)
+        // Reload campaigns sidebar and populate Pane 3
         const cid = ev.campaign_id || _pipelineState.campaignId;
         if (cid) {
             loadCampaigns().then(() => {
@@ -8374,9 +9557,6 @@ function handlePipelineSSE(ev) {
                     el.classList.toggle('active', id === cid);
                 });
             });
-
-            // Poll for vertical insight (generated in background thread on server)
-            _pollForInsight(cid);
         }
 
     } else if (ev.type === 'insight_ready') {
@@ -8438,11 +9618,90 @@ document.getElementById('pipeline-map').addEventListener('click', function(e) {
 
 // Result row clicks in summary pane (delegated to handle apostrophes/special chars in names)
 document.getElementById('pane-summary-content').addEventListener('click', function(e) {
+    // Don't handle clicks on links
+    if (e.target.closest('a')) return;
+
+    // Scored result row → open detail
     const row = e.target.closest('.cv-result-row');
-    if (!row) return;
-    const name = row.dataset.company;
-    if (name) openProspectDetail(name);
+    if (row) {
+        const name = row.dataset.company;
+        if (name) openProspectDetail(name);
+        return;
+    }
+
+    // Discovery list item → open detail only (checkbox handles selection separately)
+    const item = e.target.closest('.discovery-list-item');
+    if (item && !e.target.closest('.discovery-select-cb')) {
+        const name = item.dataset.companyName;
+        if (name) openProspectDetail(name);
+    }
 });
+
+async function _sendToResearch(lensSelectId) {
+    // Gather companies from selection map
+    const companies = Array.from(_selectedForResearch.values());
+    if (!companies.length) return;
+
+    const lensName = _getSelectedLensName(lensSelectId || 'summary-lens-select');
+
+    const btn = document.querySelector('.str-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+
+    try {
+        const resp = await fetch('/api/send-to-research', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ companies }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            alert(err.error || 'Failed to send');
+            return;
+        }
+        // Switch to Research module and pre-fill chat with scoring query
+        switchModule('research');
+        refreshSidebar();
+        switchLeftTab('chats');
+        newChat();
+
+        const names = companies.map(c => c.name);
+        let query = '';
+        if (names.length === 1) {
+            query = `Score ${names[0]} using the ${lensName} lens.`;
+        } else {
+            query = `Score ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} using the ${lensName} lens.`;
+        }
+
+        // Collect all evidence source URLs across companies
+        const allSources = [];
+        companies.forEach(c => {
+            (c.evidence || []).forEach(e => {
+                if (e.source_url && !allSources.includes(e.source_url)) allSources.push(e.source_url);
+            });
+        });
+        if (allSources.length > 0) {
+            query += '\n\nSources:\n' + allSources.map(u => `- ${u}`).join('\n');
+        }
+
+        setTimeout(() => {
+            const chatInput = document.getElementById('chat-input');
+            if (chatInput) {
+                chatInput.value = query;
+                autoResize(chatInput);
+                chatInput.focus();
+                chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+            }
+        }, 200);
+
+        // Clear selection state
+        _selectedForResearch.clear();
+    } catch (e) {
+        console.error('Send to research failed:', e);
+        alert('Failed: ' + e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Send to Research'; }
+    }
+}
 
 function runProspectPipeline() {
     if (_prospectPipelineRunning) return;
@@ -8478,10 +9737,25 @@ function runProspectPipeline() {
     initPipelineMap(niche);
     focusPane('pane-execution');
 
+    // Collect structured niche fields if Niche Builder was used
+    const nicheCtx = {};
+    const _nbSize = document.querySelector('#nb-company-size .icp-chip.selected');
+    if (_nbSize) nicheCtx.company_size = _nbSize.dataset.value;
+    const _nbModel = document.querySelector('#nb-business-model .icp-chip.selected');
+    if (_nbModel) nicheCtx.business_model = _nbModel.dataset.value === 'Both' ? 'B2B/B2C' : _nbModel.dataset.value;
+    const _nbVert = (document.getElementById('nb-vertical')?.value || '').trim();
+    if (_nbVert) nicheCtx.vertical = _nbVert;
+    const _nbGeoC = (document.getElementById('nb-geography-custom')?.value || '').trim();
+    const _nbGeo = document.querySelector('#nb-geography .icp-chip.selected');
+    if (_nbGeoC) nicheCtx.geography = _nbGeoC;
+    else if (_nbGeo) nicheCtx.geography = _nbGeo.dataset.value;
+    const _nbQual = (document.getElementById('nb-qualifiers')?.value || '').trim();
+    if (_nbQual) nicheCtx.qualifiers = _nbQual;
+
     fetch('/api/ua-pipeline', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ niche, top_n: topN }),
+        body: JSON.stringify({ niche, top_n: topN, context: nicheCtx }),
     }).then(async resp => {
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
@@ -8509,7 +9783,7 @@ function runProspectPipeline() {
         _currentRunCampaignId = null;
         _savedLivePipelineDOM = null;
         btn.disabled = false;
-        btn.textContent = 'Discover';
+        btn.textContent = 'Search';
         loadCampaigns();
     });
 }

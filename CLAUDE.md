@@ -13,7 +13,7 @@ A competitive intelligence platform that scrapes, classifies, and analyzes compa
 - **AI:** Multi-provider rotation — 5 providers with 17+ model fallbacks. Report providers: Gemini (primary, multi-key rotation), Groq, Cerebras, Mistral, OpenRouter (free models). Chat providers: Gemini (primary, native function calling), Groq, Cerebras, Mistral, OpenRouter. Separate provider lists for reports (`REPORT_PROVIDERS`) and chat (`CHAT_PROVIDERS`).
 - **Scraping:** httpx + BeautifulSoup, SEC EDGAR, USPTO patents, Reddit RSS, HackerNews, YouTube transcripts
 - **CLI:** Click-based (`main.py`), also serves web UI via `python main.py web --port 5001`
-- **DB:** `intel.db` — 9 tables: companies, jobs, classifications, dossiers, dossier_analyses, dossier_events, hiring_snapshots, llm_usage, icp_profiles
+- **DB:** `intel.db` — 11 tables: companies, jobs, classifications, dossiers, dossier_analyses, dossier_events, hiring_snapshots, llm_usage, icp_profiles, lenses, lens_scores
 
 ## Commands
 
@@ -67,8 +67,9 @@ competitive-intel-agent/
 │   ├── pricing.py           # Product & pricing strategy analysis
 │   ├── compare.py           # Head-to-head comparison + landscape analysis
 │   ├── profile.py           # Full company profile (runs financial + competitors + sentiment + patents)
-│   ├── ua_discover.py       # Prospect discovery via web search (config-driven or hardcoded)
-│   └── ua_fit.py            # ICP fit scoring (dynamic or legacy signal collection)
+│   ├── ua_discover.py       # Prospect discovery via web search (smart query generation from structured context)
+│   ├── ua_fit.py            # Legacy ICP fit scoring (validate_websites still used, scoring functions importable)
+│   └── lens.py              # Lens scoring engine — score_with_lens(), configurable dimensions/weights/rubrics
 ├── prompts/
 │   ├── chat.py              # System prompt, condensed prompt, tool schemas + tiered selection for chat agent
 │   ├── briefing.py          # Briefing prompt with hybrid DMS scoring rubric + algo score injection
@@ -84,8 +85,9 @@ competitive-intel-agent/
 │   ├── pricing.py           # Pricing analysis prompt
 │   ├── compare.py           # Comparison prompt
 │   ├── profile.py           # Executive profile prompt
-│   ├── ua_fit.py            # ICP fit scoring prompt (dynamic from config or hardcoded)
-│   └── ua_discover.py       # Prospect discovery prompt (dynamic from config or hardcoded)
+│   ├── ua_fit.py            # Legacy ICP fit scoring prompt (still used for historical campaigns)
+│   ├── ua_discover.py       # Prospect discovery prompt (structured context support)
+│   └── lens.py              # Lens scoring prompt — dynamic rubric from lens dimensions/weights
 ├── scraper/
 │   ├── site_crawler.py      # General website crawler (httpx + BS4)
 │   ├── tech_detect.py       # Technology fingerprinting from HTML/headers/scripts
@@ -210,7 +212,7 @@ Defined in `prompts/chat.py`, executed in `agents/chat.py`:
 - **Search:** web_search, reddit_search, reddit_deep_search, hn_search, youtube_search, youtube_transcript
 - **Database:** query_db
 - **Dossiers:** get_dossier, save_dossier_event, refresh_key_facts, generate_briefing
-- **Prospecting:** ua_discover (accepts icp_profile_id), ua_fit_score (accepts icp_profile_id), get_ua_targets
+- **Prospecting:** ua_discover, ua_fit_score (aliased → CTV Ad Sales lens), get_ua_targets (aliased → lens_scores), score_lens, create_lens, list_lenses
 - **Utility:** get_current_datetime
 
 ### Context-Aware Chat
@@ -254,23 +256,22 @@ This is the same multi-step LLM pattern used in Crucible (JobDiscovery) — spen
 - Used by briefing generator for temporal trend analysis (hiring trajectory)
 - `get_hiring_snapshots()` and `save_hiring_snapshot()` in `db.py`
 
-### Prospecting Module (ICP Fit Scoring)
+### Prospecting Module (Lens-Based Scoring)
 
-- **Purpose:** Score companies as prospects for streaming TV / CTV advertising (Universal Ads use case). Fixed 5-dimension rubric, research-backed (runs techstack→financial→sentiment analyses per company before scoring).
-- **Score identity:** "CTV Propensity Score" in UI, with info-icon tooltip explaining methodology
-- **Discovery:** `agents/ua_discover.py` + `prompts/ua_discover.py` — LLM generates prospect list from niche description via web search (4 hardcoded queries)
-- **Scoring:** `agents/ua_fit.py` + `prompts/ua_fit.py` — runs analyses, then LLM scores against fixed rubric
-- **Dimensions (fixed 5):**
+- **Architecture:** Two-phase workflow — **Discover** (pure search) + **Research** (lens-based scoring)
+- **Discover:** `agents/ua_discover.py` + `prompts/ua_discover.py` — smart query generation from structured Niche Builder context (8-12 targeted queries). No scoring in pipeline. Users select up to 3 companies → "Send to Research".
+- **Lens system:** `agents/lens.py` + `prompts/lens.py` — configurable evaluation frameworks with custom dimensions, weights, rubrics. Default "CTV Ad Sales" lens with 5 dimensions matching legacy CTV scoring.
+- **Default dimensions (CTV Ad Sales lens):**
   - Financial Capacity (25%) — `financial_capacity` — SEC EDGAR / web
   - Paid Media Footprint (20%) — `advertising_maturity` — ad pixel detection via techstack
   - Growth Trajectory (20%) — `growth_trajectory` — financial growth + sentiment news
   - Video Asset Readiness (20%) — `creative_readiness` — sentiment + social/video mentions
   - Channel Expansion Intent (15%) — `channel_expansion_intent` — sentiment news + hiring signals
 - **Score Tiers:** Prime Prospect (80+), Strong Candidate (60+), Possible Fit (40+), Weak Fit (20+), Not a Fit (0+)
-- **UI:** Merged Dimension Cards (bar + rationale + signal tags), Outbound Strategy Playbook box, action button stubs (Sync to CRM, Generate Outreach, Add to Beeswax), per-dimension tooltips
+- **UI:** Dynamic lens names (no hardcoded CTV labels). Dimension Cards with bar + rationale + signal tags. Score tooltips from lens rubric_description.
 - **CLI commands:** `ua-discover`, `ua-fit`, `ua-pipeline`
-- **Chat integration:** 3 tools — `ua_discover`, `ua_fit_score`, `get_ua_targets`
-- **DB:** `dossiers.ua_fit_json` stores scores. `_dimensions` metadata allows UI to render with display labels (backward-compat with old stored data via `_dimDisplayLabel` override map in JS)
+- **Chat integration:** `ua_discover`, `ua_fit_score` (aliased to CTV lens), `get_ua_targets` (aliased to lens_scores), `score_lens`, `create_lens`, `list_lenses`
+- **DB:** `lenses` table (dimensions_json), `lens_scores` table (score_data JSON). Legacy `dossiers.ua_fit_json` preserved for backward compat.
 
 ### ICP Wizard System
 
@@ -305,9 +306,11 @@ Module sidebar (64px) on far left with icon+label buttons (Research, Prospects).
 - **Middle pane:** Chat interface with SSE streaming, tool call display, thinking indicators, context pill above input showing what company/report is being viewed
 - **Right pane (580px):** Report viewer / Dossier detail / Intelligence briefing with source popovers showing priority-ordered key facts
 
-**Prospecting workspace** — two-panel layout:
-- **Left panel (300px):** Niche text input + top-n number input + Discover button, ICP profile indicator with popover menu, niche suggestion chips, SSE progress panel during pipeline runs
-- **Main panel (flex):** Ranked prospect list with score rings, detail view with score ring + dynamic dimension bars + methodology section + recommended angle + risks + signal evidence
+**Prospecting workspace** — 4-pane horizontal pipeline layout:
+- **Pane 1 (Sidebar, 250px):** Niche input + Niche Builder modal + flat campaign history list
+- **Pane 2 (Execution Engine, 420px):** Pipeline steps only (no company cards) — search activity log + step nodes (Discovery → Found N → Validation → Complete), persists after completion
+- **Pane 3 (Market Summary, 350px):** Owns company list exclusively — checkbox-based selection (max 3), validation badges (valid/limited/skipped), Send to Research bar with lens dropdown
+- **Pane 4 (Company Detail, flex):** Discovery view: "Why this company?" + source evidence with type badges. Scored view: lens score ring, dimension cards, playbook. No Send to Research button (selection in Pane 3 only)
 
 ### CSS Design System
 
@@ -343,9 +346,12 @@ Module sidebar (64px) on far left with icon+label buttons (Research, Prospects).
 | DELETE | `/api/icp-profiles/<id>` | Delete non-default ICP profile |
 | POST | `/api/icp-profiles/<id>/activate` | Set ICP profile as active |
 | POST | `/api/icp-profiles/generate` | LLM-generate config from survey answers |
-| GET | `/api/ua-targets` | List scored prospects (sorted by score desc) |
-| POST | `/api/dossiers/<name>/ua-fit` | Score company against active ICP |
-| POST | `/api/ua-pipeline` | SSE pipeline: discover + score all (streaming progress) |
+| GET | `/api/ua-targets` | List scored prospects (legacy, sorted by score desc) |
+| POST | `/api/dossiers/<name>/ua-fit` | Score company against active ICP (legacy) |
+| POST | `/api/ua-pipeline` | SSE pipeline: discover + validate (streaming progress, accepts context) |
+| POST | `/api/send-to-research` | Send selected companies (max 3) from Discover to Research |
+| GET | `/api/lenses` | List all lenses |
+| POST | `/api/lenses/<id>/score` | Score company with specific lens |
 | GET | `/api/companies` | List all companies |
 | POST | `/api/chat` | SSE chat endpoint (with context injection + company scoping + dynamic tool selection) |
 
@@ -387,7 +393,11 @@ USPTO_API_KEY       # USPTO PatentsView API key (falls back to PATENTSVIEW_API_K
 ### Temporal Analysis
 - **hiring_snapshots:** id, company_id (FK), snapshot_date, total_roles, dept_counts, subcategory_counts, seniority_counts, strategic_tag_counts, ai_ml_role_count, growth_signal_ratio, top_skills, top_locations, created_at — UNIQUE(company_id, snapshot_date)
 
-### ICP Profiles
+### Lens System
+- **lenses:** id, name, slug (UNIQUE), description, dimensions_json (array of {key, label, weight, rubric}), created_at, updated_at
+- **lens_scores:** id, lens_id (FK), dossier_id (FK), overall_score, tier_label, score_data (JSON), created_at, updated_at — UNIQUE(lens_id, dossier_id)
+
+### ICP Profiles (Dormant)
 - **icp_profiles:** id, name, description, is_default, is_active, survey_answers_json, config_json, created_at, updated_at
   - `config_json` is the single source of truth: dimensions (key, label, weight, rubric, signal_queries), labels, discovery_filters, icp_definition, suggested_niches
   - Default "Universal Ads ICP" profile auto-created via `ensure_default_icp_profile()` on first run
@@ -398,7 +408,7 @@ USPTO_API_KEY       # USPTO PatentsView API key (falls back to PATENTSVIEW_API_K
 
 ## Current State (March 2026)
 
-Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat with multi-step context management (tool result summarization, dynamic tool schema selection, condensed system prompts), server-side PDF export (reports + briefings), and intelligence briefing with hybrid algorithmic+LLM Digital Maturity Score. Two modules via vertical sidebar: **Market Research** (three-pane layout for analysis, dossiers, chat) and **Prospecting** (ICP fit scoring with config-driven dimensions, niche-based lead discovery, SSE pipeline). The ICP Wizard system makes prospecting fully configurable — a 5-step guided survey generates custom scoring dimensions, weights, rubrics, signal queries, and discovery filters via LLM, stored as `icp_profiles` in the database. Scoring and discovery agents dynamically adapt to the active ICP profile (with hardcoded fallback for legacy compatibility). The briefing is the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization. The DMS now uses a two-pass hybrid approach: deterministic algorithmic base scores computed from structured data, then LLM fine-tuning within ±10 bounds with required justification for deviations. Sector is applied as an additive bonus (AI→+25, software→+15) rather than a floor, so weak companies in strong sectors are no longer artificially propped up. A separate `compute_anomaly_signals()` function detects 8 structural anomaly types (engineering-heavy org, top-heavy seniority, scaling without leaders, replacement churn, department surge, AI without data foundation, growth-sentiment gap, low Glassdoor, strategic sprawl) and injects them into the briefing prompt to sharpen engagement opportunity generation.
+Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat with multi-step context management (tool result summarization, dynamic tool schema selection, condensed system prompts), server-side PDF export (reports + briefings), and intelligence briefing with hybrid algorithmic+LLM Digital Maturity Score. Two modules via vertical sidebar: **Market Research** (three-pane layout for analysis, dossiers, chat) and **Prospecting** (two-phase workflow: Discover + Research with lens-based scoring). The **lens system** (`lenses` + `lens_scores` tables) replaces hardcoded CTV scoring — configurable evaluation frameworks with custom dimensions, weights, and rubrics. Default "CTV Ad Sales" lens preserves the original 5-dimension scoring. Discovery is pure search with smart query generation (8-12 targeted queries from structured Niche Builder context), users select up to 3 companies and send to Research for lens-based scoring. Chat tools `ua_fit_score` and `get_ua_targets` are aliased to the lens system with legacy fallback. CTV-specific labels removed from UI (dynamic lens names). ICP Wizard system dormant but preserved. The briefing remains the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization.
 
 ## Planned Improvements
 
