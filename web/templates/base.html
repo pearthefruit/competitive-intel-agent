@@ -1859,14 +1859,8 @@
 
         /* Scrollable container for tool call sequences */
         .tool-group {
-            max-height: 360px;
-            overflow-y: auto;
-            scroll-behavior: smooth;
+            /* No scroll on the group wrapper — scroll lives inside the bubble's progress log */
         }
-        .tool-group::-webkit-scrollbar { width: 4px; }
-        .tool-group::-webkit-scrollbar-track { background: transparent; }
-        .tool-group::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.25); border-radius: 2px; }
-        .tool-group::-webkit-scrollbar-thumb:hover { background: rgba(168,85,247,0.4); }
 
         /* Progress step log inside tool call bubble */
         .tool-progress-log {
@@ -1876,7 +1870,14 @@
             display: flex;
             flex-direction: column;
             gap: 4px;
+            max-height: 320px;
+            overflow-y: auto;
+            scroll-behavior: smooth;
         }
+        .tool-progress-log::-webkit-scrollbar { width: 4px; }
+        .tool-progress-log::-webkit-scrollbar-track { background: transparent; }
+        .tool-progress-log::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.25); border-radius: 2px; }
+        .tool-progress-log::-webkit-scrollbar-thumb:hover { background: rgba(168,85,247,0.4); }
         .tool-progress-step {
             display: flex;
             align-items: center;
@@ -6793,9 +6794,8 @@ function handleSSE(event, chat) {
         }
         saveChats();
         renderMessages();
-        // Scroll tool-group to bottom so latest tool call is visible
-        const tg = document.querySelector('.tool-call-bubble.running')?.closest('.tool-group');
-        if (tg) tg.scrollTop = tg.scrollHeight;
+        // Scroll chat to show new tool bubble
+        _scrollChatBottom();
 
     } else if (event.type === 'tool_progress') {
         // Accumulate progress steps in the tool_call message data
@@ -6866,10 +6866,10 @@ function handleSSE(event, chat) {
                 if (statusText) statusText.textContent = cleaned;
             }
         }
-        // Auto-scroll: only scroll if user hasn't scrolled up (respects _chatAutoScroll)
+        // Auto-scroll the progress log inside the running bubble (not the outer group)
         if (_chatAutoScroll) {
-            const runningGroup = document.querySelector('.tool-call-bubble.running')?.closest('.tool-group');
-            if (runningGroup) runningGroup.scrollTop = runningGroup.scrollHeight;
+            const runningLog = document.querySelector('.tool-call-bubble.running .tool-progress-log');
+            if (runningLog) runningLog.scrollTop = runningLog.scrollHeight;
         }
         _scrollChatBottom();
 
