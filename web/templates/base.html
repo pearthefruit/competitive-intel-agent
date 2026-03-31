@@ -6572,7 +6572,7 @@ function renderMessages() {
             if (steps.length && isTreeTool && hasResult) {
                 stepsHtml = `<div class="tool-progress-log" id="tool-tree-${msgIdx}">${_buildToolStepsTree(steps, m.name)}</div>`;
             } else if (steps.length) {
-                stepsHtml = `<div class="tool-progress-log">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(s)}</div>`).join('')}</div>`;
+                stepsHtml = `<div class="tool-progress-log">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(cleanProgress(s))}</div>`).join('')}</div>`;
             }
             const statusHtml = hasResult
                 ? `<div class="tool-call-status"><span class="tool-done-check">&#10003;</span> <span class="tool-status-text" style="color:var(--green)">Done — ${steps.length} step${steps.length !== 1 ? 's' : ''}</span></div>`
@@ -6800,7 +6800,8 @@ function handleSSE(event, chat) {
     } else if (event.type === 'tool_progress') {
         // Accumulate progress steps in the tool_call message data
         const isStructured = event.structured === true;
-        const cleaned = isStructured ? null : cleanProgress(event.text);
+        const rawText = event.text || '';
+        const cleaned = isStructured ? null : cleanProgress(rawText);
         for (let i = chat.messages.length - 1; i >= 0; i--) {
             if (chat.messages[i].role === 'tool_call' && !chat.messages[i].result) {
                 if (!chat.messages[i].steps) chat.messages[i].steps = [];
@@ -6820,10 +6821,11 @@ function handleSSE(event, chat) {
                         model: event.model,
                     });
                 } else {
-                    // Legacy flat string step
+                    // Store RAW text (with [agent] prefix) for tree parsing,
+                    // cleaned text is only used for live DOM display
                     const steps = chat.messages[i].steps;
-                    if (!steps.length || steps[steps.length - 1] !== cleaned) {
-                        steps.push(cleaned);
+                    if (!steps.length || steps[steps.length - 1] !== rawText) {
+                        steps.push(rawText);
                     }
                 }
                 break;
@@ -6864,9 +6866,11 @@ function handleSSE(event, chat) {
                 if (statusText) statusText.textContent = cleaned;
             }
         }
-        // Auto-scroll the tool-group internally; only scroll chat if user hasn't scrolled up
-        const runningGroup = document.querySelector('.tool-call-bubble.running')?.closest('.tool-group');
-        if (runningGroup) runningGroup.scrollTop = runningGroup.scrollHeight;
+        // Auto-scroll: only scroll if user hasn't scrolled up (respects _chatAutoScroll)
+        if (_chatAutoScroll) {
+            const runningGroup = document.querySelector('.tool-call-bubble.running')?.closest('.tool-group');
+            if (runningGroup) runningGroup.scrollTop = runningGroup.scrollHeight;
+        }
         _scrollChatBottom();
 
     } else if (event.type === 'tool_result') {
