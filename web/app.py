@@ -1098,6 +1098,7 @@ def create_app(db_path="intel.db"):
             if detail:
                 c["prospects"] = detail.get("prospects", [])
                 c["insight"] = detail.get("insight")
+                c["execution_log"] = detail.get("execution_log")
             else:
                 c["prospects"] = []
             # Attach child campaigns for tree rendering in Pane 2
@@ -1108,6 +1109,7 @@ def create_app(db_path="intel.db"):
                 if ch_detail:
                     ch["prospects"] = ch_detail.get("prospects", [])
                     ch["insight"] = ch_detail.get("insight")
+                    ch["execution_log"] = ch_detail.get("execution_log")
                 else:
                     ch["prospects"] = []
             c["children"] = children

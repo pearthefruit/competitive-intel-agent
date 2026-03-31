@@ -1857,6 +1857,39 @@
             margin-bottom: 2px;
         }
 
+        /* Fullscreen execution overlay for tool call flowcharts */
+        .exec-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+            z-index: 9999; display: none; overflow-y: auto;
+            animation: exec-overlay-in 0.2s ease;
+        }
+        .exec-overlay.visible { display: block; }
+        @keyframes exec-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+        .exec-overlay-inner {
+            max-width: 700px; margin: 40px auto; padding: 0 24px 60px;
+        }
+        .exec-overlay-header {
+            display: flex; align-items: center; gap: 12px;
+            padding: 20px 0 16px; border-bottom: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+        .exec-overlay-header .tool-call-icon { width: 36px; height: 36px; font-size: 18px; }
+        .exec-overlay-title { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+        .exec-overlay-subtitle { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+        .exec-overlay-close {
+            margin-left: auto; width: 32px; height: 32px; border-radius: 6px;
+            background: rgba(255,255,255,0.06); border: 1px solid var(--border);
+            color: var(--text-muted); font-size: 16px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s;
+        }
+        .exec-overlay-close:hover { background: rgba(255,255,255,0.12); }
+        .exec-overlay-meta {
+            font-size: 11px; color: var(--text-muted); margin-bottom: 16px;
+            display: flex; gap: 12px;
+        }
+
         /* Scrollable container for tool call sequences */
         .tool-group {
             /* No scroll on the group wrapper — scroll lives inside the bubble's progress log */
@@ -6651,20 +6684,33 @@ function renderMessages() {
             const hasResult = !!m.result;
             const isExpanded = expandedSet.has('c' + msgIdx);
             const steps = m.steps || [];
-            // Build tree view for analysis/scoring tools, flat list for others
             const isTreeTool = ['score_lens', 'ua_fit_score', 'full_analysis', 'financial_analysis',
                                 'sentiment_analysis', 'techstack_analysis', 'competitor_analysis',
                                 'patent_analysis'].includes(m.name);
+
+            // For completed tree tools: compact bubble + "View Execution" button (opens fullscreen overlay)
+            // For running tools or non-tree tools: flat step list as before
             let stepsHtml = '';
-            if (steps.length && isTreeTool && hasResult) {
-                stepsHtml = `<div class="tool-progress-log" id="tool-tree-${msgIdx}">${_buildToolStepsTree(steps, m.name)}</div>`;
-            } else if (steps.length) {
+            if (!hasResult && steps.length) {
+                // Still running — show live flat step list
+                stepsHtml = `<div class="tool-progress-log">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(cleanProgress(s))}</div>`).join('')}</div>`;
+            } else if (hasResult && !isTreeTool && steps.length) {
+                // Completed non-tree tool — flat list on expand
                 stepsHtml = `<div class="tool-progress-log">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(cleanProgress(s))}</div>`).join('')}</div>`;
             }
+            // For completed tree tools: no inline stepsHtml — flowchart opens in overlay
+
             const statusHtml = hasResult
                 ? `<div class="tool-call-status"><span class="tool-done-check">&#10003;</span> <span class="tool-status-text" style="color:var(--green)">Done — ${steps.length} step${steps.length !== 1 ? 's' : ''}</span></div>`
                 : `<div class="tool-call-status"><div class="tool-spinner"></div> <span class="tool-status-text">Running ${escHtml(toolLabel(m.name))}...</span></div>`;
-            const chevron = hasResult ? `<span class="tool-expand-chevron">&#9660;</span>` : '';
+
+            const chevron = hasResult && !isTreeTool ? `<span class="tool-expand-chevron">&#9660;</span>` : '';
+
+            // "View Execution" button for completed tree tools
+            const execBtn = hasResult && isTreeTool && steps.length
+                ? `<div class="report-link" onclick="event.stopPropagation();openExecOverlay(${msgIdx})" style="margin-top:4px">View Execution &rarr;</div>`
+                : '';
+
             html += `<div class="msg msg-tool">
                 <div class="tool-call-bubble${hasResult ? (isExpanded ? ' expanded' : '') : ' running'}" data-msg-idx="${msgIdx}" onclick="if(!window.getSelection().toString())this.classList.toggle('expanded')">
                     <div class="tool-call-header">
@@ -6677,6 +6723,7 @@ function renderMessages() {
                     ${stepsHtml}
                     ${m.result ? `<div class="tool-result-content">${escHtml(m.result)}</div>` : ''}
                 </div>
+                ${execBtn}
                 ${m.reportFile ? `<div class="report-link" onclick="openReport('${m.reportFile}')">View Report &rarr;</div>` : ''}
             </div>`;
         }
@@ -7927,6 +7974,53 @@ function toolIcon(name) {
 function toolLabel(name) {
     return (name || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
+
+/** Open fullscreen execution overlay for a completed tool call. */
+function openExecOverlay(msgIdx) {
+    const chat = getActiveChat();
+    if (!chat) return;
+    const m = chat.messages[msgIdx];
+    if (!m || m.role !== 'tool_call' || !m.result) return;
+
+    const overlay = document.getElementById('exec-overlay');
+    const iconEl = document.getElementById('exec-overlay-icon');
+    const titleEl = document.getElementById('exec-overlay-title');
+    const subtitleEl = document.getElementById('exec-overlay-subtitle');
+    const metaEl = document.getElementById('exec-overlay-meta');
+    const bodyEl = document.getElementById('exec-overlay-body');
+
+    iconEl.innerHTML = toolIcon(m.name);
+    titleEl.textContent = toolLabel(m.name);
+    subtitleEl.textContent = formatArgs(m.args);
+    metaEl.innerHTML = `<span>&#10003; Done &mdash; ${(m.steps || []).length} steps</span>`;
+
+    // Render the flowchart tree in the overlay body
+    const steps = m.steps || [];
+    const isTreeTool = ['score_lens', 'ua_fit_score', 'full_analysis', 'financial_analysis',
+                        'sentiment_analysis', 'techstack_analysis', 'competitor_analysis',
+                        'patent_analysis'].includes(m.name);
+    if (steps.length && isTreeTool) {
+        bodyEl.innerHTML = _buildToolStepsTree(steps, m.name);
+    } else if (steps.length) {
+        bodyEl.innerHTML = `<div class="tool-progress-log" style="max-height:none;padding-left:0">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(cleanProgress(s))}</div>`).join('')}</div>`;
+    } else {
+        bodyEl.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">No execution steps recorded.</div>';
+    }
+
+    overlay.classList.add('visible');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeExecOverlay() {
+    const overlay = document.getElementById('exec-overlay');
+    overlay.classList.remove('visible');
+    document.body.style.overflow = '';
+}
+
+// Close overlay on Escape
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeExecOverlay();
+});
 
 function formatDate(ts) {
     if (!ts) return '';
@@ -11845,5 +11939,22 @@ let savedRightWidth = null;
     });
 })();
 </script>
+
+<!-- Fullscreen execution overlay -->
+<div class="exec-overlay" id="exec-overlay" onclick="if(event.target===this)closeExecOverlay()">
+    <div class="exec-overlay-inner">
+        <div class="exec-overlay-header">
+            <div class="tool-call-icon" id="exec-overlay-icon"></div>
+            <div>
+                <div class="exec-overlay-title" id="exec-overlay-title"></div>
+                <div class="exec-overlay-subtitle" id="exec-overlay-subtitle"></div>
+            </div>
+            <button class="exec-overlay-close" onclick="closeExecOverlay()">&times;</button>
+        </div>
+        <div class="exec-overlay-meta" id="exec-overlay-meta"></div>
+        <div id="exec-overlay-body"></div>
+    </div>
+</div>
+
 </body>
 </html>
