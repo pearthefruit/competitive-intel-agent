@@ -1089,11 +1089,10 @@ def create_app(db_path="intel.db"):
 
     @app.route("/api/campaigns")
     def list_campaigns():
-        """Get all campaigns with prospect counts, avg scores, and prospect data."""
-        from db import get_all_campaigns, get_campaign_detail
+        """Get root campaigns (sidebar) with children tree and prospect data."""
+        from db import get_root_campaigns, get_campaign_detail, get_campaign_tree
         conn = get_connection(db_path)
-        campaigns = get_all_campaigns(conn)
-        # Attach prospect data + parsed insight to each campaign for sidebar rendering
+        campaigns = get_root_campaigns(conn)
         for c in campaigns:
             detail = get_campaign_detail(conn, c["id"])
             if detail:
@@ -1101,6 +1100,17 @@ def create_app(db_path="intel.db"):
                 c["insight"] = detail.get("insight")
             else:
                 c["prospects"] = []
+            # Attach child campaigns for tree rendering in Pane 2
+            tree = get_campaign_tree(conn, c["id"])
+            children = [n for n in tree if n["id"] != c["id"]]
+            for ch in children:
+                ch_detail = get_campaign_detail(conn, ch["id"])
+                if ch_detail:
+                    ch["prospects"] = ch_detail.get("prospects", [])
+                    ch["insight"] = ch_detail.get("insight")
+                else:
+                    ch["prospects"] = []
+            c["children"] = children
         conn.close()
         return jsonify(campaigns)
 
@@ -1114,6 +1124,18 @@ def create_app(db_path="intel.db"):
         if not campaign:
             return jsonify({"error": "Campaign not found"}), 404
         return jsonify(campaign)
+
+    @app.route("/api/campaigns/<int:campaign_id>/tree")
+    def get_campaign_tree_api(campaign_id):
+        """Get the full tree of campaigns rooted at campaign_id."""
+        from db import get_campaign_tree, get_campaign_detail
+        conn = get_connection(db_path)
+        nodes = get_campaign_tree(conn, campaign_id)
+        for node in nodes:
+            detail = get_campaign_detail(conn, node["id"])
+            node["prospects"] = detail.get("prospects", []) if detail else []
+        conn.close()
+        return jsonify(nodes)
 
     @app.route("/api/campaigns/<int:campaign_id>", methods=["PATCH"])
     def update_campaign(campaign_id):
@@ -1208,6 +1230,8 @@ def create_app(db_path="intel.db"):
         niche = data.get("niche", "").strip()
         top_n = min(data.get("top_n", 10), 20)
         niche_context = data.get("context", {})  # structured fields from Niche Builder
+        seed_company = data.get("seed_company", "").strip()  # "Find Similar" mode
+        parent_campaign_id = data.get("parent_campaign_id")  # child campaign link
         if not niche:
             return jsonify({"error": "niche is required"}), 400
 
@@ -1220,22 +1244,42 @@ def create_app(db_path="intel.db"):
 
             try:
                 # ---- Phase 1: Discovery (with progress streaming) ----
-                yield f"data: {json.dumps({'type': 'status', 'text': f'Discovering companies in: {niche}...'})}\n\n"
+                # Depth check for "Find Similar" mode
+                if seed_company and parent_campaign_id:
+                    from db import get_campaign_depth
+                    _depth_conn = get_connection(db_path)
+                    depth = get_campaign_depth(_depth_conn, parent_campaign_id)
+                    _depth_conn.close()
+                    if depth >= 3:
+                        yield f"data: {json.dumps({'type': 'error', 'text': 'Maximum expansion depth (3) reached.'})}\n\n"
+                        return
 
-                from agents.ua_discover import discover_prospects
+                if seed_company:
+                    yield f"data: {json.dumps({'type': 'status', 'text': f'Finding companies similar to: {seed_company}...'})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'status', 'text': f'Discovering companies in: {niche}...'})}\n\n"
+
+                from agents.ua_discover import discover_prospects, discover_similar
 
                 disc_q = queue.Queue()
                 disc_holder = [None]
+                execution_log = []  # collect search events for persistence
 
                 def _disc_cb(event_type, ev_data):
                     disc_q.put((event_type, ev_data))
 
                 def _run_discovery():
                     try:
-                        result = discover_prospects(
-                            niche, top_n=top_n, db_path=db_path,
-                            context=niche_context, progress_cb=_disc_cb,
-                        )
+                        if seed_company:
+                            result = discover_similar(
+                                seed_company, top_n=top_n, db_path=db_path,
+                                progress_cb=_disc_cb,
+                            )
+                        else:
+                            result = discover_prospects(
+                                niche, top_n=top_n, db_path=db_path,
+                                context=niche_context, progress_cb=_disc_cb,
+                            )
                         disc_holder[0] = result
                     except Exception as exc:
                         print(f"[pipeline] Discovery error: {exc}")
@@ -1253,6 +1297,11 @@ def create_app(db_path="intel.db"):
                         continue
                     if ev_type == "_done":
                         break
+                    # Collect all meaningful events for execution log persistence
+                    if ev_type in ("discovery_plan", "search_start", "search_done",
+                                   "search_complete", "extracting", "extracted",
+                                   "seed_profile"):
+                        execution_log.append({"type": ev_type, **(ev_data or {})})
                     yield f"data: {json.dumps({'type': ev_type, **(ev_data or {})})}\n\n"
 
                 dt.join(timeout=300)
@@ -1260,9 +1309,18 @@ def create_app(db_path="intel.db"):
 
                 # Create campaign record (before early-return so failed searches persist)
                 from db import (create_campaign, add_campaign_prospect,
-                                update_campaign_status, get_or_create_dossier)
+                                update_campaign_status, get_or_create_dossier,
+                                save_campaign_execution_log)
                 conn = get_connection(db_path)
-                campaign_id = create_campaign(conn, niche, top_n)
+                campaign_id = create_campaign(
+                    conn, niche, top_n,
+                    parent_campaign_id=parent_campaign_id or None,
+                    seed_company=seed_company or None,
+                )
+
+                # Persist execution log (search queries, results, etc.)
+                if execution_log:
+                    save_campaign_execution_log(conn, campaign_id, execution_log)
 
                 if not companies:
                     update_campaign_status(conn, campaign_id, "empty")
@@ -1305,6 +1363,9 @@ def create_app(db_path="intel.db"):
                         continue
                     if ev_type == "_done":
                         break
+                    # Collect validation events for execution log
+                    if ev_type in ("validating", "validated"):
+                        execution_log.append({"type": ev_type, **(ev_data or {})})
                     yield f"data: {json.dumps({'type': ev_type, **ev_data})}\n\n"
 
                 vt.join(timeout=120)
@@ -1371,6 +1432,9 @@ def create_app(db_path="intel.db"):
                         )
                 conn.commit()
                 update_campaign_status(conn, campaign_id, 'complete')
+                # Re-save execution log with validation events included
+                if execution_log:
+                    save_campaign_execution_log(conn, campaign_id, execution_log)
                 conn.close()
 
                 yield f"data: {json.dumps({'type': 'complete', 'total_discovered': len(valid_companies), 'campaign_id': campaign_id})}\n\n"

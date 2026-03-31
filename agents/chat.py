@@ -782,56 +782,84 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             sys.stdout = old_stdout
             old_stdout = None
             query = args["query"]
+            if progress_callback:
+                progress_callback(f"Searching news for: {query}")
             news = search_news(query, max_results=5)
+            if progress_callback:
+                progress_callback(f"Searching Google News for: {query}")
             gnews = search_google_news(query, max_results=5, days_back=7)
+            if progress_callback:
+                progress_callback(f"Searching web for: {query}")
             web = search_web(query, max_results=5)
             all_results = dedup_results(news + gnews + web)
+            if progress_callback:
+                progress_callback(f"Found {len(all_results)} results")
             return format_search_results(all_results) if all_results else "No results found."
 
         elif name == "reddit_search":
             sys.stdout = old_stdout
             old_stdout = None
+            if progress_callback:
+                progress_callback(f"Searching Reddit for: {args['query']}")
             results = search_reddit(args["query"], max_results=args.get("max_results", 5))
+            if progress_callback:
+                progress_callback(f"Found {len(results or [])} results")
             return format_search_results(results) if results else "No Reddit results found."
 
         elif name == "reddit_deep_search":
             sys.stdout = old_stdout
             old_stdout = None
+            if progress_callback:
+                progress_callback(f"Deep searching Reddit for: {args['query']}")
             results = search_reddit_rss(
                 args["query"],
                 max_results=args.get("max_results", 10),
                 subreddits=args.get("subreddits"),
                 fetch_comments_top_n=3 if args.get("fetch_comments") else 0,
             )
+            if progress_callback:
+                progress_callback(f"Found {len(results or [])} results with comments")
             return format_search_results(results) if results else "No Reddit results found."
 
         elif name == "hn_search":
             sys.stdout = old_stdout
             old_stdout = None
+            if progress_callback:
+                progress_callback(f"Searching Hacker News for: {args['query']}")
             results = search_hackernews(
                 args["query"],
                 max_results=args.get("max_results", 10),
                 sort=args.get("sort", "relevance"),
                 fetch_comments_top_n=3 if args.get("fetch_comments") else 0,
             )
+            if progress_callback:
+                progress_callback(f"Found {len(results or [])} results")
             return format_search_results(results) if results else "No Hacker News results found."
 
         elif name == "youtube_search":
             sys.stdout = old_stdout
             old_stdout = None
+            if progress_callback:
+                progress_callback(f"Searching YouTube for: {args['query']}")
             results = search_youtube(args["query"], max_results=5)
             if not results:
                 return "No YouTube results found."
             output = format_search_results(results)
             if args.get("fetch_transcripts"):
+                if progress_callback:
+                    progress_callback(f"Fetching transcripts from {min(2, len(results))} videos")
                 transcripts = fetch_transcripts_from_search_results(results, max_videos=2)
                 if transcripts:
                     output += "\n\n--- TRANSCRIPTS ---\n\n" + format_transcripts_for_prompt(transcripts)
+            if progress_callback:
+                progress_callback(f"Found {len(results)} results")
             return output
 
         elif name == "youtube_transcript":
             sys.stdout = old_stdout
             old_stdout = None
+            if progress_callback:
+                progress_callback(f"Fetching transcript for: {args['url']}")
             text, video_id = get_video_transcript(args["url"], max_chars=args.get("max_chars", 6000))
             if text:
                 return f"Transcript for video {video_id}:\n\n{text}"

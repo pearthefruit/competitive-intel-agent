@@ -1857,6 +1857,17 @@
             margin-bottom: 2px;
         }
 
+        /* Scrollable container for tool call sequences */
+        .tool-group {
+            max-height: 360px;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+        .tool-group::-webkit-scrollbar { width: 4px; }
+        .tool-group::-webkit-scrollbar-track { background: transparent; }
+        .tool-group::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.25); border-radius: 2px; }
+        .tool-group::-webkit-scrollbar-thumb:hover { background: rgba(168,85,247,0.4); }
+
         /* Progress step log inside tool call bubble */
         .tool-progress-log {
             margin-top: 8px;
@@ -3926,6 +3937,9 @@
             border: 1px solid rgba(168,85,247,0.3);
             border-radius: 8px;
             margin-top: 12px;
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
         }
         .str-count { font-size: 12px; color: var(--text-secondary); }
         .str-btn {
@@ -3952,6 +3966,72 @@
             background: rgba(168,85,247,0.08) !important;
         }
         .discovery-list-item.skipped .discovery-select-cb { display: none; }
+
+        /* === DISCOVERY TREE (Pane 2) === */
+        .tree-node { position: relative; cursor: pointer; }
+        .tree-node .pipeline-node { transition: border-color 0.15s, background 0.15s; }
+        .tree-node.active .pipeline-node { border-color: rgba(168,85,247,0.5); background: rgba(168,85,247,0.05); }
+        .tree-node:hover .pipeline-node { border-color: rgba(168,85,247,0.3); }
+        .tree-branch-line {
+            position: absolute; left: 12px; top: 0; bottom: 0;
+            width: 1px; background: var(--border); pointer-events: none;
+        }
+        .tree-connector-horiz {
+            position: absolute; left: 12px; top: 50%;
+            width: 12px; height: 1px; background: var(--border); pointer-events: none;
+        }
+        .ancestry-badge {
+            display: inline-block; font-size: 9px; padding: 1px 6px;
+            border-radius: 3px; background: rgba(168,85,247,0.15);
+            color: var(--purple); border: 1px solid rgba(168,85,247,0.2);
+            margin-bottom: 4px;
+        }
+        .find-similar-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 7px 14px; background: rgba(168,85,247,0.1);
+            border: 1px solid rgba(168,85,247,0.3); border-radius: 6px;
+            color: var(--purple); font-size: 12px; font-weight: 600;
+            cursor: pointer; transition: background 0.15s, border-color 0.15s;
+        }
+        .find-similar-btn:hover { background: rgba(168,85,247,0.2); border-color: rgba(168,85,247,0.5); }
+        .tree-breadcrumb {
+            font-size: 11px; color: var(--text-muted); margin-bottom: 12px;
+            padding-bottom: 8px; border-bottom: 1px solid var(--border);
+        }
+        .breadcrumb-seg { cursor: pointer; color: #60a5fa; }
+        .breadcrumb-seg:hover { text-decoration: underline; }
+        .breadcrumb-seg.current { color: var(--text-primary); cursor: default; font-weight: 600; }
+        .breadcrumb-sep { color: var(--text-muted); margin: 0 4px; }
+
+        /* === PIPELINE TREE RENDERER === */
+        .ptree { font-size: 11px; }
+        .ptree-node { position: relative; margin-left: 18px; }
+        .ptree-node.depth-0 { margin-left: 0; }
+        .ptree-connector { position: absolute; left: -14px; top: 0; bottom: 0; width: 1px; background: var(--border); }
+        .ptree-node:last-child > .ptree-connector { bottom: 50%; }
+        .ptree-connector-h { position: absolute; left: -14px; top: 13px; width: 10px; height: 1px; background: var(--border); }
+        .ptree-head { display: flex; align-items: center; gap: 5px; padding: 4px 6px; border-radius: 5px; cursor: pointer; transition: background 0.15s; }
+        .ptree-head:hover { background: rgba(255,255,255,0.04); }
+        .ptree-icon { width: 18px; height: 18px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; flex-shrink: 0; }
+        .ptree-label { font-weight: 600; color: var(--text-secondary); white-space: nowrap; font-size: 11px; }
+        .ptree-summary { color: var(--text-muted); font-size: 10px; margin-left: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .ptree-badge { font-size: 8px; padding: 1px 5px; border-radius: 3px; font-weight: 600; white-space: nowrap; margin-left: auto; }
+        .ptree-badge.done { background: rgba(22,163,74,0.12); color: var(--green); }
+        .ptree-badge.cached { background: rgba(59,130,246,0.12); color: var(--accent); }
+        .ptree-badge.running { background: rgba(168,85,247,0.12); color: var(--purple); }
+        .ptree-badge.error { background: rgba(239,68,68,0.12); color: var(--red); }
+        .ptree-badge.skipped { background: rgba(107,114,128,0.12); color: #9ca3af; }
+        .ptree-children { overflow: hidden; }
+        .ptree-children.collapsed { display: none; }
+        .ptree-detail { margin: 2px 0 4px 24px; padding: 6px 8px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 5px; font-size: 10px; color: var(--text-muted); line-height: 1.5; display: none; }
+        .ptree-chevron { font-size: 8px; color: var(--text-muted); transition: transform 0.15s; flex-shrink: 0; width: 10px; text-align: center; }
+        .ptree-chevron.open { transform: rotate(90deg); }
+
+        /* Legacy exec-step compat */
+        .exec-step { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-secondary); }
+        .exec-step:hover { border-color: rgba(168,85,247,0.3); }
+        .exec-step-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+        .exec-step-summary { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
 
         /* === EVIDENCE SOURCE BADGES === */
         .evidence-item {
@@ -6029,7 +6109,7 @@ function _renderLensDetail(ls) {
             </div>
             <div class="icp-dim-bar"><div class="icp-dim-fill" style="width:${ds}%;background:${color}"></div></div>
             <div class="icp-dim-card-body">
-                <div class="icp-dim-rationale">${escHtml(rationale)}</div>
+                <div class="icp-dim-rationale">${_renderCitedText(rationale)}</div>
                 ${signalHtml ? `<div class="icp-dim-signals">${signalHtml}</div>` : ''}
             </div>
         </div>`;
@@ -6041,7 +6121,7 @@ function _renderLensDetail(ls) {
     if (scoreData.recommended_angle) {
         html += `<div class="lens-detail-footer">
             <div class="lens-footer-label">Recommended Angle</div>
-            <div class="lens-footer-text">${escHtml(scoreData.recommended_angle)}</div>
+            <div class="lens-footer-text">${_renderCitedText(scoreData.recommended_angle)}</div>
         </div>`;
     }
 
@@ -6049,7 +6129,7 @@ function _renderLensDetail(ls) {
     if (scoreData.key_risks && scoreData.key_risks.length) {
         html += `<div class="lens-detail-footer" style="border-top:none;padding-top:0">
             <div class="lens-footer-label">Key Risks</div>
-            <ul class="lens-risks-list">${scoreData.key_risks.map(r => `<li>${escHtml(r)}</li>`).join('')}</ul>
+            <ul class="lens-risks-list">${scoreData.key_risks.map(r => `<li>${_renderCitedText(r)}</li>`).join('')}</ul>
         </div>`;
     }
 
@@ -6403,6 +6483,27 @@ function getChatCol() {
     return c.querySelector('.chat-col') || c;
 }
 
+// Auto-scroll gating: disabled when user scrolls up, re-enabled on new message send
+let _chatAutoScroll = true;
+let _chatScrollProgrammatic = false;
+(function() {
+    const c = document.getElementById('chat-messages');
+    if (!c) return;
+    c.addEventListener('scroll', () => {
+        if (_chatScrollProgrammatic) return;
+        const nearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 120;
+        _chatAutoScroll = nearBottom;
+    });
+})();
+function _scrollChatBottom() {
+    if (!_chatAutoScroll) return;
+    const c = document.getElementById('chat-messages');
+    if (!c) return;
+    _chatScrollProgrammatic = true;
+    c.scrollTop = c.scrollHeight;
+    requestAnimationFrame(() => { _chatScrollProgrammatic = false; });
+}
+
 function renderMessages() {
     const chat = getActiveChat();
     const container = document.getElementById('chat-messages');
@@ -6430,7 +6531,21 @@ function renderMessages() {
 
     let html = '';
     let msgIdx = 0;
-    chat.messages.forEach(m => {
+    let inToolGroup = false;
+    const msgs = chat.messages;
+    msgs.forEach((m, i) => {
+        const isGroupable = m.role === 'tool_call' || m.role === 'thinking';
+        // Open a tool-group wrapper when entering a run of tool/thinking messages
+        if (isGroupable && !inToolGroup) {
+            html += '<div class="tool-group">';
+            inToolGroup = true;
+        }
+        // Close the wrapper when leaving a run
+        if (!isGroupable && inToolGroup) {
+            html += '</div>';
+            inToolGroup = false;
+        }
+
         if (m.role === 'user') {
             html += `<div class="msg msg-user"><div class="msg-bubble">${escHtml(m.content)}</div></div>`;
         } else if (m.role === 'assistant') {
@@ -6439,7 +6554,7 @@ function renderMessages() {
             const preview = (m.content || '').slice(0, 100) + (m.content.length > 100 ? '...' : '');
             const isExpanded = expandedSet.has('t' + msgIdx);
             html += `<div class="msg msg-thinking">
-                <div class="thinking-bubble${isExpanded ? ' expanded' : ''}" data-msg-idx="${msgIdx}" onclick="this.classList.toggle('expanded')">
+                <div class="thinking-bubble${isExpanded ? ' expanded' : ''}" data-msg-idx="${msgIdx}" onclick="if(!window.getSelection().toString())this.classList.toggle('expanded')">
                     <div class="thinking-label">Reasoning</div>
                     <div class="thinking-preview">${escHtml(preview)}</div>
                     <div class="thinking-content">${escHtml(m.content)}</div>
@@ -6449,15 +6564,22 @@ function renderMessages() {
             const hasResult = !!m.result;
             const isExpanded = expandedSet.has('c' + msgIdx);
             const steps = m.steps || [];
-            const stepsHtml = steps.length
-                ? `<div class="tool-progress-log">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(s)}</div>`).join('')}</div>`
-                : '';
+            // Build tree view for analysis/scoring tools, flat list for others
+            const isTreeTool = ['score_lens', 'ua_fit_score', 'full_analysis', 'financial_analysis',
+                                'sentiment_analysis', 'techstack_analysis', 'competitor_analysis',
+                                'patent_analysis'].includes(m.name);
+            let stepsHtml = '';
+            if (steps.length && isTreeTool && hasResult) {
+                stepsHtml = `<div class="tool-progress-log" id="tool-tree-${msgIdx}">${_buildToolStepsTree(steps, m.name)}</div>`;
+            } else if (steps.length) {
+                stepsHtml = `<div class="tool-progress-log">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(s)}</div>`).join('')}</div>`;
+            }
             const statusHtml = hasResult
                 ? `<div class="tool-call-status"><span class="tool-done-check">&#10003;</span> <span class="tool-status-text" style="color:var(--green)">Done — ${steps.length} step${steps.length !== 1 ? 's' : ''}</span></div>`
                 : `<div class="tool-call-status"><div class="tool-spinner"></div> <span class="tool-status-text">Running ${escHtml(toolLabel(m.name))}...</span></div>`;
             const chevron = hasResult ? `<span class="tool-expand-chevron">&#9660;</span>` : '';
             html += `<div class="msg msg-tool">
-                <div class="tool-call-bubble${hasResult ? (isExpanded ? ' expanded' : '') : ' running'}" data-msg-idx="${msgIdx}" onclick="this.classList.toggle('expanded')">
+                <div class="tool-call-bubble${hasResult ? (isExpanded ? ' expanded' : '') : ' running'}" data-msg-idx="${msgIdx}" onclick="if(!window.getSelection().toString())this.classList.toggle('expanded')">
                     <div class="tool-call-header">
                         <div class="tool-call-icon">${toolIcon(m.name)}</div>
                         <span class="tool-call-name">${escHtml(toolLabel(m.name))}</span>
@@ -6473,6 +6595,7 @@ function renderMessages() {
         }
         msgIdx++;
     });
+    if (inToolGroup) html += '</div>'; // close trailing tool-group
 
     // Keep welcome div hidden but in DOM, wrap everything in centered inner container
     container.innerHTML = `<div class="chat-col"><div id="welcome" class="welcome" style="display:none">
@@ -6485,7 +6608,7 @@ function renderMessages() {
             <div class="quick-action" onclick="quickAction('freeform')">Ask Anything<span>Free-form research question</span></div>
         </div>
     </div>` + html + `</div>`;
-    container.scrollTop = container.scrollHeight;
+    _scrollChatBottom();
 }
 
 // ===================== SEND MESSAGE =====================
@@ -6558,7 +6681,8 @@ async function processChat(chat) {
     typingEl.id = 'typing';
     typingEl.innerHTML = '<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
     col.appendChild(typingEl);
-    container.scrollTop = container.scrollHeight;
+    _chatAutoScroll = true; // user just sent — always scroll
+    _scrollChatBottom();
 
     // API messages (only user + assistant)
     const apiMessages = chat.messages
@@ -6654,7 +6778,7 @@ function handleSSE(event, chat) {
             typingEl.id = 'typing';
             typingEl.innerHTML = '<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
             getChatCol().appendChild(typingEl);
-            container.scrollTop = container.scrollHeight;
+            _scrollChatBottom();
         }
 
     } else if (event.type === 'tool_call') {
@@ -6669,6 +6793,9 @@ function handleSSE(event, chat) {
         }
         saveChats();
         renderMessages();
+        // Scroll tool-group to bottom so latest tool call is visible
+        const tg = document.querySelector('.tool-call-bubble.running')?.closest('.tool-group');
+        if (tg) tg.scrollTop = tg.scrollHeight;
 
     } else if (event.type === 'tool_progress') {
         // Accumulate progress steps in the tool_call message data
@@ -6703,9 +6830,10 @@ function handleSSE(event, chat) {
             const statusText = bubble.querySelector('.tool-status-text');
             if (statusText) statusText.textContent = cleaned;
         }
-        // Auto-scroll
-        const container = document.getElementById('chat-messages');
-        container.scrollTop = container.scrollHeight;
+        // Auto-scroll the tool-group internally; only scroll chat if user hasn't scrolled up
+        const runningGroup = document.querySelector('.tool-call-bubble.running')?.closest('.tool-group');
+        if (runningGroup) runningGroup.scrollTop = runningGroup.scrollHeight;
+        _scrollChatBottom();
 
     } else if (event.type === 'tool_result') {
         for (let i = chat.messages.length - 1; i >= 0; i--) {
@@ -6729,7 +6857,7 @@ function handleSSE(event, chat) {
             typingEl.id = 'typing';
             typingEl.innerHTML = '<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
             getChatCol().appendChild(typingEl);
-            container.scrollTop = container.scrollHeight;
+            _scrollChatBottom();
         }
 
     } else if (event.type === 'message') {
@@ -8032,6 +8160,8 @@ let activeProspectName = null;
 let _prospectPipelineRunning = false;
 let _currentRunCampaignId = null; // tracks which campaign owns the live pipeline DOM in Pane 2
 let _savedLivePipelineDOM = null; // stashed live pipeline DOM when user views another campaign
+let _activeTreeRootId = null;    // root campaign id of the currently displayed discovery tree
+let _activeTreeNodeId = null;    // which tree node is selected (shows its companies in Pane 3)
 
 // Flat prospect lookup — built from campaigns for detail view
 let _prospectsByName = {};
@@ -8065,10 +8195,15 @@ function renderCampaignSidebar() {
     if (!list) return;
     _prospectsByName = {};
 
-    // Index all prospects from all campaigns for detail lookup
+    // Index all prospects from all campaigns (including children) for detail lookup
     allCampaigns.forEach(c => {
         (c.prospects || []).forEach(p => {
             if (p.company_name) _prospectsByName[p.company_name] = p;
+        });
+        (c.children || []).forEach(ch => {
+            (ch.prospects || []).forEach(p => {
+                if (p.company_name) _prospectsByName[p.company_name] = p;
+            });
         });
     });
 
@@ -8141,10 +8276,21 @@ function selectCampaign(campaignId) {
         if (badge) { badge.textContent = 'Running'; badge.className = 'pane-status-badge running'; }
         _savedLivePipelineDOM = null;
     } else {
-        renderExecutionPane(campaignId);
+        // Check if campaign has child expansions → render discovery tree
+        const c = allCampaigns.find(x => x.id === campaignId);
+        const hasChildren = c && c.children && c.children.length > 0;
+        if (hasChildren) {
+            _activeTreeRootId = campaignId;
+            _activeTreeNodeId = campaignId;
+            renderDiscoveryTree(campaignId);
+        } else {
+            _activeTreeRootId = null;
+            _activeTreeNodeId = null;
+            renderExecutionPane(campaignId);
+        }
     }
 
-    renderSummaryPane(campaignId);
+    renderSummaryPane(_activeTreeNodeId || campaignId);
     clearDetailPane();
     focusPane('pane-execution');
 }
@@ -8269,11 +8415,12 @@ function renderExecutionPane(campaignId) {
     const limited = prospects.filter(p => _limitedStatuses.includes(p.validation_status)).length;
     const skipped = prospects.filter(p => p.validation_status && p.validation_status !== 'valid' && !_limitedStatuses.includes(p.validation_status)).length;
 
-    // Build static pipeline reconstruction — pipeline steps only, no company cards
+    // Build static pipeline reconstruction — pipeline steps + search log
     emptyEl.style.display = 'none';
     mapEl.style.display = 'block';
 
     const companyNames = prospects.map(p => p.company_name).join(', ');
+    const searchLogHtml = _buildSearchLogHtml(c.execution_log);
 
     mapEl.innerHTML = `
         <div class="pipeline-node done" style="padding:10px 14px">
@@ -8282,6 +8429,7 @@ function renderExecutionPane(campaignId) {
                 <div class="pipeline-node-label">Discovery</div>
             </div>
             <div class="pipeline-node-meta">Niche: <strong style="color:var(--text-primary)">${escHtml(c.niche || c.name)}</strong></div>
+            ${searchLogHtml}
         </div>
         <div class="pipeline-connector done"></div>
         <div class="pipeline-node done" style="border-color:rgba(168,85,247,0.2);padding:12px">
@@ -8310,7 +8458,7 @@ function renderExecutionPane(campaignId) {
 // --- Pane 3: Market Summary ---
 
 function renderSummaryPane(campaignId) {
-    const c = allCampaigns.find(x => x.id === campaignId);
+    const c = _findCampaignById(campaignId);
     if (!c) return;
 
     const sumContent = document.getElementById('pane-summary-content');
@@ -8425,11 +8573,13 @@ function renderSummaryPane(campaignId) {
 
     sumEmpty.style.display = 'none';
     sumContent.style.display = 'block';
+    const breadcrumbHtml = _buildBreadcrumb(campaignId);
     sumContent.innerHTML = `
         <div class="campaign-view">
+            ${breadcrumbHtml}
             <div class="campaign-view-header">
                 <div>
-                    <h2 class="campaign-view-title">${escHtml(c.name || c.niche)}</h2>
+                    <h2 class="campaign-view-title">${escHtml(c.seed_company ? `Similar to ${c.seed_company}` : (c.name || c.niche))}</h2>
                     <div class="campaign-view-meta">
                         ${createdDate} &bull; ${statusText} &bull; ${prospects.length} companies
                     </div>
@@ -8450,7 +8600,7 @@ function renderSummaryPane(campaignId) {
                 <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click a company for detailed analysis</div>
                 <div id="pane-summary-ranked-list">${rankedHtml}</div>
             </div>
-            ` : _buildDiscoveryListHtml(prospects)}
+            ` : _buildDiscoveryListHtml(prospects, c)}
         </div>
     `;
 
@@ -8460,12 +8610,13 @@ function renderSummaryPane(campaignId) {
     }
 }
 
-function _buildDiscoveryListHtml(prospects) {
+function _buildDiscoveryListHtml(prospects, campaignNode) {
     if (!prospects || prospects.length === 0) {
         return '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">No prospects discovered yet.</div>';
     }
     // Clear selection state when rebuilding
     _selectedForResearch.clear();
+    const seedCompany = campaignNode && campaignNode.seed_company;
 
     const items = prospects.map(p => {
         const name = p.company_name || '?';
@@ -8480,9 +8631,11 @@ function _buildDiscoveryListHtml(prospects) {
         const vIcon = vstatus === 'valid' ? '&#10003;' : isLimited ? '&#9888;' : '';
         const vColor = vstatus === 'valid' ? 'var(--green)' : isLimited ? 'var(--yellow)' : '';
         const limitedMsg = isLimited ? (vstatus === 'http_403' ? 'Website blocked (403)' : vstatus === 'connection_failed' ? 'Website unreachable' : vreason || 'Limited data') : '';
+        const ancestryBadge = seedCompany ? `<span class="ancestry-badge">Similar to ${escHtml(seedCompany)}</span>` : '';
         const dataPayload = JSON.stringify({name, description: desc, evidence}).replace(/'/g, '&#39;');
         return `<div class="discovery-list-item${isSkipped ? ' skipped' : ''}" data-company-name="${escHtml(name)}" data-company-payload='${dataPayload}' style="cursor:pointer;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;position:relative${isSkipped ? ';opacity:0.5' : ''}">
             ${!isSkipped ? `<input type="checkbox" class="discovery-select-cb" onclick="event.stopPropagation();_toggleResearchSelection('${escHtml(name).replace(/'/g, "\\'")}', this)" style="position:absolute;top:10px;right:10px;width:16px;height:16px;accent-color:var(--purple);cursor:pointer">` : ''}
+            ${ancestryBadge}
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:${desc ? '4px' : '0'};padding-right:${isSkipped ? '0' : '28px'}">
                 ${vIcon ? `<span style="color:${vColor};font-size:12px">${vIcon}</span>` : ''}
                 <span style="font-weight:600;font-size:13px;color:var(--text-primary)">${escHtml(name)}</span>
@@ -8554,6 +8707,646 @@ async function _autoGenerateInsight(campaignId) {
     } finally {
         delete _insightGenerating[campaignId];
     }
+}
+
+// ===================== DISCOVERY TREE HELPERS =====================
+
+/** Find a campaign by id — searches roots AND their children arrays. */
+function _findCampaignById(campaignId) {
+    for (const c of allCampaigns) {
+        if (c.id === campaignId) return c;
+        for (const ch of (c.children || [])) {
+            if (ch.id === campaignId) return ch;
+        }
+    }
+    return null;
+}
+
+/** Get depth of a campaign in its tree (root = 0). */
+function _getNodeDepth(campaignId) {
+    const c = _findCampaignById(campaignId);
+    if (!c || !c.parent_campaign_id) return 0;
+    return 1 + _getNodeDepth(c.parent_campaign_id);
+}
+
+/** Build clickable breadcrumb for child campaign nodes. */
+function _buildBreadcrumb(campaignId) {
+    const nodes = [];
+    let cur = _findCampaignById(campaignId);
+    while (cur) {
+        nodes.unshift(cur);
+        if (!cur.parent_campaign_id) break;
+        cur = _findCampaignById(cur.parent_campaign_id);
+    }
+    if (nodes.length <= 1) return '';
+    return `<div class="tree-breadcrumb">${nodes.map((n, i) => {
+        const label = n.seed_company ? `Similar to ${escHtml(n.seed_company)}` : escHtml(n.name || n.niche);
+        const isCurrent = i === nodes.length - 1;
+        return `<span class="breadcrumb-seg${isCurrent ? ' current' : ''}" ${isCurrent ? '' : `onclick="_selectTreeNode(${n.id})"`}>${label}</span>`;
+    }).join('<span class="breadcrumb-sep">/</span>')}</div>`;
+}
+
+// ===================== SHARED PIPELINE TREE RENDERER =====================
+//
+// Universal tree node schema: {id, parent_id, label, status, kind, icon, iconBg, summary, detail, children[]}
+// - kind: root | stage | operation | result
+// - status: done | running | cached | error | skipped | pending
+// - children are assembled from parent_id references or provided inline
+//
+
+/**
+ * Render a tree of pipeline nodes into a container element.
+ * @param {Array} nodes — flat array of node objects with parent_id references, OR nested with .children
+ * @param {HTMLElement} container — DOM element to render into
+ */
+function renderPipelineTree(nodes, container) {
+    if (!container || !nodes || !nodes.length) return;
+    // If nodes have parent_id, assemble tree; otherwise assume already nested
+    const tree = nodes[0].children ? nodes : _assembleTree(nodes);
+    container.innerHTML = `<div class="ptree">${tree.map(n => _renderPTreeNode(n, 0)).join('')}</div>`;
+}
+
+/** Assemble flat node array into nested tree via parent_id. */
+function _assembleTree(nodes) {
+    const map = {};
+    nodes.forEach(n => { map[n.id] = { ...n, children: [] }; });
+    const roots = [];
+    nodes.forEach(n => {
+        if (n.parent_id && map[n.parent_id]) {
+            map[n.parent_id].children.push(map[n.id]);
+        } else {
+            roots.push(map[n.id]);
+        }
+    });
+    return roots;
+}
+
+/** Render a single tree node + its children recursively. */
+function _renderPTreeNode(node, depth) {
+    const hasChildren = node.children && node.children.length > 0;
+    const hasDetail = !!node.detail;
+    const isExpandable = hasChildren || hasDetail;
+    const defaultOpen = depth < 2; // auto-expand first 2 levels
+    const chevron = isExpandable
+        ? `<span class="ptree-chevron${defaultOpen ? ' open' : ''}" onclick="event.stopPropagation();_togglePTreeNode(this)">&#9654;</span>`
+        : '<span style="width:10px;display:inline-block"></span>';
+
+    const iconBg = node.iconBg || _ptreeStatusBg(node.status);
+    const iconEl = node.icon
+        ? `<div class="ptree-icon" style="background:${iconBg}">${node.icon}</div>`
+        : '';
+
+    const badge = node.status && node.status !== 'done' && depth > 0
+        ? `<span class="ptree-badge ${node.status}">${node.status}</span>`
+        : '';
+
+    const summaryEl = node.summary
+        ? `<span class="ptree-summary">${escHtml(node.summary)}</span>`
+        : '';
+
+    const detailEl = hasDetail
+        ? `<div class="ptree-detail"${defaultOpen ? '' : ' style="display:none"'}>${node.detail}</div>`
+        : '';
+
+    const childrenHtml = hasChildren
+        ? `<div class="ptree-children${defaultOpen ? '' : ' collapsed'}">${node.children.map(c => _renderPTreeNode(c, depth + 1)).join('')}</div>`
+        : '';
+
+    return `<div class="ptree-node depth-${depth}" data-node-id="${escHtml(node.id || '')}">
+        ${depth > 0 ? '<div class="ptree-connector"></div><div class="ptree-connector-h"></div>' : ''}
+        <div class="ptree-head" ${hasDetail ? `ondblclick="_togglePTreeDetail(this)"` : ''}>
+            ${chevron}
+            ${iconEl}
+            <span class="ptree-label">${escHtml(node.label || '')}</span>
+            ${summaryEl}
+            ${badge}
+        </div>
+        ${detailEl}
+        ${childrenHtml}
+    </div>`;
+}
+
+function _ptreeStatusBg(status) {
+    const m = { done: 'rgba(22,163,74,0.15)', running: 'rgba(168,85,247,0.15)', cached: 'rgba(59,130,246,0.15)', error: 'rgba(239,68,68,0.15)', skipped: 'rgba(107,114,128,0.15)' };
+    return m[status] || 'rgba(255,255,255,0.06)';
+}
+
+/** Toggle children visibility when clicking chevron. */
+function _togglePTreeNode(chevronEl) {
+    chevronEl.classList.toggle('open');
+    const nodeEl = chevronEl.closest('.ptree-node');
+    const children = nodeEl.querySelector(':scope > .ptree-children');
+    if (children) children.classList.toggle('collapsed');
+    const detail = nodeEl.querySelector(':scope > .ptree-detail');
+    if (detail && !children) detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+}
+
+/** Toggle detail section on double-click of the head. */
+function _togglePTreeDetail(headEl) {
+    const nodeEl = headEl.closest('.ptree-node');
+    const detail = nodeEl.querySelector(':scope > .ptree-detail');
+    if (detail) detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+}
+
+// ===================== DISCOVER EXECUTION LOG → TREE NODES =====================
+
+const _srcColors = { web: '#3b82f6', news: '#a855f7', gnews: '#a855f7', reddit: '#f97316' };
+const _srcLabels = { web: 'Web', news: 'News', gnews: 'Google News', reddit: 'Reddit' };
+
+/** Convert a Discover execution_log array into pipeline tree nodes. */
+function _discoverLogToTree(executionLog, prospects, campaignLabel) {
+    if (!executionLog || !executionLog.length) return [];
+    const log = executionLog;
+    const root = {
+        id: 'root', label: campaignLabel || 'Discovery', status: 'done',
+        kind: 'root', icon: '&#128269;', iconBg: 'rgba(168,85,247,0.15)', children: [],
+    };
+
+    // Seed Profile
+    const seedProfile = log.find(e => e.type === 'seed_profile');
+    if (seedProfile && seedProfile.profile) {
+        const p = seedProfile.profile;
+        const svc = Array.isArray(p.services) ? p.services.join(', ') : (p.services || '');
+        root.children.push({
+            id: 'profile', label: `Profile: ${escHtml(seedProfile.company || '?')}`,
+            status: 'done', kind: 'stage', icon: '&#128100;', iconBg: 'rgba(168,85,247,0.15)',
+            summary: `${p.industry || '?'} · ${p.scale || '?'} · ${p.client_type || '?'}`,
+            detail: `<div><strong>Industry:</strong> ${escHtml(p.industry || '?')}</div><div><strong>Scale:</strong> ${escHtml(p.scale || '?')}</div><div><strong>Client type:</strong> ${escHtml(p.client_type || '?')}</div><div><strong>Services:</strong> ${escHtml(svc)}</div>`,
+            children: [],
+        });
+    }
+
+    // Search
+    const searches = log.filter(e => e.type === 'search_done');
+    const summary = log.find(e => e.type === 'search_complete');
+    if (searches.length) {
+        const unique = summary ? summary.unique_results : searches.reduce((s, e) => s + (e.results_count || 0), 0);
+        const srcCounts = {};
+        searches.forEach(s => { srcCounts[s.source] = (srcCounts[s.source] || 0) + 1; });
+        const srcText = Object.entries(srcCounts).map(([k, v]) => `${v} ${_srcLabels[k] || k}`).join(', ');
+
+        const searchNode = {
+            id: 'search', label: 'Search', status: 'done', kind: 'stage',
+            icon: '&#128269;', iconBg: 'rgba(59,130,246,0.15)',
+            summary: `${searches.length} queries (${srcText}) → ${unique} unique`,
+            children: [],
+        };
+
+        // Group searches by source
+        const bySource = {};
+        searches.forEach(s => {
+            const src = s.source || 'web';
+            if (!bySource[src]) bySource[src] = [];
+            bySource[src].push(s);
+        });
+
+        Object.entries(bySource).forEach(([src, items]) => {
+            const color = _srcColors[src] || '#6b7280';
+            const label = _srcLabels[src] || src;
+            const totalResults = items.reduce((s, e) => s + (e.results_count || 0), 0);
+            const sourceNode = {
+                id: `search.${src}`, label: label, status: 'done', kind: 'stage',
+                icon: '&#127760;', iconBg: `${color}22`,
+                summary: `${items.length} queries → ${totalResults} results`,
+                children: items.map((s, i) => ({
+                    id: `search.${src}.${i}`, label: escHtml(s.query || ''),
+                    status: 'done', kind: 'operation',
+                    summary: `${s.results_count || 0} results`,
+                    children: [],
+                })),
+            };
+            searchNode.children.push(sourceNode);
+        });
+
+        if (summary) {
+            searchNode.children.push({
+                id: 'search.dedup', label: 'Dedup', status: 'done', kind: 'result',
+                icon: '&#128200;', iconBg: 'rgba(22,163,74,0.15)',
+                summary: `${summary.total_results} → ${summary.unique_results} unique`,
+                children: [],
+            });
+        }
+        root.children.push(searchNode);
+    }
+
+    // AI Extraction
+    const extracted = log.find(e => e.type === 'extracted');
+    if (extracted) {
+        const names = extracted.companies || [];
+        root.children.push({
+            id: 'extraction', label: 'AI Extraction', status: 'done', kind: 'stage',
+            icon: '&#127919;', iconBg: 'rgba(168,85,247,0.15)',
+            summary: `${names.length} companies`,
+            detail: escHtml(names.join(', ')),
+            children: [],
+        });
+    }
+
+    // Validation
+    const validations = log.filter(e => e.type === 'validated');
+    if (validations.length) {
+        const vValid = validations.filter(v => !v.limited && v.valid).length;
+        const vLimited = validations.filter(v => v.limited).length;
+        const valNode = {
+            id: 'validation', label: 'Validation', status: 'done', kind: 'stage',
+            icon: '&#10003;', iconBg: 'rgba(22,163,74,0.15)',
+            summary: `${vValid} valid${vLimited ? `, ${vLimited} limited` : ''}`,
+            children: validations.map((v, i) => ({
+                id: `validation.${i}`, label: v.company || '?',
+                status: v.limited ? 'error' : v.valid ? 'done' : 'skipped',
+                kind: 'result',
+                summary: v.limited ? (v.reason || 'limited') : v.valid ? 'OK' : (v.reason || 'skipped'),
+                children: [],
+            })),
+        };
+        root.children.push(valNode);
+    } else if (prospects && prospects.length) {
+        // Fallback from prospect data
+        const _ls = ['limited', 'http_403', 'connection_failed'];
+        const v = prospects.filter(p => p.validation_status === 'valid').length;
+        const l = prospects.filter(p => _ls.includes(p.validation_status)).length;
+        root.children.push({
+            id: 'validation', label: 'Validation', status: 'done', kind: 'stage',
+            icon: '&#10003;', iconBg: 'rgba(22,163,74,0.15)',
+            summary: `${v} valid${l ? `, ${l} limited` : ''}`,
+            children: [],
+        });
+    }
+
+    return [root];
+}
+
+// ===================== RESEARCH TOOL STEPS → TREE (BRIDGE) =====================
+
+const _agentMeta = {
+    financial:  { icon: '&#128200;', label: 'Financial Analysis',  bg: 'rgba(22,163,74,0.15)' },
+    sentiment:  { icon: '&#128172;', label: 'Sentiment Analysis',  bg: 'rgba(234,179,8,0.15)' },
+    techstack:  { icon: '&#9881;',   label: 'Techstack Analysis',  bg: 'rgba(59,130,246,0.15)' },
+    lens:       { icon: '&#127919;', label: 'Lens Scoring',        bg: 'rgba(168,85,247,0.15)' },
+    landscape:  { icon: '&#127758;', label: 'Landscape',           bg: 'rgba(107,114,128,0.15)' },
+    competitors:{ icon: '&#9876;',   label: 'Competitors',         bg: 'rgba(239,68,68,0.15)' },
+    patents:    { icon: '&#128218;', label: 'Patents',             bg: 'rgba(168,85,247,0.15)' },
+    discover:   { icon: '&#128269;', label: 'Discovery',           bg: 'rgba(168,85,247,0.15)' },
+};
+
+/**
+ * Parse flat tool_progress step strings into a PipelineTree structure.
+ * Groups steps by [agent_prefix] into stage branches with operations as children.
+ */
+function _buildToolStepsTree(steps, toolName) {
+    if (!steps || !steps.length) return '';
+
+    // Parse each step to identify its agent prefix
+    const parsed = steps.map(s => {
+        const match = s.match(/^\[(\w+)\]\s*(.+)$/);
+        if (match) return { agent: match[1].toLowerCase(), text: match[2].trim(), raw: s };
+        // Direct progress strings (no prefix) — group under tool name
+        return { agent: '_direct', text: s, raw: s };
+    });
+
+    // Group by agent
+    const groups = {};
+    const groupOrder = [];
+    parsed.forEach(p => {
+        if (!groups[p.agent]) {
+            groups[p.agent] = [];
+            groupOrder.push(p.agent);
+        }
+        groups[p.agent].push(p);
+    });
+
+    // Build tree nodes
+    const rootChildren = [];
+    groupOrder.forEach(agent => {
+        const items = groups[agent];
+        const meta = _agentMeta[agent] || { icon: '&#9654;', label: agent, bg: 'rgba(255,255,255,0.06)' };
+
+        if (agent === '_direct') {
+            // Direct progress — render as flat operations under root
+            items.forEach((item, i) => {
+                rootChildren.push({
+                    id: `direct.${i}`, label: item.text, status: 'done', kind: 'operation', children: [],
+                });
+            });
+            return;
+        }
+
+        // Classify steps within each agent
+        const stageNode = {
+            id: agent, label: meta.label, status: 'done', kind: 'stage',
+            icon: meta.icon, iconBg: meta.bg,
+            summary: `${items.length} steps`,
+            children: [],
+        };
+
+        items.forEach((item, i) => {
+            // Detect key patterns for richer display
+            const text = item.text;
+            let childLabel = text;
+            let childSummary = '';
+            let childStatus = 'done';
+
+            // Extract results/counts from common patterns
+            const resultMatch = text.match(/returned (\d+) results?/i);
+            const savedMatch = text.match(/Report saved to (.+)/i);
+            const notFoundMatch = text.match(/not found|no .* results|could not/i);
+            const reusedMatch = text.match(/reusing cached/i);
+            const fetchingMatch = text.match(/^(Fetching|Searching|Scraping|Generating)/i);
+
+            if (resultMatch) childSummary = `${resultMatch[1]} results`;
+            else if (savedMatch) { childLabel = 'Report saved'; childSummary = savedMatch[1]; }
+            else if (notFoundMatch) childStatus = 'skipped';
+            else if (reusedMatch) childStatus = 'cached';
+
+            stageNode.children.push({
+                id: `${agent}.${i}`, label: childLabel, status: childStatus,
+                kind: savedMatch ? 'result' : 'operation',
+                summary: childSummary, children: [],
+            });
+        });
+
+        // Update stage summary with more context
+        const resultSteps = items.filter(s => s.text.match(/returned \d+ results?/i));
+        const savedSteps = items.filter(s => s.text.match(/Report saved/i));
+        const cachedSteps = items.filter(s => s.text.match(/reusing cached/i));
+        if (cachedSteps.length) stageNode.status = 'cached';
+        if (savedSteps.length) stageNode.summary = 'Report saved';
+        else if (resultSteps.length) {
+            const total = resultSteps.reduce((s, item) => {
+                const m = item.text.match(/returned (\d+) results?/i);
+                return s + (m ? parseInt(m[1]) : 0);
+            }, 0);
+            stageNode.summary = `${total} results across ${resultSteps.length} sources`;
+        }
+
+        rootChildren.push(stageNode);
+    });
+
+    // Render using the shared PipelineTree renderer
+    const tmp = document.createElement('div');
+    renderPipelineTree(rootChildren, tmp);
+    return tmp.innerHTML;
+}
+
+// ---- Execution log rendering (summary + expandable detail) ----
+
+/** Toggle expanded detail on an execution step block (double-click handler). */
+function _toggleExecDetail(el) {
+    const detail = el.querySelector('.exec-detail');
+    if (detail) detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+}
+
+/** Build full execution log HTML — summary by default, double-click expands detail. */
+function _buildExecutionLogHtml(executionLog, prospects) {
+    if (!executionLog || !executionLog.length) return '';
+    const log = executionLog;
+
+    const sections = [];
+
+    // --- Seed Profile (for "Find Similar" mode) ---
+    const seedProfile = log.find(e => e.type === 'seed_profile');
+    if (seedProfile) {
+        const p = seedProfile.profile;
+        const company = seedProfile.company || '?';
+        const summaryText = p
+            ? `${p.industry || '?'} · ${p.scale || '?'} · ${p.client_type || '?'}`
+            : 'Profile lookup failed';
+        const detailHtml = p ? `
+            <div class="exec-detail" style="display:none;margin-top:6px;font-size:10px;color:var(--text-muted);line-height:1.6">
+                <div><strong>Industry:</strong> ${escHtml(p.industry || 'Unknown')}</div>
+                <div><strong>Scale:</strong> ${escHtml(p.scale || 'Unknown')}</div>
+                <div><strong>Client type:</strong> ${escHtml(p.client_type || 'Unknown')}</div>
+                <div><strong>Services:</strong> ${escHtml(Array.isArray(p.services) ? p.services.join(', ') : (p.services || 'Unknown'))}</div>
+            </div>
+        ` : '';
+        sections.push(`<div class="exec-step" ondblclick="_toggleExecDetail(this)" title="Double-click for detail" style="cursor:pointer">
+            <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:var(--purple);font-size:10px">&#128100;</span>
+                <span class="exec-step-title">Seed Profile: ${escHtml(company)}</span>
+            </div>
+            <div class="exec-step-summary">${escHtml(summaryText)}</div>
+            ${detailHtml}
+        </div>`);
+    }
+
+    // --- Search Queries ---
+    const plan = log.find(e => e.type === 'discovery_plan' && e.total_queries > 0);
+    const searches = log.filter(e => e.type === 'search_done');
+    const summary = log.find(e => e.type === 'search_complete');
+    if (searches.length) {
+        const totalResults = summary ? summary.total_results : searches.reduce((s, e) => s + (e.results_count || 0), 0);
+        const uniqueResults = summary ? summary.unique_results : totalResults;
+        const srcCounts = {};
+        searches.forEach(s => { srcCounts[s.source] = (srcCounts[s.source] || 0) + 1; });
+        const srcSummary = Object.entries(srcCounts).map(([k, v]) => `${v} ${_srcLabels[k] || k}`).join(', ');
+        const summaryText = `${searches.length} queries (${srcSummary}) → ${uniqueResults} unique results`;
+
+        const detailRows = searches.map(s => {
+            const color = _srcColors[s.source] || '#6b7280';
+            const label = _srcLabels[s.source] || s.source_label || s.source;
+            return `<div style="display:flex;align-items:center;gap:6px;font-size:10px;line-height:1.8">
+                <span style="color:var(--green);font-size:9px">&#10003;</span>
+                <span style="color:${color};font-weight:600;min-width:70px">${escHtml(label)}</span>
+                <span style="color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.query || '')}</span>
+                <span style="color:var(--text-muted);font-size:9px;white-space:nowrap">${s.results_count || 0}</span>
+            </div>`;
+        }).join('');
+
+        sections.push(`<div class="exec-step" ondblclick="_toggleExecDetail(this)" title="Double-click for detail" style="cursor:pointer">
+            <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:var(--accent);font-size:10px">&#128269;</span>
+                <span class="exec-step-title">Search</span>
+            </div>
+            <div class="exec-step-summary">${escHtml(summaryText)}</div>
+            <div class="exec-detail" style="display:none;margin-top:6px">
+                ${detailRows}
+                ${summary ? `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;padding-top:4px;border-top:1px solid var(--border)">Dedup: ${summary.total_results} total → ${summary.unique_results} unique</div>` : ''}
+            </div>
+        </div>`);
+    }
+
+    // --- LLM Extraction ---
+    const extracted = log.find(e => e.type === 'extracted');
+    if (extracted) {
+        const names = extracted.companies || [];
+        sections.push(`<div class="exec-step" ondblclick="_toggleExecDetail(this)" title="Double-click for detail" style="cursor:pointer">
+            <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:var(--purple);font-size:10px">&#127919;</span>
+                <span class="exec-step-title">AI Extraction</span>
+            </div>
+            <div class="exec-step-summary">Extracted ${names.length} companies from search results</div>
+            <div class="exec-detail" style="display:none;margin-top:6px;font-size:10px;color:var(--text-muted);line-height:1.6">${escHtml(names.join(', '))}</div>
+        </div>`);
+    }
+
+    // --- Validation ---
+    const validations = log.filter(e => e.type === 'validated');
+    if (validations.length) {
+        const vValid = validations.filter(v => !v.limited && v.valid).length;
+        const vLimited = validations.filter(v => v.limited).length;
+        const vSkipped = validations.filter(v => !v.valid && !v.limited).length;
+        const summaryText = `${vValid} valid${vLimited ? `, ${vLimited} limited` : ''}${vSkipped ? `, ${vSkipped} skipped` : ''}`;
+
+        const detailRows = validations.map(v => {
+            const icon = v.limited ? '<span style="color:var(--yellow)">&#9888;</span>'
+                       : v.valid ? '<span style="color:var(--green)">&#10003;</span>'
+                       : '<span style="color:var(--red)">&times;</span>';
+            const reason = v.reason && v.reason !== 'OK' ? ` — ${escHtml(v.reason)}` : '';
+            return `<div style="font-size:10px;line-height:1.8;display:flex;align-items:center;gap:6px">
+                ${icon}
+                <span style="color:var(--text-secondary)">${escHtml(v.company || '?')}</span>
+                <span style="color:var(--text-muted)">${reason}</span>
+            </div>`;
+        }).join('');
+
+        sections.push(`<div class="exec-step" ondblclick="_toggleExecDetail(this)" title="Double-click for detail" style="cursor:pointer">
+            <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:var(--green);font-size:10px">&#10003;</span>
+                <span class="exec-step-title">Validation</span>
+            </div>
+            <div class="exec-step-summary">${escHtml(summaryText)}</div>
+            <div class="exec-detail" style="display:none;margin-top:6px">${detailRows}</div>
+        </div>`);
+    } else if (prospects && prospects.length) {
+        // Fallback: reconstruct from prospect data if no validation events in log
+        const _ls = ['limited', 'http_403', 'connection_failed'];
+        const v = prospects.filter(p => p.validation_status === 'valid').length;
+        const l = prospects.filter(p => _ls.includes(p.validation_status)).length;
+        const sk = prospects.filter(p => p.validation_status && p.validation_status !== 'valid' && !_ls.includes(p.validation_status)).length;
+        sections.push(`<div class="exec-step">
+            <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:var(--green);font-size:10px">&#10003;</span>
+                <span class="exec-step-title">Validation</span>
+            </div>
+            <div class="exec-step-summary">${v} valid${l ? `, ${l} limited` : ''}${sk ? `, ${sk} skipped` : ''}</div>
+        </div>`);
+    }
+
+    return `<div style="margin-top:8px;display:flex;flex-direction:column;gap:3px">${sections.join('')}</div>`;
+}
+
+/** Build inline execution details using the PipelineTree renderer. */
+function _buildNodeExecutionHtml(node) {
+    const prospects = node.prospects || [];
+    if (!prospects.length && node.status !== 'empty') return '';
+
+    if (node.status === 'empty') {
+        return `<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary)">
+            <div style="font-size:11px;color:var(--text-muted)">No companies matched this search.</div>
+        </div>`;
+    }
+
+    // Use new tree renderer if execution_log exists
+    if (node.execution_log && node.execution_log.length) {
+        const label = node.seed_company ? `Similar to ${node.seed_company}` : (node.name || node.niche || 'Discovery');
+        const treeNodes = _discoverLogToTree(node.execution_log, prospects, label);
+        // Render to string: create temp container, render, extract innerHTML
+        const tmp = document.createElement('div');
+        renderPipelineTree(treeNodes, tmp);
+        return `<div style="margin-top:8px">${tmp.innerHTML}</div>`;
+    }
+
+    // Fallback to legacy exec-step rendering
+    return _buildExecutionLogHtml(node.execution_log, prospects);
+}
+
+/** Build search log HTML using PipelineTree for standalone campaigns (renderExecutionPane). */
+function _buildSearchLogHtml(executionLog) {
+    if (!executionLog || !executionLog.length) return '';
+    const treeNodes = _discoverLogToTree(executionLog, null, 'Search Activity');
+    // Render just the children (skip the root wrapper for inline use)
+    if (treeNodes.length && treeNodes[0].children && treeNodes[0].children.length) {
+        const tmp = document.createElement('div');
+        // Render the children directly without the root wrapper
+        const childNodes = treeNodes[0].children;
+        tmp.innerHTML = `<div class="ptree">${childNodes.map(n => _renderPTreeNode(n, 0)).join('')}</div>`;
+        return tmp.innerHTML;
+    }
+    return _buildExecutionLogHtml(executionLog, null);
+}
+
+/** Render the discovery tree in Pane 2 for a campaign with children. */
+function renderDiscoveryTree(rootCampaignId) {
+    const mapEl = document.getElementById('pipeline-map');
+    const emptyEl = document.getElementById('pane-execution-empty');
+    if (!mapEl) return;
+    if (emptyEl) emptyEl.style.display = 'none';
+    mapEl.style.display = 'block';
+
+    const root = allCampaigns.find(x => x.id === rootCampaignId);
+    if (!root) return;
+
+    // Flatten tree: root + children
+    const allNodes = [root, ...(root.children || [])];
+    const activeId = _activeTreeNodeId || rootCampaignId;
+
+    // Build a children map for tree-line rendering
+    const childrenOf = {};
+    allNodes.forEach(n => {
+        const pid = n.parent_campaign_id || null;
+        if (!childrenOf[pid]) childrenOf[pid] = [];
+        childrenOf[pid].push(n);
+    });
+
+    // Recursive render
+    function _renderNode(node, depth) {
+        const isActive = node.id === activeId;
+        const indent = depth * 24;
+        const icon = node.seed_company ? '&#128279;' : '&#128269;';
+        const label = node.seed_company ? `Similar to ${escHtml(node.seed_company)}` : escHtml(node.name || node.niche);
+        const count = node.prospect_count || (node.prospects || []).length || 0;
+        const statusCls = node.status === 'complete' ? 'done' : node.status === 'running' ? 'running' : '';
+        const statusBadge = node.status === 'running'
+            ? '<span class="pane-status-badge running" style="font-size:9px;padding:1px 6px">Running</span>'
+            : node.status === 'error'
+            ? '<span class="pane-status-badge error" style="font-size:9px;padding:1px 6px">Error</span>'
+            : node.status === 'empty'
+            ? '<span class="pane-status-badge" style="font-size:9px;padding:1px 6px;background:rgba(107,114,128,0.15);color:#9ca3af">Empty</span>'
+            : '';
+
+        // Active node shows expanded execution details; inactive nodes stay compact
+        const executionHtml = isActive ? _buildNodeExecutionHtml(node) : '';
+
+        let html = `<div class="tree-node${isActive ? ' active' : ''}" data-campaign-id="${node.id}" onclick="_selectTreeNode(${node.id})" style="margin-left:${indent}px">
+            ${depth > 0 ? '<div class="tree-connector-horiz"></div>' : ''}
+            <div class="pipeline-node ${statusCls}" style="margin:4px 0;padding:10px 12px;cursor:pointer">
+                <div class="pipeline-node-header">
+                    <div class="pipeline-node-icon" style="font-size:14px">${icon}</div>
+                    <div class="pipeline-node-label" style="font-size:12px">${label}</div>
+                </div>
+                <div class="pipeline-node-meta" style="font-size:10px;margin-top:3px;display:flex;gap:8px;align-items:center">
+                    <span style="color:var(--purple)">${count} companies</span>
+                    ${statusBadge}
+                </div>
+                ${executionHtml}
+            </div>
+        </div>`;
+
+        // Render children recursively
+        const kids = childrenOf[node.id] || [];
+        for (const kid of kids) {
+            html += _renderNode(kid, depth + 1);
+        }
+        return html;
+    }
+
+    mapEl.innerHTML = _renderNode(root, 0);
+
+    // Update status badge
+    const badge = document.getElementById('pane-execution-status');
+    if (badge) {
+        badge.textContent = 'Tree';
+        badge.className = 'pane-status-badge';
+        badge.style.cssText = 'background:rgba(168,85,247,0.15);color:var(--purple)';
+    }
+}
+
+/** Handle click on a tree node — update Pane 3 to show that node's companies. */
+function _selectTreeNode(campaignId) {
+    _activeTreeNodeId = campaignId;
+    if (_activeTreeRootId) renderDiscoveryTree(_activeTreeRootId);
+    renderSummaryPane(campaignId);
+    clearDetailPane();
 }
 
 // Real-time summary update during live pipeline (called on each 'scored' SSE event)
@@ -8645,9 +9438,11 @@ async function openProspectDetail(companyName) {
     if (!p || !p.ua_fit) {
         // Show discovery blurb — try live pipeline state first, then campaign prospect data
         const discoveryCompany = (_pipelineState.companies || []).find(c => c.name === companyName);
-        // Also check campaign data (for sidebar-loaded campaigns)
-        const campaignProspect = !discoveryCompany && activeCampaignId
-            ? (allCampaigns.find(x => x.id === activeCampaignId)?.prospects || []).find(x => x.company_name === companyName)
+        // Also check campaign data (for sidebar-loaded campaigns + child tree nodes)
+        const lookupCampaignId = _activeTreeNodeId || activeCampaignId;
+        const lookupCampaign = lookupCampaignId ? _findCampaignById(lookupCampaignId) : null;
+        const campaignProspect = !discoveryCompany && lookupCampaign
+            ? (lookupCampaign.prospects || []).find(x => x.company_name === companyName)
             : null;
 
         const disc = campaignProspect?.discovery || null;
@@ -8688,6 +9483,23 @@ async function openProspectDetail(companyName) {
                 </div>`;
             }
 
+            // "Find Similar" button — show if depth < 3 and pipeline not running
+            const treeDepth = _getNodeDepth(_activeTreeNodeId || activeCampaignId);
+            const canExpand = treeDepth < 3 && !_prospectPipelineRunning;
+            const safeName = companyName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const findSimilarHtml = canExpand
+                ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+                    <button class="find-similar-btn" onclick="runFindSimilar('${safeName}')">
+                        &#128279; Find Similar Companies
+                    </button>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:4px">
+                        Discover companies similar to ${escHtml(companyName)}
+                    </div>
+                </div>`
+                : (treeDepth >= 3
+                    ? `<div style="margin-top:16px;font-size:11px;color:var(--text-muted)">Max expansion depth reached (3 levels)</div>`
+                    : '');
+
             detContent.innerHTML = `<div style="padding:24px">
                 <h2 style="margin-bottom:8px;font-size:18px">${escHtml(companyName)}</h2>
                 ${dc.description ? `<p style="color:var(--text-secondary);font-size:13px;margin-bottom:10px;line-height:1.5">${escHtml(dc.description)}</p>` : ''}
@@ -8697,6 +9509,7 @@ async function openProspectDetail(companyName) {
                 </div>
                 ${whyHtml}
                 ${evidenceHtml}
+                ${findSimilarHtml}
             </div>`;
             detEmpty.style.display = 'none';
             detContent.style.display = 'block';
@@ -8774,7 +9587,7 @@ async function openProspectDetail(companyName) {
             </div>
             <div class="icp-dim-bar"><div class="icp-dim-fill" style="width:${s}%;background:${color}"></div></div>
             <div class="icp-dim-card-body">
-                <div class="icp-dim-rationale">${escHtml(rationale)}</div>
+                <div class="icp-dim-rationale">${_renderCitedText(rationale)}</div>
                 ${signals ? `<div class="icp-dim-signals">${signals}</div>` : ''}
             </div>
         </div>`;
@@ -8815,7 +9628,7 @@ async function openProspectDetail(companyName) {
     ).join('');
     snapHtml += pillRows;
 
-    let risksHtml = (fit.key_risks || []).map(r => `<li>${escHtml(r)}</li>`).join('');
+    let risksHtml = (fit.key_risks || []).map(r => `<li>${_renderCitedText(r)}</li>`).join('');
 
     const cov = fit.signal_coverage || {};
     const confLabel = cov.confidence || '?';
@@ -8899,7 +9712,7 @@ async function openProspectDetail(companyName) {
                 <span class="icp-playbook-icon">&#128218;</span>
                 <span class="icp-playbook-label">Outbound Strategy Playbook</span>
             </div>
-            <div class="icp-playbook-text">${escHtml(fit.recommended_angle)}</div>
+            <div class="icp-playbook-text">${_renderCitedText(fit.recommended_angle)}</div>
         </div>` : ''}
 
         <div class="icp-section">
@@ -9026,7 +9839,7 @@ function _buildProspectDashboard(container) {
 
     // Playbook card
     const playbookCard = fit.recommended_angle ? _dashCard('Outbound Strategy Playbook',
-        `<div style="font-size:13px;color:var(--text-secondary);line-height:1.5">${escHtml(fit.recommended_angle)}</div>`, true) : '';
+        `<div style="font-size:13px;color:var(--text-secondary);line-height:1.5">${_renderCitedText(fit.recommended_angle)}</div>`, true) : '';
 
     // Dimension detail cards — each dimension gets its own card
     const dimCards = dims.map(d => {
@@ -9052,7 +9865,7 @@ function _buildProspectDashboard(container) {
             <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;margin-bottom:10px">
                 <div style="height:100%;width:${s}%;background:${color};border-radius:3px"></div>
             </div>
-            <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:8px">${escHtml(rationale)}</div>
+            <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:8px">${_renderCitedText(rationale)}</div>
             ${signals ? `<div class="icp-dim-signals">${signals}</div>` : ''}
         </div>`;
     }).join('');
@@ -9073,7 +9886,7 @@ function _buildProspectDashboard(container) {
 
     // Risks card
     const risksCard = (fit.key_risks || []).length ? _dashCard('Key Risks',
-        `<ul class="icp-risks">${(fit.key_risks || []).map(r => `<li>${escHtml(r)}</li>`).join('')}</ul>`, false) : '';
+        `<ul class="icp-risks">${(fit.key_risks || []).map(r => `<li>${_renderCitedText(r)}</li>`).join('')}</ul>`, false) : '';
 
     // Sources card
     const sourcesCard = _dashCard('Analysis Sources',
@@ -9181,9 +9994,12 @@ async function _loadLenses() {
 
 function _buildLensSelectHtml(selectId) {
     if (_availableLenses.length === 0) return `<select class="lens-select" id="${selectId}"><option>Loading...</option></select>`;
-    const opts = _availableLenses.map((l, i) =>
-        `<option value="${escHtml(l.slug || l.name)}" ${i === 0 ? 'selected' : ''}>${escHtml(l.name)}</option>`
-    ).join('');
+    const lastUsed = localStorage.getItem('sv_last_lens') || '';
+    const opts = _availableLenses.map((l, i) => {
+        const val = l.slug || l.name;
+        const sel = lastUsed ? (val === lastUsed ? 'selected' : '') : (i === 0 ? 'selected' : '');
+        return `<option value="${escHtml(val)}" ${sel}>${escHtml(l.name)}</option>`;
+    }).join('');
     return `<select class="lens-select" id="${selectId}">${opts}</select>`;
 }
 
@@ -9298,15 +10114,19 @@ window.addEventListener('resize', function() {
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
 
+            // Account for CSS zoom on ancestor — offsetWidth gives CSS px, clientX is visual px
+            const zoomEl = leftPane.closest('[style*="zoom"], #workspace-prospecting');
+            const zoom = zoomEl ? parseFloat(getComputedStyle(zoomEl).zoom) || 1 : 1;
             const startX = e.clientX;
-            const startLeftW = leftPane.getBoundingClientRect().width;
-            const startRightW = rightPane.getBoundingClientRect().width;
+            const startLeftW = leftPane.offsetWidth;
+            const startRightW = rightPane.offsetWidth;
 
             function onMove(e2) {
-                const dx = e2.clientX - startX;
-                const newLeft = Math.max(200, startLeftW + dx);
-                const newRight = Math.max(200, startRightW - dx);
-                // Only apply if both stay above minimum
+                const dx = (e2.clientX - startX) / zoom;
+                const totalW = startLeftW + startRightW;
+                // Clamp so neither goes below 200 AND total is preserved
+                const newLeft = Math.max(200, Math.min(startLeftW + dx, totalW - 200));
+                const newRight = totalW - newLeft;
                 if (newLeft >= 200 && newRight >= 200) {
                     leftPane.style.width = newLeft + 'px';
                     leftPane.style.flex = '0 0 ' + newLeft + 'px';
@@ -9453,8 +10273,14 @@ function handlePipelineSSE(ev) {
         if (ev.campaign_id) {
             _pipelineState.campaignId = ev.campaign_id;
             _currentRunCampaignId = ev.campaign_id;
-            activeCampaignId = ev.campaign_id;
-            // Immediately show new campaign in sidebar so it doesn't look merged with old one
+            // For child campaigns (Find Similar), don't change activeCampaignId —
+            // the root stays active in sidebar, the child becomes the active tree node
+            if (_activeTreeRootId) {
+                _activeTreeNodeId = ev.campaign_id;
+            } else {
+                activeCampaignId = ev.campaign_id;
+            }
+            // Refresh sidebar (root campaigns only) — child shows up in tree after pipeline completes
             loadCampaigns();
         }
 
@@ -9646,14 +10472,25 @@ function handlePipelineSSE(ev) {
         const cid = ev.campaign_id || _pipelineState.campaignId;
         if (cid) {
             loadCampaigns().then(() => {
-                activeCampaignId = cid;
-                renderCampaignSidebar();
-                renderSummaryPane(cid);
-                // Highlight active sidebar item
-                document.querySelectorAll('.search-query-item').forEach(el => {
-                    const id = parseInt(el.dataset.campaignId, 10);
-                    el.classList.toggle('active', id === cid);
-                });
+                // Check if this is a child campaign (Find Similar completed)
+                const completedCampaign = _findCampaignById(cid);
+                if (completedCampaign && completedCampaign.parent_campaign_id) {
+                    // Child campaign — rebuild tree, show child's results in Pane 3
+                    const rootId = _activeTreeRootId || activeCampaignId;
+                    _activeTreeRootId = rootId;
+                    _activeTreeNodeId = cid;
+                    renderDiscoveryTree(rootId);
+                    renderSummaryPane(cid);
+                } else {
+                    activeCampaignId = cid;
+                    renderCampaignSidebar();
+                    renderSummaryPane(cid);
+                    // Highlight active sidebar item
+                    document.querySelectorAll('.search-query-item').forEach(el => {
+                        const id = parseInt(el.dataset.campaignId, 10);
+                        el.classList.toggle('active', id === cid);
+                    });
+                }
             });
         }
 
@@ -9755,7 +10592,10 @@ async function _sendToResearch(lensSelectId) {
     const companies = Array.from(_selectedForResearch.values());
     if (!companies.length) return;
 
-    const lensName = _getSelectedLensName(lensSelectId || 'summary-lens-select');
+    const selId = lensSelectId || 'summary-lens-select';
+    const lensName = _getSelectedLensName(selId);
+    const selEl = document.getElementById(selId);
+    if (selEl) localStorage.setItem('sv_last_lens', selEl.value);
 
     const btn = document.querySelector('.str-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
@@ -9898,6 +10738,119 @@ function runProspectPipeline() {
         btn.disabled = false;
         btn.textContent = 'Search';
         loadCampaigns();
+    });
+}
+
+// ===================== FIND SIMILAR =====================
+
+function initPipelineMapSimilar(seedCompany) {
+    const emptyEl = document.getElementById('pane-execution-empty');
+    const mapEl = document.getElementById('pipeline-map');
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (mapEl) mapEl.style.display = 'block';
+
+    _pipelineState = {
+        niche: `Similar to ${seedCompany}`, companies: [],
+        companyStatus: {}, companyScores: {}, companyAnalysisProgress: {},
+        phase: 'discovering',
+    };
+
+    if (mapEl) mapEl.innerHTML = `
+        <div class="pipeline-node running" id="pm-input">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon">&#128279;</div>
+                <div class="pipeline-node-label">Find Similar</div>
+            </div>
+            <div class="pipeline-node-meta">
+                Anchored on: <strong style="color:var(--purple)">${escHtml(seedCompany)}</strong>
+            </div>
+        </div>
+        <div class="pipeline-connector" id="pm-conn-discovery"></div>
+        <div class="pipeline-node running" id="pm-discovery">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon"><div class="company-card-spinner"></div></div>
+                <div class="pipeline-node-label">Searching for Similar...</div>
+            </div>
+            <div class="pipeline-node-meta" id="pm-discovery-meta">Building competitor profile...</div>
+        </div>
+    `;
+}
+
+function runFindSimilar(companyName) {
+    if (_prospectPipelineRunning) return;
+
+    const parentCampaignId = _activeTreeNodeId || activeCampaignId;
+    if (!parentCampaignId) return;
+
+    const niche = `Similar to ${companyName}`;
+    const topN = parseInt(document.getElementById('prospect-topn')?.value) || 10;
+
+    _prospectPipelineRunning = true;
+    _currentRunCampaignId = null;
+
+    // Set Pane 2 badge to Running
+    const badge = document.getElementById('pane-execution-status');
+    if (badge) { badge.textContent = 'Running'; badge.className = 'pane-status-badge running'; }
+
+    // Clear Panes 3 & 4
+    clearDetailPane();
+    const sumContent = document.getElementById('pane-summary-content');
+    const sumEmpty = document.getElementById('pane-summary-empty');
+    if (sumContent) { sumContent.style.display = 'none'; sumContent.innerHTML = ''; }
+    if (sumEmpty) sumEmpty.style.display = 'block';
+
+    // Init pipeline map for find-similar mode
+    initPipelineMapSimilar(companyName);
+    focusPane('pane-execution');
+
+    fetch('/api/ua-pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            niche,
+            top_n: topN,
+            seed_company: companyName,
+            parent_campaign_id: parentCampaignId,
+        }),
+    }).then(async resp => {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const ev = JSON.parse(line.slice(6));
+                    handlePipelineSSE(ev);
+                } catch {}
+            }
+        }
+    }).catch(e => {
+        console.error('Find Similar error:', e);
+        handlePipelineSSE({ type: 'error', text: 'Connection error: ' + e.message });
+    }).finally(() => {
+        _prospectPipelineRunning = false;
+        _currentRunCampaignId = null;
+        _savedLivePipelineDOM = null;
+        const btn = document.getElementById('prospect-run-btn');
+        if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
+        loadCampaigns().then(() => {
+            // After loading, if the parent now has children, render the tree
+            if (_activeTreeRootId || activeCampaignId) {
+                const rootId = _activeTreeRootId || activeCampaignId;
+                const root = allCampaigns.find(x => x.id === rootId);
+                if (root && root.children && root.children.length > 0) {
+                    _activeTreeRootId = rootId;
+                    renderDiscoveryTree(rootId);
+                }
+            }
+        });
     });
 }
 

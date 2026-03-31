@@ -98,3 +98,88 @@ Return a JSON array. Each element:
 ```
 
 Return ONLY the JSON array. No explanation or markdown fences."""
+
+
+def build_similar_discovery_prompt(seed_company, search_results_text, profile=None):
+    """Build a prompt to find companies similar to *seed_company*.
+
+    Uses the profile context (industry, services, scale, client_type) from
+    ``_profile_lookup`` to anchor the similarity search accurately.  Output
+    schema matches ``build_discovery_prompt`` so the rest of the pipeline is
+    unchanged.
+    """
+    profile_block = ""
+    if profile:
+        parts = []
+        if profile.get("industry"):
+            parts.append(f"- **Industry:** {profile['industry']}")
+        if profile.get("services"):
+            svc = profile["services"]
+            if isinstance(svc, list):
+                svc = ", ".join(svc)
+            parts.append(f"- **Services:** {svc}")
+        if profile.get("scale"):
+            parts.append(f"- **Scale:** {profile['scale']}")
+        if profile.get("client_type"):
+            parts.append(f"- **Client Type:** {profile['client_type']}")
+        if parts:
+            profile_block = f"""
+## Seed Company Profile
+
+{chr(10).join(parts)}
+
+Use this profile to identify companies with similar business models, industry focus,
+client base, and scale.  Do NOT include companies that are merely in the same broad
+sector but operate at a fundamentally different scale or serve different markets.
+"""
+
+    return f"""You are a GTM research analyst identifying companies similar to a known company.
+
+## Task
+
+Find real companies that are direct competitors, close alternatives, or players in the
+same niche as **{seed_company}**.
+
+{profile_block}
+## Search Results
+
+{search_results_text}
+
+## Instructions
+
+1. Only include companies that are **genuinely similar** to {seed_company} — same type of
+   business, similar scale, overlapping customer base or product category.
+2. **Exclude {seed_company} itself** from results.
+3. Exclude mega-brands that operate at a fundamentally different scale unless {seed_company}
+   is itself an enterprise-scale company.
+4. For **why_included**, explain specifically HOW this company is similar to {seed_company} —
+   what they share in terms of market, product, or customer profile.
+5. Include evidence from the search results to support each inclusion.
+6. Aim for variety — don't just list the 3 most obvious competitors.
+7. If a company's website URL isn't in the results, infer it from the company name. If
+   unknown, use null.
+8. For **evidence**, include 1-3 search result entries that support this company's inclusion.
+   Each entry must use the exact source URL from the search results above.  Do NOT
+   fabricate URLs — only use URLs that appear in the search results.
+
+## Output Format
+
+Return a JSON array. Each element:
+```json
+{{{{
+  "name": "Company Name",
+  "website": "https://example.com",
+  "description": "One-sentence description of what they do",
+  "estimated_size": "startup | smb | midmarket | enterprise",
+  "why_included": "How this company is similar to {seed_company}",
+  "evidence": [
+    {{{{
+      "source_title": "Title of the article or page",
+      "source_url": "https://exact-url-from-search-results",
+      "snippet": "Direct quote or key data point (1-2 sentences)"
+    }}}}
+  ]
+}}}}
+```
+
+Return ONLY the JSON array. No explanation or markdown fences."""

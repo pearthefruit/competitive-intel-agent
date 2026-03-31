@@ -204,6 +204,9 @@ def _migrate_db(conn):
         ("dossiers", "website_url", "TEXT"),
         ("campaign_prospects", "discovery_json", "TEXT"),
         ("dossiers", "briefing_lens_id", "INTEGER"),
+        ("campaigns", "parent_campaign_id", "INTEGER"),
+        ("campaigns", "seed_company", "TEXT"),
+        ("campaigns", "execution_log_json", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -810,12 +813,13 @@ def get_ua_targets(conn, icp_profile_id=None):
 
 # --- Campaign helpers ---
 
-def create_campaign(conn, niche, top_n, name=None):
+def create_campaign(conn, niche, top_n, name=None, parent_campaign_id=None, seed_company=None):
     """Create a new campaign. Returns campaign id."""
     now = datetime.now(timezone.utc).isoformat()
     cur = conn.execute(
-        "INSERT INTO campaigns (niche, name, top_n, status, created_at, updated_at) VALUES (?, ?, ?, 'running', ?, ?)",
-        (niche, name or niche, top_n, now, now),
+        """INSERT INTO campaigns (niche, name, top_n, status, parent_campaign_id, seed_company, created_at, updated_at)
+           VALUES (?, ?, ?, 'running', ?, ?, ?, ?)""",
+        (niche, name or niche, top_n, parent_campaign_id, seed_company, now, now),
     )
     conn.commit()
     return cur.lastrowid
@@ -827,6 +831,15 @@ def update_campaign_status(conn, campaign_id, status):
     conn.execute(
         "UPDATE campaigns SET status = ?, updated_at = ? WHERE id = ?",
         (status, now, campaign_id),
+    )
+    conn.commit()
+
+
+def save_campaign_execution_log(conn, campaign_id, execution_log):
+    """Save the execution log (search queries, results) as JSON on the campaign."""
+    conn.execute(
+        "UPDATE campaigns SET execution_log_json = ? WHERE id = ?",
+        (json.dumps(execution_log), campaign_id),
     )
     conn.commit()
 
@@ -919,6 +932,13 @@ def get_campaign_detail(conn, campaign_id):
             campaign["insight"] = None
     else:
         campaign["insight"] = None
+    if campaign.get("execution_log_json"):
+        try:
+            campaign["execution_log"] = json.loads(campaign["execution_log_json"])
+        except (json.JSONDecodeError, TypeError):
+            campaign["execution_log"] = None
+    else:
+        campaign["execution_log"] = None
     return campaign
 
 
@@ -930,10 +950,52 @@ def rename_campaign(conn, campaign_id, name):
 
 
 def delete_campaign(conn, campaign_id):
-    """Delete a campaign and its prospect links (not the dossiers themselves)."""
-    conn.execute("DELETE FROM campaign_prospects WHERE campaign_id = ?", (campaign_id,))
-    conn.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))
+    """Delete a campaign, all child campaigns, and their prospect links (not the dossiers)."""
+    tree = get_campaign_tree(conn, campaign_id)
+    # Delete leaf-first to respect any FK constraints
+    for node in reversed(tree):
+        conn.execute("DELETE FROM campaign_prospects WHERE campaign_id = ?", (node["id"],))
+        conn.execute("DELETE FROM campaigns WHERE id = ?", (node["id"],))
     conn.commit()
+
+
+def get_root_campaigns(conn):
+    """Get top-level (non-child) campaigns only, for sidebar rendering."""
+    rows = conn.execute(
+        """SELECT c.*,
+                  (SELECT COUNT(*) FROM campaign_prospects WHERE campaign_id = c.id) as prospect_count
+           FROM campaigns c
+           WHERE c.parent_campaign_id IS NULL
+           ORDER BY c.created_at DESC"""
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_campaign_tree(conn, root_id):
+    """Return all campaigns in the tree rooted at root_id, ordered by created_at."""
+    rows = conn.execute(
+        """WITH RECURSIVE tree(id) AS (
+             SELECT id FROM campaigns WHERE id = ?
+             UNION ALL
+             SELECT c.id FROM campaigns c JOIN tree ON c.parent_campaign_id = tree.id
+           )
+           SELECT c.*,
+                  (SELECT COUNT(*) FROM campaign_prospects WHERE campaign_id = c.id) as prospect_count
+           FROM campaigns c JOIN tree USING(id)
+           ORDER BY c.created_at""",
+        (root_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_campaign_depth(conn, campaign_id):
+    """Return the depth of this campaign in its tree (root = 0)."""
+    row = conn.execute(
+        "SELECT parent_campaign_id FROM campaigns WHERE id = ?", (campaign_id,)
+    ).fetchone()
+    if not row or row["parent_campaign_id"] is None:
+        return 0
+    return 1 + get_campaign_depth(conn, row["parent_campaign_id"])
 
 
 # --- ICP Profile helpers ---
