@@ -77,9 +77,9 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
 - **generate_briefing**: Generate a consulting-ready intelligence briefing scored through a configurable lens (defaults to Digital Transformation), with engagement opportunity map, budget/appetite signals, competitive pressure assessment, and strategic assessment. Optionally accepts a `lens_id` to score through a different lens. Requires at least 2 analyses in the dossier. Use after building up a company dossier.
 
 ### Prospecting (Lead Discovery & Prospect Fit Scoring)
-- **ua_discover**: Discover prospective companies in a target niche/vertical. Searches web, Reddit, and news to find SMB-to-midmarket companies suited for premium video/streaming TV advertising. Returns a list of discovered companies.
-- **ua_fit_score**: Score a company using the CTV Ad Sales lens (routes through the lens scoring system). Runs required analyses, then scores weighted dimensions 0-100 with evidence-backed rationale. Use when someone asks "is this a good prospect?" or "score this lead."
-- **get_ua_targets**: Get all companies scored with the CTV Ad Sales lens, sorted by score. Falls back to legacy scores if lens not found. Use to answer "who are our best prospects?" or "show me the pipeline."
+- **discover_prospects**: Discover prospective companies in a target niche/vertical. Searches web, Reddit, and news to find companies matching the target profile. Returns a list of discovered companies.
+- **score_prospect**: Score a company using the active lens (configurable scoring framework). Runs required analyses based on lens dimensions, then scores each dimension 0-100 with evidence-backed rationale. Use when someone asks "is this a good prospect?" or "score this lead."
+- **get_scored_prospects**: Get all companies scored with the active lens, sorted by score. Use to answer "who are our best prospects?" or "show me the pipeline."
 
 ### Reasoning
 - **think**: Record your step-by-step reasoning. The user can see this. Use it liberally — before decisions, after unexpected results, when evaluating data quality.
@@ -138,7 +138,7 @@ FOLLOW_UP_TOOL_NAMES = CORE_TOOL_NAMES | {
     "competitor_analysis", "sentiment_analysis", "seo_audit",
     "techstack_analysis", "pricing_analysis", "compare_companies",
     "landscape_analysis", "collect", "classify", "analyze",
-    "ua_discover", "ua_fit_score", "get_ua_targets",
+    "discover_prospects", "score_prospect", "get_scored_prospects",
     "score_lens", "list_lenses", "get_lens_scores",
 }
 
@@ -685,8 +685,8 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "ua_discover",
-            "description": "Discover prospective companies in a target niche or vertical. Searches web, Reddit, and news to find companies that match the configured ICP. Returns a list of discovered companies with names, websites, and descriptions. Use when the user says 'find prospects in...', 'discover leads in...', or asks about companies in a specific vertical.",
+            "name": "discover_prospects",
+            "description": "Discover prospective companies in a target niche or vertical. Searches web, Reddit, and news to find companies that match the target profile. Returns a list of discovered companies with names, websites, and descriptions. Use when the user says 'find prospects in...', 'discover leads in...', or asks about companies in a specific vertical.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -700,8 +700,8 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "ua_fit_score",
-            "description": "Score a company using the CTV Ad Sales lens (routes through the configurable lens scoring system). Runs required analyses based on lens dimensions, then scores each dimension 0-100 with evidence-backed rationale. Use when someone asks 'is this a good prospect?', 'score this company', or 'how well does X fit our criteria?'",
+            "name": "score_prospect",
+            "description": "Score a company using the active lens (configurable scoring framework). Runs required analyses based on lens dimensions, then scores each dimension 0-100 with evidence-backed rationale. Use when someone asks 'is this a good prospect?', 'score this company', or 'how well does X fit our criteria?'",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -715,8 +715,8 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "get_ua_targets",
-            "description": "Get all companies scored with the CTV Ad Sales lens, sorted by score descending. Falls back to legacy scores if lens not found. Use when the user asks 'show me our prospects', 'who are the best leads?', 'what's in the pipeline?', or 'list scored companies'.",
+            "name": "get_scored_prospects",
+            "description": "Get all companies scored with the active lens, sorted by score descending. Falls back to legacy scores if lens not found. Use when the user asks 'show me our prospects', 'who are the best leads?', 'what's in the pipeline?', or 'list scored companies'.",
             "parameters": {
                 "type": "object",
                 "properties": {},

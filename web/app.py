@@ -1278,7 +1278,7 @@ def create_app(db_path="intel.db"):
                 else:
                     yield f"data: {json.dumps({'type': 'status', 'text': f'Discovering companies in: {niche}...'})}\n\n"
 
-                from agents.ua_discover import discover_prospects, discover_similar
+                from agents.discover import discover_prospects, discover_similar
 
                 disc_q = queue.Queue()
                 disc_holder = [None]

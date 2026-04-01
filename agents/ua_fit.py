@@ -529,7 +529,7 @@ def run_pipeline(niche, top_n=15, db_path="intel.db", progress_cb=None):
 
     Returns (companies, scored_results, report_path).
     """
-    from agents.ua_discover import discover_prospects
+    from agents.discover import discover_prospects
 
     # Step 1: Discover
     companies = discover_prospects(niche, top_n=top_n, db_path=db_path)

@@ -164,7 +164,7 @@ def landscape_cmd(company, top_n):
 @click.option("--db", default="intel.db", help="SQLite database path")
 def ua_discover_cmd(niche, top_n, db):
     """Discover prospective companies in a niche/vertical."""
-    from agents.ua_discover import discover_prospects
+    from agents.discover import discover_prospects
     companies = discover_prospects(niche, top_n, db)
     if companies:
         print(f"\n  Discovered {len(companies)} companies in '{niche}'")

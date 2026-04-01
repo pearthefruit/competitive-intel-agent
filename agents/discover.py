@@ -12,7 +12,7 @@ from pathlib import Path
 from agents.llm import generate_json, unique_report_path
 from scraper.web_search import search_web, search_news, search_reddit, format_search_results, dedup_results
 from scraper.google_news import search_google_news
-from prompts.ua_discover import build_discovery_prompt, build_similar_discovery_prompt
+from prompts.discover import build_discovery_prompt, build_similar_discovery_prompt
 from db import get_connection, get_or_create_dossier
 from agents.compare import _profile_lookup
 

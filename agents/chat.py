@@ -1025,8 +1025,8 @@ def _execute_tool(name, args, db_path, progress_callback=None):
 
             return "\n".join(lines)
 
-        elif name == "ua_discover":
-            from agents.ua_discover import discover_prospects
+        elif name == "discover_prospects":
+            from agents.discover import discover_prospects
             niche = args["niche"]
             top_n = args.get("top_n", 15)
             if progress_callback:
@@ -1038,11 +1038,11 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                     lines.append(f"{i}. **{c.get('name', '?')}** — {c.get('description', 'No description')[:120]}")
                     if c.get("website"):
                         lines.append(f"   Website: {c['website']}")
-                lines.append(f"\nUse `ua_fit_score` or `score_lens` to score any of these companies.")
+                lines.append(f"\nUse `score_prospect` or `score_lens` to score any of these companies.")
                 return "\n".join(lines)
             return "No companies found for this niche."
 
-        elif name == "ua_fit_score":
+        elif name == "score_prospect":
             from agents.lens import score_with_lens
             from db import get_connection, get_lens_by_slug
             company = args["company"]
@@ -1075,7 +1075,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                 return "\n".join(lines)
             return f"Failed to score {company}."
 
-        elif name == "get_ua_targets":
+        elif name == "get_scored_prospects":
             from db import get_connection, get_lens_by_slug, get_all_scores_for_lens
             conn = get_connection(db_path)
             lens = get_lens_by_slug(conn, "ctv-ad-sales")
@@ -1090,7 +1090,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                         sd = s.get("score_data", {})
                         lines.append(f"| {i} | {s.get('company_name', '?')} | {s.get('overall_score', 0)}/100 | {sd.get('tier_label', '?')} | {(sd.get('recommended_angle') or 'N/A')[:80]} |")
                     return "\n".join(lines)
-                return f"No companies scored with {lens['name']} lens yet. Use `ua_discover` to find prospects and `ua_fit_score` to score them."
+                return f"No companies scored with {lens['name']} lens yet. Use `discover_prospects` to find prospects and `score_prospect` to score them."
             else:
                 # Fallback to legacy ua_fit_json
                 from db import get_ua_targets
@@ -1104,7 +1104,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                         fit = t.get("ua_fit", {})
                         lines.append(f"| {i} | {t.get('company_name', '?')} | {fit.get('overall_score', 0)}/100 | {fit.get('overall_label', '?')} | {(fit.get('recommended_angle') or 'N/A')[:80]} |")
                     return "\n".join(lines)
-                return "No prospects scored yet. Use `ua_discover` to find prospects and `ua_fit_score` to score them."
+                return "No prospects scored yet. Use `discover_prospects` to find prospects and `score_prospect` to score them."
 
         # --- Lens Scoring ---
 

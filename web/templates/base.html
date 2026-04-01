@@ -6758,7 +6758,7 @@ function renderMessages() {
             const hasResult = !!m.result;
             const isExpanded = expandedSet.has('c' + msgIdx);
             const steps = m.steps || [];
-            const isTreeTool = ['score_lens', 'ua_fit_score', 'full_analysis', 'financial_analysis',
+            const isTreeTool = ['score_lens', 'score_prospect', 'full_analysis', 'financial_analysis',
                                 'sentiment_analysis', 'techstack_analysis', 'competitor_analysis',
                                 'patent_analysis', 'seo_audit', 'pricing_analysis'].includes(m.name);
 
@@ -8083,7 +8083,7 @@ function openExecOverlay(msgIdx) {
         }
     } else if (steps.length) {
         // Fallback: bridge parser for tools without structured events
-        const isTreeTool = ['score_lens', 'ua_fit_score', 'full_analysis', 'financial_analysis',
+        const isTreeTool = ['score_lens', 'score_prospect', 'full_analysis', 'financial_analysis',
                             'sentiment_analysis', 'techstack_analysis', 'competitor_analysis',
                             'patent_analysis', 'seo_audit', 'pricing_analysis'].includes(m.name);
         if (isTreeTool) {
