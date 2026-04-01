@@ -723,13 +723,13 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             return "Financial analysis failed — no data found."
 
         elif name == "patent_analysis":
-            path = patent_analysis(args["company"])
+            path = patent_analysis(args["company"], progress_cb=progress_callback)
             if path:
                 return f"Patent analysis saved to: {path}"
             return "Patent analysis failed — no patent data found."
 
         elif name == "competitor_analysis":
-            path = competitor_analysis(args["company"])
+            path = competitor_analysis(args["company"], progress_cb=progress_callback)
             if path:
                 return f"Competitor analysis saved to: {path}"
             return "Competitor analysis failed — no data found."
@@ -741,7 +741,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             return "Sentiment analysis failed — no data found."
 
         elif name == "seo_audit":
-            path = seo_audit(args["url"], args.get("max_pages", 10), company_name=args.get("company_name"))
+            path = seo_audit(args["url"], args.get("max_pages", 10), company_name=args.get("company_name"), progress_cb=progress_callback)
             if path:
                 return f"SEO/AEO audit saved to: {path}"
             return "SEO audit failed — could not crawl the site."
@@ -753,7 +753,7 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             return "Tech stack analysis failed — could not crawl the site."
 
         elif name == "pricing_analysis":
-            path = pricing_analysis(args["url"], company_name=args.get("company_name"))
+            path = pricing_analysis(args["url"], company_name=args.get("company_name"), progress_cb=progress_callback)
             if path:
                 return f"Pricing analysis saved to: {path}"
             return "Pricing analysis failed — could not crawl the site."

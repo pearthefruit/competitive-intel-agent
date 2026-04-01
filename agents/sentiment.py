@@ -14,6 +14,17 @@ from scraper.tiktok import fetch_tiktok_from_search_results, format_tiktok_for_p
 from prompts.sentiment import build_sentiment_prompt
 
 
+def _result_detail(results, max_items=10):
+    """Format search results as detail lines for progress events."""
+    lines = []
+    for r in results[:max_items]:
+        title = r.get('title', '')[:80]
+        url = r.get('href', r.get('url', ''))
+        if title:
+            lines.append(f'• {title}' + (f'  ({url})' if url else ''))
+    return '\n'.join(lines) if lines else ''
+
+
 def sentiment_analysis(company, progress_cb=None):
     """Analyze employee sentiment for a company. Returns report path or None.
 
@@ -44,7 +55,7 @@ def sentiment_analysis(company, progress_cb=None):
         print(f"[sentiment] No Glassdoor/web results — company may be too small, too new, or using an unusual name that search engines don't associate with employer reviews")
         _cb("source_done", {"source": "glassdoor_web", "status": "skipped", "summary": "No results"})
     else:
-        _cb("source_done", {"source": "glassdoor_web", "status": "done", "summary": f"{web_count} results"})
+        _cb("source_done", {"source": "glassdoor_web", "status": "done", "summary": f"{web_count} results", "detail": _result_detail(all_results)})
 
     # Blind / TeamBlind (anonymous, verified-employee reviews — strong for tech)
     _cb("source_start", {"source": "blind", "label": "Blind", "detail": "Scraping employee reviews"})
@@ -57,7 +68,7 @@ def sentiment_analysis(company, progress_cb=None):
     all_results.extend(blind)
     if blind:
         print(f"[sentiment] Blind returned {len(blind)} results")
-        _cb("source_done", {"source": "blind", "status": "done", "summary": f"{len(blind)} results"})
+        _cb("source_done", {"source": "blind", "status": "done", "summary": f"{len(blind)} results", "detail": _result_detail(blind)})
     else:
         _cb("source_done", {"source": "blind", "status": "skipped", "summary": "No results"})
 
@@ -70,7 +81,7 @@ def sentiment_analysis(company, progress_cb=None):
     all_results.extend(fishbowl)
     if fishbowl:
         print(f"[sentiment] Fishbowl returned {len(fishbowl)} results")
-        _cb("source_done", {"source": "fishbowl", "status": "done", "summary": f"{len(fishbowl)} results"})
+        _cb("source_done", {"source": "fishbowl", "status": "done", "summary": f"{len(fishbowl)} results", "detail": _result_detail(fishbowl)})
     else:
         _cb("source_done", {"source": "fishbowl", "status": "skipped", "summary": "No results"})
 
@@ -83,7 +94,8 @@ def sentiment_analysis(company, progress_cb=None):
     all_results.extend(gnews)
     news_count = len(news) + len(gnews)
     if news_count:
-        _cb("source_done", {"source": "news", "status": "done", "summary": f"{news_count} results"})
+        news_all = list(news) + list(gnews)
+        _cb("source_done", {"source": "news", "status": "done", "summary": f"{news_count} results", "detail": _result_detail(news_all)})
     else:
         _cb("source_done", {"source": "news", "status": "skipped", "summary": "No results"})
 
@@ -95,7 +107,7 @@ def sentiment_analysis(company, progress_cb=None):
     if web_count == 0 and reddit:
         print(f"[sentiment] Reddit returned {len(reddit)} results — these tend to be more candid than formal review sites")
     if reddit:
-        _cb("source_done", {"source": "reddit", "status": "done", "summary": f"{len(reddit)} results"})
+        _cb("source_done", {"source": "reddit", "status": "done", "summary": f"{len(reddit)} results", "detail": _result_detail(reddit)})
     else:
         _cb("source_done", {"source": "reddit", "status": "skipped", "summary": "No results"})
 
@@ -116,7 +128,7 @@ def sentiment_analysis(company, progress_cb=None):
     all_results.extend(career_reddit)
     if career_reddit:
         print(f"[sentiment] Career subreddits returned {len(career_reddit)} results")
-        _cb("source_done", {"source": "reddit_rss", "status": "done", "summary": f"{len(career_reddit)} results"})
+        _cb("source_done", {"source": "reddit_rss", "status": "done", "summary": f"{len(career_reddit)} results", "detail": _result_detail(career_reddit)})
     else:
         _cb("source_done", {"source": "reddit_rss", "status": "skipped", "summary": "No results"})
 
@@ -128,7 +140,7 @@ def sentiment_analysis(company, progress_cb=None):
     if web_count == 0 and hn:
         print(f"[sentiment] Hacker News returned {len(hn)} results — useful for tech industry sentiment")
     if hn:
-        _cb("source_done", {"source": "hackernews", "status": "done", "summary": f"{len(hn)} results"})
+        _cb("source_done", {"source": "hackernews", "status": "done", "summary": f"{len(hn)} results", "detail": _result_detail(hn)})
     else:
         _cb("source_done", {"source": "hackernews", "status": "skipped", "summary": "No results"})
 
@@ -139,7 +151,7 @@ def sentiment_analysis(company, progress_cb=None):
     all_results.extend(onepoint3)
     if onepoint3:
         print(f"[sentiment] 1Point3Acres returned {len(onepoint3)} interview posts")
-        _cb("source_done", {"source": "1point3acres", "status": "done", "summary": f"{len(onepoint3)} results"})
+        _cb("source_done", {"source": "1point3acres", "status": "done", "summary": f"{len(onepoint3)} results", "detail": _result_detail(onepoint3)})
     else:
         _cb("source_done", {"source": "1point3acres", "status": "skipped", "summary": "No results"})
 
@@ -154,7 +166,8 @@ def sentiment_analysis(company, progress_cb=None):
             if tiktok_items:
                 tiktok_text = format_tiktok_for_prompt(tiktok_items)
                 print(f"[sentiment] TikTok returned {len(tiktok_items)} videos with content")
-                _cb("source_done", {"source": "tiktok", "status": "done", "summary": f"{len(tiktok_items)} videos"})
+                tiktok_detail = '\n'.join(f"• {t.get('title', 'Video')[:80]}  ({t.get('url', '')})" for t in tiktok_items[:5])
+                _cb("source_done", {"source": "tiktok", "status": "done", "summary": f"{len(tiktok_items)} videos", "detail": tiktok_detail})
                 # Also add as search results for dedup/formatting
                 for t in tiktok_items:
                     all_results.append({
@@ -213,6 +226,6 @@ def sentiment_analysis(company, progress_cb=None):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[sentiment] Report saved to {filename}")
-    save_to_dossier(company, "sentiment", report_file=str(filename), report_text=report, model_used=model)
+    save_to_dossier(company, "sentiment", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
     _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)

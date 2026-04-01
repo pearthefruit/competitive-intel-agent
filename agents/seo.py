@@ -186,11 +186,13 @@ def _build_page_details(seo_signals, aeo_signals):
     return "\n".join(details)
 
 
-def seo_audit(url, max_pages=10, company_name=None):
+def seo_audit(url, max_pages=10, company_name=None, progress_cb=None):
     """Run a full SEO & AEO audit on a website.
 
     Returns path to the generated report markdown file.
     """
+    _cb = progress_cb or (lambda *a: None)
+
     # Ensure URL has scheme
     if not url.startswith("http"):
         url = "https://" + url
@@ -198,7 +200,9 @@ def seo_audit(url, max_pages=10, company_name=None):
     print(f"[seo] Starting SEO & AEO audit for {url}")
     domain = urlparse(url).netloc
 
-    # Crawl the site
+    # --- Phase 1: Site Crawl ---
+    _cb('analysis_start', {'analysis_type': 'crawl', 'label': 'Site Crawl'})
+    _cb('source_start', {'source': 'crawler', 'label': 'Web Crawler', 'detail': f'Crawling up to {max_pages} pages from {domain}'})
     pages = crawl_site(url, max_pages=max_pages)
     if not pages:
         print("[seo] Crawl returned zero pages — possible causes:")
@@ -206,32 +210,60 @@ def seo_audit(url, max_pages=10, company_name=None):
         print("[seo]   - Site may be fully JS-rendered (SPA) and requires a headless browser to access content")
         print("[seo]   - URL may be invalid, behind authentication, or returning non-200 status codes")
         print("[seo]   - Try using the site's root domain if you used a deep link")
+        _cb('source_done', {'source': 'crawler', 'status': 'error', 'summary': 'Zero pages crawled'})
+        _cb('analysis_done', {'analysis_type': 'crawl'})
         return None
 
     if len(pages) < max_pages:
         print(f"[seo] Only crawled {len(pages)}/{max_pages} pages — site may have few internal links, aggressive rate-limiting, or a flat structure")
+    crawl_detail = '\n'.join(f"• {p.get('url', '?')}  ({p.get('word_count', 0)} words)" for p in pages[:10])
+    _cb('source_done', {'source': 'crawler', 'status': 'done', 'summary': f'{len(pages)} pages crawled', 'detail': crawl_detail})
+    _cb('analysis_done', {'analysis_type': 'crawl'})
 
-    # Extract signals
+    # --- Phase 2: Signal Analysis ---
+    _cb('analysis_start', {'analysis_type': 'analysis', 'label': 'SEO/AEO Analysis'})
     print(f"[seo] Analyzing {len(pages)} pages...")
+
+    _cb('source_start', {'source': 'seo_signals', 'label': 'SEO Signal Extraction', 'detail': f'Analyzing {len(pages)} pages for on-page SEO'})
     seo_signals = [_extract_seo_signals(p) for p in pages]
-    aeo_signals = [_extract_aeo_signals(p) for p in pages]
-
-    # Build summaries
     seo_summary = _build_seo_summary(seo_signals)
-    aeo_summary = _build_aeo_summary(aeo_signals)
-    page_details = _build_page_details(seo_signals, aeo_signals)
+    titles_ok = sum(1 for s in seo_signals if s.get('title_ok'))
+    meta_ok = sum(1 for s in seo_signals if s.get('meta_desc_ok'))
+    hierarchy_ok = sum(1 for s in seo_signals if s.get('heading_hierarchy_ok'))
+    seo_detail = f"Title optimization: {titles_ok}/{len(seo_signals)} pages\nMeta descriptions: {meta_ok}/{len(seo_signals)} pages\nHeading hierarchy: {hierarchy_ok}/{len(seo_signals)} pages"
+    seo_detail += '\n' + '\n'.join(f"• {s.get('url', '?')}: title={s.get('title_length')}ch, H1s={s.get('h1_count')}" for s in seo_signals[:8])
+    _cb('source_done', {'source': 'seo_signals', 'status': 'done', 'summary': f'{len(seo_signals)} pages analyzed', 'detail': seo_detail})
 
-    # Generate LLM narrative
+    _cb('source_start', {'source': 'aeo_signals', 'label': 'AEO Signal Extraction', 'detail': 'Schema, FAQ, structured content detection'})
+    aeo_signals = [_extract_aeo_signals(p) for p in pages]
+    aeo_summary = _build_aeo_summary(aeo_signals)
+    faq_pages = sum(1 for a in aeo_signals if a.get('has_faq_schema'))
+    article_pages = sum(1 for a in aeo_signals if a.get('has_article_schema'))
+    all_schema = set()
+    for a in aeo_signals:
+        all_schema.update(a.get('aeo_schema_types', []))
+    aeo_detail = f"FAQ schema: {faq_pages} pages\nArticle schema: {article_pages} pages\nSchema types found: {', '.join(sorted(all_schema)) or 'none'}"
+    _cb('source_done', {'source': 'aeo_signals', 'status': 'done', 'summary': f'{len(aeo_signals)} pages analyzed', 'detail': aeo_detail})
+
+    page_details = _build_page_details(seo_signals, aeo_signals)
+    _cb('analysis_done', {'analysis_type': 'analysis'})
+
+    # --- Phase 3: Report Generation ---
+    _cb('analysis_start', {'analysis_type': 'report', 'label': 'Report Generation'})
+
     prompt = build_seo_prompt(url, len(pages), seo_summary, aeo_summary, page_details)
     prompt += get_temporal_context(company_name or domain, "seo")
 
+    _cb('source_start', {'source': 'llm', 'label': 'LLM Synthesis', 'detail': f'Generating SEO/AEO audit narrative for {len(pages)} pages'})
     try:
         narrative, model_used = generate_text(prompt)
         print(f"[seo] Report generated via {model_used}")
+        _cb('source_done', {'source': 'llm', 'status': 'done', 'summary': f'Generated via {model_used}'})
     except Exception as e:
         print(f"[error] LLM report generation failed: {e}")
         narrative = "*Report generation failed. See data below.*"
         model_used = "none"
+        _cb('source_done', {'source': 'llm', 'status': 'error', 'summary': str(e)[:80]})
 
     # Assemble report
     today = datetime.now().strftime("%Y-%m-%d")
@@ -283,6 +315,9 @@ def seo_audit(url, max_pages=10, company_name=None):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[seo] Report saved to {filename}")
+    _cb('report_saved', {'path': str(filename)})
+    _cb('analysis_done', {'analysis_type': 'report'})
+
     dossier_name = company_name or domain
-    save_to_dossier(dossier_name, "seo", report_file=str(filename), report_text=report, model_used=model_used)
+    save_to_dossier(dossier_name, "seo", report_file=str(filename), report_text=report, model_used=model_used, progress_cb=_cb)
     return str(filename)

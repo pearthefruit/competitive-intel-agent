@@ -61,15 +61,17 @@ def _run_analysis(analysis_type, company_name, website_url=None, db_path="intel.
     if analysis_type == "techstack":
         return fn(website_url, max_pages=3, company_name=company_name, db_path=db_path, progress_cb=progress_cb)
     elif analysis_type == "seo":
-        return fn(website_url, max_pages=5, company_name=company_name)
+        return fn(website_url, max_pages=5, company_name=company_name, progress_cb=progress_cb)
     elif analysis_type == "pricing":
-        return fn(website_url, company_name=company_name)
+        return fn(website_url, company_name=company_name, progress_cb=progress_cb)
     elif analysis_type == "hiring":
         return fn(company_name, db_path=db_path)
     elif analysis_type in ("financial", "sentiment"):
         return fn(company_name, progress_cb=progress_cb)
+    elif analysis_type in ("competitors", "patents"):
+        return fn(company_name, progress_cb=progress_cb)
     else:
-        # brand_ad, competitors, patents — no progress_cb yet
+        # brand_ad — no progress_cb
         return fn(company_name)
 
 

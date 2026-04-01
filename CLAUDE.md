@@ -13,7 +13,7 @@ A competitive intelligence platform that scrapes, classifies, and analyzes compa
 - **AI:** Multi-provider rotation — 5 providers with 17+ model fallbacks. Report providers: Gemini (primary, multi-key rotation), Groq, Cerebras, Mistral, OpenRouter (free models). Chat providers: Gemini (primary, native function calling), Groq, Cerebras, Mistral, OpenRouter. Separate provider lists for reports (`REPORT_PROVIDERS`) and chat (`CHAT_PROVIDERS`).
 - **Scraping:** httpx + BeautifulSoup + trafilatura, SEC EDGAR (XBRL + 8-K filings), USPTO patents, Reddit RSS, HackerNews, YouTube transcripts, Google News RSS, Blind, TikTok (yt-dlp), 1Point3Acres
 - **CLI:** Click-based (`main.py`), also serves web UI via `python main.py web --port 5001`
-- **DB:** `intel.db` — 13 tables: companies, jobs, classifications, dossiers, dossier_analyses, dossier_events, hiring_snapshots, llm_usage, icp_profiles, lenses, lens_scores, campaigns, campaign_prospects
+- **DB:** `intel.db` — 13 tables: companies, jobs, classifications, dossiers, dossier_analyses, dossier_events, hiring_snapshots, llm_usage, icp_profiles, lenses, lens_scores, campaigns (+ parent_campaign_id, seed_company, execution_log_json for recursive discovery trees), campaign_prospects
 
 ## Commands
 
@@ -48,7 +48,7 @@ python main.py ua-pipeline --niche "DTC skincare" --top-n 15 [--icp-profile <id>
 ```
 competitive-intel-agent/
 ├── main.py                  # CLI entry point (Click)
-├── db.py                    # SQLite schema, migrations, all DB helpers
+├── db.py                    # SQLite schema, migrations, all DB helpers (incl. recursive campaign tree CTE)
 ├── intel.db                 # SQLite database (gitignored)
 ├── agents/
 │   ├── llm.py               # LLM provider rotation, generate_text/generate_json, save_to_dossier, key facts extraction, change detection
@@ -58,18 +58,18 @@ competitive-intel-agent/
 │   ├── collect.py           # Job scraping from ATS boards
 │   ├── classify.py          # Job classification (department, seniority, strategic tags)
 │   ├── analyze.py           # Strategic hiring analysis report
-│   ├── financial.py         # SEC EDGAR / web search financial analysis
+│   ├── financial.py         # SEC EDGAR / web search financial analysis (progress_cb: structured events per source)
 │   ├── competitors.py       # Competitive landscape mapping
-│   ├── sentiment.py         # Employee sentiment (Glassdoor, Reddit+comments, HN+comments, Blind, Fishbowl, 1P3A)
+│   ├── sentiment.py         # Employee sentiment (Glassdoor, Reddit+comments, HN+comments, Blind, Fishbowl, 1P3A) (progress_cb: structured events per source)
 │   ├── patents.py           # USPTO patent portfolio analysis
-│   ├── techstack.py         # Website technology detection + analysis
+│   ├── techstack.py         # Website technology detection + analysis (progress_cb: structured events per source)
 │   ├── seo.py               # SEO & AEO audit
 │   ├── pricing.py           # Product & pricing strategy analysis
 │   ├── compare.py           # Head-to-head comparison + landscape analysis
 │   ├── profile.py           # Full company profile (runs financial + competitors + sentiment + patents)
-│   ├── ua_discover.py       # Prospect discovery via web search (smart query generation from structured context)
+│   ├── ua_discover.py       # Prospect discovery via web search (smart query generation + company-anchored "Find Similar" via discover_similar())
 │   ├── ua_fit.py            # Legacy ICP fit scoring (validate_websites still used, scoring functions importable)
-│   └── lens.py              # Lens scoring engine — score_with_lens(), configurable dimensions/weights/rubrics
+│   └── lens.py              # Lens scoring engine — score_with_lens(), configurable dimensions/weights/rubrics, threads progress_cb to analysis agents
 ├── prompts/
 │   ├── chat.py              # System prompt, condensed prompt, tool schemas + tiered selection for chat agent
 │   ├── briefing.py          # Briefing prompt with hybrid DMS scoring rubric + algo score injection
@@ -86,7 +86,7 @@ competitive-intel-agent/
 │   ├── compare.py           # Comparison prompt
 │   ├── profile.py           # Executive profile prompt
 │   ├── ua_fit.py            # Legacy ICP fit scoring prompt (still used for historical campaigns)
-│   ├── ua_discover.py       # Prospect discovery prompt (structured context support)
+│   ├── ua_discover.py       # Prospect discovery prompt (structured context + similar company discovery prompt)
 │   └── lens.py              # Lens scoring prompt — dynamic rubric from lens dimensions/weights
 ├── scraper/
 │   ├── site_crawler.py      # General website crawler (httpx + BS4)
@@ -108,9 +108,9 @@ competitive-intel-agent/
 │   ├── nonprofit.py         # ProPublica Nonprofit Explorer API (IRS Form 990 data)
 │   └── youtube.py           # YouTube search + transcript extraction
 ├── web/
-│   ├── app.py               # Flask app factory, API routes, SSE chat endpoint, tool result summarization
+│   ├── app.py               # Flask app factory, API routes, SSE chat endpoint (_structured_cb wrapper for analysis progress), tool result summarization, discovery tree API
 │   └── templates/
-│       └── base.html         # Entire SPA — HTML + CSS + JS in one file (~8700+ lines)
+│       └── base.html         # Entire SPA — HTML + CSS + JS in one file (~12100+ lines)
 ├── reports/                  # Generated markdown reports (gitignored)
 └── .env                      # API keys (gitignored)
 ```
@@ -122,7 +122,7 @@ competitive-intel-agent/
 1. **Collect:** Scrape job listings from ATS boards (or custom company APIs for Amazon, Jane Street, etc.) → `companies` + `jobs` tables
 2. **Classify:** LLM classifies each job (department, seniority, strategic tags) → `classifications` table
 3. **Analyze:** Generate strategic hiring analysis report → saved to `reports/` + `dossier_analyses`
-4. **Other analyses:** Financial, competitors, sentiment, patents, techstack, SEO, pricing — each produces a report + key facts stored on the dossier
+4. **Other analyses:** Financial, competitors, sentiment, patents, techstack, SEO, pricing — each produces a report + key facts stored on the dossier. Financial, sentiment, and techstack agents accept `progress_cb` and emit structured events (`source_start`, `source_done`, `generating`, `report_saved`) per data source for real-time UI progress tracking.
 5. **Dossier system:** All analyses accumulate on a company dossier. Key facts are extracted from each report and stored as JSON. Changes between runs are detected and saved as timeline events.
 6. **Briefing:** Computes algorithmic DMS base scores from structured data, then synthesizes all dossier data into a consulting-ready intelligence briefing with hybrid Digital Maturity Score and engagement opportunities.
 
@@ -211,9 +211,9 @@ Defined in `prompts/chat.py`, executed in `agents/chat.py`:
 - **Reasoning:** think
 - **Raw Data:** search_sec_edgar, search_patents_raw, search_financial_news
 - **Job Intelligence:** hiring_pipeline, collect, classify, reclassify, analyze
-- **Analysis Reports:** financial_analysis, patent_analysis, competitor_analysis, sentiment_analysis, seo_audit, techstack_analysis, pricing_analysis
+- **Analysis Reports:** financial_analysis, patent_analysis, competitor_analysis, sentiment_analysis, seo_audit, techstack_analysis, pricing_analysis (financial, sentiment, techstack pass `progress_callback` through for structured per-source events)
 - **Multi-Company:** full_analysis, compare_companies, landscape_analysis
-- **Search:** web_search, reddit_search, reddit_deep_search, hn_search, youtube_search, youtube_transcript
+- **Search:** web_search, reddit_search, reddit_deep_search, hn_search, youtube_search, youtube_transcript (all emit `progress_callback` steps for real-time UI progress)
 - **Database:** query_db
 - **Dossiers:** get_dossier, save_dossier_event, refresh_key_facts, generate_briefing
 - **Prospecting:** ua_discover, ua_fit_score (aliased → CTV Ad Sales lens), get_ua_targets (aliased → lens_scores), score_lens, create_lens, list_lenses
@@ -239,6 +239,8 @@ The chat system uses a three-pronged approach to prevent context overflow errors
 
 **3. Condensed System Prompt** — Full system prompt (~9K chars) used only on round 1. Rounds 2+ swap to `CONDENSED_SYSTEM_PROMPT` (~400 chars) that keeps essential behavioral rules only. The nuclear trim fallback (context overflow recovery) also uses condensed prompt + no tools.
 
+**4. Structured Progress Callbacks** — The SSE chat endpoint uses `_structured_cb(*args)` as the progress callback for tool execution. It handles both 1-arg string calls (legacy flat progress) and 2-arg `(event_type, data_dict)` structured calls from analysis agents. Structured events are queued as dicts with `_structured: True` flag. The SSE emitter (`_emit_progress`) detects this flag and includes the structured event fields directly in the SSE payload with `structured: true`. This fixes a bug where `lens.py`'s 2-arg `progress_cb("analysis_start", {...})` calls crashed the old 1-arg lambda.
+
 **Net effect on context overhead:**
 - Round 1: ~26K chars (unchanged — LLM needs full context for initial decision)
 - Rounds 2+: ~4K chars (saves ~22K chars)
@@ -262,8 +264,10 @@ This is the same multi-step LLM pattern used in Crucible (JobDiscovery) — spen
 
 ### Prospecting Module (Lens-Based Scoring)
 
-- **Architecture:** Two-phase workflow — **Discover** (pure search) + **Research** (lens-based scoring)
+- **Architecture:** Two-phase workflow — **Discover** (pure search) + **Research** (lens-based scoring). Discovery supports both niche-based and company-anchored ("Find Similar") modes.
 - **Discover:** `agents/ua_discover.py` + `prompts/ua_discover.py` — smart query generation from structured Niche Builder context (8-12 targeted queries). No scoring in pipeline. Users select up to 3 companies → "Send to Research".
+- **Find Similar:** `discover_similar()` in `agents/ua_discover.py` — company-anchored recursive discovery. Uses `_profile_lookup` from `compare.py` for profile-aware search, `_build_similar_queries()` for targeted queries. Creates child campaigns linked via `parent_campaign_id`. Max tree depth: 3. Emits `seed_profile` SSE event with company profile data. Prompt: `build_similar_discovery_prompt()` in `prompts/ua_discover.py`.
+- **Discovery Tree:** Campaigns form a tree structure (root → child → grandchild). `get_root_campaigns()` returns top-level campaigns; `get_campaign_tree()` uses recursive CTE to fetch full tree. `get_campaign_depth()` computes depth for max-depth enforcement. `delete_campaign()` cascades to children. Frontend renders tree in Pane 2 with breadcrumb navigation in Pane 3.
 - **Lens system:** `agents/lens.py` + `prompts/lens.py` — configurable evaluation frameworks with custom dimensions, weights, rubrics. Default "CTV Ad Sales" lens with 5 dimensions matching legacy CTV scoring.
 - **Default dimensions (CTV Ad Sales lens):**
   - Financial Capacity (25%) — `financial_capacity` — SEC EDGAR / web
@@ -311,10 +315,19 @@ Module sidebar (64px) on far left with icon+label buttons (Research, Prospects).
 - **Right pane (580px):** Report viewer / Dossier detail / Intelligence briefing with source popovers showing priority-ordered key facts
 
 **Prospecting workspace** — 4-pane horizontal pipeline layout:
-- **Pane 1 (Sidebar, 250px):** Niche input + Niche Builder modal + flat campaign history list
-- **Pane 2 (Execution Engine, 420px):** Pipeline steps only (no company cards) — search activity log + step nodes (Discovery → Found N → Validation → Complete), persists after completion
-- **Pane 3 (Market Summary, 350px):** Owns company list exclusively — checkbox-based selection (max 3), validation badges (valid/limited/skipped), Send to Research bar with lens dropdown
-- **Pane 4 (Company Detail, flex):** Discovery view: "Why this company?" + source evidence with type badges. Scored view: lens score ring, dimension cards, playbook. No Send to Research button (selection in Pane 3 only)
+- **Pane 1 (Sidebar, 250px):** Niche input + Niche Builder modal + flat campaign history list (root campaigns only)
+- **Pane 2 (Execution Engine, 420px):** Pipeline steps only (no company cards) — search activity log + step nodes (Discovery → Found N → Validation → Complete), persists after completion. `renderExecutionPane()` uses `renderPipelineTree()` for campaigns with `execution_log` data (flowchart cards). For campaigns with children, renders a **discovery tree** (`renderDiscoveryTree()`) showing parent→child campaign hierarchy. State: `_activeTreeRootId`, `_activeTreeNodeId`.
+- **Pane 3 (Market Summary, 350px):** Owns company list exclusively — checkbox-based selection (max 3), validation badges (valid/limited/skipped), Send to Research bar with lens dropdown. Shows breadcrumb navigation (`_buildBreadcrumb()`) when viewing a child campaign in a tree.
+- **Pane 4 (Company Detail, flex):** Discovery view: "Why this company?" + source evidence with type badges + **"Find Similar" button** (`runFindSimilar()`) for company-anchored recursive discovery. Scored view: lens score ring, dimension cards, playbook. No Send to Research button (selection in Pane 3 only). Ancestry badges on company cards for tree context.
+
+**Pipeline Tree component** — shared `renderPipelineTree(nodes, container)` renders universal tree nodes with schema `{id, parent_id, label, status, kind, icon, iconBg, summary, detail, children[]}`. CSS restyled as visual flowchart: `.ptree-card` stage cards with colored left borders (green=done, blue=cached, purple=running, red=error), `.ptree-arrow` connectors between cards (gradient line + CSS triangle arrowhead), `.ptree-mini` mini-cards for data sources. **Horizontal fan-out**: sources branch horizontally from parent stage via `.ptree-fanout` layout (vertical line → `.ptree-fanout-rail` horizontal rail → individual `.ptree-mini` cards with tick connectors). Running cards get `ptree-pulse` animation. Collapsible detail on click. Used by:
+- `_discoverLogToTree()` — converts Discover `execution_log` → tree nodes grouped by source type (web/news/reddit)
+- `_buildToolStepsTree()` — parses Research chat `tool_progress` strings by `[agent]` prefix into tree stages (bridge/fallback for agents without structured progress)
+- `_structuredStepsToTree()` — converts `structuredSteps[]` (from `progress_cb` events) into proper PipelineTree nodes, grouping by analysis_type with mini-card fan-out per data source. Preferred over bridge parser when `structuredSteps` available.
+
+**Fullscreen execution overlay** — `.exec-overlay` fullscreen dark overlay (z-index 9999, backdrop blur) opens via "View Execution →" link on completed analysis tool bubbles in chat. Shows flowchart at 1200px max-width with scaled-up nodes (18px labels, 38px icons). Non-interactive cards (pointer-events:none, no hover, no chevron). Close via X button, click outside, or Escape key. `openExecOverlay(msgIdx)` prefers `structuredSteps` over bridge parser; `closeExecOverlay()` cleans up.
+
+**Structured progress events** — `tool_progress` SSE handler detects `event.structured === true` (from financial/sentiment/techstack agents via `_structured_cb`). Structured events stored in `chat.messages[i].structuredSteps[]` (separate from flat `steps[]`). Live DOM updates render structured events with status icons (checkmark=done, dash=skipped, x=error, play=running), source labels, and summaries. Completed tree tools show compact bubble + "View Execution →" link (no inline flowchart); running tools keep flat step list during execution; non-tree tools keep flat step list on expand. Scrollbar on `.tool-progress-log` inside bubble (moved from `.tool-group` wrapper), max-height 320px with styled purple scrollbar.
 
 ### CSS Design System
 
@@ -352,10 +365,24 @@ Module sidebar (64px) on far left with icon+label buttons (Research, Prospects).
 | POST | `/api/icp-profiles/generate` | LLM-generate config from survey answers |
 | GET | `/api/ua-targets` | List scored prospects (legacy, sorted by score desc) |
 | POST | `/api/dossiers/<name>/ua-fit` | Score company against active ICP (legacy) |
-| POST | `/api/ua-pipeline` | SSE pipeline: discover + validate (streaming progress, accepts context) |
+| POST | `/api/ua-pipeline` | SSE pipeline: discover + validate (streaming progress, accepts context, seed_company, parent_campaign_id; depth max 3) |
 | POST | `/api/send-to-research` | Send selected companies (max 3) from Discover to Research |
 | GET | `/api/lenses` | List all lenses |
-| POST | `/api/lenses/<id>/score` | Score company with specific lens |
+| GET | `/api/lenses/<id>` | Get single lens with full config |
+| POST | `/api/lenses` | Create a new lens |
+| POST | `/api/lenses/generate` | LLM-generate a lens config from name + description |
+| PUT | `/api/lenses/<id>` | Update a lens config |
+| DELETE | `/api/lenses/<id>` | Delete a non-preset lens |
+| POST | `/api/dossiers/<name>/score-lens` | Score company through a lens |
+| GET | `/api/dossiers/<name>/lens-scores` | Get all lens scores for a company |
+| GET | `/api/campaigns` | List root campaigns with children tree + prospects (includes `execution_log` from detail) |
+| GET | `/api/campaigns/<id>` | Single campaign with prospects + insight |
+| GET | `/api/campaigns/<id>/tree` | Full recursive tree of campaigns rooted at id |
+| PATCH | `/api/campaigns/<id>` | Rename campaign |
+| DELETE | `/api/campaigns/<id>` | Delete campaign (cascades to children) |
+| PATCH | `/api/campaign-prospects/<cid>/<did>` | Update prospect status |
+| POST | `/api/campaigns/<id>/insight` | Generate vertical insight |
+| POST | `/api/campaigns/<cid>/prospects/<name>/brief` | Generate outreach brief |
 | GET | `/api/companies` | List all companies |
 | POST | `/api/chat` | SSE chat endpoint (with context injection + company scoping + dynamic tool selection) |
 
@@ -401,6 +428,10 @@ USPTO_API_KEY       # USPTO PatentsView API key (falls back to PATENTSVIEW_API_K
 - **lenses:** id, name, slug (UNIQUE), description, dimensions_json (array of {key, label, weight, rubric}), created_at, updated_at
 - **lens_scores:** id, lens_id (FK), dossier_id (FK), overall_score, tier_label, score_data (JSON), created_at, updated_at — UNIQUE(lens_id, dossier_id)
 
+### Prospecting Campaigns
+- **campaigns:** id, niche, name, top_n, status, insight_json, parent_campaign_id (FK → campaigns, nullable — enables recursive discovery trees), seed_company (TEXT, nullable — company name that spawned a "Find Similar" child), execution_log_json (TEXT — search events + validation events + seed profile), created_at, updated_at
+- **campaign_prospects:** id, campaign_id (FK), dossier_id (FK), validation_status, prospect_status, brief_json, created_at
+
 ### ICP Profiles (Dormant)
 - **icp_profiles:** id, name, description, is_default, is_active, survey_answers_json, config_json, created_at, updated_at
   - `config_json` is the single source of truth: dimensions (key, label, weight, rubric, signal_queries), labels, discovery_filters, icp_definition, suggested_niches
@@ -412,7 +443,7 @@ USPTO_API_KEY       # USPTO PatentsView API key (falls back to PATENTSVIEW_API_K
 
 ## Current State (March 2026)
 
-Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat with multi-step context management (tool result summarization, dynamic tool schema selection, condensed system prompts), server-side PDF export (reports + briefings), and intelligence briefing with hybrid algorithmic+LLM Digital Maturity Score. Two modules via vertical sidebar: **Market Research** (three-pane layout for analysis, dossiers, chat) and **Prospecting** (two-phase workflow: Discover + Research with lens-based scoring). The **lens system** (`lenses` + `lens_scores` tables) replaces hardcoded CTV scoring — configurable evaluation frameworks with custom dimensions, weights, and rubrics. Default "CTV Ad Sales" lens preserves the original 5-dimension scoring. Discovery is pure search with smart query generation (8-12 targeted queries from structured Niche Builder context), users select up to 3 companies and send to Research for lens-based scoring. Chat tools `ua_fit_score` and `get_ua_targets` are aliased to the lens system with legacy fallback. CTV-specific labels removed from UI (dynamic lens names). ICP Wizard system dormant but preserved. The briefing remains the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization.
+Fully functional with 12 analysis types, agentic chat with 5 LLM providers and 17+ model fallbacks, dossier system with change detection, hiring temporal analysis via snapshots, context-aware company-scoped chat with multi-step context management (tool result summarization, dynamic tool schema selection, condensed system prompts), server-side PDF export (reports + briefings), and intelligence briefing with hybrid algorithmic+LLM Digital Maturity Score. Two modules via vertical sidebar: **Market Research** (three-pane layout for analysis, dossiers, chat) and **Prospecting** (two-phase workflow: Discover + Research with lens-based scoring). The **lens system** (`lenses` + `lens_scores` tables) replaces hardcoded CTV scoring — configurable evaluation frameworks with custom dimensions, weights, and rubrics. Default "CTV Ad Sales" lens preserves the original 5-dimension scoring. Discovery supports both niche-based search (8-12 targeted queries from structured Niche Builder context) and company-anchored "Find Similar" mode (recursive discovery trees up to depth 3, using `_profile_lookup` for profile-aware queries). Users select up to 3 companies and send to Research for lens-based scoring. **Discovery trees** form parent-child campaign hierarchies navigable via tree visualization in Pane 2 with breadcrumb navigation. **Pipeline Tree** is a shared visualization component (`renderPipelineTree()`) restyled as a visual flowchart — stage cards with colored left borders, arrow connectors (gradient line + CSS triangle), and horizontal fan-out for data sources. Used for both discovery execution logs and chat tool progress. Chat tools now emit `progress_callback` steps for search operations (web, Reddit, HN, YouTube). **Structured progress callbacks** on financial, sentiment, and techstack agents emit per-source events (`source_start`, `source_done`, `generating`, `report_saved`) via `_structured_cb` bridge in `web/app.py`, rendered as live status-icon progress in chat tool bubbles. `_structuredStepsToTree()` converts structured events into proper tree nodes grouped by analysis type. **Fullscreen execution overlay** (`.exec-overlay`) opens from "View Execution →" on completed chat tool bubbles to show the flowchart at 1200px max-width with scaled-up nodes. Discover module flowchart fixed — `list_campaigns()` now copies `execution_log` from campaign detail to response. Chat tools `ua_fit_score` and `get_ua_targets` are aliased to the lens system with legacy fallback. CTV-specific labels removed from UI (dynamic lens names). ICP Wizard system dormant but preserved. The briefing remains the flagship feature — it transforms raw intelligence into a consulting partner-ready document that identifies digital transformation opportunities with section-to-source citation mapping and engagement opportunity prioritization.
 
 ## Planned Improvements
 

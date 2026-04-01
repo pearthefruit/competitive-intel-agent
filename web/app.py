@@ -488,6 +488,22 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True})
 
+    @app.route("/api/dossiers/merge", methods=["POST"])
+    def merge_dossiers_route():
+        from db import merge_dossiers
+        data = request.json or {}
+        keep = data.get("keep")
+        merge = data.get("merge")
+        if not keep or not merge:
+            return jsonify({"error": "Provide 'keep' and 'merge' company names"}), 400
+        try:
+            conn = get_connection(db_path)
+            kept_id, count = merge_dossiers(conn, keep, merge)
+            conn.close()
+            return jsonify({"ok": True, "kept_id": kept_id, "merged_records": count})
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
     # --- Dossier API ---
 
     @app.route("/api/llm-usage")
@@ -503,8 +519,9 @@ def create_app(db_path="intel.db"):
 
     @app.route("/api/dossiers")
     def list_dossiers():
+        hide_empty = request.args.get("hide_empty", "1") == "1"
         conn = get_connection(db_path)
-        dossiers = get_all_dossiers(conn)
+        dossiers = get_all_dossiers(conn, hide_empty=hide_empty)
         conn.close()
         return jsonify(dossiers)
 
@@ -1462,7 +1479,8 @@ def create_app(db_path="intel.db"):
     def list_companies():
         """Unified company list merging dossier data with orphan reports."""
         conn = get_connection(db_path)
-        dossiers = get_all_dossiers(conn)
+        hide_empty = request.args.get("hide_empty", "1") == "1"
+        dossiers = get_all_dossiers(conn, hide_empty=hide_empty)
 
         # Get all analyses with report_file for each dossier
         all_analyses = conn.execute(

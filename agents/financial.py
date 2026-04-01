@@ -11,6 +11,17 @@ from scraper.google_news import search_google_news
 from prompts.financial import build_financial_prompt, build_financial_prompt_private
 
 
+def _result_detail(results, max_items=15):
+    """Format search results as detail lines for progress events."""
+    lines = []
+    for r in results[:max_items]:
+        title = r.get('title', '')[:80]
+        url = r.get('href', r.get('url', ''))
+        if title:
+            lines.append(f'• {title}' + (f'  ({url})' if url else ''))
+    return '\n'.join(lines) if lines else ''
+
+
 def financial_analysis(company, progress_cb=None):
     """Run financial analysis for a company. Returns path to saved report or None.
 
@@ -33,7 +44,8 @@ def financial_analysis(company, progress_cb=None):
             print(f"  {i}. {c['company_name']} (ticker: {c['ticker']}, match: {c['match_type']})")
         cik_info = cik_result[0]
         print(f"[financial] Auto-selecting: {cik_info['company_name']}")
-        _cb("source_done", {"source": "sec_edgar", "status": "done", "summary": f"Found: {cik_info['company_name']} (ticker: {cik_info['ticker']})"})
+        _edgar_detail = f"Entity: {cik_info['company_name']}\nTicker: {cik_info['ticker']}\nCIK: {cik_info['cik']}\nMatch: {cik_info['match_type']}"
+        _cb("source_done", {"source": "sec_edgar", "status": "done", "summary": f"Found: {cik_info['company_name']} (ticker: {cik_info['ticker']})", "detail": _edgar_detail})
         return _analyze_public(company, cik_info, _cb)
 
     elif cik_result:
@@ -43,9 +55,10 @@ def financial_analysis(company, progress_cb=None):
             name_upper = cik_result["company_name"].upper()
             if search_upper not in name_upper:
                 print(f"[financial] Ticker '{cik_result['ticker']}' matches {cik_result['company_name']} — name mismatch, using web search instead")
-                _cb("source_done", {"source": "sec_edgar", "status": "skipped", "summary": "Ticker mismatch"})
+                _cb("source_done", {"source": "sec_edgar", "status": "skipped", "summary": "Ticker mismatch", "detail": f"Ticker {cik_result['ticker']} → {cik_result['company_name']}\nName mismatch with '{company}'"})
                 return _analyze_non_sec(company, _cb)
-        _cb("source_done", {"source": "sec_edgar", "status": "done", "summary": f"Found: {cik_result['company_name']} (ticker: {cik_result['ticker']})"})
+        _edgar_detail = f"Entity: {cik_result['company_name']}\nTicker: {cik_result['ticker']}\nCIK: {cik_result['cik']}\nMatch: {cik_result['match_type']}"
+        _cb("source_done", {"source": "sec_edgar", "status": "done", "summary": f"Found: {cik_result['company_name']} (ticker: {cik_result['ticker']})", "detail": _edgar_detail})
         return _analyze_public(company, cik_result, _cb)
     else:
         print(f"[financial] {company} not found in SEC EDGAR — could be private, foreign-listed, or filed under a different entity name")
@@ -83,7 +96,8 @@ def _analyze_public(company, cik_info, _cb=None):
 
     filings = get_recent_filings(cik)
     financials_text = format_financials_for_prompt(financials, filings)
-    _cb("source_done", {"source": "xbrl", "status": "done", "summary": f"{len(financials)} metrics, {len(filings)} filings"})
+    xbrl_detail = "Metrics: " + ", ".join(financials.keys()) + f"\n{len(filings)} recent filings"
+    _cb("source_done", {"source": "xbrl", "status": "done", "summary": f"{len(financials)} metrics, {len(filings)} filings", "detail": xbrl_detail})
 
     # Fetch live market data (stock price, market cap, valuation ratios)
     _cb("source_start", {"source": "yahoo_finance", "label": "Yahoo Finance", "detail": f"Market data for {ticker}"})
@@ -93,7 +107,8 @@ def _analyze_public(company, cik_info, _cb=None):
         market_text = format_stock_data_for_prompt(stock_data)
         financials_text += "\n" + market_text
         print(f"[financial] Got market data: price={stock_data.get('price')}, market_cap={stock_data.get('market_cap')}")
-        _cb("source_done", {"source": "yahoo_finance", "status": "done", "summary": f"price={stock_data.get('price')}, cap={stock_data.get('market_cap')}"})
+        yf_detail = '\n'.join(f"• {k}: {v}" for k, v in stock_data.items() if v is not None and k not in ('_raw',))
+        _cb("source_done", {"source": "yahoo_finance", "status": "done", "summary": f"price={stock_data.get('price')}, cap={stock_data.get('market_cap')}", "detail": yf_detail})
     else:
         print(f"[financial] Could not fetch live market data for {ticker} — report will use SEC data only")
         _cb("source_done", {"source": "yahoo_finance", "status": "skipped", "summary": "Unavailable"})
@@ -121,7 +136,8 @@ def _analyze_public(company, cik_info, _cb=None):
     if eight_k:
         financials_text += "\n" + format_8k_for_prompt(eight_k)
         print(f"[financial] Added {len(eight_k)} 8-K filing events")
-        _cb("source_done", {"source": "8k_filings", "status": "done", "summary": f"{len(eight_k)} events"})
+        eight_k_detail = '\n'.join(f"• {e.get('form', '8-K')} ({e.get('date', 'N/A')}): {', '.join(e.get('items', []))}" for e in eight_k[:10])
+        _cb("source_done", {"source": "8k_filings", "status": "done", "summary": f"{len(eight_k)} events", "detail": eight_k_detail})
     else:
         _cb("source_done", {"source": "8k_filings", "status": "skipped", "summary": "None found"})
 
@@ -153,7 +169,7 @@ def _analyze_public(company, cik_info, _cb=None):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[financial] Report saved to {filename}")
-    save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model)
+    save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
     _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)
 
@@ -175,7 +191,8 @@ def _analyze_non_sec(company, _cb=None):
             if financials and financials.get("filings"):
                 nonprofit_data = format_990_for_prompt(financials)
                 print(f"[financial] Got Form 990 data — {len(financials['filings'])} years of filings")
-                _cb("source_done", {"source": "propublica", "status": "done", "summary": f"{len(financials['filings'])} years of 990 filings"})
+                pp_detail = f"Name: {match['name']}\nEIN: {match['ein']}\n{len(financials['filings'])} years of Form 990 data"
+                _cb("source_done", {"source": "propublica", "status": "done", "summary": f"{len(financials['filings'])} years of 990 filings", "detail": pp_detail})
             else:
                 print(f"[financial] Nonprofit matched but no 990 filings found")
                 _cb("source_done", {"source": "propublica", "status": "skipped", "summary": "Matched but no filings"})
@@ -220,7 +237,8 @@ def _analyze_non_sec(company, _cb=None):
     snippet_only = [r for r in unique_results if 0 < len(r.get("body", "")) <= 300]
     no_body = [r for r in unique_results if not r.get("body")]
     print(f"[financial] Search results: {len(unique_results)} unique ({len(fetched)} with fetched content, {len(snippet_only)} snippet-only, {len(no_body)} no body)")
-    _cb("source_done", {"source": "web_search", "status": "done", "summary": f"{len(unique_results)} unique results ({len(queries)} queries)"})
+    web_detail = _result_detail(unique_results)
+    _cb("source_done", {"source": "web_search", "status": "done", "summary": f"{len(unique_results)} unique results ({len(queries)} queries)", "detail": web_detail})
 
     search_text = format_search_results(unique_results)
 
@@ -248,7 +266,12 @@ def _analyze_non_sec(company, _cb=None):
                 has_statements = "income_stmt" in extended
                 if has_statements:
                     print(f"[financial] Got full financial statements — this company has structured data comparable to SEC filers")
-        _cb("source_done", {"source": "yahoo_finance", "status": "done", "summary": f"ticker={ticker}, statements={'yes' if has_statements else 'no'}"})
+        yf2_parts = [f"Ticker: {ticker}"]
+        if stock_data:
+            yf2_parts.extend(f"• {k}: {v}" for k, v in stock_data.items() if v is not None and k not in ('_raw',))
+        if has_statements:
+            yf2_parts.append("Financial statements: available")
+        _cb("source_done", {"source": "yahoo_finance", "status": "done", "summary": f"ticker={ticker}, statements={'yes' if has_statements else 'no'}", "detail": '\n'.join(yf2_parts)})
     else:
         _cb("source_done", {"source": "yahoo_finance", "status": "skipped", "summary": "No ticker found"})
 
@@ -293,6 +316,6 @@ def _analyze_non_sec(company, _cb=None):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[financial] Report saved to {filename}")
-    save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model)
+    save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
     _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)

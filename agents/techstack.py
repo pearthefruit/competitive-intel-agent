@@ -198,14 +198,16 @@ def techstack_analysis(url, max_pages=5, company_name=None, db_path=None, progre
         print("[techstack] No pages crawled — site may block automated requests, require JS rendering, or be behind authentication")
         _cb("source_done", {"source": "crawl", "status": "error", "summary": "No pages crawled"})
         return None
-    _cb("source_done", {"source": "crawl", "status": "done", "summary": f"{len(pages)} pages crawled"})
+    crawl_detail = '\n'.join(f"• {p.get('url', '?')}  ({p.get('word_count', 0)} words)" for p in pages[:10])
+    _cb("source_done", {"source": "crawl", "status": "done", "summary": f"{len(pages)} pages crawled", "detail": crawl_detail})
 
     # Detect technologies
     _cb("source_start", {"source": "tech_detect", "label": "Tech Detection", "detail": f"Fingerprinting technologies on {domain}"})
     tech = detect_technologies(pages)
     total_techs = sum(len(v) for v in tech.values())
     print(f"[techstack] Detected {total_techs} technologies across {len(tech)} categories")
-    _cb("source_done", {"source": "tech_detect", "status": "done", "summary": f"{total_techs} technologies across {len(tech)} categories"})
+    tech_detail = '\n'.join(f"• {cat}: {', '.join(items)}" for cat, items in tech.items() if items)
+    _cb("source_done", {"source": "tech_detect", "status": "done", "summary": f"{total_techs} technologies across {len(tech)} categories", "detail": tech_detail})
 
     if total_techs == 0:
         print("[techstack] No technologies detected — possible reasons:")
@@ -229,7 +231,8 @@ def techstack_analysis(url, max_pages=5, company_name=None, db_path=None, progre
         if hiring_section:
             print(f"[techstack] Hiring data found: {hiring_stats['total_roles']} roles, "
                   f"{len(hiring_stats.get('top_skills', []))} skills identified")
-            _cb("source_done", {"source": "hiring_data", "status": "done", "summary": f"{hiring_stats['total_roles']} roles, {len(hiring_stats.get('top_skills', []))} skills"})
+            hiring_detail = f"Total roles: {hiring_stats['total_roles']}\nTop skills: {', '.join(hiring_stats.get('top_skills', [])[:15])}"
+            _cb("source_done", {"source": "hiring_data", "status": "done", "summary": f"{hiring_stats['total_roles']} roles, {len(hiring_stats.get('top_skills', []))} skills", "detail": hiring_detail})
         else:
             print(f"[techstack] No hiring data found for '{company_name}' — report will cover website stack only")
             _cb("source_done", {"source": "hiring_data", "status": "skipped", "summary": f"No data for '{company_name}'"})
@@ -271,6 +274,6 @@ def techstack_analysis(url, max_pages=5, company_name=None, db_path=None, progre
 
     print(f"[techstack] Report saved to {filename}")
     dossier_name = company_name or domain
-    save_to_dossier(dossier_name, "techstack", report_file=str(filename), report_text=report, model_used=model)
+    save_to_dossier(dossier_name, "techstack", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
     _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)

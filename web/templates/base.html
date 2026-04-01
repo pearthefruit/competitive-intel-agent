@@ -1904,16 +1904,50 @@
         .exec-overlay .ptree-arrow::before { width: 2px; }
         .exec-overlay .ptree-arrow::after { border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 7px solid rgba(168,85,247,0.4); }
         .exec-overlay .ptree-mini {
-            padding: 10px 16px; border-radius: 10px; min-width: 90px;
-            pointer-events: none;
+            padding: 10px 16px; border-radius: 10px; min-width: 120px;
+            pointer-events: none; align-items: flex-start;
+            flex-direction: row; gap: 10px; counter-increment: exec-step;
         }
         .exec-overlay .ptree-mini:hover { border-color: var(--border); box-shadow: none; }
-        .exec-overlay .ptree-mini-label { font-size: 13px; }
-        .exec-overlay .ptree-mini-value { font-size: 14px; margin-top: 3px; }
-        .exec-overlay .ptree-mini::before { top: -11px; height: 10px; }
-        .exec-overlay .ptree-fanout { padding: 18px 0 8px; }
-        .exec-overlay .ptree-fanout-items { gap: 10px; }
-        .exec-overlay .ptree-fanout-rail { margin: 0 24px 10px; }
+        .exec-overlay .ptree-mini-label {
+            font-size: 13px; max-width: none; white-space: normal;
+            overflow: visible; text-overflow: clip; text-align: left;
+            word-break: break-word;
+        }
+        .exec-overlay .ptree-mini-value {
+            font-size: 14px; margin-top: 3px; max-width: none; white-space: normal;
+            overflow: visible; text-overflow: clip; text-align: left;
+            word-break: break-word;
+        }
+        .exec-overlay .ptree-mini::before {
+            display: flex; content: counter(exec-step);
+            position: static; width: 22px; height: 22px; min-width: 22px;
+            border-radius: 50%; background: rgba(168,85,247,0.2);
+            color: rgba(168,85,247,0.8); font-size: 11px; font-weight: 700;
+            align-items: center; justify-content: center;
+            flex-shrink: 0; margin-top: 1px;
+        }
+        .exec-overlay .ptree-fanout { padding: 14px 0 4px; }
+        .exec-overlay .ptree-fanout::before { display: none; }
+        .exec-overlay .ptree-fanout-items {
+            gap: 10px; justify-content: flex-start; counter-reset: exec-step;
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        }
+        .exec-overlay .ptree-fanout-rail { display: none; }
+        .exec-overlay .ptree-mini.has-detail {
+            pointer-events: auto; cursor: pointer;
+        }
+        .exec-overlay .ptree-mini.has-detail:hover {
+            border-color: rgba(168,85,247,0.4); box-shadow: 0 0 8px rgba(168,85,247,0.08);
+        }
+        .exec-overlay .ptree-mini.selected {
+            border-color: rgba(168,85,247,0.5); box-shadow: 0 0 12px rgba(168,85,247,0.15);
+        }
+        .exec-overlay .ptree-detail-area { margin-top: 12px; }
+        .exec-overlay .ptree-mini-detail-panel {
+            font-size: 13px; line-height: 1.6; padding: 12px 16px;
+            pointer-events: auto;
+        }
         .exec-overlay .ptree-card-detail { font-size: 13px; padding: 12px 16px 10px 46px; line-height: 1.8; pointer-events: auto; }
         .exec-overlay .ptree-card-chevron { display: none; }
 
@@ -4159,6 +4193,16 @@
         .ptree-mini.error .ptree-mini-value { color: var(--red); }
         .ptree-mini.skipped .ptree-mini-value { color: #6b7280; }
         .ptree-mini.skipped { opacity: 0.5; }
+        .ptree-mini.has-detail { cursor: pointer; }
+        .ptree-mini.selected { border-color: rgba(168,85,247,0.5); box-shadow: 0 0 8px rgba(168,85,247,0.15); }
+        /* Detail panel area below the grid */
+        .ptree-detail-area { margin-top: 8px; }
+        .ptree-mini-detail-panel {
+            font-size: 10px; color: var(--text-muted); line-height: 1.5;
+            padding: 8px 10px; border-top: 1px solid var(--border);
+            word-break: break-word;
+        }
+        .ptree-mini-detail-panel strong { color: var(--text-secondary); }
 
         /* Expandable detail inside card */
         .ptree-card-detail {
@@ -6713,7 +6757,7 @@ function renderMessages() {
             const steps = m.steps || [];
             const isTreeTool = ['score_lens', 'ua_fit_score', 'full_analysis', 'financial_analysis',
                                 'sentiment_analysis', 'techstack_analysis', 'competitor_analysis',
-                                'patent_analysis'].includes(m.name);
+                                'patent_analysis', 'seo_audit', 'pricing_analysis'].includes(m.name);
 
             // For completed tree tools: compact bubble + "View Execution" button (opens fullscreen overlay)
             // For running tools or non-tree tools: flat step list as before
@@ -8038,7 +8082,7 @@ function openExecOverlay(msgIdx) {
         // Fallback: bridge parser for tools without structured events
         const isTreeTool = ['score_lens', 'ua_fit_score', 'full_analysis', 'financial_analysis',
                             'sentiment_analysis', 'techstack_analysis', 'competitor_analysis',
-                            'patent_analysis'].includes(m.name);
+                            'patent_analysis', 'seo_audit', 'pricing_analysis'].includes(m.name);
         if (isTreeTool) {
             bodyEl.innerHTML = _buildToolStepsTree(steps, m.name);
         } else {
@@ -9020,8 +9064,29 @@ function _buildBreadcrumb(campaignId) {
 //
 // Renders pipeline stages as visual card nodes connected by arrows.
 // Stage children are shown as inline chips (source badges) inside the card.
-// Click a card to expand/collapse its detail section.
+// Click a mini-card to expand its detail panel below the grid.
 //
+
+/** Toggle a single mini-card detail panel. Only one open at a time per card. */
+function _toggleMiniDetail(cardId, idx) {
+    const area = document.getElementById('ptree-details-' + cardId);
+    if (!area) return;
+    const panels = area.querySelectorAll('.ptree-mini-detail-panel');
+    const target = document.getElementById('ptree-detail-' + cardId + '-' + idx);
+    // Find the mini-card to toggle its selected state
+    const fanout = area.closest('.ptree-fanout');
+    const minis = fanout ? fanout.querySelectorAll('.ptree-mini') : [];
+
+    const isOpen = target && target.style.display !== 'none';
+    // Close all panels first
+    panels.forEach(p => p.style.display = 'none');
+    minis.forEach(m => m.classList.remove('selected'));
+    // Toggle target
+    if (!isOpen && target) {
+        target.style.display = 'block';
+        if (minis[idx]) minis[idx].classList.add('selected');
+    }
+}
 
 function _ptreeStatusBg(status) {
     const m = { done: 'rgba(22,163,74,0.15)', running: 'rgba(168,85,247,0.15)', cached: 'rgba(59,130,246,0.15)', error: 'rgba(239,68,68,0.15)', skipped: 'rgba(107,114,128,0.15)' };
@@ -9077,68 +9142,52 @@ function _renderCard(node) {
     // Build horizontal fan-out — mini-cards branching from this stage
     let fanoutHtml = '';
     if (children.length > 0) {
-        const minis = children.map(child => {
+        const cardId = (node.id || Math.random().toString(36).slice(2)).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const minis = children.map((child, idx) => {
             const cStatus = child.status || 'done';
             const cLabel = child.label || '?';
             const cSummary = child.summary || '';
+            const cDetail = child.detail || '';
             const subCount = (child.children || []).length;
             const valueText = cSummary || (subCount > 0 ? `${subCount} steps` : '');
-            return `<div class="ptree-mini ${cStatus}" title="${escHtml(cLabel)}${valueText ? ': ' + escHtml(valueText) : ''}">
+            const hasDetail = !!(cDetail && cDetail !== cSummary);
+            const clickAttr = hasDetail
+                ? `onclick="event.stopPropagation();_toggleMiniDetail('${cardId}',${idx})"`
+                : '';
+            return `<div class="ptree-mini ${cStatus}${hasDetail ? ' has-detail' : ''}" ${clickAttr} data-idx="${idx}" title="${escHtml(cLabel)}${valueText ? ': ' + escHtml(valueText) : ''}">
                 <div class="ptree-mini-label">${escHtml(cLabel)}</div>
                 ${valueText ? `<div class="ptree-mini-value">${escHtml(valueText)}</div>` : ''}
             </div>`;
         }).join('');
+
+        // Per-child detail panels (only one visible at a time, below the grid)
+        const detailPanels = children.map((child, idx) => {
+            const cDetail = child.detail || '';
+            if (!cDetail || cDetail === (child.summary || '')) return '';
+            const detailRendered = escHtml(cDetail).replace(/\n/g, '<br>');
+            return `<div class="ptree-mini-detail-panel" id="ptree-detail-${cardId}-${idx}" style="display:none">
+                <strong>${escHtml(child.label || '')}</strong><br>${detailRendered}
+            </div>`;
+        }).join('');
+
         fanoutHtml = `<div class="ptree-fanout">
             <div class="ptree-fanout-rail"></div>
             <div class="ptree-fanout-items">${minis}</div>
+            ${detailPanels ? `<div class="ptree-detail-area" id="ptree-details-${cardId}">${detailPanels}</div>` : ''}
         </div>`;
     }
 
-    // Expandable detail — per-child query-level breakdown
-    let detailHtml = '';
-    const hasExpandable = children.some(c => (c.children && c.children.length) || c.detail) || node.detail;
-    if (hasExpandable) {
-        let detailContent = '';
-        if (node.detail) {
-            detailContent += `<div style="margin-bottom:6px">${node.detail}</div>`;
-        }
-        children.forEach(child => {
-            const grandkids = child.children || [];
-            if (grandkids.length > 0) {
-                detailContent += `<div style="margin-bottom:8px"><strong style="color:var(--text-secondary)">${escHtml(child.label)}</strong>`;
-                grandkids.forEach(gk => {
-                    const gkIcon = gk.status === 'done' ? '&#10003;' : gk.status === 'skipped' ? '&#8212;' : gk.status === 'error' ? '&#10007;' : '&#9654;';
-                    const gkColor = gk.status === 'done' ? 'var(--green)' : gk.status === 'error' ? 'var(--red)' : gk.status === 'skipped' ? 'var(--yellow)' : 'var(--text-muted)';
-                    detailContent += `<div style="display:flex;align-items:center;gap:5px;margin-left:8px;line-height:1.8">
-                        <span style="color:${gkColor};font-size:9px">${gkIcon}</span>
-                        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(gk.label || '')}</span>
-                        ${gk.summary ? `<span style="color:var(--text-muted);white-space:nowrap">${escHtml(gk.summary)}</span>` : ''}
-                    </div>`;
-                });
-                detailContent += '</div>';
-            } else if (child.detail) {
-                detailContent += `<div style="margin-bottom:4px"><strong style="color:var(--text-secondary)">${escHtml(child.label)}:</strong> ${child.detail}</div>`;
-            }
-        });
-        if (detailContent) {
-            detailHtml = `<div class="ptree-card-detail">${detailContent}</div>`;
-        }
-    }
+    const detailHtml = '';
+    const chevronHtml = '';
 
-    const chevronHtml = hasExpandable
-        ? '<span class="ptree-card-chevron">&#9660;</span>'
-        : '';
-
-    return `<div class="ptree-card status-${status}" onclick="this.classList.toggle('expanded')">
+    return `<div class="ptree-card status-${status}">
         <div class="ptree-card-header">
             ${iconHtml}
             <span class="ptree-card-label">${escHtml(node.label || '')}</span>
             ${statusHtml}
-            ${chevronHtml}
         </div>
         ${summaryHtml}
         ${fanoutHtml}
-        ${detailHtml}
     </div>`;
 }
 
@@ -9273,14 +9322,24 @@ function _discoverLogToTree(executionLog, prospects, campaignLabel) {
 // ===================== RESEARCH TOOL STEPS → TREE (BRIDGE) =====================
 
 const _agentMeta = {
-    financial:  { icon: '&#128200;', label: 'Financial Analysis',  bg: 'rgba(22,163,74,0.15)' },
-    sentiment:  { icon: '&#128172;', label: 'Sentiment Analysis',  bg: 'rgba(234,179,8,0.15)' },
-    techstack:  { icon: '&#9881;',   label: 'Techstack Analysis',  bg: 'rgba(59,130,246,0.15)' },
-    lens:       { icon: '&#127919;', label: 'Lens Scoring',        bg: 'rgba(168,85,247,0.15)' },
-    landscape:  { icon: '&#127758;', label: 'Landscape',           bg: 'rgba(107,114,128,0.15)' },
-    competitors:{ icon: '&#9876;',   label: 'Competitors',         bg: 'rgba(239,68,68,0.15)' },
-    patents:    { icon: '&#128218;', label: 'Patents',             bg: 'rgba(168,85,247,0.15)' },
-    discover:   { icon: '&#128269;', label: 'Discovery',           bg: 'rgba(168,85,247,0.15)' },
+    financial:      { icon: '&#128200;', label: 'Financial Analysis',  bg: 'rgba(22,163,74,0.15)' },
+    sentiment:      { icon: '&#128172;', label: 'Sentiment Analysis',  bg: 'rgba(234,179,8,0.15)' },
+    techstack:      { icon: '&#9881;',   label: 'Techstack Analysis',  bg: 'rgba(59,130,246,0.15)' },
+    lens:           { icon: '&#127919;', label: 'Lens Scoring',        bg: 'rgba(168,85,247,0.15)' },
+    landscape:      { icon: '&#127758;', label: 'Landscape',           bg: 'rgba(107,114,128,0.15)' },
+    competitors:    { icon: '&#9876;',   label: 'Competitors',         bg: 'rgba(239,68,68,0.15)' },
+    patents:        { icon: '&#128218;', label: 'Patents',             bg: 'rgba(168,85,247,0.15)' },
+    discover:       { icon: '&#128269;', label: 'Discovery',           bg: 'rgba(168,85,247,0.15)' },
+    // Phase types (used by structured progress within individual agents)
+    lookup:         { icon: '&#128270;', label: 'Industry Lookup',     bg: 'rgba(59,130,246,0.15)' },
+    search:         { icon: '&#128269;', label: 'Patent Search',       bg: 'rgba(168,85,247,0.15)' },
+    web_search:     { icon: '&#127760;', label: 'Web Search',          bg: 'rgba(59,130,246,0.15)' },
+    deep_sources:   { icon: '&#128225;', label: 'Deep Sources',        bg: 'rgba(234,179,8,0.15)' },
+    crawl:          { icon: '&#128424;', label: 'Site Crawl',          bg: 'rgba(107,114,128,0.15)' },
+    analysis:       { icon: '&#128202;', label: 'SEO/AEO Analysis',   bg: 'rgba(59,130,246,0.15)' },
+    pricing_detect: { icon: '&#128176;', label: 'Pricing Detection',  bg: 'rgba(22,163,74,0.15)' },
+    report:         { icon: '&#128196;', label: 'Report Generation',   bg: 'rgba(22,163,74,0.15)' },
+    dossier:        { icon: '&#128451;', label: 'Dossier Update',      bg: 'rgba(168,85,247,0.15)' },
 };
 
 /**
@@ -9320,39 +9379,71 @@ function _structuredStepsToTree(structuredSteps, toolName, args) {
         } else if (ev.event === 'analysis_done') {
             const at = ev.analysis_type || currentStage?.id;
             if (at && stages[at]) {
-                stages[at].status = ev.reused ? 'cached' : (ev.report_path ? 'done' : 'error');
+                stages[at].status = ev.error ? 'error' : (ev.reused ? 'cached' : 'done');
                 if (ev.reused) stages[at].summary = 'Cached (< 7 days old)';
+                else if (ev.error) stages[at].summary = ev.error;
                 else if (ev.report_path) stages[at].summary = 'Report saved';
-                else stages[at].summary = 'Failed';
+                // else: leave summary from source_done events
             }
-        } else if (ev.event === 'source_start' && currentStage) {
+        } else if (ev.event === 'source_start') {
+            // Create implicit stage if source events arrive without analysis_start
+            // (financial, sentiment, techstack emit source events directly)
+            if (!currentStage) {
+                const implicitKey = (toolName || '').replace('_analysis', '').replace('_audit', '');
+                const meta = _agentMeta[implicitKey] || { icon: '&#9654;', label: toolLabel(toolName) || 'Analysis', bg: 'rgba(255,255,255,0.06)' };
+                currentStage = {
+                    id: implicitKey || '_implicit', label: meta.label, status: 'running', kind: 'stage',
+                    icon: meta.icon, iconBg: meta.bg,
+                    summary: '', children: [], _sources: [],
+                };
+                stages[currentStage.id] = currentStage;
+                stageOrder.push(currentStage.id);
+            }
             // Track that a source is being queried
             currentStage._sources.push({
                 source: ev.source, label: ev.label || ev.source,
-                status: 'running', summary: ev.detail || '',
+                status: 'running', summary: ev.detail || '', detail: ev.detail || '',
             });
-        } else if (ev.event === 'source_done' && currentStage) {
-            // Update the source with result
+        } else if (ev.event === 'source_done') {
+            // Create implicit stage if needed (same as source_start)
+            if (!currentStage) {
+                const implicitKey = (toolName || '').replace('_analysis', '').replace('_audit', '');
+                const meta = _agentMeta[implicitKey] || { icon: '&#9654;', label: toolLabel(toolName) || 'Analysis', bg: 'rgba(255,255,255,0.06)' };
+                currentStage = {
+                    id: implicitKey || '_implicit', label: meta.label, status: 'running', kind: 'stage',
+                    icon: meta.icon, iconBg: meta.bg,
+                    summary: '', children: [], _sources: [],
+                };
+                stages[currentStage.id] = currentStage;
+                stageOrder.push(currentStage.id);
+            }
+            // Update the source with result — preserve detail from source_start
             const src = currentStage._sources.find(s => s.source === ev.source);
             if (src) {
                 src.status = ev.status || 'done';
                 src.summary = ev.summary || '';
+                if (ev.detail) src.detail = ev.detail;
             } else {
                 currentStage._sources.push({
                     source: ev.source, label: ev.label || ev.source,
                     status: ev.status || 'done', summary: ev.summary || '',
+                    detail: ev.detail || '',
                 });
             }
-        } else if (ev.event === 'generating' && currentStage) {
-            currentStage._sources.push({
-                source: 'llm', label: 'LLM Synthesis',
-                status: 'done', summary: ev.detail || 'Generating report',
-            });
-        } else if (ev.event === 'report_saved' && currentStage) {
-            currentStage._sources.push({
-                source: 'report', label: 'Report',
-                status: 'done', summary: ev.path || 'Saved',
-            });
+        } else if (ev.event === 'generating') {
+            if (currentStage) {
+                currentStage._sources.push({
+                    source: 'llm', label: 'LLM Synthesis',
+                    status: 'done', summary: ev.detail || 'Generating report',
+                });
+            }
+        } else if (ev.event === 'report_saved') {
+            if (currentStage) {
+                currentStage._sources.push({
+                    source: 'report', label: 'Report Saved',
+                    status: 'done', summary: ev.path || 'Saved',
+                });
+            }
         } else if (ev.event === 'scoring') {
             const scoringNode = {
                 id: 'scoring', label: 'Lens Scoring', status: 'done', kind: 'stage',
@@ -9364,21 +9455,29 @@ function _structuredStepsToTree(structuredSteps, toolName, args) {
         }
     });
 
-    // Convert source arrays into children nodes
+    // Convert source arrays into children nodes, collect phases as top-level cards
+    const topLevel = [];
     stageOrder.forEach(at => {
         const stage = stages[at];
         if (stage._sources) {
             stage.children = stage._sources.map((src, i) => ({
                 id: `${at}.${src.source || i}`, label: src.label,
                 status: src.status, kind: 'operation',
-                summary: src.summary, children: [],
+                summary: src.summary, detail: src.detail || '', children: [],
             }));
             delete stage._sources;
         }
-        root.children.push(stage);
+        // Implicit stages (no analysis_done) — infer status from children
+        if (stage.status === 'running' && stage.children && stage.children.length > 0) {
+            const hasError = stage.children.some(c => c.status === 'error');
+            stage.status = hasError ? 'error' : 'done';
+        }
+        topLevel.push(stage);
     });
 
-    return [root];
+    // Return phases as top-level nodes — each becomes a full card with source fan-out.
+    // The overlay header already shows the tool name + args, so no root wrapper needed.
+    return topLevel.length > 0 ? topLevel : null;
 }
 
 /**

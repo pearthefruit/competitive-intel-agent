@@ -478,8 +478,69 @@ def get_company_info(conn, company_id):
 
 # --- Dossier helpers ---
 
+def _find_similar_dossier(conn, name, threshold=0.85):
+    """Find an existing dossier with a similar name (fuzzy match).
+
+    Catches typos and spelling variants like 'loveable' → 'Lovable'.
+    Returns (dossier_id, canonical_name) or (None, None).
+    """
+    from difflib import SequenceMatcher
+    rows = conn.execute("SELECT id, company_name FROM dossiers").fetchall()
+    name_lower = name.lower().strip()
+    best_id, best_name, best_ratio = None, None, 0.0
+    for row in rows:
+        existing = row["company_name"].lower().strip()
+        ratio = SequenceMatcher(None, name_lower, existing).ratio()
+        if ratio >= threshold and ratio > best_ratio:
+            best_id, best_name, best_ratio = row["id"], row["company_name"], ratio
+    if best_id:
+        return best_id, best_name
+    return None, None
+
+
+def merge_dossiers(conn, keep_name, merge_name):
+    """Merge two dossiers — moves all data from merge_name into keep_name, deletes merge_name.
+
+    Returns (kept_id, merged_count) or raises ValueError if either dossier not found.
+    """
+    keep = conn.execute("SELECT id FROM dossiers WHERE company_name = ? COLLATE NOCASE", (keep_name,)).fetchone()
+    merge = conn.execute("SELECT id FROM dossiers WHERE company_name = ? COLLATE NOCASE", (merge_name,)).fetchone()
+    if not keep:
+        raise ValueError(f"Dossier '{keep_name}' not found")
+    if not merge:
+        raise ValueError(f"Dossier '{merge_name}' not found")
+    if keep["id"] == merge["id"]:
+        raise ValueError("Cannot merge a dossier with itself")
+
+    keep_id, merge_id = keep["id"], merge["id"]
+    merged = 0
+
+    # Move analyses
+    cur = conn.execute("UPDATE dossier_analyses SET dossier_id = ? WHERE dossier_id = ?", (keep_id, merge_id))
+    merged += cur.rowcount
+    # Move events
+    cur = conn.execute("UPDATE dossier_events SET dossier_id = ? WHERE dossier_id = ?", (keep_id, merge_id))
+    merged += cur.rowcount
+    # Move lens scores (skip duplicates — same lens_id)
+    conn.execute("""UPDATE OR IGNORE lens_scores SET dossier_id = ? WHERE dossier_id = ?""", (keep_id, merge_id))
+    conn.execute("DELETE FROM lens_scores WHERE dossier_id = ?", (merge_id,))
+    # Move campaign prospect links
+    conn.execute("UPDATE OR IGNORE campaign_prospects SET dossier_id = ? WHERE dossier_id = ?", (keep_id, merge_id))
+    conn.execute("DELETE FROM campaign_prospects WHERE dossier_id = ?", (merge_id,))
+    # Delete the merged dossier
+    conn.execute("DELETE FROM dossiers WHERE id = ?", (merge_id,))
+    conn.commit()
+    print(f"[dossier] Merged '{merge_name}' (id={merge_id}) into '{keep_name}' (id={keep_id}), moved {merged} records")
+    return keep_id, merged
+
+
 def get_or_create_dossier(conn, company_name, sector=None, description=None):
-    """Get existing dossier or create a new one. Returns dossier id."""
+    """Get existing dossier or create a new one. Returns dossier id.
+
+    Uses COLLATE NOCASE for exact match, then fuzzy matching (≥85% similarity)
+    to catch typos and spelling variants.
+    """
+    # Exact match (case-insensitive)
     row = conn.execute(
         "SELECT id FROM dossiers WHERE company_name = ? COLLATE NOCASE",
         (company_name,),
@@ -498,6 +559,24 @@ def get_or_create_dossier(conn, company_name, sector=None, description=None):
         conn.execute(f"UPDATE dossiers SET {', '.join(updates)} WHERE id = ?", params)
         conn.commit()
         return dossier_id
+
+    # Fuzzy match — catch typos/spelling variants (e.g., "loveable" → "Lovable")
+    fuzzy_id, fuzzy_name = _find_similar_dossier(conn, company_name)
+    if fuzzy_id:
+        print(f"[dossier] Fuzzy matched '{company_name}' → existing '{fuzzy_name}'")
+        updates = ["updated_at = ?"]
+        params = [datetime.now(timezone.utc).isoformat()]
+        if sector:
+            updates.append("sector = ?")
+            params.append(sector)
+        if description:
+            updates.append("description = ?")
+            params.append(description)
+        params.append(fuzzy_id)
+        conn.execute(f"UPDATE dossiers SET {', '.join(updates)} WHERE id = ?", params)
+        conn.commit()
+        return fuzzy_id
+
     cur = conn.execute(
         "INSERT INTO dossiers (company_name, sector, description) VALUES (?, ?, ?)",
         (company_name, sector, description),
@@ -564,15 +643,21 @@ def get_dossier_by_company(conn, company_name):
     return dossier
 
 
-def get_all_dossiers(conn):
-    """Get all dossiers with summary stats."""
-    rows = conn.execute(
-        """SELECT d.*,
+def get_all_dossiers(conn, hide_empty=False):
+    """Get all dossiers with summary stats.
+
+    Args:
+        hide_empty: If True, exclude dossiers with 0 analyses (e.g. Discover stubs).
+    """
+    query = """SELECT d.*,
                   (SELECT COUNT(*) FROM dossier_analyses WHERE dossier_id = d.id) as analysis_count,
                   (SELECT COUNT(*) FROM dossier_events WHERE dossier_id = d.id) as event_count,
                   (SELECT MAX(created_at) FROM dossier_analyses WHERE dossier_id = d.id) as last_analysis_at
-           FROM dossiers d ORDER BY d.updated_at DESC"""
-    ).fetchall()
+           FROM dossiers d"""
+    if hide_empty:
+        query += " WHERE (SELECT COUNT(*) FROM dossier_analyses WHERE dossier_id = d.id) > 0"
+    query += " ORDER BY d.updated_at DESC"
+    rows = conn.execute(query).fetchall()
     return [dict(r) for r in rows]
 
 

@@ -996,12 +996,15 @@ def get_temporal_context(company, analysis_type, db_path="intel.db"):
 
 
 def save_to_dossier(company, analysis_type, report_file=None, report_text=None,
-                    model_used=None, db_path="intel.db"):
+                    model_used=None, db_path="intel.db", progress_cb=None):
     """Save an analysis to the company dossier with extracted key facts.
 
     Called at the end of every analysis agent. Extracts structured facts from
     the report, detects changes vs. previous run, and stores everything.
     """
+    _cb = progress_cb or (lambda *a: None)
+    _cb('analysis_start', {'analysis_type': 'dossier', 'label': 'Dossier Update'})
+
     try:
         conn = get_connection(db_path)
 
@@ -1013,29 +1016,38 @@ def save_to_dossier(company, analysis_type, report_file=None, report_text=None,
         new_facts = None
         if report_text:
             print(f"[dossier] Extracting key facts for {company}/{analysis_type}...")
+            _cb('source_start', {'source': 'extract', 'label': 'Key Facts Extraction', 'detail': f'Extracting from {analysis_type} report'})
             new_facts = extract_key_facts(company, report_text, analysis_type=analysis_type)
             if new_facts:
                 key_facts_json = json.dumps(new_facts)
                 print(f"[dossier] Extracted {len(new_facts)} facts: {list(new_facts.keys())}")
+                facts_detail = '\n'.join(f'• {k}: {str(v)[:100]}' for k, v in list(new_facts.items())[:12])
+                _cb('source_done', {'source': 'extract', 'status': 'done', 'summary': f'{len(new_facts)} facts: {", ".join(list(new_facts.keys())[:5])}', 'detail': facts_detail})
             else:
                 print("[dossier] No key facts extracted")
+                _cb('source_done', {'source': 'extract', 'status': 'skipped', 'summary': 'No facts extracted'})
 
         # Detect changes vs. previous analysis
         if new_facts:
+            _cb('source_start', {'source': 'changes', 'label': 'Change Detection', 'detail': f'Comparing with prior {analysis_type} scan'})
             old_facts = get_previous_key_facts(conn, dossier_id, analysis_type)
             if old_facts:
                 changes = _detect_changes(old_facts, new_facts)
                 if changes:
                     print(f"[dossier] Detected {len(changes)} changes since last {analysis_type} scan:")
+                    change_summaries = []
                     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     for c in changes:
                         # Log to console
                         if c.get("pct_change") is not None:
                             print(f"[dossier]   {c['field']}: {c['old_value']} -> {c['new_value']} ({c['pct_change']:+.1f}%)")
+                            change_summaries.append(f"{c['field']} ({c['pct_change']:+.1f}%)")
                         elif c["change_type"] == "added" and c.get("items_added"):
                             print(f"[dossier]   {c['field']}: +{c['items_added']}")
+                            change_summaries.append(f"{c['field']}: +{len(c['items_added'])} items")
                         else:
                             print(f"[dossier]   {c['field']}: {c['old_value']} -> {c['new_value']}")
+                            change_summaries.append(f"{c['field']} changed")
 
                         # Save as timeline event
                         if c.get("pct_change") is not None:
@@ -1053,12 +1065,17 @@ def save_to_dossier(company, analysis_type, report_file=None, report_text=None,
                             event_date=today,
                             data_json=json.dumps(c),
                         )
+                    changes_detail = '\n'.join(f'• {s}' for s in change_summaries)
+                    _cb('source_done', {'source': 'changes', 'status': 'done', 'summary': f'{len(changes)} changes: {", ".join(change_summaries[:3])}', 'detail': changes_detail})
                 else:
                     print(f"[dossier] No significant changes since last {analysis_type} scan")
+                    _cb('source_done', {'source': 'changes', 'status': 'done', 'summary': 'No significant changes'})
             else:
                 print(f"[dossier] First {analysis_type} scan — no prior data to compare")
+                _cb('source_done', {'source': 'changes', 'status': 'skipped', 'summary': f'First {analysis_type} scan'})
 
         # Store the analysis
+        _cb('source_start', {'source': 'save', 'label': 'Save to Dossier', 'detail': f'Persisting to {company} dossier'})
         add_dossier_analysis(
             conn, dossier_id, analysis_type,
             report_file=report_file,
@@ -1068,7 +1085,12 @@ def save_to_dossier(company, analysis_type, report_file=None, report_text=None,
 
         conn.close()
         print(f"[dossier] Saved {analysis_type} analysis to {company} dossier")
+        save_detail = f"Company: {company}\nType: {analysis_type}\nReport: {report_file or 'N/A'}\nModel: {model_used or 'N/A'}"
+        _cb('source_done', {'source': 'save', 'status': 'done', 'summary': f'Saved {analysis_type} to {company} dossier', 'detail': save_detail})
+        _cb('analysis_done', {'analysis_type': 'dossier'})
         return dossier_id
     except Exception as e:
         print(f"[dossier] Error saving to dossier: {e}")
+        _cb('source_done', {'source': 'save', 'status': 'error', 'summary': str(e)[:80]})
+        _cb('analysis_done', {'analysis_type': 'dossier'})
         return None

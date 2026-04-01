@@ -10,11 +10,20 @@ from scraper.hackernews import search_hackernews
 from prompts.competitors import build_competitor_prompt
 
 
-def competitor_analysis(company):
+def _result_titles(results, max_items=5):
+    """Extract titles from search results for progress detail."""
+    titles = [r.get('title', r.get('href', ''))[:100] for r in results[:max_items]]
+    return '\n'.join(f'• {t}' for t in titles) if titles else ''
+
+
+def competitor_analysis(company, progress_cb=None):
     """Map the competitive landscape for a company. Returns report path or None."""
+    _cb = progress_cb or (lambda *a: None)
     print(f"\n[competitors] Mapping competitive landscape for {company}...")
 
-    # Multiple targeted searches
+    # --- Phase 1: Web Search ---
+    _cb('analysis_start', {'analysis_type': 'web_search', 'label': 'Web Search'})
+
     queries = [
         f"{company} competitors",
         f"{company} alternatives",
@@ -22,36 +31,59 @@ def competitor_analysis(company):
     ]
 
     all_results = []
-    for query in queries:
+    for i, query in enumerate(queries):
+        _cb('source_start', {'source': f'web_{i}', 'label': f'"{query}"', 'detail': f'Query {i+1} of {len(queries)}'})
         results = search_web(query, max_results=5)
         all_results.extend(results)
+        _cb('source_done', {'source': f'web_{i}', 'status': 'done' if results else 'skipped',
+             'summary': f'{len(results)} results', 'detail': _result_titles(results)})
 
     web_count = len(all_results)
+
     if web_count < 3:
         print(f"[competitors] Only {web_count} web results — company may operate in a niche market, be a subsidiary, or use a name that's hard to search for")
         print(f"[competitors] Expanding search to Reddit, YouTube, and Hacker News for community-sourced competitive data...")
 
-    # Also check news (DDG + Google News)
+    _cb('analysis_done', {'analysis_type': 'web_search'})
+
+    # --- Phase 2: Deep Sources ---
+    _cb('analysis_start', {'analysis_type': 'deep_sources', 'label': 'Deep Sources'})
+
+    _cb('source_start', {'source': 'ddg_news', 'label': 'DDG News', 'detail': f'"{company} competition market"'})
     news = search_news(f"{company} competition market", max_results=3)
     all_results.extend(news)
+    _cb('source_done', {'source': 'ddg_news', 'status': 'done' if news else 'skipped',
+         'summary': f'{len(news)} results', 'detail': _result_titles(news)})
+
     print("[competitors] Searching Google News for competitive news...")
+    _cb('source_start', {'source': 'google_news', 'label': 'Google News', 'detail': f'"{company} competition market share"'})
     gnews = search_google_news(f"{company} competition market share", max_results=5, days_back=30)
     all_results.extend(gnews)
+    _cb('source_done', {'source': 'google_news', 'status': 'done' if gnews else 'skipped',
+         'summary': f'{len(gnews)} results', 'detail': _result_titles(gnews)})
 
-    # Reddit discussions (often mention competitors by name)
     print("[competitors] Searching Reddit for community competitor mentions...")
+    _cb('source_start', {'source': 'reddit', 'label': 'Reddit', 'detail': f'"{company} vs alternatives competitors"'})
     reddit = search_reddit(f"{company} vs alternatives competitors", max_results=3)
     all_results.extend(reddit)
+    _cb('source_done', {'source': 'reddit', 'status': 'done' if reddit else 'skipped',
+         'summary': f'{len(reddit)} results', 'detail': _result_titles(reddit)})
 
-    # YouTube (analyst videos, comparisons)
     print("[competitors] Searching YouTube for analyst comparisons...")
+    _cb('source_start', {'source': 'youtube', 'label': 'YouTube', 'detail': f'"{company} vs competitors comparison"'})
     yt = search_youtube(f"{company} vs competitors comparison", max_results=2)
     all_results.extend(yt)
+    _cb('source_done', {'source': 'youtube', 'status': 'done' if yt else 'skipped',
+         'summary': f'{len(yt)} results', 'detail': _result_titles(yt)})
 
-    # Hacker News (tech community perspective)
     print("[competitors] Searching Hacker News for tech community perspective...")
+    _cb('source_start', {'source': 'hackernews', 'label': 'Hacker News', 'detail': f'"{company} vs alternatives"'})
     hn = search_hackernews(f"{company} vs alternatives", max_results=3)
     all_results.extend(hn)
+    _cb('source_done', {'source': 'hackernews', 'status': 'done' if hn else 'skipped',
+         'summary': f'{len(hn)} results', 'detail': _result_titles(hn)})
+
+    _cb('analysis_done', {'analysis_type': 'deep_sources'})
 
     if not all_results:
         print("[competitors] No competitive data found from any source — company may be too niche or newly launched")
@@ -60,15 +92,18 @@ def competitor_analysis(company):
 
     # Deduplicate (normalized title matching, keeps highest-quality source)
     unique = dedup_results(all_results)
-
     search_text = format_search_results(unique)
 
-    # Generate report
+    # --- Phase 3: Report Generation ---
+    _cb('analysis_start', {'analysis_type': 'report', 'label': 'Report Generation'})
+
     prompt = build_competitor_prompt(company, search_text)
     prompt += get_temporal_context(company, "competitors")
 
     print("[competitors] Generating report...")
+    _cb('source_start', {'source': 'llm', 'label': 'LLM Synthesis', 'detail': f'Analyzing {len(unique)} unique sources'})
     text, model = generate_text(prompt)
+    _cb('source_done', {'source': 'llm', 'status': 'done', 'summary': f'Generated via {model}'})
 
     # Save report
     today = datetime.now().strftime("%Y-%m-%d")
@@ -90,5 +125,8 @@ def competitor_analysis(company):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[competitors] Report saved to {filename}")
-    save_to_dossier(company, "competitors", report_file=str(filename), report_text=report, model_used=model)
+    _cb('report_saved', {'path': str(filename)})
+    _cb('analysis_done', {'analysis_type': 'report'})
+
+    save_to_dossier(company, "competitors", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
     return str(filename)

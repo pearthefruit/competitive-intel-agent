@@ -17,6 +17,35 @@ SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 # Cache the tickers list in memory
 _tickers_cache = None
 
+# Map common brand/product names to SEC filing entity names
+COMPANY_ALIASES = {
+    "GOOGLE": "ALPHABET",
+    "YOUTUBE": "ALPHABET",
+    "WAYMO": "ALPHABET",
+    "DEEPMIND": "ALPHABET",
+    "FACEBOOK": "META PLATFORMS",
+    "INSTAGRAM": "META PLATFORMS",
+    "WHATSAPP": "META PLATFORMS",
+    "SNAPCHAT": "SNAP",
+    "TIKTOK": "BYTEDANCE",
+    "LINKEDIN": "MICROSOFT",
+    "GITHUB": "MICROSOFT",
+    "AWS": "AMAZON.COM",
+    "AMAZON": "AMAZON.COM",
+    "WHOLE FOODS": "AMAZON.COM",
+    "TWITTER": "X HOLDINGS",
+    "VMWARE": "BROADCOM",
+    "PAYPAL": "PAYPAL HOLDINGS",
+    "VENMO": "PAYPAL HOLDINGS",
+    "SLACK": "SALESFORCE",
+    "TABLEAU": "SALESFORCE",
+    "ACTIVISION": "MICROSOFT",
+    "ACTIVISION BLIZZARD": "MICROSOFT",
+    "PLAYSTATION": "SONY GROUP",
+    "SONY": "SONY GROUP",
+    "SAMSUNG": None,  # Korean-listed, not in SEC
+}
+
 # XBRL tags we care about (in priority order for each metric)
 FINANCIAL_TAGS = {
     "revenue": [
@@ -81,6 +110,17 @@ def lookup_cik(company_name):
         return None
 
     search = company_name.strip().upper()
+
+    # Resolve brand/product names to SEC filing entity names
+    alias = COMPANY_ALIASES.get(search)
+    if alias is None and search in COMPANY_ALIASES:
+        # Explicitly mapped to None = known non-SEC company
+        print(f"[edgar] {company_name} is known to be non-US-listed (no SEC filings)")
+        return None
+    if alias:
+        print(f"[edgar] Resolved alias: {company_name} → {alias}")
+        search = alias
+
     search_base = _strip_suffixes(search)
 
     candidates = []
