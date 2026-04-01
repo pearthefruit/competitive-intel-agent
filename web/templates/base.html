@@ -4203,6 +4203,9 @@
             word-break: break-word;
         }
         .ptree-mini-detail-panel strong { color: var(--text-secondary); }
+        .ptree-result-link { color: #60a5fa; text-decoration: none; }
+        .ptree-result-link:hover { text-decoration: underline; color: #93bbfc; }
+        .ptree-result-meta { color: #6b7280; font-size: 9px; }
 
         /* Expandable detail inside card */
         .ptree-card-detail {
@@ -9164,7 +9167,10 @@ function _renderCard(node) {
         const detailPanels = children.map((child, idx) => {
             const cDetail = child.detail || '';
             if (!cDetail || cDetail === (child.summary || '')) return '';
-            const detailRendered = escHtml(cDetail).replace(/\n/g, '<br>');
+            // _richDetail flag means the detail already contains safe HTML (links)
+            const detailRendered = child._richDetail
+                ? cDetail.replace(/\n/g, '<br>')
+                : escHtml(cDetail).replace(/\n/g, '<br>');
             return `<div class="ptree-mini-detail-panel" id="ptree-detail-${cardId}-${idx}" style="display:none">
                 <strong>${escHtml(child.label || '')}</strong><br>${detailRendered}
             </div>`;
@@ -9200,26 +9206,34 @@ const _srcLabels = { web: 'Web', news: 'News', gnews: 'Google News', reddit: 'Re
 function _discoverLogToTree(executionLog, prospects, campaignLabel) {
     if (!executionLog || !executionLog.length) return [];
     const log = executionLog;
-    const root = {
+
+    // Build as flat array of top-level cards (each renders as its own ptree-card
+    // with arrows between them). Children of each card become clickable mini-cards.
+    const cards = [];
+
+    // Root / label card
+    const rootCard = {
         id: 'root', label: campaignLabel || 'Discovery', status: 'done',
         kind: 'root', icon: '&#128269;', iconBg: 'rgba(168,85,247,0.15)', children: [],
     };
 
-    // Seed Profile
+    // Seed Profile — shown as mini-card inside root
     const seedProfile = log.find(e => e.type === 'seed_profile');
     if (seedProfile && seedProfile.profile) {
         const p = seedProfile.profile;
         const svc = Array.isArray(p.services) ? p.services.join(', ') : (p.services || '');
-        root.children.push({
+        rootCard.summary = `${p.industry || '?'} · ${p.scale || '?'} · ${p.client_type || '?'}`;
+        rootCard.children.push({
             id: 'profile', label: `Profile: ${escHtml(seedProfile.company || '?')}`,
             status: 'done', kind: 'stage', icon: '&#128100;', iconBg: 'rgba(168,85,247,0.15)',
-            summary: `${p.industry || '?'} · ${p.scale || '?'} · ${p.client_type || '?'}`,
-            detail: `<div><strong>Industry:</strong> ${escHtml(p.industry || '?')}</div><div><strong>Scale:</strong> ${escHtml(p.scale || '?')}</div><div><strong>Client type:</strong> ${escHtml(p.client_type || '?')}</div><div><strong>Services:</strong> ${escHtml(svc)}</div>`,
+            summary: `${p.industry || '?'} · ${p.scale || '?'}`,
+            detail: `Industry: ${escHtml(p.industry || '?')}\nScale: ${escHtml(p.scale || '?')}\nClient type: ${escHtml(p.client_type || '?')}\nServices: ${escHtml(svc)}`,
             children: [],
         });
     }
+    cards.push(rootCard);
 
-    // Search
+    // Search — own top-level card, source groups as mini-cards
     const searches = log.filter(e => e.type === 'search_done');
     const summary = log.find(e => e.type === 'search_complete');
     if (searches.length) {
@@ -9228,16 +9242,14 @@ function _discoverLogToTree(executionLog, prospects, campaignLabel) {
         searches.forEach(s => { srcCounts[s.source] = (srcCounts[s.source] || 0) + 1; });
         const srcText = Object.entries(srcCounts).map(([k, v]) => `${v} ${_srcLabels[k] || k}`).join(', ');
 
-        const queryDetail = searches.map(s => `• [${(_srcLabels[s.source] || s.source)}] ${escHtml(s.query || '?')} → ${s.results_count || 0} results`).join('\n');
-        const searchNode = {
+        const searchCard = {
             id: 'search', label: 'Search', status: 'done', kind: 'stage',
             icon: '&#128269;', iconBg: 'rgba(59,130,246,0.15)',
             summary: `${searches.length} queries (${srcText}) → ${unique} unique`,
-            detail: queryDetail,
             children: [],
         };
 
-        // Group searches by source
+        // Group searches by source — each source becomes a clickable mini-card
         const bySource = {};
         searches.forEach(s => {
             const src = s.source || 'web';
@@ -9249,61 +9261,88 @@ function _discoverLogToTree(executionLog, prospects, campaignLabel) {
             const color = _srcColors[src] || '#6b7280';
             const label = _srcLabels[src] || src;
             const totalResults = items.reduce((s, e) => s + (e.results_count || 0), 0);
-            const srcDetail = items.map(s => `• ${escHtml(s.query || '?')} → ${s.results_count || 0} results`).join('\n');
-            const sourceNode = {
+            // Build rich detail with results under each query
+            const srcDetailParts = [];
+            items.forEach(s => {
+                srcDetailParts.push(`⟐ ${escHtml(s.query || '?')} → ${s.results_count || 0} results`);
+                if (s.results && s.results.length) {
+                    s.results.forEach(r => {
+                        const title = r.title || 'Untitled';
+                        const url = r.url || '';
+                        const meta = [r.source, r.date].filter(Boolean).join(' · ');
+                        if (url) {
+                            srcDetailParts.push(`  ↳ <a href="${escHtml(url)}" target="_blank" rel="noopener" class="ptree-result-link">${escHtml(title)}</a>${meta ? ' <span class="ptree-result-meta">(' + escHtml(meta) + ')</span>' : ''}`);
+                        } else {
+                            srcDetailParts.push(`  ↳ ${escHtml(title)}${meta ? ' (' + escHtml(meta) + ')' : ''}`);
+                        }
+                    });
+                }
+            });
+            const srcDetail = srcDetailParts.join('\n');
+            searchCard.children.push({
                 id: `search.${src}`, label: label, status: 'done', kind: 'stage',
                 icon: '&#127760;', iconBg: `${color}22`,
                 summary: `${items.length} queries → ${totalResults} results`,
                 detail: srcDetail,
-                children: items.map((s, i) => ({
-                    id: `search.${src}.${i}`, label: escHtml(s.query || ''),
-                    status: 'done', kind: 'operation',
-                    summary: `${s.results_count || 0} results`,
-                    detail: `Query: ${escHtml(s.query || '?')}\nSource: ${label}\nResults: ${s.results_count || 0}`,
-                    children: [],
-                })),
-            };
-            searchNode.children.push(sourceNode);
+                _richDetail: true,
+                children: [],
+            });
         });
 
         if (summary) {
-            searchNode.children.push({
+            searchCard.children.push({
                 id: 'search.dedup', label: 'Dedup', status: 'done', kind: 'result',
                 icon: '&#128200;', iconBg: 'rgba(22,163,74,0.15)',
                 summary: `${summary.total_results} → ${summary.unique_results} unique`,
                 children: [],
             });
         }
-        root.children.push(searchNode);
+        cards.push(searchCard);
     }
 
-    // AI Extraction
+    // AI Extraction — own top-level card, each company as a mini-card
     const extracted = log.find(e => e.type === 'extracted');
     if (extracted) {
+        const details = extracted.company_details || [];
         const names = extracted.companies || [];
-        root.children.push({
+        const extractionCard = {
             id: 'extraction', label: 'AI Extraction', status: 'done', kind: 'stage',
             icon: '&#127919;', iconBg: 'rgba(168,85,247,0.15)',
             summary: `${names.length} companies`,
-            detail: escHtml(names.join(', ')),
             children: [],
-        });
+        };
+        if (details.length) {
+            extractionCard.children = details.map((c, i) => {
+                const name = c.name || names[i] || '?';
+                const lines = [];
+                if (c.description) lines.push(escHtml(c.description));
+                if (c.estimated_size) lines.push(`Size: ${escHtml(c.estimated_size)}`);
+                if (c.website) lines.push(`<a href="${escHtml(c.website)}" target="_blank" rel="noopener" class="ptree-result-link">${escHtml(c.website)}</a>`);
+                if (c.why_included) lines.push(`Why: ${escHtml(c.why_included)}`);
+                return {
+                    id: `extraction.${i}`, label: name, status: 'done', kind: 'result',
+                    summary: c.estimated_size || '',
+                    detail: lines.join('\n'),
+                    _richDetail: true,
+                    children: [],
+                };
+            });
+        } else {
+            // Fallback for old campaigns without company_details
+            extractionCard.detail = escHtml(names.join(', '));
+        }
+        cards.push(extractionCard);
     }
 
-    // Validation
+    // Validation — own top-level card, per-company results as mini-cards
     const validations = log.filter(e => e.type === 'validated');
     if (validations.length) {
         const vValid = validations.filter(v => !v.limited && v.valid).length;
         const vLimited = validations.filter(v => v.limited).length;
-        const valDetail = validations.map(v => {
-            const status = v.limited ? '⚠️ limited' : v.valid ? '✓ valid' : '✗ skipped';
-            return `• ${v.company || '?'}: ${status}${v.reason ? ' (' + v.reason + ')' : ''}`;
-        }).join('\n');
-        const valNode = {
+        cards.push({
             id: 'validation', label: 'Validation', status: 'done', kind: 'stage',
             icon: '&#10003;', iconBg: 'rgba(22,163,74,0.15)',
             summary: `${vValid} valid${vLimited ? `, ${vLimited} limited` : ''}`,
-            detail: valDetail,
             children: validations.map((v, i) => ({
                 id: `validation.${i}`, label: v.company || '?',
                 status: v.limited ? 'error' : v.valid ? 'done' : 'skipped',
@@ -9312,14 +9351,13 @@ function _discoverLogToTree(executionLog, prospects, campaignLabel) {
                 detail: `Company: ${v.company || '?'}\nStatus: ${v.limited ? 'Limited' : v.valid ? 'Valid' : 'Skipped'}${v.reason ? '\nReason: ' + v.reason : ''}`,
                 children: [],
             })),
-        };
-        root.children.push(valNode);
+        });
     } else if (prospects && prospects.length) {
         // Fallback from prospect data
         const _ls = ['limited', 'http_403', 'connection_failed'];
         const v = prospects.filter(p => p.validation_status === 'valid').length;
         const l = prospects.filter(p => _ls.includes(p.validation_status)).length;
-        root.children.push({
+        cards.push({
             id: 'validation', label: 'Validation', status: 'done', kind: 'stage',
             icon: '&#10003;', iconBg: 'rgba(22,163,74,0.15)',
             summary: `${v} valid${l ? `, ${l} limited` : ''}`,
@@ -9327,7 +9365,7 @@ function _discoverLogToTree(executionLog, prospects, campaignLabel) {
         });
     }
 
-    return [root];
+    return cards;
 }
 
 // ===================== RESEARCH TOOL STEPS → TREE (BRIDGE) =====================

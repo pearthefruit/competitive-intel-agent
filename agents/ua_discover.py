@@ -19,6 +19,21 @@ from agents.compare import _profile_lookup
 
 _SOURCE_LABELS = {"web": "Web Search", "news": "News", "reddit": "Reddit", "gnews": "Google News"}
 
+
+def _result_items(results):
+    """Extract lightweight metadata from search results for execution log auditability."""
+    items = []
+    for r in results:
+        item = {"title": (r.get("title") or "")[:120]}
+        item["url"] = r.get("href") or r.get("url") or ""
+        if r.get("source"):
+            item["source"] = r["source"]
+        if r.get("date"):
+            item["date"] = str(r["date"])[:20]
+        items.append(item)
+    return items
+
+
 import re
 
 # Geography patterns for auto-extraction from free-text niche input
@@ -213,6 +228,7 @@ def discover_prospects(niche, top_n=15, db_path="intel.db", context=None, progre
             "query": query,
             "results_count": len(results),
             "cumulative_count": len(all_results),
+            "results": _result_items(results),
         })
 
     if not all_results:
@@ -253,6 +269,10 @@ def discover_prospects(niche, top_n=15, db_path="intel.db", context=None, progre
     _cb("extracted", {
         "count": len(companies),
         "companies": [c.get("name", "?") for c in companies],
+        "company_details": [
+            {k: v for k, v in c.items() if k != "body" and v}
+            for c in companies
+        ],
     })
 
     # Create dossier stubs
@@ -266,7 +286,7 @@ def discover_prospects(niche, top_n=15, db_path="intel.db", context=None, progre
 
     # Save discovery report
     today = datetime.now().strftime("%Y-%m-%d")
-    safe_niche = niche.lower().replace(" ", "_").replace("/", "_")[:40]
+    safe_niche = re.sub(r'[^\w\-]', '_', niche.lower())[:40].strip('_')
 
     report_lines = [
         f"# Lead Discovery: {niche}",
@@ -445,6 +465,7 @@ def discover_similar(seed_company, top_n=10, db_path="intel.db", progress_cb=Non
             "query": query,
             "results_count": len(results),
             "cumulative_count": len(all_results),
+            "results": _result_items(results),
         })
 
     if not all_results:
@@ -484,6 +505,10 @@ def discover_similar(seed_company, top_n=10, db_path="intel.db", progress_cb=Non
     _cb("extracted", {
         "count": len(companies),
         "companies": [c.get("name", "?") for c in companies],
+        "company_details": [
+            {k: v for k, v in c.items() if k != "body" and v}
+            for c in companies
+        ],
     })
 
     # Create dossier stubs
@@ -497,7 +522,7 @@ def discover_similar(seed_company, top_n=10, db_path="intel.db", progress_cb=Non
 
     # Save discovery report
     today = datetime.now().strftime("%Y-%m-%d")
-    safe_seed = seed_company.lower().replace(" ", "_").replace("/", "_")[:40]
+    safe_seed = re.sub(r'[^\w\-]', '_', seed_company.lower())[:40].strip('_')
 
     report_lines = [
         f"# Similar Companies: {seed_company}",
