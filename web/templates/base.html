@@ -9228,10 +9228,12 @@ function _discoverLogToTree(executionLog, prospects, campaignLabel) {
         searches.forEach(s => { srcCounts[s.source] = (srcCounts[s.source] || 0) + 1; });
         const srcText = Object.entries(srcCounts).map(([k, v]) => `${v} ${_srcLabels[k] || k}`).join(', ');
 
+        const queryDetail = searches.map(s => `• [${(_srcLabels[s.source] || s.source)}] ${escHtml(s.query || '?')} → ${s.results_count || 0} results`).join('\n');
         const searchNode = {
             id: 'search', label: 'Search', status: 'done', kind: 'stage',
             icon: '&#128269;', iconBg: 'rgba(59,130,246,0.15)',
             summary: `${searches.length} queries (${srcText}) → ${unique} unique`,
+            detail: queryDetail,
             children: [],
         };
 
@@ -9247,14 +9249,17 @@ function _discoverLogToTree(executionLog, prospects, campaignLabel) {
             const color = _srcColors[src] || '#6b7280';
             const label = _srcLabels[src] || src;
             const totalResults = items.reduce((s, e) => s + (e.results_count || 0), 0);
+            const srcDetail = items.map(s => `• ${escHtml(s.query || '?')} → ${s.results_count || 0} results`).join('\n');
             const sourceNode = {
                 id: `search.${src}`, label: label, status: 'done', kind: 'stage',
                 icon: '&#127760;', iconBg: `${color}22`,
                 summary: `${items.length} queries → ${totalResults} results`,
+                detail: srcDetail,
                 children: items.map((s, i) => ({
                     id: `search.${src}.${i}`, label: escHtml(s.query || ''),
                     status: 'done', kind: 'operation',
                     summary: `${s.results_count || 0} results`,
+                    detail: `Query: ${escHtml(s.query || '?')}\nSource: ${label}\nResults: ${s.results_count || 0}`,
                     children: [],
                 })),
             };
@@ -9290,15 +9295,21 @@ function _discoverLogToTree(executionLog, prospects, campaignLabel) {
     if (validations.length) {
         const vValid = validations.filter(v => !v.limited && v.valid).length;
         const vLimited = validations.filter(v => v.limited).length;
+        const valDetail = validations.map(v => {
+            const status = v.limited ? '⚠️ limited' : v.valid ? '✓ valid' : '✗ skipped';
+            return `• ${v.company || '?'}: ${status}${v.reason ? ' (' + v.reason + ')' : ''}`;
+        }).join('\n');
         const valNode = {
             id: 'validation', label: 'Validation', status: 'done', kind: 'stage',
             icon: '&#10003;', iconBg: 'rgba(22,163,74,0.15)',
             summary: `${vValid} valid${vLimited ? `, ${vLimited} limited` : ''}`,
+            detail: valDetail,
             children: validations.map((v, i) => ({
                 id: `validation.${i}`, label: v.company || '?',
                 status: v.limited ? 'error' : v.valid ? 'done' : 'skipped',
                 kind: 'result',
                 summary: v.limited ? (v.reason || 'limited') : v.valid ? 'OK' : (v.reason || 'skipped'),
+                detail: `Company: ${v.company || '?'}\nStatus: ${v.limited ? 'Limited' : v.valid ? 'Valid' : 'Skipped'}${v.reason ? '\nReason: ' + v.reason : ''}`,
                 children: [],
             })),
         };

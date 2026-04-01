@@ -19,6 +19,36 @@ from agents.compare import _profile_lookup
 
 _SOURCE_LABELS = {"web": "Web Search", "news": "News", "reddit": "Reddit", "gnews": "Google News"}
 
+import re
+
+# Geography patterns for auto-extraction from free-text niche input
+_GEO_PATTERNS = [
+    (r'\bbased in (?:the )?(.+?)(?:\s*$|\s+(?:that|who|which|and|with))', None),
+    (r'\bin (?:the )?(US|USA|United States|UK|United Kingdom|Canada|Europe|EU|APAC|Asia|India|Germany|France|Japan|Australia|Brazil|LATAM|EMEA)\b', None),
+    (r'\b(US|USA|UK|EU)\b[- ]based\b', None),
+    (r'\b(American|British|Canadian|European|Indian|German|French|Japanese|Australian|Korean|Chinese)\s+(?:companies|brands|makers|firms)', {
+        "American": "US", "British": "UK", "Canadian": "Canada", "European": "Europe",
+        "Indian": "India", "German": "Germany", "French": "France", "Japanese": "Japan",
+        "Australian": "Australia", "Korean": "South Korea", "Chinese": "China",
+    }),
+]
+
+
+def _extract_geography(niche):
+    """Extract geography from free-text niche string. Returns geo string or None."""
+    text = niche.strip()
+    for pattern, mapping in _GEO_PATTERNS:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            raw = m.group(1).strip().rstrip('.,;')
+            if mapping:
+                return mapping.get(raw, raw)
+            # Normalize common abbreviations
+            norm = {"us": "US", "usa": "US", "united states": "US", "uk": "UK",
+                    "united kingdom": "UK", "eu": "Europe"}
+            return norm.get(raw.lower(), raw)
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Query generation — build targeted queries from structured context
@@ -126,6 +156,14 @@ def discover_prospects(niche, top_n=15, db_path="intel.db", context=None, progre
     """
     context = context or {}
     _cb = progress_cb or (lambda *a: None)
+
+    # Auto-extract geography from niche string if not in context
+    if not context.get("geography"):
+        _geo = _extract_geography(niche)
+        if _geo:
+            context = dict(context)  # don't mutate original
+            context["geography"] = _geo
+            print(f"[discover] Auto-detected geography from niche: {_geo}")
 
     print(f"\n[discover] Searching for companies in: {niche}")
     if context:
