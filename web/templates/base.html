@@ -10993,6 +10993,9 @@ function handlePipelineSSE(ev) {
 
     } else if (ev.type === 'complete') {
         _pipelineState.phase = 'complete';
+        // Pipeline is logically done — clear running state so renderExecutionPane won't bail
+        _prospectPipelineRunning = false;
+        _currentRunCampaignId = null;
         const mapEl2 = document.getElementById('pipeline-map');
         if (mapEl2) {
             mapEl2.insertAdjacentHTML('beforeend', `
@@ -11021,10 +11024,12 @@ function handlePipelineSSE(ev) {
                     _activeTreeNodeId = cid;
                     renderDiscoveryTree(rootId);
                     renderSummaryPane(cid);
+                    renderExecutionPane(cid);
                 } else {
                     activeCampaignId = cid;
                     renderCampaignSidebar();
                     renderSummaryPane(cid);
+                    renderExecutionPane(cid);
                     // Highlight active sidebar item
                     document.querySelectorAll('.search-query-item').forEach(el => {
                         const id = parseInt(el.dataset.campaignId, 10);
@@ -11273,11 +11278,18 @@ function runProspectPipeline() {
         handlePipelineSSE({ type: 'error', text: 'Connection error: ' + e.message });
     }).finally(() => {
         _prospectPipelineRunning = false;
+        const finishedCampaignId = _currentRunCampaignId;
         _currentRunCampaignId = null;
         _savedLivePipelineDOM = null;
         btn.disabled = false;
         btn.textContent = 'Search';
-        loadCampaigns();
+        loadCampaigns().then(() => {
+            // Re-render execution pane with the final pipeline tree
+            if (finishedCampaignId) {
+                activeCampaignId = finishedCampaignId;
+                renderExecutionPane(finishedCampaignId);
+            }
+        });
     });
 }
 
@@ -11376,6 +11388,7 @@ function runFindSimilar(companyName) {
         handlePipelineSSE({ type: 'error', text: 'Connection error: ' + e.message });
     }).finally(() => {
         _prospectPipelineRunning = false;
+        const finishedCampaignId = _currentRunCampaignId;
         _currentRunCampaignId = null;
         _savedLivePipelineDOM = null;
         const btn = document.getElementById('prospect-run-btn');
@@ -11388,7 +11401,11 @@ function runFindSimilar(companyName) {
                 if (root && root.children && root.children.length > 0) {
                     _activeTreeRootId = rootId;
                     renderDiscoveryTree(rootId);
+                } else if (finishedCampaignId) {
+                    renderExecutionPane(finishedCampaignId);
                 }
+            } else if (finishedCampaignId) {
+                renderExecutionPane(finishedCampaignId);
             }
         });
     });

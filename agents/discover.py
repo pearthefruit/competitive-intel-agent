@@ -9,10 +9,10 @@ combined search results.
 from datetime import datetime
 from pathlib import Path
 
-from agents.llm import generate_json, unique_report_path
+from agents.llm import generate_json, unique_report_path, FAST_CHAIN
 from scraper.web_search import search_web, search_news, search_reddit, format_search_results, dedup_results
 from scraper.google_news import search_google_news
-from prompts.discover import build_discovery_prompt, build_similar_discovery_prompt
+from prompts.discover import build_discovery_prompt, build_similar_discovery_prompt, build_query_generation_prompt
 from db import get_connection, get_or_create_dossier
 from agents.compare import _profile_lookup
 
@@ -66,26 +66,70 @@ def _extract_geography(niche):
 
 
 # ---------------------------------------------------------------------------
-# Query generation — build targeted queries from structured context
+# Query generation — LLM-powered with template fallback
 # ---------------------------------------------------------------------------
 
-def _build_queries(niche, context):
-    """Generate search queries tailored to the niche and structured context.
+_VALID_SOURCES = {"web", "news", "gnews", "reddit"}
 
-    Uses vertical, size, geography, business_model, and qualifiers to craft
-    queries that surface the right kinds of companies rather than blasting
-    the whole concatenated string at DuckDuckGo.
+
+def _build_queries_llm(niche, context):
+    """Use a fast LLM to generate targeted search queries from the niche description.
+
+    Returns list of (source, query) tuples, or None if the LLM call fails.
     """
+    prompt = build_query_generation_prompt(niche, context)
+    try:
+        result = generate_json(prompt, timeout=20, chain=FAST_CHAIN)
+    except Exception as e:
+        print(f"[discover] LLM query generation failed: {e}")
+        return None
+
+    if result is None:
+        return None
+
+    # Normalize response — LLMs may return either:
+    #   1. Flat array: [{"source": "web", "query": "..."}, ...]
+    #   2. Grouped dict: {"web": [{"query": "..."}, ...], "news": [...], ...}
+    queries = []
+    if isinstance(result, dict):
+        for source, items in result.items():
+            if source not in _VALID_SOURCES:
+                continue
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                query = item.get("query", "").strip() if isinstance(item, dict) else str(item).strip()
+                if query and len(query) < 150:
+                    queries.append((source, query))
+    elif isinstance(result, list):
+        for item in result:
+            if not isinstance(item, dict):
+                continue
+            source = item.get("source", "web")
+            query = item.get("query", "").strip()
+            if source not in _VALID_SOURCES:
+                source = "web"
+            if query and len(query) < 150:
+                queries.append((source, query))
+
+    if len(queries) < 4:
+        print(f"[discover] LLM query generation produced too few valid queries ({len(queries)})")
+        return None
+
+    print(f"[discover] LLM generated {len(queries)} targeted queries")
+    return queries
+
+
+def _build_queries_template(niche, context):
+    """Template-based query generation (fallback when LLM is unavailable)."""
     vertical = context.get("vertical", "").strip()
     size = context.get("company_size", "").strip()
     geo = context.get("geography", "").strip()
     model = context.get("business_model", "").strip()
     qualifiers = context.get("qualifiers", "").strip()
 
-    # Core search term — prefer the vertical alone (cleaner queries)
     core = vertical or niche
 
-    # Size keywords for search
     size_terms = {
         "Startup": ["startup", "seed funded", "early stage"],
         "SMB": ["small business", "SMB", "growing"],
@@ -93,25 +137,17 @@ def _build_queries(niche, context):
         "Enterprise": ["enterprise", "large"],
     }
     size_kws = size_terms.get(size, [])
-
-    # Geography qualifier
     geo_q = f" in {geo}" if geo and geo not in ("Global", "") else ""
 
     queries = []
-
-    # --- Web search queries (targeted by dimension) ---
-
-    # 1. Core vertical discovery
     queries.append(("web", f"top {core} companies{geo_q} 2026"))
     queries.append(("web", f"fastest growing {core} companies{geo_q}"))
 
-    # 2. Size-aware queries
     if size_kws:
         queries.append(("web", f"{size_kws[0]} {core} companies{geo_q}"))
     else:
         queries.append(("web", f"best {core} companies brands{geo_q}"))
 
-    # 3. Funding / investment signals (great for finding real companies)
     if size in ("Startup", "SMB"):
         queries.append(("web", f"{core} companies funding raised{geo_q} 2025 2026"))
         queries.append(("web", f"crunchbase {core}{geo_q} startups"))
@@ -120,7 +156,6 @@ def _build_queries(niche, context):
     else:
         queries.append(("web", f"{core} emerging brands to watch{geo_q}"))
 
-    # 4. Business model specific
     if model == "B2B":
         queries.append(("web", f"B2B {core} vendors platforms{geo_q}"))
     elif model == "B2C":
@@ -128,27 +163,28 @@ def _build_queries(niche, context):
     elif model == "B2B/B2C":
         queries.append(("web", f"{core} brands platforms{geo_q}"))
 
-    # 5. Qualifier-driven queries (user-specified signals like "VC-backed", "DTC only")
     if qualifiers:
         queries.append(("web", f"{core} {qualifiers}{geo_q}"))
 
-    # 6. Industry lists / directories
     queries.append(("web", f"list of {core} companies{geo_q}"))
-
-    # --- News queries (recent coverage = active companies) ---
     queries.append(("news", f"{core} companies{geo_q} funding growth 2026"))
     queries.append(("news", f"{core}{geo_q} brands expansion"))
-
-    # --- Google News queries (supplement DDG with broader coverage) ---
     queries.append(("gnews", f"{core} companies{geo_q} funding growth 2026"))
     queries.append(("gnews", f"{core}{geo_q} acquisition expansion"))
-
-    # --- Reddit queries (community signals) ---
     queries.append(("reddit", f"{core} companies recommendations{geo_q}"))
     if model == "B2C":
         queries.append(("reddit", f"best {core} brands favorites"))
 
     return queries
+
+
+def _build_queries(niche, context):
+    """Generate search queries — LLM-powered with template fallback."""
+    llm_queries = _build_queries_llm(niche, context)
+    if llm_queries:
+        return llm_queries
+    print("[discover] Falling back to template-based queries")
+    return _build_queries_template(niche, context)
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +286,7 @@ def discover_prospects(niche, top_n=15, db_path="intel.db", context=None, progre
     })
 
     search_text = format_search_results(unique)
-    prompt = build_discovery_prompt(niche, search_text, context=context)
+    prompt = build_discovery_prompt(niche, search_text, context=context, top_n=top_n)
     companies = generate_json(prompt, timeout=60)
 
     if not isinstance(companies, list):
@@ -485,7 +521,7 @@ def discover_similar(seed_company, top_n=10, db_path="intel.db", progress_cb=Non
     })
 
     search_text = format_search_results(unique)
-    prompt = build_similar_discovery_prompt(seed_company, search_text, profile=profile)
+    prompt = build_similar_discovery_prompt(seed_company, search_text, profile=profile, top_n=top_n)
     companies = generate_json(prompt, timeout=60)
 
     if not isinstance(companies, list):

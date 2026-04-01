@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(cp agents/ua_discover.py agents/discover.py)",
+      "Bash(cp prompts/ua_discover.py prompts/discover.py)",
+      "Bash(find . -path */agents/__pycache__/ua_discover* -o -path */prompts/__pycache__/ua_discover*)",
+      "Bash(cd:*)"
     ]
   }
 }
