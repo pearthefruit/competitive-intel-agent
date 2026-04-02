@@ -858,10 +858,20 @@
             transition: background 0.1s;
         }
         .company-group-header:hover { background: var(--bg-hover); }
+        .company-group-header.active {
+            background: rgba(59,130,246,0.1);
+            border-left: 2px solid var(--accent);
+            padding-left: 10px;
+        }
         .company-group-chevron {
             font-size: 11px;
             color: var(--text-muted);
             transition: transform 0.15s;
+            padding: 4px;
+            flex-shrink: 0;
+        }
+        .company-group-chevron:hover {
+            color: var(--text-primary);
         }
         .company-group.open .company-group-chevron { transform: rotate(90deg); }
         .company-group-count {
@@ -1293,6 +1303,7 @@
         .source-profile { background: rgba(107,114,128,0.18); color: #9ca3af; }
         .source-landscape { background: rgba(14,165,233,0.18); color: #38bdf8; }
         .source-brand_ad { background: rgba(236,72,153,0.18); color: #f472b6; }
+        .source-executive_signals { background: rgba(234,179,8,0.18); color: #fbbf24; }
         .source-compare { background: rgba(251,191,36,0.18); color: #fbbf24; }
         .source-analysis { background: rgba(107,114,128,0.18); color: #9ca3af; }
         .source-lens { background: rgba(6,182,212,0.18); color: #22d3ee; }
@@ -5051,11 +5062,13 @@ function renderCompanyList() {
             }
         }
 
+        const isActive = activeDossierName === company.name;
         return `<div class="company-group${isOpen ? ' open' : ''}">
-            <div class="company-group-header" onclick="toggleCompany('${escHtml(company.name)}')">
-                <span class="company-group-chevron">${chevron}</span>
+            <div class="company-group-header${isActive ? ' active' : ''}" onclick="openDossier('${escHtml(company.name)}')">
+                <span class="company-group-chevron" onclick="event.stopPropagation();toggleCompany('${escHtml(company.name)}')">${chevron}</span>
                 <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${escHtml(company.name)}</span>
                 <span class="rename-btn" onclick="renameCompany('${escHtml(company.name)}', event)" title="Rename company">Edit</span>
+                <span class="rename-btn" onclick="deleteCompany('${escHtml(company.name)}', event)" title="Delete company" style="color:var(--red)">&times;</span>
                 ${starHtml}
                 ${sectorHtml}
                 <span class="company-group-count">${company.analysis_count || 0}</span>
@@ -5063,6 +5076,32 @@ function renderCompanyList() {
             ${isOpen ? `<div class="company-group-items">${itemsHtml}</div>` : ''}
         </div>`;
     }).join('');
+}
+
+async function deleteCompany(nameEscaped, event) {
+    if (event) event.stopPropagation();
+    const d = document.createElement('div');
+    d.innerHTML = nameEscaped;
+    const name = d.textContent;
+
+    if (!confirm(`Delete "${name}" and all its analyses, lens scores, and events? This cannot be undone.`)) return;
+
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(name)}/delete`, { method: 'POST' });
+        const data = await resp.json();
+        if (!resp.ok) {
+            alert(data.error || 'Delete failed');
+            return;
+        }
+        openCompanies.delete(name);
+        if (activeDossierName === name) activeDossierName = null;
+        loadCompanies();
+        // Clear right pane if it was showing this company
+        const rightContent = document.getElementById('right-content');
+        if (rightContent && activeDossierName === null) rightContent.innerHTML = '';
+    } catch (e) {
+        alert('Delete failed: ' + e.message);
+    }
 }
 
 async function renameCompany(oldNameEscaped, event) {
@@ -5126,7 +5165,6 @@ async function openDossier(companyName) {
         if (!resp.ok) return;
         const dossier = await resp.json();
         activeDossierName = companyName;
-        openCompanies.add(companyName);
         currentReportFilename = null;
         _activeDashboardLens = null;
         const dLabel = dossier.briefing_json ? 'intelligence briefing' : 'dossier';
@@ -5224,7 +5262,7 @@ let _activeBriefingData = null;
 let _activeDossierData = null;
 let _activeDashboardLens = null; // lens override for expanded dashboard view
 
-const _VALID_SOURCES = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis'];
+const _VALID_SOURCES = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis','brand_ad','executive_signals'];
 
 // Match source tags including hyphens (e.g. [lens_ctv-ad-sales], [brand_ad])
 const _SOURCE_TAG_RE = /\[([\w][\w,\s-]*)\]/g;
@@ -5258,7 +5296,7 @@ function _renderCitedText(text) {
     // Replace [source] and [source1, source2] tags with clickable badges
     if (!text) return '';
     return escHtml(text).replace(_SOURCE_TAG_RE, (match, inner) => {
-        const sources = inner.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+        const sources = inner.split(',').map(s => s.trim().toLowerCase().replace(/\s+/g, '_')).filter(s => s);
         const badges = sources
             .filter(s => _isSourceTag(s))
             .map(s => _renderSourceBadge(s));
@@ -5297,6 +5335,8 @@ const _SOURCE_PRIORITY_KEYS = {
     seo: ['seo_overall_assessment','aeo_readiness_signals','seo_schema_types','pages_analyzed'],
     pricing: ['pricing_model','pricing_tiers','price_range','target_segment','has_free_tier'],
     profile: ['sector','key_products','revenue','headcount','key_competitors','business_model'],
+    brand_ad: ['active_ad_channels','ctv_activity','ad_spend_signal','recent_campaigns','content_output','influencer_activity','channel_expansion_signals'],
+    executive_signals: ['organizational_commitment','leadership_stability','leadership_investment_domains','recent_executive_hires','open_executive_searches','notable_signals'],
 };
 
 const _SOURCE_LABELS = {
@@ -5312,6 +5352,8 @@ const _SOURCE_LABELS = {
     landscape: 'Market Landscape',
     compare: 'Comparison',
     analysis: 'Analysis',
+    brand_ad: 'Brand & Advertising',
+    executive_signals: 'Executive Signals',
 };
 
 function showSourcePopover(event, type) {
@@ -7224,7 +7266,8 @@ function handleSSE(event, chat) {
                 const match = event.result.match(/saved to:\s*(?:reports[\/\\])?(.+\.md)/i);
                 if (match) {
                     chat.messages[i].reportFile = match[1];
-                    setTimeout(() => openReport(match[1]), 300);
+                    const reportName = match[1].replace(/\.md$/, '').replace(/_/g, ' ');
+                    showToast(`<strong>${escHtml(reportName)}</strong> ready — <a href="#" onclick="event.preventDefault();openReport('${escHtml(match[1])}');this.closest('.toast').remove()" style="color:var(--accent);text-decoration:underline">View Report</a>`, 'success', 8000);
                 }
                 break;
             }

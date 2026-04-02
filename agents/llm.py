@@ -804,6 +804,26 @@ Report:
 
 Return ONLY valid JSON, no explanation."""
 
+_BRAND_AD_FACTS_PROMPT = """Extract structured brand & advertising intelligence facts from this analysis report about {company}.
+
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "active_ad_channels": array of confirmed advertising channels (e.g. ["Meta/Instagram", "Google Ads", "CTV/Streaming", "Linear TV", "Podcast"])
+- "recent_campaigns": array of 2-3 recent campaign names or descriptions
+- "ctv_activity": one of "confirmed", "exploring", "no signal" — whether company is active on Connected TV / streaming platforms
+- "ad_spend_signal": one of "growing", "stable", "contracting", "unknown" — directional marketing investment trend
+- "agency_relationships": array of known agency partners or null
+- "content_output": one of "high", "moderate", "low" — volume of brand content / creative output
+- "influencer_activity": boolean — whether company uses influencer marketing
+- "channel_expansion_signals": array of new channels the company is exploring or moving into
+- "notable_signals": string summarizing the most important advertising pattern (1-2 sentences)
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
 _EXECUTIVE_SIGNALS_FACTS_PROMPT = """Extract structured executive hiring signal facts from this analysis report about {company}.
 
 Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
@@ -834,6 +854,7 @@ _TYPE_KEY_FACTS_PROMPTS = {
     "profile": _PROFILE_FACTS_PROMPT,
     "ua_fit": _UA_FIT_FACTS_PROMPT,
     "executive_signals": _EXECUTIVE_SIGNALS_FACTS_PROMPT,
+    "brand_ad": _BRAND_AD_FACTS_PROMPT,
 }
 
 

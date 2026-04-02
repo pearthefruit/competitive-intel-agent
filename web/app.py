@@ -480,6 +480,27 @@ def create_app(db_path="intel.db"):
             if conn: conn.close()
             return jsonify({"error": str(e)}), 500
 
+    @app.route("/api/dossiers/<path:name>/delete", methods=["POST"])
+    def delete_dossier(name):
+        """Delete a company dossier and all its analyses, lens scores, and events."""
+        try:
+            conn = get_connection(db_path)
+            row = conn.execute("SELECT id FROM dossiers WHERE company_name COLLATE NOCASE = ?", (name,)).fetchone()
+            if not row:
+                conn.close()
+                return jsonify({"error": "Not found"}), 404
+            dossier_id = row["id"]
+            conn.execute("DELETE FROM campaign_prospects WHERE dossier_id = ?", (dossier_id,))
+            conn.execute("DELETE FROM dossier_analyses WHERE dossier_id = ?", (dossier_id,))
+            conn.execute("DELETE FROM dossier_events WHERE dossier_id = ?", (dossier_id,))
+            conn.execute("DELETE FROM lens_scores WHERE dossier_id = ?", (dossier_id,))
+            conn.execute("DELETE FROM dossiers WHERE id = ?", (dossier_id,))
+            conn.commit()
+            conn.close()
+            return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.route("/api/analyses/<int:analysis_id>", methods=["DELETE"])
     def delete_analysis(analysis_id):
         conn = get_connection(db_path)
