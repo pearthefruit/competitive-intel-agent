@@ -7,6 +7,7 @@ from agents.llm import generate_text, save_to_dossier, get_temporal_context, uni
 from agents.financial import financial_analysis
 from agents.competitors import competitor_analysis
 from agents.sentiment import sentiment_analysis
+from agents.executive_signals import executive_signals_analysis
 from agents.patents import patent_analysis
 from agents.collect import collect
 from agents.classify import classify
@@ -38,6 +39,7 @@ def company_profile(company, url=None, db_path="intel.db"):
         "financial": lambda: financial_analysis(company),
         "competitors": lambda: competitor_analysis(company),
         "sentiment": lambda: sentiment_analysis(company),
+        "executive_signals": lambda: executive_signals_analysis(company, db_path=db_path),
         "patents": lambda: patent_analysis(company),
     }
 

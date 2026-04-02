@@ -365,7 +365,8 @@ def _build_source_mapping(lens_config, all_key_facts, hiring_stats):
 def build_briefing_prompt(company_name, all_key_facts, report_summaries,
                           hiring_stats=None, hiring_snapshots=None,
                           data_confidence=None, algo_scores=None,
-                          anomaly_signals=None, lens_config=None):
+                          anomaly_signals=None, lens_config=None,
+                          computed_metrics_text=None):
     """Build the intelligence briefing prompt.
 
     Args:
@@ -378,6 +379,7 @@ def build_briefing_prompt(company_name, all_key_facts, report_summaries,
         algo_scores: dict from compute_dms_scores() or None
         anomaly_signals: list of anomaly dicts from compute_anomaly_signals() or None
         lens_config: dict with dimensions, labels, score_label, scoring_context, etc.
+        computed_metrics_text: pre-computed metrics block to inject (from format_metrics_for_prompt)
     """
     # ---- Format intelligence data (unchanged) ----
 
@@ -522,6 +524,8 @@ AVAILABLE INTELLIGENCE:
 {formatted_facts}
 
 {formatted_summaries}
+
+{computed_metrics_text or ''}
 
 HIRING DATA:  [source: hiring]
 {formatted_hiring}

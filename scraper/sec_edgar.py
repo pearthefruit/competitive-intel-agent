@@ -466,6 +466,30 @@ def get_8k_filings(cik, max_filings=15):
         http.close()
 
 
+def fetch_8k_content(filing_url, max_chars=5000):
+    """Fetch and extract text content from an 8-K filing HTML document.
+
+    Returns cleaned text or empty string on failure.
+    """
+    if not filing_url:
+        return ""
+    try:
+        http = httpx.Client(headers=EDGAR_HEADERS, timeout=15, follow_redirects=True)
+        resp = http.get(filing_url)
+        http.close()
+        if resp.status_code != 200:
+            return ""
+        html = resp.text
+        # Strip HTML tags
+        text = re.sub(r'<[^>]+>', ' ', html)
+        # Collapse whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text[:max_chars]
+    except Exception as e:
+        print(f"[edgar] Failed to fetch 8-K content: {e}")
+        return ""
+
+
 def format_8k_for_prompt(filings):
     """Format 8-K filing events for LLM context."""
     if not filings:

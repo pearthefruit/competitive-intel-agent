@@ -9,6 +9,7 @@ from scraper.stock_data import get_stock_data, format_stock_data_for_prompt, get
 from scraper.web_search import search_web, search_news, format_search_results, dedup_results
 from scraper.google_news import search_google_news
 from prompts.financial import build_financial_prompt, build_financial_prompt_private
+from agents.metrics import compute_financial_metrics, format_metrics_for_prompt
 
 
 def _result_detail(results, max_items=15):
@@ -141,6 +142,14 @@ def _analyze_public(company, cik_info, _cb=None):
     else:
         _cb("source_done", {"source": "8k_filings", "status": "skipped", "summary": "None found"})
 
+    # Compute deterministic financial metrics
+    fin_metrics = compute_financial_metrics(financials, stock_data, extended)
+    if fin_metrics:
+        metrics_block = format_metrics_for_prompt({"financial": fin_metrics})
+        if metrics_block:
+            financials_text += "\n\n" + metrics_block
+        print(f"[financial] Computed {len(fin_metrics)} deterministic metrics")
+
     # Generate report
     prompt = build_financial_prompt(company, ticker, financials_text)
     prompt += get_temporal_context(company, "financial")
@@ -149,15 +158,34 @@ def _analyze_public(company, cik_info, _cb=None):
     print("[financial] Generating report...")
     text, model = generate_text(prompt)
 
-    # Build and save report
+    # Build quick-reference metrics header
     today = datetime.now().strftime("%Y-%m-%d")
     safe_name = company.lower().replace(" ", "_").replace(".", "_")
+
+    metrics_header = ""
+    if fin_metrics:
+        parts = []
+        if fin_metrics.get("revenue_formatted"):
+            s = f"**Revenue:** {fin_metrics['revenue_formatted']}"
+            if fin_metrics.get("revenue_yoy_growth") is not None:
+                s += f" ({fin_metrics['revenue_yoy_growth']:+.1f}% YoY)"
+            parts.append(s)
+        if fin_metrics.get("rd_intensity") is not None:
+            parts.append(f"**R&D Intensity:** {fin_metrics['rd_intensity']:.1f}%")
+        if fin_metrics.get("operating_margin") is not None:
+            parts.append(f"**Op Margin:** {fin_metrics['operating_margin']:.1f}%")
+        if fin_metrics.get("fcf_formatted"):
+            parts.append(f"**FCF:** {fin_metrics['fcf_formatted']}")
+        if fin_metrics.get("market_cap_formatted"):
+            parts.append(f"**Market Cap:** {fin_metrics['market_cap_formatted']}")
+        if parts:
+            metrics_header = "\n" + " | ".join(parts) + "\n"
 
     header = f"""# Financial Analysis: {company}
 
 **Ticker:** {ticker} | **CIK:** {cik} | **Date:** {today}
 **Source:** SEC EDGAR (XBRL) | **Model:** {model}
-
+{metrics_header}
 ---
 
 """
@@ -169,9 +197,62 @@ def _analyze_public(company, cik_info, _cb=None):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[financial] Report saved to {filename}")
-    save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    dossier_result = save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+
+    # Overlay computed metrics onto LLM-extracted key facts for precision
+    if fin_metrics and dossier_result:
+        _persist_computed_metrics(company, fin_metrics)
+
     _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)
+
+
+def _persist_computed_metrics(company, fin_metrics):
+    """Override LLM-extracted financial key facts with deterministic computed values."""
+    try:
+        from db import get_connection, get_dossier_by_company
+        import json
+
+        conn = get_connection()
+        dossier = get_dossier_by_company(conn, company)
+        if not dossier:
+            conn.close()
+            return
+
+        row = conn.execute(
+            "SELECT id, key_facts_json FROM dossier_analyses WHERE dossier_id = ? AND analysis_type = 'financial' ORDER BY created_at DESC LIMIT 1",
+            (dossier["id"],)
+        ).fetchone()
+        if not row or not row["key_facts_json"]:
+            conn.close()
+            return
+
+        kf = json.loads(row["key_facts_json"])
+
+        # Override with computed values (more reliable than LLM extraction)
+        if fin_metrics.get("revenue_formatted"):
+            kf["revenue"] = fin_metrics["revenue_formatted"]
+        if fin_metrics.get("revenue_yoy_growth") is not None:
+            kf["revenue_growth"] = f"{fin_metrics['revenue_yoy_growth']:+.1f}%"
+        if fin_metrics.get("market_cap_formatted"):
+            kf["market_cap"] = fin_metrics["market_cap_formatted"]
+        if fin_metrics.get("employee_count"):
+            kf["headcount"] = fin_metrics["employee_count"]
+        if fin_metrics.get("cash_formatted"):
+            kf["cash_position"] = fin_metrics["cash_formatted"]
+
+        # Store the full computed metrics for the briefing to consume
+        kf["_computed_metrics"] = fin_metrics
+
+        conn.execute(
+            "UPDATE dossier_analyses SET key_facts_json = ? WHERE id = ?",
+            (json.dumps(kf), row["id"])
+        )
+        conn.commit()
+        conn.close()
+        print(f"[financial] Persisted {len(fin_metrics)} computed metrics to key facts")
+    except Exception as e:
+        print(f"[financial] Warning: could not persist computed metrics: {e}")
 
 
 def _analyze_non_sec(company, _cb=None):

@@ -111,18 +111,13 @@ def sentiment_analysis(company, progress_cb=None):
     else:
         _cb("source_done", {"source": "reddit", "status": "skipped", "summary": "No results"})
 
-    # Reddit — career-specific subreddits (finance, consulting, accounting, tech, CS)
-    _cb("source_start", {"source": "reddit_rss", "label": "Reddit RSS", "detail": "Searching career subreddits"})
-    career_subs = [
-        "FinancialCareers", "consulting", "Big4",
-        "cscareerquestions", "ExperiencedDevs",
-        "Accounting", "MBA",
-    ]
-    print(f"[sentiment] Searching {len(career_subs)} career subreddits...")
+    # Reddit — AI-selected subreddits relevant to the company's industry
+    _cb("source_start", {"source": "reddit_rss", "label": "Reddit RSS", "detail": "Searching industry-relevant subreddits"})
+    print(f"[sentiment] Searching Reddit RSS with dynamic subreddit selection...")
     career_reddit = search_reddit_rss(
-        f"{company} working culture",
+        f'"{company}" workplace OR employees OR culture',
         max_results=5,
-        subreddits=career_subs,
+        subreddits=None,
         fetch_comments_top_n=3,
     )
     all_results.extend(career_reddit)
@@ -135,7 +130,10 @@ def sentiment_analysis(company, progress_cb=None):
     # Hacker News (tech community — candid takes on companies)
     _cb("source_start", {"source": "hackernews", "label": "Hacker News", "detail": "Searching tech community perspectives"})
     print("[sentiment] Searching Hacker News for tech community perspectives...")
-    hn = search_hackernews(f"{company} working culture employees", max_results=5, fetch_comments_top_n=3)
+    hn = search_hackernews(f'"{company}" employee culture workplace', max_results=5, fetch_comments_top_n=3)
+    if not hn:
+        # Broaden to just the company name — HN may not have culture-specific posts for non-tech companies
+        hn = search_hackernews(f'"{company}"', max_results=5, fetch_comments_top_n=3)
     all_results.extend(hn)
     if web_count == 0 and hn:
         print(f"[sentiment] Hacker News returned {len(hn)} results — useful for tech industry sentiment")

@@ -406,10 +406,11 @@ def _score_ai_readiness(hiring_stats, patents_kf, profile_kf, hiring_kf):
     }
 
 
-def _score_org_readiness(hiring_stats, hiring_kf, sentiment_kf):
+def _score_org_readiness(hiring_stats, hiring_kf, sentiment_kf, exec_kf=None):
     """Score Organizational Readiness (0-100)."""
     signals = []
     missing = []
+    exec_kf = exec_kf or {}
 
     # --- Hiring trend ---
     trend_map = {"growing": 25, "stable": 15, "shrinking": 0}
@@ -478,16 +479,29 @@ def _score_org_readiness(hiring_stats, hiring_kf, sentiment_kf):
     else:
         missing.append("sentiment")
 
+    # --- Executive signals ---
+    exec_pts = 0
+    if exec_kf:
+        commitment = (exec_kf.get("organizational_commitment") or "").lower()
+        commitment_pts = {"strong": 15, "moderate": 8, "weak": -5, "unclear": 0}.get(commitment, 0)
+        domains = exec_kf.get("leadership_investment_domains") or []
+        domain_pts = min(len(domains) * 3, 10)
+        exec_pts = commitment_pts + domain_pts
+        signals.append(f"Executive commitment '{commitment}' + {len(domains)} leadership domains → {'+' if exec_pts >= 0 else ''}{exec_pts} pts")
+    else:
+        missing.append("executive_signals")
+
     # --- Combine ---
-    raw = trend_pts + growth_pts + tag_pts + sentiment_pts
+    raw = trend_pts + growth_pts + tag_pts + sentiment_pts + exec_pts
     final = _clamp(15 + raw)
 
     sources_present = sum([
         hiring_stats is not None,
         bool(hiring_kf),
         bool(sentiment_kf),
+        bool(exec_kf),
     ])
-    confidence = round(sources_present / 3, 2)
+    confidence = round(sources_present / 4, 2)
 
     return {
         "algorithmic_score": final,
@@ -688,7 +702,8 @@ def compute_dms_scores(hiring_stats, all_key_facts):
     tech = _score_tech_modernity(hiring_stats, techstack_kf, profile_kf, hiring_kf)
     data = _score_data_analytics(hiring_stats, techstack_kf, profile_kf, hiring_kf)
     ai = _score_ai_readiness(hiring_stats, patents_kf, profile_kf, hiring_kf)
-    org = _score_org_readiness(hiring_stats, hiring_kf, sentiment_kf)
+    exec_kf = all_key_facts.get("executive_signals", {})
+    org = _score_org_readiness(hiring_stats, hiring_kf, sentiment_kf, exec_kf)
 
     # Weighted overall
     weighted = round(

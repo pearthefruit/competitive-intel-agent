@@ -342,18 +342,25 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
     http = httpx.Client(timeout=timeout, follow_redirects=True)
 
     skipped_unhealthy = 0
+    skip_providers = set()  # [C] Skip entire provider after prompt-size errors (413)
+
     for p in expanded:
         key = p["_key"]
-        model_id = f"{p['name']}/{p['model']}"
+        provider = p["name"]
+        model_id = f"{provider}/{p['model']}"
         key_hint = key[-4:] if len(key) >= 4 else '****'
 
+        # [C] Skip providers known to reject this prompt size
+        if provider in skip_providers:
+            continue
+
         # Skip keys in cooldown
-        if not is_key_healthy(p["name"], key):
+        if not is_key_healthy(provider, key):
             skipped_unhealthy += 1
             continue
 
         try:
-            if p["name"] == "gemini":
+            if provider == "gemini":
                 with gemini_lock:
                     genai.configure(api_key=key)
                     model = genai.GenerativeModel(p["model"])
@@ -369,7 +376,7 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
                 except Exception:
                     pass
                 print(f"[llm] ✓ {model_id} (key …{key_hint})" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
-                log_llm_call(p["name"], p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
+                log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
                 result_text = response.text if not json_mode else response.text
                 return (normalize_citations(result_text) if not json_mode else result_text), model_id
             else:
@@ -389,32 +396,71 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
                         out_tok = usage.get("completion_tokens")
                     http.close()
                     print(f"[llm] ✓ {model_id} (key …{key_hint})" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
-                    log_llm_call(p["name"], p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
+                    log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
                     return (normalize_citations(text) if not json_mode else text), model_id
                 elif resp.status_code == 429:
                     print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
-                    log_llm_call(p["name"], p["model"], key_hint, "rate_limited", error="429", caller=caller)
-                    mark_key_unhealthy(p["name"], key, "429")
+                    log_llm_call(provider, p["model"], key_hint, "rate_limited", error="429", caller=caller)
+                    mark_key_unhealthy(provider, key, "429")
+                    continue
+                elif resp.status_code == 413:
+                    # [C] Prompt too large for this provider — skip ALL remaining entries for it
+                    print(f"[llm] {model_id} prompt too large (413) — skipping all {provider} models")
+                    log_llm_call(provider, p["model"], key_hint, "error", error="413 prompt too large", caller=caller)
+                    skip_providers.add(provider)
                     continue
                 else:
                     err = f"HTTP {resp.status_code}"
                     print(f"[llm] {model_id} (key …{key_hint}) failed: {err}")
-                    log_llm_call(p["name"], p["model"], key_hint, "error", error=err, caller=caller)
+                    log_llm_call(provider, p["model"], key_hint, "error", error=err, caller=caller)
                     continue
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "quota" in err_str.lower() or "rate" in err_str.lower():
                 print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
-                log_llm_call(p["name"], p["model"], key_hint, "rate_limited", error=err_str[:200], caller=caller)
-                mark_key_unhealthy(p["name"], key, err_str)
+                log_llm_call(provider, p["model"], key_hint, "rate_limited", error=err_str[:200], caller=caller)
+                mark_key_unhealthy(provider, key, err_str)
+            elif provider == "gemini" and json_mode and ("400" in err_str or "schema" in err_str.lower() or "constraint" in err_str.lower()):
+                # [B] Gemini schema error in structured output mode — retry without json_mode
+                print(f"[llm] {model_id} (key …{key_hint}) schema rejected — retrying as plain text")
+                log_llm_call(provider, p["model"], key_hint, "error", error=f"schema_fallback: {err_str[:150]}", caller=caller)
+                try:
+                    with gemini_lock:
+                        genai.configure(api_key=key)
+                        model = genai.GenerativeModel(p["model"])
+                        response = model.generate_content(prompt)
+                    in_tok = out_tok = None
+                    try:
+                        um = response.usage_metadata
+                        in_tok = um.prompt_token_count
+                        out_tok = um.candidates_token_count
+                    except Exception:
+                        pass
+                    print(f"[llm] ✓ {model_id} (key …{key_hint}) [schema fallback]" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
+                    log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
+                    return response.text, model_id
+                except Exception as retry_e:
+                    retry_err = str(retry_e)
+                    if "429" in retry_err or "quota" in retry_err.lower():
+                        log_llm_call(provider, p["model"], key_hint, "rate_limited", error=retry_err[:200], caller=caller)
+                        mark_key_unhealthy(provider, key, retry_err)
+                    else:
+                        log_llm_call(provider, p["model"], key_hint, "error", error=f"schema_fallback_failed: {retry_err[:150]}", caller=caller)
+            elif "413" in err_str or "too large" in err_str.lower() or "content length" in err_str.lower():
+                # [C] Prompt too large via exception — skip provider
+                print(f"[llm] {model_id} prompt too large — skipping all {provider} models")
+                log_llm_call(provider, p["model"], key_hint, "error", error="413 prompt too large", caller=caller)
+                skip_providers.add(provider)
             else:
                 print(f"[llm] {model_id} (key …{key_hint}) failed: {e}")
-                log_llm_call(p["name"], p["model"], key_hint, "error", error=err_str[:200], caller=caller)
+                log_llm_call(provider, p["model"], key_hint, "error", error=err_str[:200], caller=caller)
             continue
 
     http.close()
     if skipped_unhealthy:
         print(f"[llm] Skipped {skipped_unhealthy} entries due to key cooldowns")
+    if skip_providers:
+        print(f"[llm] Skipped providers due to prompt size: {', '.join(skip_providers)}")
     raise RuntimeError("All LLM providers failed for text generation")
 
 
@@ -758,6 +804,24 @@ Report:
 
 Return ONLY valid JSON, no explanation."""
 
+_EXECUTIVE_SIGNALS_FACTS_PROMPT = """Extract structured executive hiring signal facts from this analysis report about {company}.
+
+Return a JSON object with ONLY the fields you can find evidence for. Use null for missing values.
+
+Fields to extract:
+- "recent_executive_hires": array of objects [{{"name": "string", "title": "string", "date": "string", "previous_company": "string", "signal_domain": "string"}}] — each confirmed executive appointment
+- "executive_departures": array of objects [{{"name": "string", "title": "string", "date": "string"}}] — each confirmed departure
+- "open_executive_searches": array of strings — titles being actively recruited (e.g. ["VP Engineering", "Chief Data Officer"])
+- "leadership_investment_domains": array of strings — strategic domains where leadership is investing (e.g. ["AI/ML", "Digital Transformation", "Product"])
+- "organizational_commitment": one of "strong", "moderate", "weak", "unclear"
+- "leadership_stability": one of "stable", "rebuilding", "transitioning", "churning"
+- "notable_signals": string summarizing the single most important executive hiring pattern (1-2 sentences)
+
+Report:
+{report_text}
+
+Return ONLY valid JSON, no explanation."""
+
 _TYPE_KEY_FACTS_PROMPTS = {
     "techstack": _TECHSTACK_FACTS_PROMPT,
     "seo": _SEO_FACTS_PROMPT,
@@ -769,6 +833,7 @@ _TYPE_KEY_FACTS_PROMPTS = {
     "patents": _PATENTS_FACTS_PROMPT,
     "profile": _PROFILE_FACTS_PROMPT,
     "ua_fit": _UA_FIT_FACTS_PROMPT,
+    "executive_signals": _EXECUTIVE_SIGNALS_FACTS_PROMPT,
 }
 
 

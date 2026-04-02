@@ -26,6 +26,7 @@ from agents.patents import patent_analysis
 from agents.pricing import pricing_analysis
 from agents.competitors import competitor_analysis
 from agents.sentiment import sentiment_analysis
+from agents.executive_signals import executive_signals_analysis
 from agents.profile import company_profile
 from agents.compare import compare_companies, landscape_analysis
 from prompts.chat import SYSTEM_PROMPT, TOOL_SCHEMAS
@@ -557,8 +558,63 @@ def _save_dossier_event(args, db_path):
     return f"Event saved to {args['company']} dossier: [{args['event_type']}] {args['title']}"
 
 
+# Analysis tools that save to dossier — eligible for recency skip
+_ANALYSIS_TOOLS = {
+    "financial_analysis": "financial",
+    "patent_analysis": "patents",
+    "competitor_analysis": "competitors",
+    "sentiment_analysis": "sentiment",
+    "executive_signals_analysis": "executive_signals",
+    "techstack_analysis": "techstack",
+    "seo_audit": "seo",
+    "pricing_analysis": "pricing",
+}
+
+_RECENCY_SECONDS = 3600  # 1 hour — skip re-running if analysis is this fresh
+
+
+def _check_recent_analysis(tool_name, company, db_path):
+    """Check if a recent analysis exists in the dossier. Returns result string or None."""
+    analysis_type = _ANALYSIS_TOOLS.get(tool_name)
+    if not analysis_type or not company:
+        return None
+    try:
+        from db import get_connection, get_dossier_by_company
+        from datetime import datetime, timezone
+        conn = get_connection(db_path)
+        dossier = get_dossier_by_company(conn, company)
+        if not dossier:
+            conn.close()
+            return None
+        row = conn.execute(
+            "SELECT report_file, created_at FROM dossier_analyses WHERE dossier_id = ? AND analysis_type = ? ORDER BY created_at DESC LIMIT 1",
+            (dossier["id"], analysis_type)
+        ).fetchone()
+        conn.close()
+        if not row or not row["created_at"]:
+            return None
+        created = row["created_at"]
+        if not created.endswith("Z") and "+" not in created:
+            created += "+00:00"
+        created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        age_seconds = (datetime.now(timezone.utc) - created_dt).total_seconds()
+        if age_seconds < _RECENCY_SECONDS:
+            age_min = int(age_seconds / 60)
+            return f"{analysis_type.replace('_', ' ').title()} analysis already completed {age_min} min ago → {row['report_file']}. No need to re-run."
+    except Exception as e:
+        print(f"[chat] Recency check failed: {e}")
+    return None
+
+
 def _execute_tool(name, args, db_path, progress_callback=None):
     """Execute a tool call and return a concise result string for the LLM."""
+    # Check if a recent analysis already exists (skip re-running after disconnect/restart)
+    company_arg = args.get("company") or args.get("company_name")
+    recent = _check_recent_analysis(name, company_arg, db_path)
+    if recent:
+        print(f"[chat] Skipping {name} — recent result exists")
+        return recent
+
     # Serialize stdout capture — prevents concurrent tool calls from clobbering each other
     _stdout_lock.acquire()
     old_stdout = sys.stdout
@@ -739,6 +795,12 @@ def _execute_tool(name, args, db_path, progress_callback=None):
             if path:
                 return f"Sentiment analysis saved to: {path}"
             return "Sentiment analysis failed — no data found."
+
+        elif name == "executive_signals_analysis":
+            path = executive_signals_analysis(args["company"], db_path=db_path, progress_cb=progress_callback)
+            if path:
+                return f"Executive signals analysis saved to: {path}"
+            return "Executive signals analysis failed — no data found."
 
         elif name == "seo_audit":
             path = seo_audit(args["url"], args.get("max_pages", 10), company_name=args.get("company_name"), progress_cb=progress_callback)

@@ -16,6 +16,7 @@ from agents.patents import patent_analysis
 from agents.pricing import pricing_analysis
 from agents.competitors import competitor_analysis
 from agents.sentiment import sentiment_analysis
+from agents.executive_signals import executive_signals_analysis
 from agents.profile import company_profile
 from agents.compare import compare_companies, landscape_analysis
 
@@ -131,6 +132,14 @@ def competitors_cmd(company):
 def sentiment_cmd(company):
     """Analyze employee sentiment and workplace culture."""
     sentiment_analysis(company)
+
+
+@cli.command("executive-signals")
+@click.option("--company", required=True, help="Company name")
+@click.option("--db", default="intel.db", help="SQLite database path")
+def executive_signals_cmd(company, db):
+    """Analyze executive hiring signals — leadership changes and organizational commitment."""
+    executive_signals_analysis(company, db_path=db)
 
 
 @cli.command("profile")

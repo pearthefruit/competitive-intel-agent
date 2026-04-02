@@ -206,7 +206,7 @@ def techstack_analysis(url, max_pages=5, company_name=None, db_path=None, progre
     tech = detect_technologies(pages)
     total_techs = sum(len(v) for v in tech.values())
     print(f"[techstack] Detected {total_techs} technologies across {len(tech)} categories")
-    tech_detail = '\n'.join(f"• {cat}: {', '.join(items)}" for cat, items in tech.items() if items)
+    tech_detail = '\n'.join(f"• {cat}: {', '.join(t['name'] for t in items)}" for cat, items in tech.items() if items)
     _cb("source_done", {"source": "tech_detect", "status": "done", "summary": f"{total_techs} technologies across {len(tech)} categories", "detail": tech_detail})
 
     if total_techs == 0:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agents.llm import generate_json, BRIEFING_CHAIN
 from agents.scoring import compute_dms_scores, compute_anomaly_signals
+from agents.metrics import compute_company_metrics, format_metrics_for_prompt, format_peer_table_for_prompt
 from db import (get_connection, get_dossier_by_company, get_latest_key_facts,
                 get_company_id, compute_hiring_stats, get_hiring_snapshots,
                 get_recent_changes, get_lens, get_lens_by_slug, DT_LENS_SLUG)
@@ -15,6 +16,7 @@ from prompts.briefing import build_briefing_prompt
 ALL_ANALYSIS_TYPES = [
     "hiring", "financial", "competitors", "sentiment", "patents",
     "techstack", "seo", "pricing", "profile", "compare", "landscape",
+    "executive_signals",
 ]
 
 
@@ -53,6 +55,56 @@ def _get_report_summaries(analyses):
             pass
 
     return summaries
+
+
+_IDENTITY_FIELDS = ("name", "sector", "hq_location", "ceo", "founded",
+                     "headcount", "revenue", "market_cap", "website")
+
+_NA_VALUES = {"n/a", "na", "unknown", "not available", "none", ""}
+
+
+def _is_missing(val):
+    """Check if an identity field value is effectively missing."""
+    if val is None:
+        return True
+    if isinstance(val, str) and val.strip().lower() in _NA_VALUES:
+        return True
+    return False
+
+
+def _backfill_identity(briefing, dossier):
+    """Fill missing subject_identity fields from the previous briefing.
+
+    Company identity data (HQ, headcount, founded, etc.) rarely changes.
+    If the new LLM output has N/A for a field that a previous briefing had,
+    carry the previous value forward.
+    """
+    new_identity = briefing.get("subject_identity", {})
+    if not isinstance(new_identity, dict):
+        new_identity = {}
+        briefing["subject_identity"] = new_identity
+
+    prev_briefing_raw = dossier.get("briefing_json")
+    if not prev_briefing_raw:
+        return
+
+    try:
+        prev = json.loads(prev_briefing_raw) if isinstance(prev_briefing_raw, str) else prev_briefing_raw
+    except (json.JSONDecodeError, TypeError):
+        return
+
+    prev_identity = prev.get("subject_identity", {})
+    if not isinstance(prev_identity, dict):
+        return
+
+    backfilled = []
+    for field in _IDENTITY_FIELDS:
+        if _is_missing(new_identity.get(field)) and not _is_missing(prev_identity.get(field)):
+            new_identity[field] = prev_identity[field]
+            backfilled.append(field)
+
+    if backfilled:
+        print(f"[briefing] Backfilled identity fields from previous briefing: {', '.join(backfilled)}")
 
 
 def _build_data_confidence(hiring_stats, analyses, company_name, conn):
@@ -98,6 +150,8 @@ def _build_data_confidence(hiring_stats, analyses, company_name, conn):
         caveats.append("No patent analysis — innovation scores exclude IP signals")
     if "sentiment" not in analyses_available:
         caveats.append("No sentiment analysis — org/culture scores exclude employee sentiment")
+    if "executive_signals" not in analyses_available:
+        caveats.append("No executive signals analysis — organizational commitment scores exclude leadership hiring data")
     if "linkedin" in scrape_coverage.lower():
         caveats.append("LinkedIn sample may not capture all open roles — consider running ATS scrape if available")
 
@@ -251,6 +305,46 @@ def generate_briefing(company_name, db_path="intel.db", lens_id=None):
         for a in anomaly_signals:
             print(f"[briefing]   [{a['severity']}] {a['type']}: {a['consulting_angle']}")
 
+    # 5.7. Compute pre-computed metrics (zero LLM cost)
+    computed_metrics = compute_company_metrics(
+        financials=None,  # Financial metrics come from key_facts._computed_metrics
+        stock_data=None,
+        extended=None,
+        hiring_stats=hiring_stats,
+        snapshots=hiring_snapshots,
+        all_key_facts=all_key_facts,
+    )
+    # Merge in any computed financial metrics persisted during financial analysis
+    fin_kf = all_key_facts.get("financial", {})
+    if fin_kf.get("_computed_metrics"):
+        computed_metrics["financial"] = fin_kf["_computed_metrics"]
+        print(f"[briefing] Using {len(computed_metrics['financial'])} pre-computed financial metrics")
+
+    metrics_text = format_metrics_for_prompt(computed_metrics)
+
+    # Peer benchmarking (if competitor data exists — zero LLM cost)
+    peer_benchmarks = None
+    competitor_names = (all_key_facts.get("competitors", {}).get("key_competitors") or [])
+    if competitor_names and computed_metrics.get("financial"):
+        print(f"[briefing] Computing peer benchmarks for {len(competitor_names[:4])} competitors...")
+        try:
+            from agents.benchmarking import compute_peer_benchmarks
+            peer_benchmarks = compute_peer_benchmarks(
+                company_name, computed_metrics["financial"], competitor_names[:4]
+            )
+            if peer_benchmarks:
+                peer_text = format_peer_table_for_prompt(
+                    computed_metrics["financial"], peer_benchmarks["peers"]
+                )
+                if peer_text:
+                    metrics_text += "\n" + peer_text
+                print(f"[briefing] Peer benchmarks: {len(peer_benchmarks['peers'])} peers compared")
+        except Exception as e:
+            print(f"[briefing] Peer benchmarking skipped: {e}")
+
+    if metrics_text:
+        print(f"[briefing] Pre-computed metrics block: {len(metrics_text)} chars")
+
     # 6. Get recent change events for temporal context
     recent_changes = get_recent_changes(conn, dossier["id"], limit=15)
     if recent_changes:
@@ -266,6 +360,7 @@ def generate_briefing(company_name, db_path="intel.db", lens_id=None):
         algo_scores=algo_scores,
         anomaly_signals=anomaly_signals,
         lens_config=lens_config,
+        computed_metrics_text=metrics_text,
     )
     if recent_changes:
         changes_text = "\n".join([
@@ -288,6 +383,9 @@ def generate_briefing(company_name, db_path="intel.db", lens_id=None):
     # 7.5. Normalize schema key — LLM may return "digital_maturity" or "scoring"
     if "digital_maturity" in briefing and "scoring" not in briefing:
         briefing["scoring"] = briefing.pop("digital_maturity")
+
+    # 7.6. Backfill missing identity fields from previous briefing
+    _backfill_identity(briefing, dossier)
 
     # 8. Post-process scoring section
     if "scoring" in briefing:

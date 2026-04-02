@@ -43,6 +43,7 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
 - **patent_analysis**: Full patent portfolio analysis from USPTO data (innovation areas, IP strategy).
 - **competitor_analysis**: Map competitive landscape — competitors, differentiators, market position.
 - **sentiment_analysis**: Employee sentiment and workplace culture from reviews and news.
+- **executive_signals_analysis**: Executive hiring signals — C-suite and VP-level appointments, departures, and open searches. Reveals organizational commitment: if leadership isn't investing at the top, initiatives stall in middle management.
 - **seo_audit**: SEO & AEO audit on a website.
 - **techstack_analysis**: Detect technologies a website uses + internal engineering stack from hiring data (when available).
 - **pricing_analysis**: Analyze pricing strategy, tiers, and positioning.
@@ -135,8 +136,8 @@ FOLLOW_UP_TOOL_NAMES = CORE_TOOL_NAMES | {
     "search_financial_news", "reddit_search", "hn_search",
     "generate_briefing", "hiring_pipeline", "batch_company_analysis",
     "full_analysis", "financial_analysis", "patent_analysis",
-    "competitor_analysis", "sentiment_analysis", "seo_audit",
-    "techstack_analysis", "pricing_analysis", "compare_companies",
+    "competitor_analysis", "sentiment_analysis", "executive_signals_analysis",
+    "seo_audit", "techstack_analysis", "pricing_analysis", "compare_companies",
     "landscape_analysis", "collect", "classify", "analyze",
     "discover_prospects", "score_prospect", "get_scored_prospects",
     "score_lens", "list_lenses", "get_lens_scores",
@@ -363,6 +364,20 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "sentiment_analysis",
             "description": "Analyze employee sentiment, workplace culture, and employer reputation from Glassdoor, Reddit, news, and Hacker News. Saves a .md report.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "company": {"type": "string", "description": "Company name"}
+                },
+                "required": ["company"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "executive_signals_analysis",
+            "description": "Analyze executive hiring signals — C-suite and VP-level appointments, departures, and open searches. Uses SEC 8-K filings (public companies), news, and classified executive job openings. Reveals organizational commitment: if leadership isn't investing at the top, strategic initiatives stall in middle management. Saves a .md report.",
             "parameters": {
                 "type": "object",
                 "properties": {

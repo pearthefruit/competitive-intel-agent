@@ -3511,6 +3511,7 @@
         }
         .dash-hero-left {
             display: flex;
+            flex-wrap: wrap;
             gap: 20px;
             align-items: center;
             padding: 20px 24px;
@@ -3521,6 +3522,7 @@
         .dash-hero-right {
             flex: 1;
             padding: 16px 20px;
+            overflow-y: auto;
         }
         .dash-hero-right-title {
             font-size: 11px;
@@ -3529,6 +3531,28 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 8px;
+        }
+        .dash-rationale-entry {
+            margin-bottom: 8px;
+        }
+        .dash-rationale-text {
+            font-size: 14px;
+            color: var(--text-muted);
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .dash-rationale-text.expanded {
+            -webkit-line-clamp: unset;
+            overflow: visible;
+        }
+        .dash-rationale-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-secondary);
         }
         .dash-hero-score {
             display: flex;
@@ -3549,10 +3573,12 @@
             text-align: center;
         }
         .dash-hero-bars {
-            flex: 1;
+            flex-basis: 100%;
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
+            border-top: 1px solid var(--border);
+            padding-top: 12px;
         }
         .dash-hero-identity {
             display: flex;
@@ -3804,6 +3830,29 @@
         .toast-close { background: none; border: none; color: inherit; cursor: pointer; opacity: 0.6; font-size: 16px; line-height: 1; flex-shrink: 0; }
         .toast-close:hover { opacity: 1; }
         @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+        /* === LENS PICKER === */
+        .lens-picker-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        .lens-picker-pill {
+            padding: 12px 14px;
+            border-radius: 8px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .lens-picker-pill:hover {
+            border-color: var(--border-strong);
+            background: var(--bg-hover);
+        }
+        .lens-picker-pill.active {
+            border-color: var(--accent);
+            background: rgba(59,130,246,0.1);
+        }
 
         /* === LENS SCORES === */
         .lens-bar {
@@ -4381,10 +4430,6 @@
                     <div class="quick-action" onclick="quickAction('landscape', 'Run a landscape analysis on ')">
                         Landscape Analysis
                         <span>Discover competitors automatically</span>
-                    </div>
-                    <div class="quick-action" onclick="quickAction('freeform')">
-                        Ask Anything
-                        <span>Free-form research question</span>
                     </div>
                 </div>
             </div>
@@ -6372,7 +6417,91 @@ function expandLensDetail(companyName, idx) {
 }
 
 let _briefingInProgress = false;
-async function generateBriefing(companyName) {
+
+function generateBriefing(companyName) {
+    if (_briefingInProgress) return;
+    _showLensPicker(companyName);
+}
+
+async function _showLensPicker(companyName) {
+    // Ensure lenses are loaded
+    if (!_cachedLenses) {
+        try {
+            const resp = await fetch('/api/lenses');
+            if (resp.ok) _cachedLenses = await resp.json();
+        } catch {}
+    }
+    const lenses = _cachedLenses || [];
+    if (!lenses.length) {
+        // No lenses cached — just generate with default
+        _executeGenerateBriefing(companyName, null);
+        return;
+    }
+
+    // Determine the last-used lens for this company
+    let defaultLensId = null;
+    const b = _activeBriefingData;
+    if (b && b.scoring && b.scoring._lens) {
+        defaultLensId = b.scoring._lens.id;
+    }
+
+    // Remove any existing picker
+    const existing = document.querySelector('.lens-picker-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'niche-builder-overlay lens-picker-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    let pillsHtml = '';
+    lenses.forEach(lens => {
+        const isDefault = lens.id === defaultLensId;
+        pillsHtml += `<div class="lens-picker-pill${isDefault ? ' active' : ''}" data-lens-id="${lens.id}" onclick="_selectLensForBriefing(this, ${lens.id})">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">${escHtml(lens.name)}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml((lens.config || {}).score_label || lens.description || '')}</div>
+            ${isDefault ? '<div style="font-size:10px;color:var(--green);margin-top:2px">Last used</div>' : ''}
+        </div>`;
+    });
+
+    overlay.innerHTML = `<div class="niche-builder-modal" style="max-width:460px">
+        <div class="niche-builder-header">
+            <h2>Choose Lens for ${escHtml(companyName)}</h2>
+            <button class="icp-wizard-close" onclick="this.closest('.lens-picker-overlay').remove()">&times;</button>
+        </div>
+        <div style="padding:16px 20px">
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Select the evaluation lens for this briefing. The lens determines scoring dimensions, rubrics, and how consulting opportunities are framed.</div>
+            <div class="lens-picker-grid">${pillsHtml}</div>
+            <div style="margin-top:16px;text-align:right">
+                <button class="dash-refresh-btn" style="padding:8px 20px;font-size:13px" onclick="_confirmLensPicker('${escHtml(companyName)}')">Generate Briefing</button>
+            </div>
+        </div>
+    </div>`;
+
+    document.body.appendChild(overlay);
+
+    // ESC to close
+    const escHandler = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); } };
+    document.addEventListener('keydown', escHandler);
+    overlay._escHandler = escHandler;
+}
+
+function _selectLensForBriefing(el, lensId) {
+    el.closest('.lens-picker-grid').querySelectorAll('.lens-picker-pill').forEach(p => p.classList.remove('active'));
+    el.classList.add('active');
+}
+
+function _confirmLensPicker(companyName) {
+    const overlay = document.querySelector('.lens-picker-overlay');
+    const active = overlay ? overlay.querySelector('.lens-picker-pill.active') : null;
+    const lensId = active ? parseInt(active.dataset.lensId) : null;
+    if (overlay) {
+        if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
+        overlay.remove();
+    }
+    _executeGenerateBriefing(companyName, lensId);
+}
+
+async function _executeGenerateBriefing(companyName, lensId) {
     if (_briefingInProgress) return;
     _briefingInProgress = true;
 
@@ -6392,10 +6521,11 @@ async function generateBriefing(companyName) {
     };
 
     try {
+        const body = lensId ? {lens_id: lensId} : {};
         const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/briefing`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({}),
+            body: JSON.stringify(body),
         });
         const data = await resp.json();
         if (data.ok) {
@@ -6775,7 +6905,7 @@ function renderMessages() {
             // For completed tree tools: no inline stepsHtml — flowchart opens in overlay
 
             const statusHtml = hasResult
-                ? `<div class="tool-call-status"><span class="tool-done-check">&#10003;</span> <span class="tool-status-text" style="color:var(--green)">Done — ${steps.length} step${steps.length !== 1 ? 's' : ''}</span></div>`
+                ? `<div class="tool-call-status"><span class="tool-done-check">&#10003;</span> <span class="tool-status-text" style="color:var(--green)">Done${steps.length ? ` — ${steps.length} step${steps.length !== 1 ? 's' : ''}` : ''}</span></div>`
                 : `<div class="tool-call-status"><div class="tool-spinner"></div> <span class="tool-status-text">Running ${escHtml(toolLabel(m.name))}...</span></div>`;
 
             const chevron = hasResult && !isTreeTool ? `<span class="tool-expand-chevron">&#9660;</span>` : '';
@@ -6931,7 +7061,14 @@ async function processChat(chat) {
         }
     } catch (e) {
         console.error('[chat] Connection error:', e);
-        chat.messages.push({ role: 'assistant', content: `Connection error: ${e.message || 'stream interrupted'}. The server may still be processing — check the terminal for details.` });
+        chat.messages.push({ role: 'assistant', content: `Connection error: ${e.message || 'stream interrupted'}. The server may have restarted — you can ask me to continue where we left off.` });
+    }
+
+    // Kill any stale running tool calls — mark them as cancelled
+    for (const m of chat.messages) {
+        if (m.role === 'tool_call' && !m.result) {
+            m.result = '(Interrupted — server disconnected before this tool completed)';
+        }
     }
 
     const t = document.getElementById('typing');
@@ -7492,7 +7629,7 @@ function _buildBriefingDashboard(content) {
             const badges = sources.map(s =>
                 _renderSourceBadge(s)
             ).join(' ');
-            rationaleHtml += `<div style="margin-bottom:8px"><span style="font-size:15px;font-weight:600;color:var(--text-secondary)">${escHtml(d.label)}:</span> <span style="font-size:15px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
+            rationaleHtml += `<div class="dash-rationale-entry"><div class="dash-rationale-label">${escHtml(d.label)}</div><div class="dash-rationale-text" onclick="this.classList.toggle('expanded')" title="Click to expand">${_stripCitations(sub.rationale)}</div>${badges ? `<div style="margin-top:4px">${badges}</div>` : ''}</div>`;
         }
     });
 
