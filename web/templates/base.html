@@ -6471,7 +6471,15 @@ function _renderLensDetail(ls) {
         const signals = (sub.signals || []);
 
         let signalHtml = signals.map(sig => {
-            if (typeof sig === 'string') return `<span class="icp-signal-tag">${escHtml(sig)}</span>`;
+            if (typeof sig === 'string') {
+                const urlMatch = sig.match(/https?:\/\/[^\s)]+/);
+                if (urlMatch) {
+                    const url = urlMatch[0];
+                    const text = sig.replace(url, '').trim() || url;
+                    return `<a class="icp-signal-tag" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(text)}</a>`;
+                }
+                return `<span class="icp-signal-tag">${escHtml(sig)}</span>`;
+            }
             const text = sig.text || '';
             const url = sig.url;
             if (url) return `<a class="icp-signal-tag" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(text)}</a>`;
@@ -9322,7 +9330,9 @@ function renderSummaryPane(campaignId) {
         ];
         // Build diagnostics from whatever dimensions the score has
         const sampleScore = _getScore(scored[0]);
-        const dims = sampleScore?._dimensions || [];
+        const dims = sampleScore?._dimensions || Object.keys(sampleScore?.sub_scores || {}).map(k => ({
+            key: k, label: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), weight: 0.2,
+        }));
         const signalBadges = dims.slice(0, 4).map((dim, i) => {
             const ic = _diagIcons[i % _diagIcons.length];
             const aboveThreshold = scored.filter(p => {
@@ -10622,6 +10632,14 @@ async function openProspectDetail(companyName) {
     function _renderSignal(sig) {
         // Handle both old (string) and new ({text, url}) formats
         if (typeof sig === 'string') {
+            // Auto-detect URLs in plain string signals
+            const urlMatch = sig.match(/https?:\/\/[^\s)]+/);
+            if (urlMatch) {
+                const url = urlMatch[0];
+                const text = sig.replace(url, '').trim() || url;
+                allSources.push({ text, url });
+                return `<a class="icp-signal-tag" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(text)}</a>`;
+            }
             return `<span class="icp-signal-tag">${escHtml(sig)}</span>`;
         }
         const text = sig.text || sig;

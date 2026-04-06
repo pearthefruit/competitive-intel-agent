@@ -34,6 +34,22 @@ def financial_analysis(company, progress_cb=None):
     _cb = progress_cb or (lambda *a: None)
     print(f"\n[financial] Analyzing {company}...")
 
+    # Check for cached financial snapshot from niche evaluation
+    # If snapshot confirms private company, skip SEC EDGAR lookup entirely
+    try:
+        from db import get_connection, get_or_create_dossier, get_financial_snapshot
+        _snap_conn = get_connection()
+        _snap_did = get_or_create_dossier(_snap_conn, company)
+        _snap = get_financial_snapshot(_snap_conn, _snap_did)
+        _snap_conn.close()
+        if _snap and not _snap.get("is_public") and not _snap.get("ticker"):
+            print(f"[financial] Snapshot confirms {company} is private — skipping SEC EDGAR lookup")
+            _cb("source_start", {"source": "sec_edgar", "label": "SEC EDGAR", "detail": f"Looking up {company}"})
+            _cb("source_done", {"source": "sec_edgar", "status": "skipped", "summary": "Private company (cached)"})
+            return _analyze_non_sec(company, _cb)
+    except Exception:
+        pass
+
     # Step 1: Try SEC EDGAR (public company)
     _cb("source_start", {"source": "sec_edgar", "label": "SEC EDGAR", "detail": f"Looking up {company}"})
     cik_result = lookup_cik(company)
