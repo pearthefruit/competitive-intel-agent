@@ -229,6 +229,9 @@ def get_stock_data(ticker):
             "avg_volume": info.get("averageVolume"),
             "sector": info.get("sector"),
             "industry": info.get("industry"),
+            "country": info.get("country"),
+            "city": info.get("city"),
+            "employee_count": info.get("fullTimeEmployees"),
             "source": "Yahoo Finance",
         }
 

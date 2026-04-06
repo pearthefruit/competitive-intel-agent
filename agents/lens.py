@@ -492,3 +492,98 @@ def batch_score_lens(companies, lens_id, db_path="intel.db", max_workers=3, prog
 
     # Return in original order
     return [(c.get("name", "?"), results.get(c.get("name", "?"))) for c in companies]
+
+
+# ---- Lens-Aware Vertical Insight ----
+
+def generate_lens_vertical_insight(campaign_id, db_path="intel.db"):
+    """Generate a vertical insight for a campaign using lens scores (not UA fit).
+
+    Reads all prospects with lens_score data, builds a summary, calls LLM,
+    saves to campaigns.insight_json. Returns the insight dict or None.
+    """
+    from db import get_campaign_detail, get_connection
+
+    conn = get_connection(db_path)
+    campaign = get_campaign_detail(conn, campaign_id)
+    conn.close()
+
+    if not campaign:
+        print(f"[lens-insight] Campaign {campaign_id} not found")
+        return None
+
+    niche = campaign.get("niche", "unknown")
+    prospects = campaign.get("prospects", [])
+
+    # Build summaries from lens-scored prospects, falling back to ua_fit
+    summaries = []
+    lens_name = None
+    dims_labels = []
+    for p in prospects:
+        fit = p.get("lens_score") or p.get("ua_fit")
+        if not fit:
+            continue
+        if not lens_name and fit.get("_lens"):
+            lens_name = fit["_lens"].get("name", "")
+        if not dims_labels and fit.get("_dimensions"):
+            dims_labels = [d.get("label", d.get("key", "")) for d in fit["_dimensions"]]
+        summaries.append({
+            "company_name": p.get("company_name", "?"),
+            "overall_score": fit.get("overall_score", 0),
+            "overall_label": fit.get("overall_label", "?"),
+            "sub_scores": fit.get("sub_scores", {}),
+            "engagement_opportunities": fit.get("engagement_opportunities", []),
+            "strategic_assessment": fit.get("strategic_assessment", ""),
+            "key_risks": fit.get("key_risks", []),
+            "company_snapshot": fit.get("company_snapshot", {}),
+        })
+
+    if not summaries:
+        print(f"[lens-insight] No scored prospects in campaign {campaign_id}")
+        return None
+
+    # Build lens-aware prompt
+    lens_context = f"Lens: {lens_name}\nDimensions: {', '.join(dims_labels)}" if lens_name else ""
+    prompt = f"""You are a strategy consultant analyzing a batch of prospects in the "{niche}" vertical.
+{lens_context}
+
+Below are {len(summaries)} scored companies. Synthesize patterns across them.
+
+{json.dumps(summaries, indent=2, default=str)[:12000]}
+
+Return JSON:
+{{
+  "vertical_summary": "2-3 sentence overview of this niche as a consulting opportunity — focus on the {lens_name or 'evaluated'} dimensions, not generic observations",
+  "insight_paragraphs": ["3-5 paragraphs covering: market dynamics across scored companies, patterns in the scoring dimensions, financial capacity range, recommended engagement approach"],
+  "top_3_priorities": [
+    {{"title": "short title", "description": "1-2 sentence action item grounded in the data"}}
+  ],
+  "common_objections": [
+    {{"objection": "what prospect might say", "counter": "response grounded in prospect data"}}
+  ]
+}}
+
+Rules:
+- Ground every claim in the actual score data — cite company names and scores
+- Focus insights on the {lens_name or 'evaluation'} dimensions, not generic business advice
+- Priorities should be actionable next steps for the consulting team
+- Return ONLY the JSON object"""
+
+    print(f"[lens-insight] Generating insight for '{niche}' ({len(summaries)} prospects, lens={lens_name})...")
+    insight = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN)
+
+    if not insight:
+        print("[lens-insight] LLM returned no insight")
+        return None
+
+    # Save to DB
+    conn = get_connection(db_path)
+    conn.execute(
+        "UPDATE campaigns SET insight_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (json.dumps(insight), campaign_id),
+    )
+    conn.commit()
+    conn.close()
+
+    print(f"[lens-insight] Insight saved for campaign {campaign_id}")
+    return insight

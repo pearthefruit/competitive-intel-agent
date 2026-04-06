@@ -207,6 +207,10 @@ def _migrate_db(conn):
         ("campaigns", "parent_campaign_id", "INTEGER"),
         ("campaigns", "seed_company", "TEXT"),
         ("campaigns", "execution_log_json", "TEXT"),
+        ("dossiers", "financial_snapshot_json", "TEXT"),
+        ("dossiers", "financial_snapshot_at", "TEXT"),
+        ("campaigns", "niche_eval_json", "TEXT"),
+        ("campaigns", "scoring_lens_id", "INTEGER"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -920,6 +924,52 @@ def update_campaign_status(conn, campaign_id, status):
     conn.commit()
 
 
+def save_financial_snapshot(conn, dossier_id, snapshot_dict):
+    """Save lightweight financial scan data to a dossier."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE dossiers SET financial_snapshot_json = ?, financial_snapshot_at = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(snapshot_dict), now, now, dossier_id),
+    )
+    conn.commit()
+
+
+def get_financial_snapshot(conn, dossier_id):
+    """Get existing financial snapshot from a dossier, or None."""
+    row = conn.execute(
+        "SELECT financial_snapshot_json FROM dossiers WHERE id = ?", (dossier_id,)
+    ).fetchone()
+    if row and row["financial_snapshot_json"]:
+        try:
+            return json.loads(row["financial_snapshot_json"])
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+def save_niche_evaluation(conn, campaign_id, niche_eval_dict):
+    """Save aggregated niche evaluation to a campaign."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE campaigns SET niche_eval_json = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(niche_eval_dict), now, campaign_id),
+    )
+    conn.commit()
+
+
+def get_niche_evaluation(conn, campaign_id):
+    """Get existing niche evaluation from a campaign, or None."""
+    row = conn.execute(
+        "SELECT niche_eval_json FROM campaigns WHERE id = ?", (campaign_id,)
+    ).fetchone()
+    if row and row["niche_eval_json"]:
+        try:
+            return json.loads(row["niche_eval_json"])
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
 def save_campaign_execution_log(conn, campaign_id, execution_log):
     """Save the execution log (search queries, results) as JSON on the campaign."""
     conn.execute(
@@ -968,12 +1018,23 @@ def get_all_campaigns(conn):
     return [dict(r) for r in rows]
 
 
+def set_campaign_lens(conn, campaign_id, lens_id):
+    """Set the scoring lens for a campaign."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE campaigns SET scoring_lens_id = ?, updated_at = ? WHERE id = ?",
+        (lens_id, now, campaign_id),
+    )
+    conn.commit()
+
+
 def get_campaign_detail(conn, campaign_id):
-    """Get a single campaign with its prospects joined to dossier ua_fit data."""
+    """Get a single campaign with its prospects joined to dossier scores."""
     campaign = conn.execute("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)).fetchone()
     if not campaign:
         return None
     campaign = dict(campaign)
+    scoring_lens_id = campaign.get("scoring_lens_id")
     rows = conn.execute(
         """SELECT cp.*, d.company_name, d.sector, d.description as company_description,
                   d.website_url, d.ua_fit_json, d.ua_fit_generated_at
@@ -984,6 +1045,40 @@ def get_campaign_detail(conn, campaign_id):
                     THEN json_extract(d.ua_fit_json, '$.overall_score') ELSE 0 END DESC""",
         (campaign_id,),
     ).fetchall()
+
+    # Pre-fetch lens scores for all prospects in this campaign
+    lens_scores_map = {}
+    if scoring_lens_id:
+        ls_rows = conn.execute(
+            """SELECT ls.dossier_id, ls.score_json
+               FROM lens_scores ls
+               JOIN campaign_prospects cp ON ls.dossier_id = cp.dossier_id
+               WHERE cp.campaign_id = ? AND ls.lens_id = ?""",
+            (campaign_id, scoring_lens_id),
+        ).fetchall()
+        for ls_row in ls_rows:
+            try:
+                lens_scores_map[ls_row["dossier_id"]] = json.loads(ls_row["score_json"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+    else:
+        # No specific lens — check for any lens scores on these dossiers
+        ls_rows = conn.execute(
+            """SELECT ls.dossier_id, ls.score_json
+               FROM lens_scores ls
+               JOIN campaign_prospects cp ON ls.dossier_id = cp.dossier_id
+               WHERE cp.campaign_id = ?
+               ORDER BY ls.scored_at DESC""",
+            (campaign_id,),
+        ).fetchall()
+        for ls_row in ls_rows:
+            did = ls_row["dossier_id"]
+            if did not in lens_scores_map:  # keep latest per dossier
+                try:
+                    lens_scores_map[did] = json.loads(ls_row["score_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
     prospects = []
     for r in rows:
         p = dict(r)
@@ -994,6 +1089,8 @@ def get_campaign_detail(conn, campaign_id):
                 p["ua_fit"] = None
         else:
             p["ua_fit"] = None
+        # Attach lens score if available
+        p["lens_score"] = lens_scores_map.get(p["dossier_id"])
         if p.get("brief_json"):
             try:
                 p["brief"] = json.loads(p["brief_json"])
@@ -1009,6 +1106,16 @@ def get_campaign_detail(conn, campaign_id):
         else:
             p["discovery"] = None
         prospects.append(p)
+    # Sort by best available score (lens_score preferred over ua_fit)
+    def _best_score(p):
+        ls = p.get("lens_score")
+        if ls and ls.get("overall_score") is not None:
+            return ls["overall_score"]
+        ua = p.get("ua_fit")
+        if ua and ua.get("overall_score") is not None:
+            return ua["overall_score"]
+        return -1
+    prospects.sort(key=_best_score, reverse=True)
     campaign["prospects"] = prospects
     if campaign.get("insight_json"):
         try:
@@ -1024,6 +1131,13 @@ def get_campaign_detail(conn, campaign_id):
             campaign["execution_log"] = None
     else:
         campaign["execution_log"] = None
+    if campaign.get("niche_eval_json"):
+        try:
+            campaign["niche_eval"] = json.loads(campaign["niche_eval_json"])
+        except (json.JSONDecodeError, TypeError):
+            campaign["niche_eval"] = None
+    else:
+        campaign["niche_eval"] = None
     return campaign
 
 

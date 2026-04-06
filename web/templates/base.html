@@ -3128,6 +3128,58 @@
         .icp-empty .icon { font-size: 32px; margin-bottom: 8px; }
         .icp-empty .subtitle { font-size: 12px; margin-top: 4px; }
 
+        /* --- Niche Evaluation Charts --- */
+        .ne-section { margin-bottom: 18px; }
+        .ne-section-title {
+            font-size: 10px; font-weight: 600; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+        }
+        .ne-stat-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            gap: 8px; margin-bottom: 16px;
+        }
+        .ne-stat-card {
+            background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+            border-radius: 8px; padding: 10px 12px;
+        }
+        .ne-stat-value { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+        .ne-stat-label { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+        .ne-bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+        .ne-bar-label {
+            font-size: 11px; color: var(--text-secondary); min-width: 90px; max-width: 90px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .ne-bar-track {
+            flex: 1; height: 18px; background: rgba(255,255,255,0.04);
+            border-radius: 3px; overflow: hidden;
+        }
+        .ne-bar-fill {
+            height: 100%; border-radius: 3px; transition: width 0.6s ease;
+            min-width: 2px;
+        }
+        .ne-bar-value { font-size: 11px; color: var(--text-muted); min-width: 55px; text-align: right; }
+        .ne-stacked-bar {
+            display: flex; height: 10px; border-radius: 5px; overflow: hidden;
+            background: rgba(255,255,255,0.04); margin-bottom: 8px;
+        }
+        .ne-stacked-segment { height: 100%; transition: width 0.5s ease; }
+        .ne-legend { display: flex; flex-wrap: wrap; gap: 10px; }
+        .ne-legend-item { display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-muted); }
+        .ne-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+        .ne-badge-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+        .ne-badge {
+            padding: 3px 10px; border-radius: 12px; font-size: 11px;
+            background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        .ne-badge .ne-badge-count { font-weight: 600; color: var(--text-primary); margin-right: 4px; }
+        .ne-no-data { font-size: 11px; color: var(--text-muted); font-style: italic; padding: 6px 0; }
+        .ne-coverage {
+            font-size: 10px; color: var(--text-muted); padding-top: 10px;
+            border-top: 1px solid var(--border); margin-top: 10px;
+        }
+        .ne-divider { height: 1px; background: var(--border); margin: 16px 0; }
+
         /* --- RIGHT PANE --- */
         .right-pane {
             width: 0;
@@ -8652,6 +8704,15 @@ let _activeTreeNodeId = null;    // which tree node is selected (shows its compa
 // Flat prospect lookup — built from campaigns for detail view
 let _prospectsByName = {};
 
+function _getScore(p) {
+    // Unified score accessor — prefers lens score over UA fit
+    return p?.lens_score || p?.ua_fit || null;
+}
+
+function _hasScore(p) {
+    return !!_getScore(p);
+}
+
 function _prospectTierClass(score) {
     if (score >= 80) return 'prime';
     if (score >= 60) return 'strong';
@@ -8880,7 +8941,7 @@ function renderExecutionPane(campaignId) {
     }
 
     const prospects = (c.prospects || []).sort((a, b) =>
-        (b.ua_fit?.overall_score || 0) - (a.ua_fit?.overall_score || 0));
+        (_getScore(b)?.overall_score || 0) - (_getScore(a)?.overall_score || 0));
 
     // Handle empty campaigns (no companies found)
     if (c.status === 'empty' || (!prospects.length && c.status !== 'running')) {
@@ -8906,7 +8967,7 @@ function renderExecutionPane(campaignId) {
         return;
     }
 
-    const scored = prospects.filter(p => p.ua_fit);
+    const scored = prospects.filter(p => _hasScore(p));
     const _limitedStatuses = ['limited', 'http_403', 'connection_failed'];
     const valid = prospects.filter(p => p.validation_status === 'valid').length;
     const limited = prospects.filter(p => _limitedStatuses.includes(p.validation_status)).length;
@@ -8952,6 +9013,129 @@ function renderExecutionPane(campaignId) {
     `;
 }
 
+// --- Niche Evaluation Chart Renderers ---
+
+function renderNicheEvaluation(ne) {
+    if (!ne) return '';
+    const cov = ne.data_coverage || {};
+    const agg = ne.aggregate || {};
+
+    // KPI stat cards
+    const stats = [];
+    if (agg.total_revenue_formatted) stats.push({v: agg.total_revenue_formatted, l: 'Combined Revenue'});
+    if (agg.median_revenue_formatted) stats.push({v: agg.median_revenue_formatted, l: 'Median Revenue'});
+    if (ne.company_count) stats.push({v: ne.company_count, l: 'Companies Scanned'});
+    if (agg.avg_revenue_growth != null) stats.push({v: (agg.avg_revenue_growth > 0 ? '+' : '') + agg.avg_revenue_growth.toFixed(1) + '%', l: 'Avg Growth YoY'});
+    if (agg.total_market_cap_formatted) stats.push({v: agg.total_market_cap_formatted, l: 'Combined Mkt Cap'});
+    if (agg.total_employees) stats.push({v: agg.total_employees.toLocaleString(), l: 'Total Employees'});
+
+    const statHtml = stats.length ? `<div class="ne-stat-grid">${stats.map(s =>
+        `<div class="ne-stat-card"><div class="ne-stat-value">${s.v}</div><div class="ne-stat-label">${s.l}</div></div>`
+    ).join('')}</div>` : '';
+
+    // Revenue distribution bar chart
+    const revenueHtml = _neRevenueChart(ne);
+
+    // Company size stacked bar
+    const sizeHtml = _neStackedBar(ne.distributions?.revenue_buckets, [
+        {label: '<$5M', color: 'var(--text-muted)'},
+        {label: '$5M-$25M', color: 'var(--yellow)'},
+        {label: '$25M-$50M', color: '#f97316'},
+        {label: '$50M-$100M', color: 'var(--accent)'},
+        {label: '$100M-$500M', color: 'var(--purple)'},
+        {label: '$500M-$1B', color: 'var(--green)'},
+        {label: '$1B+', color: '#14b8a6'},
+    ]);
+
+    // Growth distribution stacked bar
+    const growthHtml = _neStackedBar(ne.distributions?.growth_buckets, [
+        {label: 'Declining (<0%)', color: 'var(--red)'},
+        {label: 'Stable (0-10%)', color: 'var(--text-muted)'},
+        {label: 'Growing (10-25%)', color: 'var(--accent)'},
+        {label: 'Rapid (25%+)', color: 'var(--green)'},
+    ]);
+
+    // Geography badges
+    const geo = ne.geography || {};
+    const geoEntries = Object.entries(geo).filter(([k]) => k !== 'Unknown').sort((a,b) => b[1]-a[1]);
+    const unknownCount = geo['Unknown'] || 0;
+    const geoHtml = geoEntries.length ? `<div class="ne-badge-grid">${geoEntries.map(([country, count]) =>
+        `<span class="ne-badge"><span class="ne-badge-count">${count}</span>${escHtml(country)}</span>`
+    ).join('')}${unknownCount ? `<span class="ne-badge" style="opacity:0.5"><span class="ne-badge-count">${unknownCount}</span>Unknown</span>` : ''}</div>` : '<div class="ne-no-data">No geography data available</div>';
+
+    // Sector badges
+    const sectors = ne.sectors || {};
+    const sectorEntries = Object.entries(sectors).filter(([k]) => k !== 'Unknown' && k !== 'None').sort((a,b) => b[1]-a[1]);
+    const sectorHtml = sectorEntries.length ? `<div class="ne-badge-grid">${sectorEntries.map(([sector, count]) =>
+        `<span class="ne-badge"><span class="ne-badge-count">${count}</span>${escHtml(sector)}</span>`
+    ).join('')}</div>` : '';
+
+    // Public vs Private
+    const pp = ne.public_vs_private || {};
+    const ppHtml = (pp.public || pp.private) ? `<div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);margin-top:6px">
+        ${pp.public ? `<span><span style="color:var(--accent);font-weight:600">${pp.public}</span> Public</span>` : ''}
+        ${pp.private ? `<span><span style="color:var(--purple);font-weight:600">${pp.private}</span> Private</span>` : ''}
+    </div>` : '';
+
+    // Coverage footer
+    const coverageHtml = `<div class="ne-coverage">
+        Data coverage: ${cov.revenue_known || 0}/${ne.company_count} with revenue &bull;
+        ${cov.market_cap_known || 0} publicly traded &bull;
+        ${cov.growth_known || 0} with growth data
+    </div>`;
+
+    return `
+        <div class="ne-section">
+            <div class="cv-section-title" style="margin-bottom:12px">Niche Evaluation</div>
+            ${statHtml}
+            ${ppHtml}
+        </div>
+        ${revenueHtml ? `<div class="ne-section"><div class="ne-section-title">Revenue Distribution</div>${revenueHtml}</div>` : ''}
+        ${sizeHtml ? `<div class="ne-section"><div class="ne-section-title">Company Size Breakdown</div>${sizeHtml}</div>` : ''}
+        ${growthHtml ? `<div class="ne-section"><div class="ne-section-title">Growth Distribution</div>${growthHtml}</div>` : ''}
+        ${geoEntries.length ? `<div class="ne-section"><div class="ne-section-title">Geography</div>${geoHtml}</div>` : ''}
+        ${sectorHtml ? `<div class="ne-section"><div class="ne-section-title">Sectors</div>${sectorHtml}</div>` : ''}
+        ${coverageHtml}
+    `;
+}
+
+function _neRevenueChart(ne) {
+    const companies = (ne.per_company || []).filter(c => c.revenue).sort((a,b) => b.revenue - a.revenue);
+    if (!companies.length) return '<div class="ne-no-data">No revenue data available</div>';
+    const maxRev = companies[0].revenue;
+    return companies.map(c => {
+        const pct = Math.max((c.revenue / maxRev) * 100, 2);
+        const color = c.is_public ? 'var(--accent)' : 'var(--purple)';
+        const quality = c.data_quality === 'low' ? ' (est.)' : '';
+        return `<div class="ne-bar-row">
+            <span class="ne-bar-label" title="${escHtml(c.name)}">${escHtml(c.name)}</span>
+            <div class="ne-bar-track">
+                <div class="ne-bar-fill" style="width:${pct}%;background:${color}"></div>
+            </div>
+            <span class="ne-bar-value">${c.revenue_formatted || '?'}${quality}</span>
+        </div>`;
+    }).join('');
+}
+
+function _neStackedBar(buckets, config) {
+    if (!buckets || !buckets.length) return '';
+    const total = buckets.reduce((s, b) => s + b.count, 0);
+    if (!total) return '<div class="ne-no-data">No data available</div>';
+
+    const segments = buckets.map((b, i) => {
+        const pct = (b.count / total) * 100;
+        const cfg = config[i] || {color: 'var(--text-muted)'};
+        return pct > 0 ? `<div class="ne-stacked-segment" style="width:${pct}%;background:${cfg.color}" title="${b.label}: ${b.count}"></div>` : '';
+    }).join('');
+
+    const legend = buckets.map((b, i) => {
+        const cfg = config[i] || {color: 'var(--text-muted)', label: b.label};
+        return b.count > 0 ? `<span class="ne-legend-item"><span class="ne-legend-dot" style="background:${cfg.color}"></span>${cfg.label} (${b.count})</span>` : '';
+    }).join('');
+
+    return `<div class="ne-stacked-bar">${segments}</div><div class="ne-legend">${legend}</div>`;
+}
+
 // --- Pane 3: Market Summary ---
 
 function renderSummaryPane(campaignId) {
@@ -8963,12 +9147,13 @@ function renderSummaryPane(campaignId) {
     if (!sumContent) return;
 
     const prospects = (c.prospects || []).sort((a, b) =>
-        (b.ua_fit?.overall_score || 0) - (a.ua_fit?.overall_score || 0));
-    const scored = prospects.filter(p => p.ua_fit);
+        (_getScore(b)?.overall_score || 0) - (_getScore(a)?.overall_score || 0));
+    const scored = prospects.filter(p => _hasScore(p));
 
     // Handle empty campaigns
     if (c.status === 'empty' || (!prospects.length && c.status !== 'running')) {
         if (sumEmpty) sumEmpty.style.display = 'none';
+        sumContent.style.display = 'block';
         sumContent.innerHTML = `<div class="pane-empty">
             <div class="icon">&#128269;</div>
             <div>No companies found</div>
@@ -8986,7 +9171,7 @@ function renderSummaryPane(campaignId) {
 
     // Score tier distribution
     const tiers = { prime: 0, strong: 0, possible: 0, weak: 0 };
-    scored.forEach(p => { tiers[_prospectTierClass(p.ua_fit?.overall_score || 0)]++; });
+    scored.forEach(p => { tiers[_prospectTierClass(_getScore(p)?.overall_score || 0)]++; });
 
     // Tier distribution bar
     const tierTotal = scored.length || 1;
@@ -9032,13 +9217,24 @@ function renderSummaryPane(campaignId) {
             return `<li><span class="priority-icon" style="background:${ic.bg};color:${ic.color}">${ic.icon}</span><div class="priority-title">${escHtml(p.title)}</div><div class="priority-desc">${escHtml(p.description)}</div></li>`;
         }).join('');
 
-        // Market Signal Diagnostics — placeholder badges derived from batch data
-        const signalBadges = [
-            { icon: '&#128737;', bg: 'rgba(239,68,68,0.1)', color: 'var(--red)', title: 'Signal Vulnerability', sub: `${scored.filter(p => (p.ua_fit?.signal_coverage?.categories_with_data || 0) < 2).length}/${scored.length} have limited data coverage` },
-            { icon: '&#128200;', bg: 'rgba(22,163,74,0.1)', color: 'var(--green)', title: 'Growth Concentration', sub: `${scored.filter(p => (p.ua_fit?.sub_scores?.growth_trajectory?.score || 0) >= 60).length}/${scored.length} show strong growth signals` },
-            { icon: '&#127916;', bg: 'rgba(168,85,247,0.1)', color: 'var(--purple)', title: 'Creative Readiness', sub: `${scored.filter(p => (p.ua_fit?.sub_scores?.creative_readiness?.score || 0) >= 50).length}/${scored.length} have video assets for CTV` },
-            { icon: '&#128176;', bg: 'rgba(59,130,246,0.1)', color: 'var(--accent)', title: 'Ad Spend Maturity', sub: `${scored.filter(p => (p.ua_fit?.sub_scores?.advertising_maturity?.score || 0) >= 50).length}/${scored.length} run active paid media` },
+        // Market Signal Diagnostics — dynamically derived from lens dimensions
+        const _diagIcons = [
+            { icon: '&#128737;', bg: 'rgba(239,68,68,0.1)', color: 'var(--red)' },
+            { icon: '&#128200;', bg: 'rgba(22,163,74,0.1)', color: 'var(--green)' },
+            { icon: '&#127916;', bg: 'rgba(168,85,247,0.1)', color: 'var(--purple)' },
+            { icon: '&#128176;', bg: 'rgba(59,130,246,0.1)', color: 'var(--accent)' },
         ];
+        // Build diagnostics from whatever dimensions the score has
+        const sampleScore = _getScore(scored[0]);
+        const dims = sampleScore?._dimensions || [];
+        const signalBadges = dims.slice(0, 4).map((dim, i) => {
+            const ic = _diagIcons[i % _diagIcons.length];
+            const aboveThreshold = scored.filter(p => {
+                const sc = _getScore(p);
+                return (sc?.sub_scores?.[dim.key]?.score || 0) >= 50;
+            }).length;
+            return { ...ic, title: dim.label, sub: `${aboveThreshold}/${scored.length} score 50+ on ${dim.label}` };
+        });
         const signalHtml = signalBadges.map(b =>
             `<div class="signal-badge"><div class="signal-badge-icon" style="background:${b.bg};color:${b.color}">${b.icon}</div><div><div class="signal-badge-title">${b.title}</div><div class="signal-badge-sub">${b.sub}</div></div></div>`
         ).join('');
@@ -9083,6 +9279,8 @@ function renderSummaryPane(campaignId) {
                 </div>
             </div>
 
+            ${c.niche_eval ? renderNicheEvaluation(c.niche_eval) + '<div class="ne-divider"></div>' : ''}
+
             ${scored.length > 0 ? `
             <div class="cv-section">
                 <div class="cv-section-title">Score Distribution</div>
@@ -9097,6 +9295,10 @@ function renderSummaryPane(campaignId) {
                 <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click a company for detailed analysis</div>
                 <div id="pane-summary-ranked-list">${rankedHtml}</div>
             </div>
+            ${(() => {
+                const unscoredProspects = prospects.filter(p => !_hasScore(p));
+                return unscoredProspects.length > 0 ? `<div class="ne-divider"></div>${_buildDiscoveryListHtml(unscoredProspects, c)}` : '';
+            })()}
             ` : _buildDiscoveryListHtml(prospects, c)}
         </div>
     `;
@@ -9159,8 +9361,9 @@ function _buildDiscoveryListHtml(prospects, campaignNode) {
 
 function _buildRankedListHtml(scored) {
     return scored.map(p => {
-        const s = p.ua_fit?.overall_score || 0;
-        const label = p.ua_fit?.overall_label || '';
+        const _sc = _getScore(p);
+        const s = _sc?.overall_score || 0;
+        const label = _sc?.overall_label || '';
         const isLimited = p.validation_status && p.validation_status !== 'valid';
         const isActive = activeProspectName === p.company_name ? ' active' : '';
         return `<div class="cv-result-row${isActive}" data-company="${escHtml(p.company_name)}">
@@ -10145,7 +10348,7 @@ async function openProspectDetail(companyName) {
 
     // Find the prospect data from campaign lookup or fetch fresh
     let p = _prospectsByName[companyName];
-    if (!p || !p.ua_fit) {
+    if (!p || !_hasScore(p)) {
         try {
             const resp = await fetch('/api/ua-targets');
             if (resp.ok) {
@@ -10155,7 +10358,7 @@ async function openProspectDetail(companyName) {
             }
         } catch (e) { /* ignore */ }
     }
-    if (!p || !p.ua_fit) {
+    if (!p || !_hasScore(p)) {
         // Show discovery blurb — try live pipeline state first, then campaign prospect data
         const discoveryCompany = (_pipelineState.companies || []).find(c => c.name === companyName);
         // Also check campaign data (for sidebar-loaded campaigns + child tree nodes)
@@ -10242,7 +10445,7 @@ async function openProspectDetail(companyName) {
         return;
     }
 
-    const fit = p.ua_fit;
+    const fit = _getScore(p);
     const score = fit.overall_score || 0;
     const tier = _prospectTierClass(score);
     const sub = fit.sub_scores || {};
@@ -10489,9 +10692,9 @@ function toggleDetailFullscreen() {
 function _buildProspectDashboard(container) {
     if (!activeProspectName) return;
     const p = _prospectsByName[activeProspectName];
-    if (!p || !p.ua_fit) return;
+    if (!p || !_hasScore(p)) return;
 
-    const fit = p.ua_fit;
+    const fit = _getScore(p);
     const score = fit.overall_score || 0;
     const tier = _prospectTierClass(score);
     const sub = fit.sub_scores || {};
@@ -10664,7 +10867,7 @@ async function rescoreProspect(encodedName) {
 
     // Get website from existing data
     const p = _prospectsByName[companyName];
-    const website = p?.ua_fit?.company_snapshot?.website || '';
+    const website = _getScore(p)?.company_snapshot?.website || '';
 
     try {
         const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/ua-fit`, {
@@ -10885,6 +11088,7 @@ function initPipelineMap(niche) {
     _pipelineState = {
         niche, companies: [],
         companyStatus: {}, companyScores: {}, companyAnalysisProgress: {},
+        nicheEval: null,
         phase: 'discovering',
     };
 
@@ -11056,6 +11260,97 @@ function handlePipelineSSE(ev) {
                 </div>
                 <div class="pipeline-connector done"></div>
             `);
+        }
+
+    } else if (ev.type === 'niche_scan_start') {
+        // Show niche scan progress in Pane 3
+        const sumContent = document.getElementById('pane-summary-content');
+        const sumEmpty = document.getElementById('pane-summary-empty');
+        if (sumEmpty) sumEmpty.style.display = 'none';
+        if (sumContent) {
+            sumContent.style.display = 'block';
+            sumContent.innerHTML = `<div class="campaign-view" style="padding:16px">
+                <div class="ne-section">
+                    <div class="ne-section-title">Niche Evaluation</div>
+                    <div id="niche-scan-progress" style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary)">
+                        <div class="company-card-spinner" style="width:14px;height:14px;border-width:2px"></div>
+                        <span>Scanning financial data: 0/${ev.total} companies...</span>
+                    </div>
+                </div>
+            </div>`;
+        }
+        // Add scan node to Pane 2 pipeline
+        const valNode = document.getElementById('pm-validation');
+        if (valNode) {
+            valNode.insertAdjacentHTML('afterend', `
+                <div class="pipeline-connector" id="pm-conn-scan"></div>
+                <div class="pipeline-node running" id="pm-niche-scan" style="padding:10px 14px">
+                    <div class="pipeline-node-header">
+                        <div class="company-card-spinner" style="width:14px;height:14px;border-width:2px"></div>
+                        <div class="pipeline-node-label">Financial Scan</div>
+                    </div>
+                    <div class="pipeline-node-meta" id="pm-scan-meta">Scanning 0/${ev.total}...</div>
+                </div>
+            `);
+        }
+
+    } else if (ev.type === 'niche_scan_progress') {
+        // Update scan counter in Pane 3 and Pane 2
+        const progEl = document.getElementById('niche-scan-progress');
+        if (progEl) {
+            const icon = ev.status === 'done' ? '&#10003;' : ev.status === 'error' ? '&#10007;' : '';
+            const snap = ev.snapshot || {};
+            const detail = snap.revenue_formatted ? ` &mdash; ${snap.revenue_formatted}${snap.is_public ? ' (public)' : ''}` : '';
+            progEl.innerHTML = `<div class="company-card-spinner" style="width:14px;height:14px;border-width:2px"></div>
+                <span>Scanning: ${ev.index}/${ev.total} &mdash; ${escHtml(ev.company)}${detail}</span>`;
+        }
+        const scanMeta = document.getElementById('pm-scan-meta');
+        if (scanMeta) scanMeta.textContent = `Scanning ${ev.index}/${ev.total}...`;
+
+    } else if (ev.type === 'niche_eval_complete') {
+        // Store niche eval and render charts in Pane 3
+        _pipelineState.nicheEval = ev.niche_eval;
+        const sumContent2 = document.getElementById('pane-summary-content');
+        if (sumContent2) {
+            // Build company list from discovery data
+            const discoveredCompanies = (_pipelineState.companies || []);
+            const discoveryListHtml = discoveredCompanies.map(c => {
+                const name = c.name || '?';
+                const desc = c.description || '';
+                const size = c.estimated_size || '';
+                return `<div class="discovery-list-item" data-company-name="${escHtml(name)}" style="cursor:pointer;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px"
+                    onclick="openProspectDetail('${escHtml(name).replace(/'/g, "\\'")}')">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:${desc ? '4px' : '0'}">
+                        <span style="font-weight:600;font-size:13px;color:var(--text-primary)">${escHtml(name)}</span>
+                        ${size ? `<span class="company-card-size" style="margin:0">${escHtml(size)}</span>` : ''}
+                    </div>
+                    ${desc ? `<div style="font-size:11px;color:var(--text-muted);line-height:1.4;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden">${escHtml(desc)}</div>` : ''}
+                </div>`;
+            }).join('');
+
+            sumContent2.innerHTML = `<div class="campaign-view" style="padding:16px">
+                ${renderNicheEvaluation(ev.niche_eval)}
+                <div class="ne-divider"></div>
+                <div class="cv-section">
+                    <div class="cv-section-title">Discovered Companies (${discoveredCompanies.length})</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click a company for details</div>
+                    ${discoveryListHtml}
+                </div>
+            </div>`;
+        }
+        // Update Pane 2 scan node to done
+        const scanNode = document.getElementById('pm-niche-scan');
+        if (scanNode) {
+            scanNode.className = 'pipeline-node done';
+            scanNode.style.padding = '10px 14px';
+            const cov = ev.niche_eval?.data_coverage || {};
+            scanNode.innerHTML = `
+                <div class="pipeline-node-header">
+                    <div class="pipeline-node-icon" style="font-size:14px">&#10003;</div>
+                    <div class="pipeline-node-label">Financial Scan</div>
+                </div>
+                <div class="pipeline-node-meta">${ev.niche_eval?.company_count || 0} scanned &mdash; ${cov.revenue_known || 0} with revenue data</div>
+            `;
         }
 
     } else if (ev.type === 'analyzing') {
@@ -11414,6 +11709,41 @@ function runProspectPipeline() {
     // Init pipeline map in Pane 2
     initPipelineMap(niche);
     focusPane('pane-execution');
+
+    // Add temporary sidebar entry so user can navigate back to this running pipeline
+    const list = document.getElementById('prospect-search-list');
+    if (list) {
+        // Deactivate other items
+        document.querySelectorAll('.search-query-item').forEach(el => el.classList.remove('active'));
+        // Insert at top
+        const tempItem = document.createElement('div');
+        tempItem.className = 'search-query-item active';
+        tempItem.id = 'prospect-running-temp';
+        tempItem.setAttribute('data-campaign-id', 'running');
+        tempItem.onclick = () => {
+            // Switch back to the running pipeline
+            document.querySelectorAll('.search-query-item').forEach(el => el.classList.remove('active'));
+            tempItem.classList.add('active');
+            if (_currentRunCampaignId) activeCampaignId = _currentRunCampaignId;
+            if (_savedLivePipelineDOM) {
+                const mapEl = document.getElementById('pipeline-map');
+                if (mapEl) { mapEl.innerHTML = _savedLivePipelineDOM; mapEl.style.display = 'block'; }
+                const emptyEl = document.getElementById('pane-execution-empty');
+                if (emptyEl) emptyEl.style.display = 'none';
+                _savedLivePipelineDOM = null;
+            }
+            const execBadge = document.getElementById('pane-execution-status');
+            if (execBadge) { execBadge.textContent = 'Running'; execBadge.className = 'pane-status-badge running'; }
+            focusPane('pane-execution');
+        };
+        tempItem.innerHTML = `<div class="search-query-info">
+            <div class="search-query-name">${escHtml(niche)}</div>
+            <div class="search-query-meta">
+                <span class="pane-status-badge running">Running</span>
+            </div>
+        </div>`;
+        list.insertBefore(tempItem, list.firstChild);
+    }
 
     // Collect structured niche fields if Niche Builder was used
     const nicheCtx = {};

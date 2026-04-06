@@ -953,6 +953,17 @@ def create_app(db_path="intel.db"):
                 company_name, lens_id, db_path=db_path, website_url=website_url
             )
             if score_data:
+                # Update campaign scoring_lens_id if this company belongs to any campaign
+                from db import get_or_create_dossier, set_campaign_lens
+                conn = get_connection(db_path)
+                did = get_or_create_dossier(conn, company_name)
+                campaign_rows = conn.execute(
+                    "SELECT DISTINCT campaign_id FROM campaign_prospects WHERE dossier_id = ?",
+                    (did,),
+                ).fetchall()
+                for cr in campaign_rows:
+                    set_campaign_lens(conn, cr["campaign_id"], lens_id)
+                conn.close()
                 return jsonify({"ok": True, "score": score_data})
             return jsonify({"error": "Failed to generate lens score"}), 500
         except Exception as e:
@@ -1137,6 +1148,8 @@ def create_app(db_path="intel.db"):
                 c["prospects"] = detail.get("prospects", [])
                 c["insight"] = detail.get("insight")
                 c["execution_log"] = detail.get("execution_log")
+                c["niche_eval"] = detail.get("niche_eval")
+                c["scoring_lens_id"] = detail.get("scoring_lens_id")
             else:
                 c["prospects"] = []
             # Attach child campaigns for tree rendering in Pane 2
@@ -1148,6 +1161,8 @@ def create_app(db_path="intel.db"):
                     ch["prospects"] = ch_detail.get("prospects", [])
                     ch["insight"] = ch_detail.get("insight")
                     ch["execution_log"] = ch_detail.get("execution_log")
+                    ch["niche_eval"] = ch_detail.get("niche_eval")
+                    ch["scoring_lens_id"] = ch_detail.get("scoring_lens_id")
                 else:
                     ch["prospects"] = []
             c["children"] = children
@@ -1214,9 +1229,19 @@ def create_app(db_path="intel.db"):
 
     @app.route("/api/campaigns/<int:campaign_id>/insight", methods=["POST"])
     def generate_campaign_insight(campaign_id):
-        """Generate a vertical insight for a campaign."""
-        from agents.ua_fit import generate_vertical_insight
-        insight = generate_vertical_insight(campaign_id, db_path=db_path)
+        """Generate a vertical insight for a campaign (lens-aware)."""
+        # Check if campaign has lens scores — use lens insight if so
+        from db import get_campaign_detail
+        conn = get_connection(db_path)
+        campaign = get_campaign_detail(conn, campaign_id)
+        conn.close()
+        has_lens = campaign and any(p.get("lens_score") for p in (campaign.get("prospects") or []))
+        if has_lens:
+            from agents.lens import generate_lens_vertical_insight
+            insight = generate_lens_vertical_insight(campaign_id, db_path=db_path)
+        else:
+            from agents.ua_fit import generate_vertical_insight
+            insight = generate_vertical_insight(campaign_id, db_path=db_path)
         if not insight:
             return jsonify({"error": "Could not generate insight"}), 500
         return jsonify(insight)
@@ -1452,6 +1477,62 @@ def create_app(db_path="intel.db"):
                     conn.close()
                     yield f"data: {json.dumps({'type': 'error', 'text': 'No valid companies after website validation.'})}\n\n"
                     return
+
+                # ---- Phase 2.5: Lightweight Financial Scan ----
+                yield f"data: {json.dumps({'type': 'status', 'text': f'Scanning financial data for {len(valid_companies)} companies...'})}\n\n"
+
+                from agents.niche_eval import scan_niche_financials, compute_niche_aggregates
+                from db import save_financial_snapshot, save_niche_evaluation
+
+                scan_q = queue.Queue()
+                scan_holder = [None]
+
+                def _scan_cb(event_type, ev_data):
+                    scan_q.put((event_type, ev_data))
+
+                def _run_scan():
+                    try:
+                        results = scan_niche_financials(valid_companies, progress_cb=_scan_cb)
+                        scan_holder[0] = results
+                    except Exception as exc:
+                        print(f"[pipeline] Niche scan error: {exc}")
+                        scan_holder[0] = []
+                    finally:
+                        scan_q.put(("_done", None))
+
+                st = threading.Thread(target=_run_scan, daemon=True)
+                st.start()
+
+                while True:
+                    try:
+                        ev_type, ev_data = scan_q.get(timeout=0.2)
+                    except queue.Empty:
+                        continue
+                    if ev_type == "_done":
+                        break
+                    yield f"data: {json.dumps({'type': ev_type, **(ev_data or {})})}\n\n"
+
+                st.join(timeout=180)
+
+                scan_results = scan_holder[0] or []
+
+                # Save per-company snapshots to dossiers
+                if scan_results:
+                    conn = get_connection(db_path)
+                    for snap in scan_results:
+                        snap_name = snap.get("company_name", "")
+                        if snap_name and snap.get("data_quality", "none") != "none":
+                            did = get_or_create_dossier(conn, snap_name)
+                            save_financial_snapshot(conn, did, snap)
+                    conn.close()
+
+                # Compute and save niche aggregates
+                niche_eval = compute_niche_aggregates(scan_results)
+                conn = get_connection(db_path)
+                save_niche_evaluation(conn, campaign_id, niche_eval)
+                conn.close()
+
+                yield f"data: {json.dumps({'type': 'niche_eval_complete', 'niche_eval': niche_eval})}\n\n"
 
                 # ---- Phase 3: Save website URLs + Complete ----
                 # Only save websites that actually validated — skip bad URLs
