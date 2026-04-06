@@ -3174,6 +3174,27 @@
         }
         .ne-badge .ne-badge-count { font-weight: 600; color: var(--text-primary); margin-right: 4px; }
         .ne-no-data { font-size: 11px; color: var(--text-muted); font-style: italic; padding: 6px 0; }
+        .ne-company-card {
+            padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+            margin-bottom: 4px; background: rgba(255,255,255,0.02);
+        }
+        .ne-company-row {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .ne-company-name {
+            font-size: 12px; font-weight: 600; color: var(--text-primary);
+            min-width: 90px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .ne-company-rev {
+            font-size: 11px; color: var(--text-secondary); min-width: 55px; text-align: right; flex-shrink: 0;
+        }
+        .ne-company-growth {
+            font-size: 12px; font-weight: 700; min-width: 45px; text-align: right; flex-shrink: 0; margin-left: auto;
+        }
+        .ne-company-badges {
+            display: flex; gap: 4px; margin-top: 4px;
+        }
         .ne-coverage {
             font-size: 10px; color: var(--text-muted); padding-top: 10px;
             border-top: 1px solid var(--border); margin-top: 10px;
@@ -4570,7 +4591,7 @@
                         <input type="text" id="prospect-niche-input" placeholder="Enter a niche to discover..." onkeydown="if(event.key==='Enter')runProspectPipeline()">
                     </div>
                     <div class="prospect-trigger-row">
-                        <input type="number" class="prospect-topn" id="prospect-topn" value="10" min="3" max="20" title="Max companies">
+                        <input type="number" class="prospect-topn" id="prospect-topn" value="5" min="3" max="20" title="Max companies">
                         <button id="prospect-run-btn" onclick="runProspectPipeline()">Search</button>
                     </div>
                 </div>
@@ -9025,49 +9046,15 @@ function renderNicheEvaluation(ne) {
     if (agg.total_revenue_formatted) stats.push({v: agg.total_revenue_formatted, l: 'Combined Revenue'});
     if (agg.median_revenue_formatted) stats.push({v: agg.median_revenue_formatted, l: 'Median Revenue'});
     if (ne.company_count) stats.push({v: ne.company_count, l: 'Companies Scanned'});
-    if (agg.avg_revenue_growth != null) stats.push({v: (agg.avg_revenue_growth > 0 ? '+' : '') + agg.avg_revenue_growth.toFixed(1) + '%', l: 'Avg Growth YoY'});
+    if (agg.avg_revenue_growth != null) {
+        const allEstimated = (ne.per_company || []).filter(c => c.growth != null).every(c => c.growth_estimated);
+        stats.push({v: (agg.avg_revenue_growth > 0 ? '+' : '') + agg.avg_revenue_growth.toFixed(1) + '%', l: allEstimated ? 'Avg Growth YoY (est.)' : 'Avg Growth YoY'});
+    }
     if (agg.total_market_cap_formatted) stats.push({v: agg.total_market_cap_formatted, l: 'Combined Mkt Cap'});
     if (agg.total_employees) stats.push({v: agg.total_employees.toLocaleString(), l: 'Total Employees'});
 
     const statHtml = stats.length ? `<div class="ne-stat-grid">${stats.map(s =>
         `<div class="ne-stat-card"><div class="ne-stat-value">${s.v}</div><div class="ne-stat-label">${s.l}</div></div>`
-    ).join('')}</div>` : '';
-
-    // Revenue distribution bar chart
-    const revenueHtml = _neRevenueChart(ne);
-
-    // Company size stacked bar
-    const sizeHtml = _neStackedBar(ne.distributions?.revenue_buckets, [
-        {label: '<$5M', color: 'var(--text-muted)'},
-        {label: '$5M-$25M', color: 'var(--yellow)'},
-        {label: '$25M-$50M', color: '#f97316'},
-        {label: '$50M-$100M', color: 'var(--accent)'},
-        {label: '$100M-$500M', color: 'var(--purple)'},
-        {label: '$500M-$1B', color: 'var(--green)'},
-        {label: '$1B+', color: '#14b8a6'},
-    ]);
-
-    // Growth distribution stacked bar
-    const growthHtml = _neStackedBar(ne.distributions?.growth_buckets, [
-        {label: 'Declining (<0%)', color: 'var(--red)'},
-        {label: 'Stable (0-10%)', color: 'var(--text-muted)'},
-        {label: 'Growing (10-25%)', color: 'var(--accent)'},
-        {label: 'Rapid (25%+)', color: 'var(--green)'},
-    ]);
-
-    // Geography badges
-    const geo = ne.geography || {};
-    const geoEntries = Object.entries(geo).filter(([k]) => k !== 'Unknown').sort((a,b) => b[1]-a[1]);
-    const unknownCount = geo['Unknown'] || 0;
-    const geoHtml = geoEntries.length ? `<div class="ne-badge-grid">${geoEntries.map(([country, count]) =>
-        `<span class="ne-badge"><span class="ne-badge-count">${count}</span>${escHtml(country)}</span>`
-    ).join('')}${unknownCount ? `<span class="ne-badge" style="opacity:0.5"><span class="ne-badge-count">${unknownCount}</span>Unknown</span>` : ''}</div>` : '<div class="ne-no-data">No geography data available</div>';
-
-    // Sector badges
-    const sectors = ne.sectors || {};
-    const sectorEntries = Object.entries(sectors).filter(([k]) => k !== 'Unknown' && k !== 'None').sort((a,b) => b[1]-a[1]);
-    const sectorHtml = sectorEntries.length ? `<div class="ne-badge-grid">${sectorEntries.map(([sector, count]) =>
-        `<span class="ne-badge"><span class="ne-badge-count">${count}</span>${escHtml(sector)}</span>`
     ).join('')}</div>` : '';
 
     // Public vs Private
@@ -9076,6 +9063,57 @@ function renderNicheEvaluation(ne) {
         ${pp.public ? `<span><span style="color:var(--accent);font-weight:600">${pp.public}</span> Public</span>` : ''}
         ${pp.private ? `<span><span style="color:var(--purple);font-weight:600">${pp.private}</span> Private</span>` : ''}
     </div>` : '';
+
+    // Unified company cards
+    const companies = (ne.per_company || []).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+    const maxRev = companies.length ? Math.max(...companies.map(c => c.revenue || 0)) : 0;
+    const companyCardsHtml = companies.map(c => {
+        const hasRev = c.revenue != null;
+        const barPct = hasRev && maxRev ? Math.max((c.revenue / maxRev) * 100, 2) : 0;
+        const growthVal = c.growth != null ? c.growth : null;
+        const barColor = growthVal != null ? (growthVal > 0 ? 'var(--green)' : growthVal < 0 ? 'var(--red)' : 'var(--text-muted)') : 'var(--text-muted)';
+        const growthColor = growthVal != null ? (growthVal > 10 ? 'var(--green)' : growthVal >= 0 ? 'var(--text-secondary)' : 'var(--red)') : '';
+        // Show growth % with absolute change for context
+        let growthText = '';
+        let growthEst = c.growth_estimated ? ' est.' : '';
+        if (growthVal != null) {
+            const pctStr = `${growthVal > 0 ? '+' : ''}${growthVal.toFixed(0)}%`;
+            if (hasRev) {
+                const priorRev = c.revenue / (1 + growthVal / 100);
+                const absChange = c.revenue - priorRev;
+                const sign = absChange >= 0 ? '+' : '';
+                const absFmt = Math.abs(absChange) >= 1e9 ? `${sign}$${(absChange/1e9).toFixed(1)}B`
+                    : Math.abs(absChange) >= 1e6 ? `${sign}$${(absChange/1e6).toFixed(0)}M`
+                    : `${sign}$${(absChange/1e3).toFixed(0)}K`;
+                growthText = `${pctStr} (${absFmt})`;
+            } else {
+                growthText = pctStr;
+            }
+        }
+        const quality = c.data_quality === 'high' ? '' : c.data_quality === 'medium' ? '' : ' (est.)';
+
+        const badges = [];
+        if (c.hq_country && c.hq_country !== 'Unknown') badges.push(c.hq_country);
+        if (c.sector && c.sector !== 'Unknown' && c.sector !== 'None') badges.push(c.sector);
+        const ppBadge = c.is_public
+            ? `<span class="ne-badge" style="font-size:9px;padding:1px 6px;border-color:rgba(59,130,246,0.3);color:var(--accent)">Public</span>`
+            : `<span class="ne-badge" style="font-size:9px;padding:1px 6px;border-color:rgba(168,85,247,0.3);color:var(--purple)">Private</span>`;
+
+        return `<div class="ne-company-card">
+            <div class="ne-company-row">
+                <span class="ne-company-name" title="${escHtml(c.name)}">${escHtml(c.name)}</span>
+                <span class="ne-company-rev">${hasRev ? c.revenue_formatted + quality : '—'}</span>
+                ${growthText ? `<span class="ne-company-growth" style="color:${growthColor}">${growthText}${growthEst}</span>` : '<span class="ne-company-growth" style="color:var(--text-muted)">—</span>'}
+            </div>
+            ${hasRev ? `<div class="ne-bar-track" style="height:6px;margin:4px 0 0">
+                <div class="ne-bar-fill" style="width:${barPct}%;background:${barColor};height:100%"></div>
+            </div>` : ''}
+            <div class="ne-company-badges">
+                ${ppBadge}
+                ${badges.map(b => `<span class="ne-badge" style="font-size:9px;padding:1px 6px">${escHtml(b)}</span>`).join('')}
+            </div>
+        </div>`;
+    }).join('');
 
     // Coverage footer
     const coverageHtml = `<div class="ne-coverage">
@@ -9090,11 +9128,10 @@ function renderNicheEvaluation(ne) {
             ${statHtml}
             ${ppHtml}
         </div>
-        ${revenueHtml ? `<div class="ne-section"><div class="ne-section-title">Revenue Distribution</div>${revenueHtml}</div>` : ''}
-        ${sizeHtml ? `<div class="ne-section"><div class="ne-section-title">Company Size Breakdown</div>${sizeHtml}</div>` : ''}
-        ${growthHtml ? `<div class="ne-section"><div class="ne-section-title">Growth Distribution</div>${growthHtml}</div>` : ''}
-        ${geoEntries.length ? `<div class="ne-section"><div class="ne-section-title">Geography</div>${geoHtml}</div>` : ''}
-        ${sectorHtml ? `<div class="ne-section"><div class="ne-section-title">Sectors</div>${sectorHtml}</div>` : ''}
+        ${companies.length ? `<div class="ne-section">
+            <div class="ne-section-title">Company Breakdown</div>
+            ${companyCardsHtml}
+        </div>` : ''}
         ${coverageHtml}
     `;
 }
@@ -9708,7 +9745,7 @@ function _discoverLogToTree(executionLog, prospects, campaignLabel) {
 
         if (summary) {
             searchCard.children.push({
-                id: 'search.dedup', label: 'Dedup', status: 'done', kind: 'result',
+                id: 'search.dedup', label: 'Deduplicate', status: 'done', kind: 'result',
                 icon: '&#128200;', iconBg: 'rgba(22,163,74,0.15)',
                 summary: `${summary.total_results} → ${summary.unique_results} unique`,
                 children: [],
@@ -10117,7 +10154,7 @@ function _buildExecutionLogHtml(executionLog, prospects) {
             <div class="exec-step-summary">${escHtml(summaryText)}</div>
             <div class="exec-detail" style="display:none;margin-top:6px">
                 ${detailRows}
-                ${summary ? `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;padding-top:4px;border-top:1px solid var(--border)">Dedup: ${summary.total_results} total → ${summary.unique_results} unique</div>` : ''}
+                ${summary ? `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;padding-top:4px;border-top:1px solid var(--border)">Deduplicated: ${summary.total_results} total → ${summary.unique_results} unique</div>` : ''}
             </div>
         </div>`);
     }

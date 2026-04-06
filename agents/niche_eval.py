@@ -37,6 +37,7 @@ def lightweight_financial_scan(company_name, description=None, progress_cb=None)
         "revenue": None,
         "revenue_formatted": None,
         "revenue_yoy_growth": None,
+        "growth_direction": None,
         "market_cap": None,
         "market_cap_formatted": None,
         "employee_count": None,
@@ -102,32 +103,75 @@ def lightweight_financial_scan(company_name, description=None, progress_cb=None)
         except Exception as e:
             print(f"[niche_eval] SEC EDGAR failed for {company_name}: {e}")
 
-    # --- Tier 3: LLM fallback for private companies ---
+    # --- Tier 3: Web search + LLM extraction for private companies ---
     if not ticker and result["data_quality"] == "low":
         try:
-            estimated = _estimate_private_company(company_name, description)
-            if estimated:
-                result["revenue"] = estimated.get("estimated_revenue")
-                if result["revenue"]:
-                    result["revenue_formatted"] = _format_currency(result["revenue"])
-                result["employee_count"] = estimated.get("estimated_employees")
-                result["hq_country"] = estimated.get("hq_country")
-                result["sector"] = estimated.get("sector")
-                result["industry"] = estimated.get("industry")
-                result["sources"].append("llm_estimate")
+            extracted = _research_private_company(company_name, description)
+            if extracted:
+                rev_latest = extracted.get("revenue_latest")
+                rev_prior = extracted.get("revenue_prior")
+                rev_latest_year = extracted.get("revenue_latest_year")
+                rev_prior_year = extracted.get("revenue_prior_year")
+
+                if rev_latest:
+                    result["revenue"] = rev_latest
+                    result["revenue_formatted"] = _format_currency(rev_latest)
+                    result["revenue_year"] = rev_latest_year
+
+                # Compute YoY growth from the two revenue figures
+                if rev_latest and rev_prior and rev_prior > 0:
+                    years_gap = (rev_latest_year - rev_prior_year) if (rev_latest_year and rev_prior_year) else 1
+                    if years_gap == 1:
+                        result["revenue_yoy_growth"] = round((rev_latest - rev_prior) / rev_prior * 100, 1)
+                    elif years_gap > 1:
+                        # CAGR for multi-year gaps
+                        result["revenue_yoy_growth"] = round(((rev_latest / rev_prior) ** (1 / years_gap) - 1) * 100, 1)
+                    result["revenue_prior"] = rev_prior
+                    result["revenue_prior_formatted"] = _format_currency(rev_prior)
+                    if result["revenue_yoy_growth"] is not None:
+                        result["growth_direction"] = "growing" if result["revenue_yoy_growth"] > 5 else "declining" if result["revenue_yoy_growth"] < -5 else "stable"
+
+                result["employee_count"] = extracted.get("estimated_employees")
+                result["hq_country"] = extracted.get("hq_country")
+                result["sector"] = extracted.get("sector")
+                result["industry"] = extracted.get("industry")
+                if extracted.get("_had_search_data"):
+                    result["data_quality"] = "medium"
+                    result["sources"].append("web_search")
         except Exception as e:
-            print(f"[niche_eval] LLM estimate failed for {company_name}: {e}")
+            print(f"[niche_eval] Private company research failed for {company_name}: {e}")
 
     return result
 
 
-def _estimate_private_company(company_name, description=None):
-    """Use a single FAST_CHAIN LLM call to estimate private company financials."""
+def _research_private_company(company_name, description=None):
+    """Search the web for financial data, then have LLM extract from results."""
+    from scraper.web_search import search_web
     from agents.llm import generate_json, FAST_CHAIN
     from prompts.niche_eval import build_private_company_prompt
 
-    prompt = build_private_company_prompt(company_name, description)
-    return generate_json(prompt, timeout=15, chain=FAST_CHAIN)
+    # Web search for actual financial data
+    search_snippets = []
+    try:
+        results = search_web(f'"{company_name}" revenue funding employees', max_results=5)
+        for r in results:
+            snippet = f"- {r.get('title', '')}: {r.get('body', '')}"
+            search_snippets.append(snippet[:300])
+    except Exception as e:
+        print(f"[niche_eval] Web search failed for {company_name}: {e}")
+
+    if not search_snippets:
+        print(f"[niche_eval] No search results for {company_name} — skipping (no blind guessing)")
+        return None
+
+    prompt = build_private_company_prompt(
+        company_name, description,
+        search_context="\n".join(search_snippets),
+    )
+    result = generate_json(prompt, timeout=15, chain=FAST_CHAIN)
+    if result:
+        result["_had_search_data"] = True
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +258,15 @@ def compute_niche_aggregates(scan_results):
     with_market_cap = [s for s in scan_results if s.get("market_cap")]
     with_employees = [s for s in scan_results if s.get("employee_count")]
     with_growth = [s for s in scan_results if s.get("revenue_yoy_growth") is not None]
+    # Include companies with growth_direction but no exact % — map to midpoint estimates
+    _DIRECTION_ESTIMATE = {"growing": 15, "stable": 3, "declining": -5}
+    for s in scan_results:
+        if s.get("revenue_yoy_growth") is None and s.get("growth_direction"):
+            est = _DIRECTION_ESTIMATE.get(s["growth_direction"])
+            if est is not None:
+                s["revenue_yoy_growth"] = est
+                s["_growth_estimated"] = True
+                with_growth.append(s)
 
     # --- Revenue buckets ---
     REVENUE_BUCKETS = [
@@ -327,6 +380,8 @@ def compute_niche_aggregates(scan_results):
                 "market_cap_formatted": s.get("market_cap_formatted"),
                 "employees": s.get("employee_count"),
                 "growth": s.get("revenue_yoy_growth"),
+                "growth_estimated": s.get("_growth_estimated", False),
+                "growth_direction": s.get("growth_direction"),
                 "is_public": s.get("is_public", False),
                 "data_quality": s.get("data_quality", "low"),
                 "sector": s.get("sector"),
