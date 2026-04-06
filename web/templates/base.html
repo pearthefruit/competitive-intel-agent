@@ -9300,6 +9300,8 @@ function renderSummaryPane(campaignId) {
                 return unscoredProspects.length > 0 ? `<div class="ne-divider"></div>${_buildDiscoveryListHtml(unscoredProspects, c)}` : '';
             })()}
             ` : _buildDiscoveryListHtml(prospects, c)}
+
+            ${_buildChildCampaignsHtml(c)}
         </div>
     `;
 
@@ -9444,6 +9446,38 @@ function _buildBreadcrumb(campaignId) {
         const isCurrent = i === nodes.length - 1;
         return `<span class="breadcrumb-seg${isCurrent ? ' current' : ''}" ${isCurrent ? '' : `onclick="_selectTreeNode(${n.id})"`}>${label}</span>`;
     }).join('<span class="breadcrumb-sep">/</span>')}</div>`;
+}
+
+function _buildChildCampaignsHtml(campaign) {
+    // Find child campaigns (Find Similar explorations) for this campaign
+    const children = (campaign.children || []).filter(ch => ch.parent_campaign_id === campaign.id);
+    if (!children.length) return '';
+
+    const items = children.map(ch => {
+        const label = ch.seed_company ? `Similar to ${escHtml(ch.seed_company)}` : escHtml(ch.name || ch.niche);
+        const count = ch.prospect_count || (ch.prospects || []).length || 0;
+        const statusBadge = ch.status === 'running'
+            ? '<span class="pane-status-badge running" style="font-size:9px;padding:1px 5px">Running</span>'
+            : ch.status === 'empty'
+            ? '<span class="pane-status-badge" style="font-size:9px;padding:1px 5px;background:rgba(107,114,128,0.15);color:#9ca3af">Empty</span>'
+            : '';
+        return `<div class="discovery-list-item" style="cursor:pointer;padding:10px 12px;border:1px solid rgba(168,85,247,0.2);border-radius:8px;margin-bottom:6px;background:rgba(168,85,247,0.03)"
+            onclick="_selectTreeNode(${ch.id})">
+            <div style="display:flex;align-items:center;gap:8px">
+                <span style="color:var(--purple);font-size:13px">&#128279;</span>
+                <span style="font-weight:600;font-size:13px;color:var(--text-primary)">${label}</span>
+                <span style="font-size:11px;color:var(--purple)">${count} companies</span>
+                ${statusBadge}
+            </div>
+        </div>`;
+    }).join('');
+
+    return `<div class="ne-divider"></div>
+        <div class="cv-section">
+            <div class="cv-section-title">Related Explorations</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click to view "Find Similar" results</div>
+            ${items}
+        </div>`;
 }
 
 // ===================== SHARED PIPELINE TREE RENDERER (Flowchart Cards) =====================
