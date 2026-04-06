@@ -33,7 +33,8 @@ All analysis commands: `collect`, `classify`, `analyze`, `financial`, `competito
 2. **Classify** → LLM classifies jobs (department, seniority, strategic tags) → `classifications`
 3. **Analyze** → 8 analysis agents (financial, competitors, sentiment, patents, techstack, SEO, pricing, hiring) → reports + key facts on dossier. All agents emit structured `progress_cb` events for real-time UI.
 4. **Dossier system** → analyses accumulate per company. Key facts extracted as JSON. Changes between runs detected as timeline events. Fuzzy matching (0.85 threshold) prevents duplicate dossiers.
-5. **Briefing** → hybrid algorithmic + LLM Digital Maturity Score. Algorithm computes base scores from structured data, LLM adjusts ±10 with justification, post-processing recomputes overall. Anomaly detection identifies consulting opportunities.
+5. **Niche Evaluation** → after discovery + validation, lightweight financial scan of all companies (Yahoo Finance, SEC EDGAR, LLM fallback). Aggregates into market sizing charts (revenue distribution, company size, growth, geography, sectors). Runs as Phase 2.5 in the pipeline with SSE streaming.
+6. **Briefing** → hybrid algorithmic + LLM Digital Maturity Score. Algorithm computes base scores from structured data, LLM adjusts ±10 with justification, post-processing recomputes overall. Anomaly detection identifies consulting opportunities.
 
 ### Key Architectural Decisions
 
@@ -41,12 +42,13 @@ All analysis commands: `collect`, `classify`, `analyze`, `financial`, `competito
 - **Chat context management:** Three-pronged approach to prevent context overflow on small models: (1) tool result summarization via secondary LLM, (2) dynamic tool schema selection (31 tools round 1, 11 tools round 2+), (3) condensed system prompt on rounds 2+. Saves ~22K chars per round.
 - **LLM-powered discovery queries:** `_build_queries_llm()` in `agents/discover.py` uses `FAST_CHAIN` to decompose complex niche descriptions into targeted search queries. Falls back to template-based generation if LLM fails.
 - **Execution log auditability:** Discovery events include per-result metadata (title, URL, source, date) and full company details. Frontend renders as clickable links in pipeline tree mini-cards via `_richDetail` flag.
-- **Lens system** (`agents/lens.py`): Configurable evaluation frameworks with custom dimensions, weights, rubrics. Replaces hardcoded CTV scoring. Default "CTV Ad Sales" lens preserved.
+- **Lens system** (`agents/lens.py`): Configurable evaluation frameworks with custom dimensions, weights, rubrics. Replaces hardcoded CTV scoring. Default "CTV Ad Sales" lens preserved. Prospecting module uses lens scores when available (via `_getScore()` accessor), falls back to UA fit for legacy campaigns. `scoring_lens_id` on campaigns tracks which lens was used; auto-set when companies are scored via lens endpoint.
+- **Niche evaluation** (`agents/niche_eval.py`): Bottom-up market sizing from discovered companies. Lightweight financial scan (Yahoo Finance + SEC EDGAR + LLM fallback for private companies) runs in parallel via ThreadPoolExecutor(5). Aggregates into revenue distribution, company size breakdown, growth signals, geography, and sector charts. Stored as `niche_eval_json` on campaigns. Per-company snapshots cached as `financial_snapshot_json` on dossiers for reuse in full research.
 
 ### Two Modules
 
 - **Research** — three-pane layout: navigation (Reports/Dossiers/Chat) | chat with SSE streaming + tool execution | report/dossier/briefing viewer
-- **Prospecting** — four-pane layout: niche input + campaign sidebar | execution engine (pipeline tree flowchart) | market summary (company selection) | company detail. Two-phase: Discover (LLM-powered search) → Research (lens-based scoring). Supports recursive "Find Similar" discovery trees (max depth 3).
+- **Prospecting** — four-pane layout: niche input + campaign sidebar | execution engine (pipeline tree flowchart) | market summary (company selection) | company detail. Three-phase: Discover (LLM-powered search) → Niche Evaluation (bottom-up market sizing) → Research (lens-based scoring). Supports recursive "Find Similar" discovery trees (max depth 3) with bidirectional navigation (breadcrumb up, Related Explorations down).
 
 ### Pipeline Tree Component
 
@@ -76,7 +78,7 @@ USPTO_API_KEY       # Falls back to PATENTSVIEW_API_KEY
 
 ## Legacy Notes
 
-- `agents/ua_fit.py` / `prompts/ua_fit.py` — legacy ICP scoring, superseded by lens system. `validate_websites()` still used. DB columns `ua_fit_json`, `ua_fit_generated_at` preserved for backward compat.
+- `agents/ua_fit.py` / `prompts/ua_fit.py` — legacy CTV-specific ICP scoring, superseded by lens system. `validate_websites()` and `generate_vertical_insight()` still used as fallbacks. DB columns `ua_fit_json`, `ua_fit_generated_at` preserved for backward compat. Prospecting module prefers `lens_score` over `ua_fit` via `_getScore()` helper in frontend.
 - Chat tools renamed from `ua_*` prefix: `discover_prospects`, `score_prospect`, `get_scored_prospects`
 - CLI commands still use `ua-discover`, `ua-fit`, `ua-pipeline` names
 - ICP Wizard system (`icp_profiles` table, 5-step survey modal) dormant but preserved
