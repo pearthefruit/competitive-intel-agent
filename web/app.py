@@ -1869,6 +1869,207 @@ def create_app(db_path="intel.db"):
         return Response(generate(), mimetype="text/event-stream",
                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+    # ── Signal routes ─────────────────────────────────────────────────
+
+    @app.route("/api/signals/scan", methods=["POST"])
+    def signals_scan_api():
+        """Scan for signals across all or specific domains, then auto-synthesize into threads. SSE-streamed."""
+        data = request.json or {}
+        domains = data.get("domains")  # list of domain names, or None for all
+        auto_synthesize = data.get("auto_synthesize", True)
+
+        def generate():
+            from agents.signals_collect import collect_all_domains, collect_domain_signals, ALL_DOMAINS
+            from db import insert_signals_batch, get_signals
+
+            scan_q = queue.Queue()
+
+            def _cb(event_type, ev_data):
+                scan_q.put((event_type, ev_data or {}))
+
+            result_box = [None]
+
+            def _run_scan():
+                try:
+                    if domains:
+                        all_sigs = []
+                        for dom in domains:
+                            sigs = collect_domain_signals(dom, max_per_source=8, progress_cb=_cb)
+                            all_sigs.extend(sigs)
+                        result_box[0] = all_sigs
+                    else:
+                        result_box[0] = collect_all_domains(max_per_source=8, progress_cb=_cb)
+                except Exception as exc:
+                    print(f"[signals] Scan error: {exc}")
+                    scan_q.put(("error", {"text": str(exc)}))
+                    result_box[0] = []
+                finally:
+                    scan_q.put(("_done", {}))
+
+            t = threading.Thread(target=_run_scan, daemon=True)
+            t.start()
+
+            while True:
+                try:
+                    ev_type, ev_data = scan_q.get(timeout=0.3)
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+                    continue
+                if ev_type == "_done":
+                    break
+                yield f"data: {json.dumps({'type': ev_type, **ev_data})}\n\n"
+
+            t.join(timeout=300)
+            signals = result_box[0] or []
+
+            # Persist to DB
+            conn = get_connection(db_path)
+            new_count = insert_signals_batch(conn, signals)
+
+            yield f"data: {json.dumps({'type': 'scan_complete', 'total_collected': len(signals), 'new_inserted': new_count})}\n\n"
+
+            # Auto-synthesize: group new signals into threads
+            if auto_synthesize and new_count > 0:
+                yield f"data: {json.dumps({'type': 'status', 'text': 'Synthesizing signals into threads...'})}\n\n"
+
+                from agents.signals_synthesize import synthesize_into_threads, extract_entities
+
+                # Fetch the recently inserted signals (last 1 day to catch this scan)
+                recent = get_signals(conn, days_back=1, limit=300)
+
+                synth_q = queue.Queue()
+                synth_result = [None]
+
+                def _synth_cb(event_type, ev_data):
+                    synth_q.put((event_type, ev_data or {}))
+
+                def _run_synth():
+                    try:
+                        result = synthesize_into_threads(conn, recent, progress_cb=_synth_cb)
+                        synth_result[0] = result
+                        # Also extract entities
+                        _synth_cb("status", {"text": "Extracting entities..."})
+                        extract_entities(conn, recent, progress_cb=_synth_cb)
+                    except Exception as exc:
+                        print(f"[signals] Synthesis error: {exc}")
+                        synth_q.put(("synth_error", {"text": str(exc)}))
+                    finally:
+                        synth_q.put(("_synth_done", {}))
+
+                st = threading.Thread(target=_run_synth, daemon=True)
+                st.start()
+
+                while True:
+                    try:
+                        ev_type, ev_data = synth_q.get(timeout=0.5)
+                    except queue.Empty:
+                        yield ": keepalive\n\n"
+                        continue
+                    if ev_type == "_synth_done":
+                        break
+                    yield f"data: {json.dumps({'type': ev_type, **ev_data})}\n\n"
+
+                st.join(timeout=120)
+                sr = synth_result[0] or {}
+                yield f"data: {json.dumps({'type': 'threads_ready', 'assigned': sr.get('assigned_count', 0), 'new_threads': sr.get('new_thread_count', 0)})}\n\n"
+
+            conn.close()
+
+        return Response(generate(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.route("/api/signals", methods=["GET"])
+    def signals_list_api():
+        """Fetch signals with optional domain filter."""
+        domain = request.args.get("domain")
+        days_back = int(request.args.get("days_back", 7))
+        limit = int(request.args.get("limit", 200))
+
+        from db import get_signals
+        conn = get_connection(db_path)
+        signals = get_signals(conn, domain=domain, days_back=days_back, limit=limit)
+        conn.close()
+        return jsonify({"signals": signals})
+
+    @app.route("/api/signals/threads", methods=["GET"])
+    def signals_threads_api():
+        """Fetch signal threads with momentum data."""
+        domain = request.args.get("domain")
+        status = request.args.get("status", "active")
+        limit = int(request.args.get("limit", 50))
+
+        from db import get_signal_clusters
+        from agents.signals_synthesize import compute_thread_momentum
+
+        conn = get_connection(db_path)
+        threads = get_signal_clusters(conn, domain=domain, status=status, limit=limit)
+
+        # Enrich with momentum
+        for t in threads:
+            t["momentum"] = compute_thread_momentum(conn, t["id"])
+
+        conn.close()
+        return jsonify({"threads": threads})
+
+    @app.route("/api/signals/clusters", methods=["GET"])
+    def signals_clusters_api():
+        """Fetch signal clusters (alias for threads, backwards compat)."""
+        domain = request.args.get("domain")
+        status = request.args.get("status", "active")
+        limit = int(request.args.get("limit", 50))
+
+        from db import get_signal_clusters
+        conn = get_connection(db_path)
+        clusters = get_signal_clusters(conn, domain=domain, status=status, limit=limit)
+        conn.close()
+        return jsonify({"clusters": clusters})
+
+    @app.route("/api/signals/threads/<int:thread_id>", methods=["GET"])
+    def signals_thread_detail_api(thread_id):
+        """Fetch a single thread with signals, entities, and momentum."""
+        from db import get_cluster_detail
+        from agents.signals_synthesize import compute_thread_momentum
+
+        conn = get_connection(db_path)
+        detail = get_cluster_detail(conn, thread_id)
+        if not detail:
+            conn.close()
+            return jsonify({"error": "Thread not found"}), 404
+
+        detail["momentum"] = compute_thread_momentum(conn, thread_id)
+
+        # Get entities for this thread's signals
+        entities = conn.execute(
+            "SELECT * FROM signal_entities WHERE cluster_id = ? OR signal_id IN "
+            "(SELECT signal_id FROM signal_cluster_items WHERE cluster_id = ?)",
+            (thread_id, thread_id),
+        ).fetchall()
+        detail["entities"] = [dict(e) for e in entities]
+
+        conn.close()
+        return jsonify(detail)
+
+    @app.route("/api/signals/clusters/<int:cluster_id>", methods=["GET"])
+    def signals_cluster_detail_api(cluster_id):
+        """Fetch a single cluster with signals and entities."""
+        from db import get_cluster_detail
+        conn = get_connection(db_path)
+        detail = get_cluster_detail(conn, cluster_id)
+        conn.close()
+        if not detail:
+            return jsonify({"error": "Cluster not found"}), 404
+        return jsonify(detail)
+
+    @app.route("/api/signals/freshness", methods=["GET"])
+    def signals_freshness_api():
+        """Get last scan timestamps per domain."""
+        from db import get_signal_freshness, get_signal_counts_by_domain
+        conn = get_connection(db_path)
+        freshness = get_signal_freshness(conn)
+        counts = get_signal_counts_by_domain(conn)
+        conn.close()
+        return jsonify({"freshness": freshness, "counts": counts})
+
     return app
 
 

@@ -175,6 +175,56 @@ CREATE TABLE IF NOT EXISTS lens_scores (
     scored_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(dossier_id, lens_id)
 );
+
+-- Signals: raw items collected from data sources for macro monitoring
+CREATE TABLE IF NOT EXISTS signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    title TEXT NOT NULL,
+    url TEXT,
+    body TEXT,
+    published_at TEXT,
+    source_name TEXT,
+    content_hash TEXT UNIQUE,
+    raw_json TEXT,
+    collected_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Signal clusters: LLM-synthesized groupings of related signals
+CREATE TABLE IF NOT EXISTS signal_clusters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain TEXT NOT NULL,
+    title TEXT NOT NULL,
+    synthesis TEXT,
+    opportunity_score INTEGER,
+    opportunity_type TEXT,
+    estimated_scope TEXT,
+    status TEXT DEFAULT 'active',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Junction table linking signals to clusters
+CREATE TABLE IF NOT EXISTS signal_cluster_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cluster_id INTEGER NOT NULL REFERENCES signal_clusters(id) ON DELETE CASCADE,
+    signal_id INTEGER NOT NULL REFERENCES signals(id),
+    UNIQUE(cluster_id, signal_id)
+);
+
+-- Extracted entities from signals for entity linking
+CREATE TABLE IF NOT EXISTS signal_entities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id INTEGER REFERENCES signals(id),
+    cluster_id INTEGER REFERENCES signal_clusters(id),
+    entity_type TEXT NOT NULL,
+    entity_value TEXT NOT NULL,
+    normalized_value TEXT,
+    dossier_id INTEGER REFERENCES dossiers(id),
+    campaign_id INTEGER REFERENCES campaigns(id),
+    metadata_json TEXT
+);
 """
 
 
@@ -212,6 +262,8 @@ def _migrate_db(conn):
         ("campaigns", "niche_eval_json", "TEXT"),
         ("campaigns", "scoring_lens_id", "INTEGER"),
         ("jobs", "source_board", "TEXT"),
+        ("campaigns", "signal_cluster_id", "INTEGER"),
+        ("signal_clusters", "last_signal_at", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -1925,3 +1977,190 @@ def get_all_scores_for_lens(conn, lens_id):
         d["score_data"] = json.loads(d["score_json"]) if d.get("score_json") else {}
         result.append(d)
     return result
+
+
+# ── Signal helpers ─────────────────────────────────────────────────────
+
+def insert_signal(conn, signal_dict):
+    """Insert a signal, ignoring duplicates by content_hash. Returns signal id or None."""
+    try:
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO signals
+               (source, domain, title, url, body, published_at, source_name, content_hash, raw_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                signal_dict["source"],
+                signal_dict["domain"],
+                signal_dict["title"],
+                signal_dict.get("url", ""),
+                signal_dict.get("body", ""),
+                signal_dict.get("published_at", ""),
+                signal_dict.get("source_name", ""),
+                signal_dict["content_hash"],
+                signal_dict.get("raw_json"),
+            ),
+        )
+        return cur.lastrowid if cur.rowcount > 0 else None
+    except Exception as e:
+        print(f"[db] insert_signal error: {e}")
+        return None
+
+
+def insert_signals_batch(conn, signals):
+    """Insert a batch of signals, returning count of new inserts."""
+    new_count = 0
+    for sig in signals:
+        sid = insert_signal(conn, sig)
+        if sid:
+            new_count += 1
+    conn.commit()
+    return new_count
+
+
+def get_signals(conn, domain=None, days_back=7, limit=200):
+    """Fetch signals with optional domain filter and recency window."""
+    if domain:
+        rows = conn.execute(
+            """SELECT * FROM signals
+               WHERE domain = ? AND collected_at >= datetime('now', ?)
+               ORDER BY collected_at DESC LIMIT ?""",
+            (domain, f"-{days_back} days", limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT * FROM signals
+               WHERE collected_at >= datetime('now', ?)
+               ORDER BY collected_at DESC LIMIT ?""",
+            (f"-{days_back} days", limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_signal_counts_by_domain(conn, days_back=7):
+    """Get signal counts per domain for the last N days."""
+    rows = conn.execute(
+        """SELECT domain, COUNT(*) as cnt FROM signals
+           WHERE collected_at >= datetime('now', ?)
+           GROUP BY domain ORDER BY cnt DESC""",
+        (f"-{days_back} days",),
+    ).fetchall()
+    return {r["domain"]: r["cnt"] for r in rows}
+
+
+def get_signal_freshness(conn):
+    """Get most recent collected_at per domain."""
+    rows = conn.execute(
+        """SELECT domain, MAX(collected_at) as last_scan FROM signals
+           GROUP BY domain"""
+    ).fetchall()
+    return {r["domain"]: r["last_scan"] for r in rows}
+
+
+def insert_signal_cluster(conn, cluster_dict):
+    """Insert a signal cluster. Returns cluster id."""
+    cur = conn.execute(
+        """INSERT INTO signal_clusters
+           (domain, title, synthesis, opportunity_score, opportunity_type, estimated_scope)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            cluster_dict["domain"],
+            cluster_dict["title"],
+            cluster_dict.get("synthesis"),
+            cluster_dict.get("opportunity_score"),
+            cluster_dict.get("opportunity_type"),
+            cluster_dict.get("estimated_scope"),
+        ),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def link_signal_to_cluster(conn, cluster_id, signal_id):
+    """Link a signal to a cluster (junction table)."""
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO signal_cluster_items (cluster_id, signal_id) VALUES (?, ?)",
+            (cluster_id, signal_id),
+        )
+    except Exception:
+        pass
+
+
+def get_signal_clusters(conn, domain=None, status="active", limit=50):
+    """Fetch signal clusters (threads) with signal counts, sorted by most recently active."""
+    if domain:
+        rows = conn.execute(
+            """SELECT sc.*, COUNT(sci.signal_id) as signal_count
+               FROM signal_clusters sc
+               LEFT JOIN signal_cluster_items sci ON sci.cluster_id = sc.id
+               WHERE sc.status = ? AND sc.domain = ?
+               GROUP BY sc.id ORDER BY COALESCE(sc.last_signal_at, sc.created_at) DESC LIMIT ?""",
+            (status, domain, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT sc.*, COUNT(sci.signal_id) as signal_count
+               FROM signal_clusters sc
+               LEFT JOIN signal_cluster_items sci ON sci.cluster_id = sc.id
+               WHERE sc.status = ?
+               GROUP BY sc.id ORDER BY COALESCE(sc.last_signal_at, sc.created_at) DESC LIMIT ?""",
+            (status, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_cluster_detail(conn, cluster_id):
+    """Fetch a single cluster with its signals and entities."""
+    cluster = conn.execute(
+        "SELECT * FROM signal_clusters WHERE id = ?", (cluster_id,)
+    ).fetchone()
+    if not cluster:
+        return None
+
+    d = dict(cluster)
+
+    # Attached signals
+    signals = conn.execute(
+        """SELECT s.* FROM signals s
+           JOIN signal_cluster_items sci ON sci.signal_id = s.id
+           WHERE sci.cluster_id = ? ORDER BY s.published_at DESC""",
+        (cluster_id,),
+    ).fetchall()
+    d["signals"] = [dict(s) for s in signals]
+
+    # Attached entities
+    entities = conn.execute(
+        "SELECT * FROM signal_entities WHERE cluster_id = ?", (cluster_id,)
+    ).fetchall()
+    d["entities"] = [dict(e) for e in entities]
+
+    return d
+
+
+def insert_signal_entity(conn, entity_dict):
+    """Insert a signal entity. Returns entity id."""
+    cur = conn.execute(
+        """INSERT INTO signal_entities
+           (signal_id, cluster_id, entity_type, entity_value, normalized_value, dossier_id, campaign_id, metadata_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            entity_dict.get("signal_id"),
+            entity_dict.get("cluster_id"),
+            entity_dict["entity_type"],
+            entity_dict["entity_value"],
+            entity_dict.get("normalized_value"),
+            entity_dict.get("dossier_id"),
+            entity_dict.get("campaign_id"),
+            entity_dict.get("metadata_json"),
+        ),
+    )
+    return cur.lastrowid
+
+
+def update_cluster_status(conn, cluster_id, status):
+    """Update a cluster's status (active/dismissed/converted)."""
+    conn.execute(
+        "UPDATE signal_clusters SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (status, cluster_id),
+    )
+    conn.commit()
