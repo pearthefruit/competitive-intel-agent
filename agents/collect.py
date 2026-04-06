@@ -92,62 +92,78 @@ def _supplement_with_linkedin(company_name, conn, company_id):
 
 
 def collect(company_name, url=None, db_path="intel.db"):
-    """Scrape all open roles and save to DB.
+    """Scrape all open roles from all available sources and save to DB.
 
-    Scrapes the primary ATS board, then supplements with LinkedIn for
-    additional coverage. Deduplicates across sources by URL and normalized title.
+    When no URL is provided, auto-detects ALL ATS boards for the company
+    and collects from each. Deduplicates across sources by URL and normalized title.
     Returns (new_count, skipped_count).
     """
     init_db(db_path)
 
-    # Auto-detect if no URL provided
-    if not url:
-        ats_type, url, _ = detect_ats_board(company_name)
-        if not url:
-            print(f"[error] Could not find an ATS board for '{company_name}'")
-            print("       Try providing the URL directly with --url")
-            return 0, 0
-    else:
+    # Explicit URL mode — scrape single source
+    if url:
         ats_type = detect_ats_type(url)
         if not ats_type:
             print(f"[error] Could not detect ATS type from URL: {url}")
             print("       Supported: Greenhouse, Lever, Ashby, Workday, LinkedIn")
             return 0, 0
-
-    scraper_cls = SCRAPERS.get(ats_type)
-    if not scraper_cls:
-        print(f"[error] No scraper for ATS type: {ats_type}")
-        return 0, 0
-
-    print(f"[collect] Scraping {company_name} via {ats_type}...")
-    scraper = scraper_cls()
-    try:
-        jobs = scraper.scrape(url, company_name)
-    except Exception as e:
-        print(f"[error] Scrape failed: {e}")
-        return 0, 0
-    finally:
-        scraper.close()
-
-    print(f"[collect] Got {len(jobs)} job(s) from {ats_type}")
+        boards = [(ats_type, url, 0)]
+    else:
+        # Auto-detect ALL boards
+        from scraper.detect import detect_all_boards
+        boards = detect_all_boards(company_name)
+        if not boards:
+            print(f"[error] Could not find any job boards for '{company_name}'")
+            print("       Try providing the URL directly with --url")
+            return 0, 0
 
     conn = get_connection(db_path)
-    company_id = upsert_company(conn, company_name, url, ats_type)
+    # Use first board's info for company record
+    primary_ats = boards[0][0] if boards else None
+    primary_url = boards[0][1] if boards else None
+    company_id = upsert_company(conn, company_name, primary_url, primary_ats)
 
-    new_count = 0
-    skipped = 0
-    for job in jobs:
-        inserted = insert_job(conn, company_id, job)
-        if inserted:
-            new_count += 1
-        else:
-            skipped += 1
+    total_new = 0
+    total_skipped = 0
+    existing_titles = _get_existing_titles(conn, company_id)
 
-    # Supplement with LinkedIn for broader coverage (if primary wasn't already LinkedIn)
-    if ats_type != "linkedin":
-        linkedin_new = _supplement_with_linkedin(company_name, conn, company_id)
-        new_count += linkedin_new
+    for ats_type, board_url, _ in boards:
+        scraper_cls = SCRAPERS.get(ats_type)
+        if not scraper_cls:
+            print(f"[collect] No scraper for ATS type: {ats_type}, skipping")
+            continue
+
+        print(f"[collect] Scraping {company_name} via {ats_type}...")
+        scraper = scraper_cls()
+        try:
+            jobs = scraper.scrape(board_url, company_name)
+        except Exception as e:
+            print(f"[collect] {ats_type} scrape failed: {e}")
+            continue
+        finally:
+            scraper.close()
+
+        new_count = 0
+        skipped = 0
+        for job in jobs:
+            # Cross-source dedup by normalized title
+            norm_title = _normalize_title(job.get("title", ""))
+            if norm_title and norm_title in existing_titles:
+                skipped += 1
+                continue
+
+            inserted = insert_job(conn, company_id, job, source_board=board_url)
+            if inserted:
+                new_count += 1
+                if norm_title:
+                    existing_titles.add(norm_title)
+            else:
+                skipped += 1
+
+        print(f"[collect] {ats_type}: +{new_count} new ({skipped} duplicates)")
+        total_new += new_count
+        total_skipped += skipped
 
     conn.close()
-    print(f"[collect] Total: {new_count} new jobs ({skipped} skipped as duplicates)")
-    return new_count, skipped
+    print(f"[collect] Total: {total_new} new jobs across {len(boards)} source(s) ({total_skipped} skipped)")
+    return total_new, total_skipped

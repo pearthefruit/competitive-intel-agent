@@ -211,6 +211,7 @@ def _migrate_db(conn):
         ("dossiers", "financial_snapshot_at", "TEXT"),
         ("campaigns", "niche_eval_json", "TEXT"),
         ("campaigns", "scoring_lens_id", "INTEGER"),
+        ("jobs", "source_board", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -350,14 +351,14 @@ def upsert_company(conn, name, url=None, ats_type=None):
     return company_id
 
 
-def insert_job(conn, company_id, job_dict):
+def insert_job(conn, company_id, job_dict, source_board=None):
     """Insert a job, skipping duplicates by URL. Returns True if inserted."""
     desc_hash = hash_description(job_dict.get("description", ""))
     try:
         conn.execute(
             """INSERT OR IGNORE INTO jobs
-               (company_id, title, department, location, url, description, description_hash, salary, date_posted)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (company_id, title, department, location, url, description, description_hash, salary, date_posted, source_board)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 company_id,
                 job_dict.get("title"),
@@ -368,6 +369,7 @@ def insert_job(conn, company_id, job_dict):
                 desc_hash,
                 job_dict.get("salary"),
                 job_dict.get("date_posted"),
+                source_board,
             ),
         )
         conn.commit()

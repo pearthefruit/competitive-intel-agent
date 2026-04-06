@@ -74,11 +74,13 @@ def _generate_slugs(company_name):
     return unique
 
 
-def detect_ats_board(company_name):
-    """Probe ATS APIs to find a company's job board.
+def detect_all_boards(company_name):
+    """Probe ALL ATS APIs to find every job board for a company.
 
-    Returns (ats_type, board_url, job_count) or (None, None, 0) if not found.
+    Returns list of (ats_type, board_url, job_count) tuples.
     """
+    boards = []
+
     # Check custom company APIs first (Amazon, Jane Street, etc.)
     custom = lookup_custom_scraper(company_name)
     if custom:
@@ -93,10 +95,9 @@ def detect_ats_board(company_name):
             )
             if resp.status_code == 200:
                 print(f"[detect] Found! Custom API confirmed for {registry_key}")
-                return registry_key, detect_url, 0
+                boards.append((registry_key, detect_url, 0))
         except Exception:
             pass
-        print(f"[detect] Custom API probe failed, falling back to generic detection")
 
     slugs = _generate_slugs(company_name)
     http = httpx.Client(
@@ -105,16 +106,18 @@ def detect_ats_board(company_name):
         follow_redirects=True,
     )
 
-    print(f"[detect] Searching for {company_name}'s job board...")
+    print(f"[detect] Searching for ALL job boards for {company_name}...")
     print(f"[detect] Trying slugs: {', '.join(slugs)}")
 
+    found_ats_types = set()
     for probe in ATS_PROBES:
+        if probe["ats"] in found_ats_types:
+            continue  # Already found a board for this ATS type
         for slug in slugs:
             url = probe["url"].format(slug=slug)
             try:
                 resp = http.get(url)
                 if probe["check"](resp):
-                    # Count jobs from the response
                     try:
                         data = resp.json()
                         if isinstance(data, list):
@@ -128,29 +131,44 @@ def detect_ats_board(company_name):
 
                     board_url = probe["board_url"].format(slug=slug)
                     print(f"[detect] Found! {probe['ats'].title()} board: {board_url} ({job_count} jobs)")
-                    http.close()
-                    return probe["ats"], board_url, job_count
+                    boards.append((probe["ats"], board_url, job_count))
+                    found_ats_types.add(probe["ats"])
+                    break  # Found this ATS type, move to next probe
             except httpx.TimeoutException:
                 continue
             except Exception:
                 continue
 
-    # Fallback 1: probe Workday API (many large companies use Workday)
-    print(f"[detect] No ATS board found, trying Workday...")
+    # Probe Workday API (many large companies use Workday)
+    print(f"[detect] Trying Workday...")
     wd_url, wd_count = detect_workday(company_name)
     if wd_url and wd_count > 0:
-        http.close()
-        return "workday", wd_url, wd_count
+        boards.append(("workday", wd_url, wd_count))
 
-    # Fallback 2: search LinkedIn for the company's jobs
-    print(f"[detect] No Workday found, trying LinkedIn...")
+    # Probe LinkedIn
+    print(f"[detect] Trying LinkedIn...")
     linkedin_result = _probe_linkedin(company_name, http)
     http.close()
-
     if linkedin_result:
-        return linkedin_result
+        boards.append(linkedin_result)
 
-    print(f"[detect] No jobs found for '{company_name}' on any platform")
+    if boards:
+        print(f"[detect] Found {len(boards)} source(s) for {company_name}: {', '.join(b[0] for b in boards)}")
+    else:
+        print(f"[detect] No jobs found for '{company_name}' on any platform")
+
+    return boards
+
+
+def detect_ats_board(company_name):
+    """Probe ATS APIs to find a company's job board (first match).
+
+    Returns (ats_type, board_url, job_count) or (None, None, 0) if not found.
+    Backward-compatible wrapper around detect_all_boards().
+    """
+    boards = detect_all_boards(company_name)
+    if boards:
+        return boards[0]
     return None, None, 0
 
 
