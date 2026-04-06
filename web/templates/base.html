@@ -3177,9 +3177,11 @@
         .ne-company-card {
             padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
             margin-bottom: 4px; background: rgba(255,255,255,0.02);
+            position: relative; overflow: visible;
         }
         .ne-company-row {
             display: flex; align-items: center; gap: 8px;
+            overflow: hidden;
         }
         .ne-company-name {
             font-size: 12px; font-weight: 600; color: var(--text-primary);
@@ -3191,10 +3193,34 @@
         }
         .ne-company-growth {
             font-size: 12px; font-weight: 700; min-width: 45px; text-align: right; flex-shrink: 0; margin-left: auto;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;
         }
         .ne-company-badges {
             display: flex; gap: 4px; margin-top: 4px;
         }
+        .ne-card-cb-wrap {
+            position: absolute; top: 50%; right: -28px; transform: translateY(-50%);
+            opacity: 0; transition: opacity 0.2s; z-index: 1;
+        }
+        .ne-company-card:hover .ne-card-cb-wrap,
+        .ne-card-cb-wrap.checked { opacity: 1; }
+        .ne-card-cb-wrap input { display: none; }
+        .ne-card-cb-dot {
+            width: 18px; height: 18px; border-radius: 4px;
+            border: 2px solid var(--border); background: transparent;
+            cursor: pointer; transition: all 0.15s; display: flex;
+            align-items: center; justify-content: center;
+        }
+        .ne-card-cb-dot:hover { border-color: var(--purple); }
+        .ne-card-cb-wrap.checked .ne-card-cb-dot {
+            background: var(--purple); border-color: var(--purple);
+        }
+        .ne-card-cb-dot::after {
+            content: ''; display: none; width: 5px; height: 9px;
+            border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+            margin-bottom: 2px;
+        }
+        .ne-card-cb-wrap.checked .ne-card-cb-dot::after { display: block; }
         .ne-coverage {
             font-size: 10px; color: var(--text-muted); padding-top: 10px;
             border-top: 1px solid var(--border); margin-top: 10px;
@@ -9036,7 +9062,7 @@ function renderExecutionPane(campaignId) {
 
 // --- Niche Evaluation Chart Renderers ---
 
-function renderNicheEvaluation(ne) {
+function renderNicheEvaluation(ne, prospects, campaignNode) {
     if (!ne) return '';
     const cov = ne.data_coverage || {};
     const agg = ne.aggregate || {};
@@ -9064,7 +9090,16 @@ function renderNicheEvaluation(ne) {
         ${pp.private ? `<span><span style="color:var(--purple);font-weight:600">${pp.private}</span> Private</span>` : ''}
     </div>` : '';
 
-    // Unified company cards
+    // Build prospect lookup for descriptions and metadata
+    const prospectMap = {};
+    (prospects || []).forEach(p => {
+        if (p.company_name) prospectMap[p.company_name.toLowerCase()] = p;
+    });
+
+    // Clear selection state when rebuilding with checkboxes
+    if (prospects && prospects.length) _selectedForResearch.clear();
+
+    // Unified company cards with expandable detail + research checkboxes
     const companies = (ne.per_company || []).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
     const maxRev = companies.length ? Math.max(...companies.map(c => c.revenue || 0)) : 0;
     const companyCardsHtml = companies.map(c => {
@@ -9073,7 +9108,6 @@ function renderNicheEvaluation(ne) {
         const growthVal = c.growth != null ? c.growth : null;
         const barColor = growthVal != null ? (growthVal > 0 ? 'var(--green)' : growthVal < 0 ? 'var(--red)' : 'var(--text-muted)') : 'var(--text-muted)';
         const growthColor = growthVal != null ? (growthVal > 10 ? 'var(--green)' : growthVal >= 0 ? 'var(--text-secondary)' : 'var(--red)') : '';
-        // Show growth % with absolute change for context
         let growthText = '';
         let growthEst = c.growth_estimated ? ' est.' : '';
         if (growthVal != null) {
@@ -9099,7 +9133,20 @@ function renderNicheEvaluation(ne) {
             ? `<span class="ne-badge" style="font-size:9px;padding:1px 6px;border-color:rgba(59,130,246,0.3);color:var(--accent)">Public</span>`
             : `<span class="ne-badge" style="font-size:9px;padding:1px 6px;border-color:rgba(168,85,247,0.3);color:var(--purple)">Private</span>`;
 
-        return `<div class="ne-company-card">
+        // Merge prospect data (description, validation, discovery evidence)
+        const prospect = prospectMap[(c.name || '').toLowerCase()];
+        const desc = prospect?.company_description || '';
+        const disc = prospect?.discovery || {};
+        const vstatus = prospect?.validation_status || 'valid';
+        const isSkipped = vstatus !== 'valid' && vstatus !== 'limited' && vstatus !== 'http_403' && vstatus !== 'connection_failed';
+        const safeName = (c.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const hasProspects = prospects && prospects.length > 0;
+
+        return `<div class="ne-company-card${isSkipped ? ' skipped' : ''}" onclick="if(!event.target.closest('.ne-card-cb-wrap')){openProspectDetail('${safeName}')}" style="cursor:pointer${isSkipped ? ';opacity:0.5' : ''}">
+            ${hasProspects && !isSkipped ? `<div class="ne-card-cb-wrap" onclick="event.stopPropagation();const cb=this.querySelector('input');cb.checked=!cb.checked;this.classList.toggle('checked',cb.checked);_toggleResearchSelection('${safeName}',cb)">
+                <input type="checkbox" class="discovery-select-cb">
+                <div class="ne-card-cb-dot"></div>
+            </div>` : ''}
             <div class="ne-company-row">
                 <span class="ne-company-name" title="${escHtml(c.name)}">${escHtml(c.name)}</span>
                 <span class="ne-company-rev">${hasRev ? c.revenue_formatted + quality : '—'}</span>
@@ -9108,12 +9155,22 @@ function renderNicheEvaluation(ne) {
             ${hasRev ? `<div class="ne-bar-track" style="height:6px;margin:4px 0 0">
                 <div class="ne-bar-fill" style="width:${barPct}%;background:${barColor};height:100%"></div>
             </div>` : ''}
+            ${desc ? `<div style="font-size:11px;color:var(--text-muted);line-height:1.4;margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(desc)}</div>` : ''}
             <div class="ne-company-badges">
                 ${ppBadge}
                 ${badges.map(b => `<span class="ne-badge" style="font-size:9px;padding:1px 6px">${escHtml(b)}</span>`).join('')}
             </div>
         </div>`;
     }).join('');
+
+    // Send to Research bar (only when prospects exist)
+    const researchBarHtml = (prospects && prospects.length) ? `
+        <div class="send-to-research-bar" id="summary-research-bar" style="display:none">
+            <span class="str-count">0/3 selected</span>
+            <span class="str-label" style="font-size:11px;color:var(--text-muted)">Score with:</span>
+            ${_buildLensSelectHtml('summary-lens-select')}
+            <button class="str-btn" onclick="_sendToResearch('summary-lens-select')" disabled>Send to Research</button>
+        </div>` : '';
 
     // Coverage footer
     const coverageHtml = `<div class="ne-coverage">
@@ -9128,11 +9185,13 @@ function renderNicheEvaluation(ne) {
             ${statHtml}
             ${ppHtml}
         </div>
-        ${companies.length ? `<div class="ne-section">
+        ${companies.length ? `<div class="ne-section" style="padding-right:36px">
             <div class="ne-section-title">Company Breakdown</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click a company for details. Select companies to send to Research.</div>
             ${companyCardsHtml}
         </div>` : ''}
         ${coverageHtml}
+        ${researchBarHtml}
     `;
 }
 
@@ -9316,9 +9375,9 @@ function renderSummaryPane(campaignId) {
                 </div>
             </div>
 
-            ${c.niche_eval ? renderNicheEvaluation(c.niche_eval) + '<div class="ne-divider"></div>' : ''}
+            ${c.niche_eval ? renderNicheEvaluation(c.niche_eval, prospects, c) : ''}
 
-            ${scored.length > 0 ? `
+            ${!c.niche_eval ? (scored.length > 0 ? `
             <div class="cv-section">
                 <div class="cv-section-title">Score Distribution</div>
                 ${tierBarHtml}
@@ -9336,7 +9395,22 @@ function renderSummaryPane(campaignId) {
                 const unscoredProspects = prospects.filter(p => !_hasScore(p));
                 return unscoredProspects.length > 0 ? `<div class="ne-divider"></div>${_buildDiscoveryListHtml(unscoredProspects, c)}` : '';
             })()}
-            ` : _buildDiscoveryListHtml(prospects, c)}
+            ` : _buildDiscoveryListHtml(prospects, c)) : ''}
+
+            ${c.niche_eval && scored.length > 0 ? `
+            <div class="ne-divider"></div>
+            <div class="cv-section">
+                <div class="cv-section-title">Score Distribution</div>
+                ${tierBarHtml}
+                ${fitLegendHtml}
+            </div>
+            ${insightHtml}
+            <div class="cv-section">
+                <div class="cv-section-title">Scored Results</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click a company for detailed analysis</div>
+                <div id="pane-summary-ranked-list">${rankedHtml}</div>
+            </div>
+            ` : ''}
 
             ${_buildChildCampaignsHtml(c)}
         </div>
@@ -11399,14 +11473,16 @@ function handlePipelineSSE(ev) {
                 </div>`;
             }).join('');
 
+            // Build pseudo-prospects from discovered companies for consolidated cards
+            const pseudoProspects = discoveredCompanies.map(c => ({
+                company_name: c.name,
+                company_description: c.description || '',
+                validation_status: 'valid',
+                discovery: { estimated_size: c.estimated_size, why_included: c.why_included, evidence: c.evidence },
+            }));
+
             sumContent2.innerHTML = `<div class="campaign-view" style="padding:16px">
-                ${renderNicheEvaluation(ev.niche_eval)}
-                <div class="ne-divider"></div>
-                <div class="cv-section">
-                    <div class="cv-section-title">Discovered Companies (${discoveredCompanies.length})</div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click a company for details</div>
-                    ${discoveryListHtml}
-                </div>
+                ${renderNicheEvaluation(ev.niche_eval, pseudoProspects, null)}
             </div>`;
         }
         // Update Pane 2 scan node to done
