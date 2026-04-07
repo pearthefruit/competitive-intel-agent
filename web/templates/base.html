@@ -14451,6 +14451,17 @@ function linkSelectedThreads() {
     Promise.all(promises).then(() => loadGraph());
 }
 
+function _toggleExecDomain(domain) {
+    if (_execExpandedDomains.has(domain)) {
+        _execExpandedDomains.delete(domain);
+    } else {
+        _execExpandedDomains.add(domain);
+    }
+    // Toggle the DOM directly without full re-render
+    const el = document.querySelector(`.exec-step[data-domain="${domain}"]`);
+    if (el) el.classList.toggle('open');
+}
+
 function _graphZoom(factor) {
     const svg = d3.select('#sig-graph-svg');
     const zb = svg.node().__zoomBehavior;
@@ -14687,6 +14698,7 @@ function closeSignalDetail() {
 
 // Structured execution data (persists for "View Last Execution" button)
 let _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'idle' };
+let _execExpandedDomains = new Set(); // track which domain cards the user has expanded
 const _SIG_SOURCE_ICONS = { fred: '📈', google_news: '📰', reddit: '💬', hackernews: '🟧' };
 const _SIG_SOURCE_LABELS = { fred: 'FRED API', google_news: 'Google News', reddit: 'Reddit', hackernews: 'Hacker News' };
 
@@ -14701,6 +14713,7 @@ function runSignalScan() {
 
     // Reset execution data
     _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'collecting', startedAt: new Date().toISOString() };
+    _execExpandedDomains.clear();
 
     // Switch to execution tab and render (setTimeout ensures DOM has updated)
     switchSignalTab('execution');
@@ -14884,8 +14897,9 @@ function _renderExecutionDetailInner(container) {
     for (const [dom, domData] of Object.entries(d.domains)) {
         const domLabel = _DOMAIN_LABELS[dom] || dom;
         const domColor = _DOMAIN_COLORS[dom] || '#6b7280';
-        html += `<div class="exec-step" style="margin-bottom:6px">
-            <div class="exec-step-header" onclick="this.parentElement.classList.toggle('open')" style="padding:8px 12px">
+        const domOpen = _execExpandedDomains.has(dom) ? ' open' : '';
+        html += `<div class="exec-step${domOpen}" style="margin-bottom:6px" data-domain="${escHtml(dom)}">
+            <div class="exec-step-header" onclick="event.stopPropagation();_toggleExecDomain('${escHtml(dom)}')" style="padding:8px 12px;cursor:pointer">
                 <span class="sig-domain-dot" style="background:${domColor};width:10px;height:10px"></span>
                 <div class="exec-step-info">
                     <div class="exec-step-title" style="font-size:11px">${escHtml(domLabel)}</div>
