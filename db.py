@@ -2122,26 +2122,27 @@ def link_signal_to_cluster(conn, cluster_id, signal_id):
         pass
 
 
-def get_signal_clusters(conn, domain=None, status="active", limit=50):
+def get_signal_clusters(conn, domain=None, status="active", limit=50, min_signals=0):
     """Fetch signal clusters (threads) with signal counts, sorted by most recently active."""
+    where = []
+    params = []
+    if status and status != "all":
+        where.append("sc.status = ?")
+        params.append(status)
     if domain:
-        rows = conn.execute(
-            """SELECT sc.*, COUNT(sci.signal_id) as signal_count
-               FROM signal_clusters sc
-               LEFT JOIN signal_cluster_items sci ON sci.cluster_id = sc.id
-               WHERE sc.status = ? AND sc.domain = ?
-               GROUP BY sc.id ORDER BY COALESCE(sc.last_signal_at, sc.created_at) DESC LIMIT ?""",
-            (status, domain, limit),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """SELECT sc.*, COUNT(sci.signal_id) as signal_count
-               FROM signal_clusters sc
-               LEFT JOIN signal_cluster_items sci ON sci.cluster_id = sc.id
-               WHERE sc.status = ?
-               GROUP BY sc.id ORDER BY COALESCE(sc.last_signal_at, sc.created_at) DESC LIMIT ?""",
-            (status, limit),
-        ).fetchall()
+        where.append("sc.domain = ?")
+        params.append(domain)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    having_sql = f"HAVING COUNT(sci.signal_id) >= {int(min_signals)}" if min_signals > 0 else ""
+    rows = conn.execute(
+        f"""SELECT sc.*, COUNT(sci.signal_id) as signal_count
+            FROM signal_clusters sc
+            LEFT JOIN signal_cluster_items sci ON sci.cluster_id = sc.id
+            {where_sql}
+            GROUP BY sc.id {having_sql}
+            ORDER BY COALESCE(sc.last_signal_at, sc.created_at) DESC LIMIT ?""",
+        (*params, limit),
+    ).fetchall()
     return [dict(r) for r in rows]
 
 

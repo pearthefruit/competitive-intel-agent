@@ -5461,6 +5461,41 @@
                                 <button onclick="toggleGraphFullscreen()" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Fullscreen">⛶</button>
                                 <span style="font-size:9px;color:var(--text-muted);margin-left:4px">Spacing</span>
                                 <input type="range" id="graph-spacing" min="30" max="200" value="100" style="width:60px;height:14px;accent-color:var(--accent)" oninput="_adjustGraphSpacing(this.value)">
+                                <div style="position:relative;margin-left:6px">
+                                    <button onclick="_toggleGraphFilters()" id="sig-graph-filter-btn" style="height:28px;padding:0 10px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:10px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px" title="Filter graph">&#9881; Filters</button>
+                                    <div id="sig-graph-filter-popover" style="display:none;position:absolute;bottom:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:14px 16px;min-width:220px;z-index:20;box-shadow:0 8px 24px rgba(0,0,0,.5)">
+                                        <div style="font-size:11px;font-weight:700;color:var(--text-primary);margin-bottom:10px">Graph Filters</div>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-secondary);margin-bottom:8px">
+                                            <span style="min-width:70px">Min signals</span>
+                                            <input type="number" id="gf-min-signals" value="0" min="0" max="50" style="width:52px;padding:4px 6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--text-primary);font-size:11px">
+                                        </label>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-secondary);margin-bottom:8px">
+                                            <span style="min-width:70px">Max threads</span>
+                                            <input type="number" id="gf-limit" value="200" min="1" max="500" style="width:52px;padding:4px 6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--text-primary);font-size:11px">
+                                        </label>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-secondary);margin-bottom:8px">
+                                            <span style="min-width:70px">Domain</span>
+                                            <select id="gf-domain" style="flex:1;padding:4px 6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--text-primary);font-size:11px">
+                                                <option value="">All</option>
+                                                <option value="economics">Economics</option>
+                                                <option value="finance">Finance</option>
+                                                <option value="geopolitics">Geopolitics</option>
+                                                <option value="tech_ai">Tech / AI</option>
+                                                <option value="labor">Labor</option>
+                                                <option value="regulatory">Regulatory</option>
+                                            </select>
+                                        </label>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-secondary);margin-bottom:12px">
+                                            <span style="min-width:70px">Status</span>
+                                            <select id="gf-status" style="flex:1;padding:4px 6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--text-primary);font-size:11px">
+                                                <option value="all" selected>All</option>
+                                                <option value="active">Active only</option>
+                                                <option value="merged">Merged only</option>
+                                            </select>
+                                        </label>
+                                        <button onclick="_applyGraphFilters()" style="width:100%;padding:6px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">Apply</button>
+                                    </div>
+                                </div>
                             </div>
                             <div id="sig-graph-selection" style="font-size:11px;color:var(--text-muted)"></div>
                             <button id="sig-brainstorm-btn" onclick="openBrainstormMode()" style="display:none;padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">🧠 Generate Insight →</button>
@@ -14384,12 +14419,53 @@ let _selectedThreadIds = new Set();
 let _graphMode = 'patterns'; // 'patterns' or 'signals'
 let _zoomedPatternId = null;
 
+function _toggleGraphFilters() {
+    const pop = document.getElementById('sig-graph-filter-popover');
+    if (pop.style.display === 'none') {
+        pop.style.display = 'block';
+        setTimeout(() => document.addEventListener('click', function _close(e) {
+            if (!pop.contains(e.target) && e.target.id !== 'sig-graph-filter-btn') {
+                pop.style.display = 'none';
+                document.removeEventListener('click', _close);
+            }
+        }), 0);
+    } else {
+        pop.style.display = 'none';
+    }
+}
+
+function _applyGraphFilters() {
+    document.getElementById('sig-graph-filter-popover').style.display = 'none';
+    // Update button to show active filter indicator
+    const minSig = parseInt(document.getElementById('gf-min-signals').value) || 0;
+    const domain = document.getElementById('gf-domain').value;
+    const btn = document.getElementById('sig-graph-filter-btn');
+    btn.style.borderColor = (minSig > 0 || domain) ? 'var(--accent)' : 'var(--border)';
+    btn.style.color = (minSig > 0 || domain) ? 'var(--accent)' : 'var(--text-secondary)';
+    loadGraph();
+}
+
 function loadGraph() {
-    fetch('/api/signals/graph')
+    const params = new URLSearchParams();
+    const minSig = document.getElementById('gf-min-signals');
+    const limit = document.getElementById('gf-limit');
+    const domain = document.getElementById('gf-domain');
+    const status = document.getElementById('gf-status');
+    if (minSig && parseInt(minSig.value) > 0) params.set('min_signals', minSig.value);
+    if (limit) params.set('limit', limit.value || '200');
+    if (domain && domain.value) params.set('domain', domain.value);
+    if (status) params.set('status', status.value || 'all');
+    const qs = params.toString();
+    fetch('/api/signals/graph' + (qs ? '?' + qs : ''))
         .then(r => r.json())
         .then(data => {
             _graphData = data;
             if (data.nodes.length) renderGraph(data);
+            else {
+                const empty = document.getElementById('signals-graph-empty');
+                if (empty) empty.style.display = 'flex';
+                d3.select('#sig-graph-svg').style('display', 'none');
+            }
         })
         .catch(e => console.error('[graph] load error:', e));
 }

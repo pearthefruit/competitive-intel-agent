@@ -2396,8 +2396,13 @@ def create_app(db_path="intel.db"):
         from db import get_signal_clusters, get_pattern_signal_noise_counts
         from agents.signals_synthesize import compute_thread_momentum
 
+        status = request.args.get("status", "all")
+        domain = request.args.get("domain") or None
+        limit = int(request.args.get("limit", 200))
+        min_signals = int(request.args.get("min_signals", 0))
+
         conn = get_connection(db_path)
-        threads = get_signal_clusters(conn, status="active", limit=50)
+        threads = get_signal_clusters(conn, status=status, limit=limit, domain=domain, min_signals=min_signals)
 
         # Build nodes
         nodes = []
