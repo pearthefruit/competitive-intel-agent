@@ -1932,7 +1932,7 @@ def create_app(db_path="intel.db"):
             if auto_synthesize and new_count > 0:
                 yield f"data: {json.dumps({'type': 'status', 'text': 'Synthesizing signals into threads...'})}\n\n"
 
-                from agents.signals_synthesize import synthesize_into_threads, extract_entities
+                from agents.signals_synthesize import synthesize_into_threads, enrich_thread_signals, extract_entities
 
                 # Fetch the recently inserted signals (last 1 day to catch this scan)
                 recent = get_signals(conn, days_back=1, limit=300)
@@ -1947,9 +1947,13 @@ def create_app(db_path="intel.db"):
                     try:
                         result = synthesize_into_threads(conn, recent, progress_cb=_synth_cb)
                         synth_result[0] = result
-                        # Also extract entities
+                        # Fetch full article text for signals in threads
+                        _synth_cb("status", {"text": "Fetching article text for thread signals..."})
+                        enrich_thread_signals(conn, progress_cb=_synth_cb)
+                        # Re-read enriched signals for entity extraction
+                        enriched = get_signals(conn, days_back=1, limit=300)
                         _synth_cb("status", {"text": "Extracting entities..."})
-                        extract_entities(conn, recent, progress_cb=_synth_cb)
+                        extract_entities(conn, enriched, progress_cb=_synth_cb)
                     except Exception as exc:
                         print(f"[signals] Synthesis error: {exc}")
                         synth_q.put(("synth_error", {"text": str(exc)}))
@@ -2060,6 +2064,33 @@ def create_app(db_path="intel.db"):
             return jsonify({"error": "Cluster not found"}), 404
         return jsonify(detail)
 
+    @app.route("/api/signals/<int:signal_id>/fetch-article", methods=["POST"])
+    def signals_fetch_article_api(signal_id):
+        """Fetch full article text for a signal on demand."""
+        from scraper.web_search import fetch_page_text
+
+        conn = get_connection(db_path)
+        row = conn.execute("SELECT id, url, body FROM signals WHERE id = ?", (signal_id,)).fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "Signal not found"}), 404
+
+        url = row["url"]
+        if not url:
+            conn.close()
+            return jsonify({"error": "Signal has no URL"}), 400
+
+        # Fetch article text
+        text = fetch_page_text(url, max_chars=5000)
+        if text and len(text) > 100:
+            conn.execute("UPDATE signals SET body = ? WHERE id = ?", (text, signal_id))
+            conn.commit()
+            conn.close()
+            return jsonify({"ok": True, "body": text, "chars": len(text)})
+
+        conn.close()
+        return jsonify({"ok": False, "body": row["body"] or "", "error": "Could not extract article text"})
+
     @app.route("/api/signals/freshness", methods=["GET"])
     def signals_freshness_api():
         """Get last scan timestamps per domain."""
@@ -2069,6 +2100,57 @@ def create_app(db_path="intel.db"):
         counts = get_signal_counts_by_domain(conn)
         conn.close()
         return jsonify({"freshness": freshness, "counts": counts})
+
+    @app.route("/api/signals/entity-context/<entity_type>/<path:entity_value>", methods=["GET"])
+    def signals_entity_context_api(entity_type, entity_value):
+        """Get context for an entity — dossier info for companies, campaigns for sectors."""
+        conn = get_connection(db_path)
+        context = {"type": entity_type, "value": entity_value}
+
+        if entity_type == "company":
+            # Check for matching dossier
+            dossier = conn.execute(
+                "SELECT id, company_name, sector, description, website_url FROM dossiers WHERE company_name = ? COLLATE NOCASE",
+                (entity_value,),
+            ).fetchone()
+            if not dossier:
+                # Try normalized value
+                norm = conn.execute(
+                    "SELECT normalized_value FROM signal_entities WHERE entity_type = 'company' AND entity_value = ? COLLATE NOCASE LIMIT 1",
+                    (entity_value,),
+                ).fetchone()
+                if norm and norm["normalized_value"]:
+                    dossier = conn.execute(
+                        "SELECT id, company_name, sector, description, website_url FROM dossiers WHERE company_name = ? COLLATE NOCASE",
+                        (norm["normalized_value"],),
+                    ).fetchone()
+            if dossier:
+                d = dict(dossier)
+                # Get latest analyses
+                analyses = conn.execute(
+                    "SELECT analysis_type, created_at FROM dossier_analyses WHERE dossier_id = ? ORDER BY created_at DESC LIMIT 5",
+                    (d["id"],),
+                ).fetchall()
+                d["analyses"] = [dict(a) for a in analyses]
+                context["dossier"] = d
+
+        elif entity_type == "sector":
+            # Find matching campaigns
+            campaigns = conn.execute(
+                "SELECT id, niche, name, status, created_at FROM campaigns WHERE niche LIKE ? COLLATE NOCASE ORDER BY created_at DESC LIMIT 5",
+                (f"%{entity_value}%",),
+            ).fetchall()
+            context["campaigns"] = [dict(c) for c in campaigns]
+
+        # Count signals mentioning this entity
+        signal_count = conn.execute(
+            "SELECT COUNT(DISTINCT signal_id) as cnt FROM signal_entities WHERE entity_type = ? AND (entity_value = ? COLLATE NOCASE OR normalized_value = ? COLLATE NOCASE)",
+            (entity_type, entity_value, entity_value),
+        ).fetchone()["cnt"]
+        context["signal_count"] = signal_count
+
+        conn.close()
+        return jsonify(context)
 
     return app
 

@@ -3701,18 +3701,19 @@
             color: var(--text-muted);
             margin-top: 8px;
         }
-        .signals-scan-log {
+        .signals-scan-status {
             padding: 8px 12px;
             font-size: 10px;
             color: var(--text-muted);
-            max-height: 200px;
-            overflow-y: auto;
         }
-        .signals-scan-log .scan-event {
-            padding: 3px 0;
-            border-bottom: 1px solid var(--border);
+        .scan-status-text {
+            font-size: 10px;
+            color: var(--text-secondary);
+            line-height: 1.5;
         }
-        .signals-scan-log .scan-event:last-child { border-bottom: none; }
+        .sig-tab-execution-content {
+            padding: 12px;
+        }
 
         /* Feed pane */
         .signals-feed {
@@ -3774,7 +3775,7 @@
         }
         .sig-feed-tab:hover { color: var(--text-secondary); }
         .sig-feed-tab.active { background: var(--accent-dim); color: var(--accent); }
-        .sig-tab-content { display: none; }
+        .sig-tab-content { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow-y: auto; padding: 8px; }
         .sig-tab-content.active { display: block; }
 
         /* Thread cards */
@@ -3835,8 +3836,9 @@
         }
         .signals-feed-body {
             flex: 1;
-            overflow-y: auto;
-            padding: 8px;
+            overflow: hidden;
+            padding: 0;
+            position: relative;
         }
         .signals-empty {
             display: flex;
@@ -4058,6 +4060,80 @@
             display: flex; align-items: center; justify-content: center;
             font-size: 12px; flex-shrink: 0;
         }
+        /* Entity chips */
+        .ent-chip {
+            display: inline-block;
+            font-size: 11px;
+            padding: 3px 10px;
+            margin: 3px 3px 3px 0;
+            border-radius: 6px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            transition: all 0.15s;
+        }
+        .ent-chip-clickable {
+            cursor: pointer;
+        }
+        .ent-chip-clickable:hover {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* Entity popover */
+        .ent-popover {
+            position: fixed;
+            z-index: 9999;
+            min-width: 280px;
+            max-width: 360px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            animation: ent-pop-in 0.15s ease;
+        }
+        @keyframes ent-pop-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .ent-popover-header {
+            padding: 14px 16px 10px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .ent-popover-header .ent-chip { margin: 0; font-size: 10px; }
+        .ent-popover-title { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+        .ent-popover-subtitle { font-size: 11px; color: var(--text-muted); }
+        .ent-popover-body {
+            padding: 12px 16px;
+        }
+        .ent-popover-actions {
+            padding: 10px 16px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 8px;
+        }
+        .ent-popover-btn {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.15s;
+        }
+        .ent-popover-btn:hover { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+        .ent-popover-btn-primary {
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            border-color: transparent;
+            color: #fff;
+        }
+        .ent-popover-btn-primary:hover { opacity: 0.9; }
+
         .exec-arrow {
             display: flex;
             align-items: center;
@@ -5186,9 +5262,9 @@
                 </button>
                 <div class="signals-freshness" id="signals-freshness">No scans yet</div>
             </div>
-            <div class="signals-scan-log" id="signals-scan-log" style="display:none"></div>
-            <div class="signals-last-exec" id="signals-last-exec" style="display:none">
-                <button onclick="showExecutionDetail()" style="width:100%;padding:6px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer;margin-top:6px">View Last Execution</button>
+            <div class="signals-scan-status" id="signals-scan-status" style="display:none">
+                <div class="scan-status-text" id="scan-status-text"></div>
+                <div class="scan-status-link" onclick="switchSignalTab('execution')" style="cursor:pointer;font-size:10px;color:var(--accent);margin-top:4px">View execution →</div>
             </div>
         </div>
 
@@ -5198,6 +5274,7 @@
                 <div class="signals-feed-tabs">
                     <button class="sig-feed-tab active" data-tab="threads" onclick="switchSignalTab('threads')">Threads</button>
                     <button class="sig-feed-tab" data-tab="raw" onclick="switchSignalTab('raw')">Raw</button>
+                    <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
                 </div>
                 <div class="signals-feed-controls">
                     <input type="text" id="signals-search" placeholder="Filter..." oninput="renderActiveSignalTab()">
@@ -5218,6 +5295,14 @@
                         <div style="font-size:32px;margin-bottom:12px">&#128225;</div>
                         <div>No signals collected yet</div>
                         <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click <strong>Scan Now</strong> to collect signals across all domains.</div>
+                    </div>
+                </div>
+                <!-- Execution view -->
+                <div class="sig-tab-content" id="sig-tab-execution">
+                    <div class="signals-empty" id="signals-exec-empty">
+                        <div style="font-size:32px;margin-bottom:12px">&#9881;</div>
+                        <div>No scan executed yet</div>
+                        <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click <strong>Scan Now</strong> to see the execution pipeline.</div>
                     </div>
                 </div>
             </div>
@@ -13615,12 +13700,18 @@ function renderSignalFeed() {
         </div>`;
     }).join('');
     container.innerHTML = html;
-
-    container.onclick = function(e) {
-        const card = e.target.closest('.sig-card');
-        if (card) openSignalDetail(parseInt(card.dataset.id));
-    };
 }
+
+// Single event delegation on the feed body — handles both tabs
+document.addEventListener('DOMContentLoaded', () => {
+    const feedBody = document.getElementById('signals-feed-body');
+    if (feedBody) feedBody.addEventListener('click', function(e) {
+        const sigCard = e.target.closest('.sig-card');
+        if (sigCard) { openSignalDetail(parseInt(sigCard.dataset.id)); return; }
+        const threadCard = e.target.closest('.thread-card');
+        if (threadCard) { openThreadDetail(parseInt(threadCard.dataset.id)); return; }
+    });
+});
 
 function renderThreadFeed() {
     const container = document.getElementById('sig-tab-threads');
@@ -13668,27 +13759,23 @@ function renderThreadFeed() {
         </div>`;
     }).join('');
     container.innerHTML = html;
-
-    container.onclick = function(e) {
-        const card = e.target.closest('.thread-card');
-        if (card) openThreadDetail(parseInt(card.dataset.id));
-    };
 }
 
 function openSignalDetail(signalId) {
-    _activeSignalId = signalId;
-    const s = _signalsCache.find(x => x.id === signalId);
-    if (!s) return;
+    // Match by loose equality to handle string/int mismatch from dataset
+    const s = _signalsCache.find(x => x.id == signalId);
+    if (!s) { console.warn('[signals] Signal not found in cache:', signalId); return; }
+    _activeSignalId = s.id;
 
     // Highlight active card
     document.querySelectorAll('.sig-card').forEach(c => c.classList.remove('active'));
-    const card = document.querySelector(`.sig-card[data-id="${signalId}"]`);
+    const card = document.querySelector(`.sig-card[data-id="${s.id}"]`);
     if (card) card.classList.add('active');
 
     const detailBody = document.getElementById('signals-detail-body');
     const detailEmpty = document.getElementById('signals-detail-empty');
     const closeBtn = document.querySelector('.signals-detail-close');
-    detailEmpty.style.display = 'none';
+    if (detailEmpty) detailEmpty.style.display = 'none';
     if (closeBtn) closeBtn.style.display = 'block';
 
     const domLabel = _DOMAIN_LABELS[s.domain] || s.domain;
@@ -13705,10 +13792,36 @@ function openSignalDetail(signalId) {
                     <span style="font-size:11px;color:var(--text-muted)">${escHtml(dateStr)}</span>
                 </div>
             </div>
-            ${s.body ? `<div class="sig-detail-body-text">${escHtml(s.body)}</div>` : ''}
-            ${s.url ? `<div class="sig-detail-link"><a href="${escHtml(s.url)}" target="_blank" rel="noopener">Open source &rarr;</a></div>` : ''}
+            <div class="sig-detail-body-text" id="sig-detail-text-${s.id}">${s.body ? escHtml(s.body) : '<span style="color:var(--text-muted);font-style:italic">No article text yet</span>'}</div>
+            <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                ${s.url && (!s.body || s.body.length < 500) ? `<button id="sig-fetch-btn-${s.id}" onclick="fetchArticleText(${s.id})" style="padding:6px 14px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer">Load full article</button>` : ''}
+                ${s.url ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--text-muted);font-size:11px;text-decoration:none">Open source &rarr;</a>` : ''}
+            </div>
         </div>
     `;
+}
+
+function fetchArticleText(signalId) {
+    const btn = document.getElementById('sig-fetch-btn-' + signalId);
+    const textEl = document.getElementById('sig-detail-text-' + signalId);
+    if (btn) { btn.textContent = 'Fetching...'; btn.disabled = true; }
+
+    fetch('/api/signals/' + signalId + '/fetch-article', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok && data.body) {
+                textEl.textContent = data.body;
+                // Update cache too
+                const cached = _signalsCache.find(x => x.id == signalId);
+                if (cached) cached.body = data.body;
+                if (btn) btn.remove();
+            } else {
+                if (btn) { btn.textContent = 'Could not fetch'; btn.style.color = 'var(--red)'; }
+            }
+        })
+        .catch(() => {
+            if (btn) { btn.textContent = 'Fetch failed'; btn.style.color = 'var(--red)'; }
+        });
 }
 
 function openThreadDetail(threadId) {
@@ -13741,19 +13854,27 @@ function openThreadDetail(threadId) {
             const signals = thread.signals || [];
             const entities = thread.entities || [];
 
-            // Group entities by type
+            // Group entities by type, dedup
             const entsByType = {};
             entities.forEach(e => {
-                if (!entsByType[e.entity_type]) entsByType[e.entity_type] = [];
+                const type = e.entity_type;
+                if (!entsByType[type]) entsByType[type] = [];
                 const val = e.normalized_value || e.entity_value;
-                if (!entsByType[e.entity_type].includes(val)) entsByType[e.entity_type].push(val);
+                if (!entsByType[type].find(x => x.toLowerCase() === val.toLowerCase())) entsByType[type].push(val);
             });
 
+            const _entIcon = {company: '🏢', sector: '📊', geography: '📍', person: '👤', regulation: '⚖️'};
+            const _entClickable = ['company', 'sector', 'geography'];
             const entHtml = Object.entries(entsByType).map(([type, vals]) => {
-                const icon = {company: '🏢', sector: '📊', geography: '📍', person: '👤', regulation: '⚖️'}[type] || '🔹';
-                return `<div style="margin-bottom:6px">
-                    <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase">${escHtml(type)}</span><br>
-                    ${vals.map(v => `<span style="display:inline-block;font-size:11px;padding:2px 8px;margin:2px;border-radius:4px;background:var(--bg-tertiary);border:1px solid var(--border)">${icon} ${escHtml(v)}</span>`).join('')}
+                const icon = _entIcon[type] || '🔹';
+                const clickable = _entClickable.includes(type);
+                return `<div style="margin-bottom:8px">
+                    <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">${escHtml(type)}</span><br>
+                    ${vals.map(v => {
+                        const cls = clickable ? 'ent-chip ent-chip-clickable' : 'ent-chip';
+                        const onclick = clickable ? `onclick="openEntityPopover(event, '${escHtml(type)}', '${escHtml(v.replace(/'/g, "\\'"))}')"` : '';
+                        return `<span class="${cls}" data-type="${escHtml(type)}" ${onclick}>${icon} ${escHtml(v)}</span>`;
+                    }).join('')}
                 </div>`;
             }).join('');
 
@@ -13812,6 +13933,119 @@ function exploreThreadAsNiche(threadId) {
     if (nicheInput) nicheInput.value = t.title;
 }
 
+function openEntityPopover(event, entityType, entityValue) {
+    event.stopPropagation();
+    // Remove any existing popover
+    document.querySelectorAll('.ent-popover').forEach(p => p.remove());
+
+    const icon = {company: '🏢', sector: '📊', geography: '📍'}[entityType] || '🔹';
+
+    // Create popover shell with loading state
+    const pop = document.createElement('div');
+    pop.className = 'ent-popover';
+    pop.innerHTML = `
+        <div class="ent-popover-header">
+            <span style="font-size:18px">${icon}</span>
+            <div>
+                <div class="ent-popover-title">${escHtml(entityValue)}</div>
+                <div class="ent-popover-subtitle">${escHtml(entityType)}</div>
+            </div>
+        </div>
+        <div class="ent-popover-body" style="text-align:center;padding:20px;color:var(--text-muted);font-size:11px">Loading...</div>
+    `;
+    document.body.appendChild(pop);
+
+    // Position near the click
+    const rect = event.target.getBoundingClientRect();
+    let top = rect.bottom + 6;
+    let left = rect.left;
+    // Keep within viewport
+    if (top + 300 > window.innerHeight) top = rect.top - 300;
+    if (left + 360 > window.innerWidth) left = window.innerWidth - 370;
+    pop.style.top = Math.max(8, top) + 'px';
+    pop.style.left = Math.max(8, left) + 'px';
+
+    // Close on outside click
+    setTimeout(() => {
+        document.addEventListener('click', function _close(e) {
+            if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', _close); }
+        });
+    }, 50);
+
+    // Fetch context
+    fetch(`/api/signals/entity-context/${encodeURIComponent(entityType)}/${encodeURIComponent(entityValue)}`)
+        .then(r => r.json())
+        .then(ctx => {
+            let bodyHtml = '';
+            let actionsHtml = '';
+
+            if (entityType === 'company') {
+                if (ctx.dossier) {
+                    const d = ctx.dossier;
+                    bodyHtml = `
+                        <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:6px">${escHtml(d.company_name)}</div>
+                        ${d.sector ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Sector: ${escHtml(d.sector)}</div>` : ''}
+                        ${d.description ? `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;line-height:1.4">${escHtml(d.description.substring(0, 200))}</div>` : ''}
+                        ${d.analyses && d.analyses.length ? `<div style="font-size:10px;color:var(--text-muted)">${d.analyses.length} analyses: ${d.analyses.map(a => a.analysis_type).join(', ')}</div>` : ''}
+                    `;
+                    actionsHtml = `
+                        <button class="ent-popover-btn ent-popover-btn-primary" onclick="document.querySelector('.ent-popover').remove();switchModule('research')">Open in Research →</button>
+                    `;
+                } else {
+                    bodyHtml = `<div style="font-size:11px;color:var(--text-muted)">No dossier exists yet for this company.</div>`;
+                    actionsHtml = `
+                        <button class="ent-popover-btn ent-popover-btn-primary" onclick="document.querySelector('.ent-popover').remove();switchModule('research');_prefillResearchChat('${escHtml(entityValue.replace(/'/g, "\\'"))}')">Research →</button>
+                        <button class="ent-popover-btn" onclick="document.querySelector('.ent-popover').remove();switchModule('prospecting');document.getElementById('prospect-niche-input').value='${escHtml(entityValue)}'">Discover →</button>
+                    `;
+                }
+            } else if (entityType === 'sector') {
+                if (ctx.campaigns && ctx.campaigns.length) {
+                    bodyHtml = `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">${ctx.campaigns.length} related campaign(s):</div>` +
+                        ctx.campaigns.map(c => `<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)">${escHtml(c.niche)} <span style="color:var(--text-muted)">(${c.status})</span></div>`).join('');
+                } else {
+                    bodyHtml = `<div style="font-size:11px;color:var(--text-muted)">No campaigns match this sector yet.</div>`;
+                }
+                actionsHtml = `
+                    <button class="ent-popover-btn ent-popover-btn-primary" onclick="document.querySelector('.ent-popover').remove();switchModule('prospecting');document.getElementById('prospect-niche-input').value='${escHtml(entityValue)}'">Explore as Niche →</button>
+                `;
+            } else if (entityType === 'geography') {
+                bodyHtml = `<div style="font-size:11px;color:var(--text-muted)">Mentioned in ${ctx.signal_count} signal(s).</div>`;
+                actionsHtml = `
+                    <button class="ent-popover-btn" onclick="document.querySelector('.ent-popover').remove();document.getElementById('signals-search').value='${escHtml(entityValue)}';renderActiveSignalTab()">Filter feed →</button>
+                `;
+            }
+
+            pop.querySelector('.ent-popover-body').innerHTML = bodyHtml;
+            if (actionsHtml) {
+                const actDiv = document.createElement('div');
+                actDiv.className = 'ent-popover-actions';
+                actDiv.innerHTML = actionsHtml;
+                pop.appendChild(actDiv);
+            }
+
+            // Add signal count footer
+            if (ctx.signal_count > 0) {
+                const footer = document.createElement('div');
+                footer.style.cssText = 'padding:6px 16px 10px;font-size:10px;color:var(--text-muted)';
+                footer.textContent = `Appears in ${ctx.signal_count} signal(s)`;
+                pop.appendChild(footer);
+            }
+        })
+        .catch(() => {
+            pop.querySelector('.ent-popover-body').innerHTML = '<div style="color:var(--red);font-size:11px">Failed to load context</div>';
+        });
+}
+
+function _prefillResearchChat(companyName) {
+    // Create a new chat and pre-fill the input with a company research prompt
+    if (typeof newChat === 'function') newChat();
+    const input = document.getElementById('chat-input');
+    if (input) {
+        input.value = `Run a full profile on ${companyName}`;
+        input.focus();
+    }
+}
+
 function closeSignalDetail() {
     _activeSignalId = null;
     _activeThreadId = null;
@@ -13831,16 +14065,18 @@ const _SIG_SOURCE_LABELS = { fred: 'FRED API', google_news: 'Google News', reddi
 
 function runSignalScan() {
     const btn = document.getElementById('signals-scan-btn');
-    const log = document.getElementById('signals-scan-log');
+    const statusEl = document.getElementById('signals-scan-status');
+    const statusText = document.getElementById('scan-status-text');
     btn.classList.add('scanning');
     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Scanning...';
-    log.style.display = 'block';
-    log.innerHTML = '';
+    statusEl.style.display = 'block';
+    statusText.textContent = 'Starting scan...';
 
     // Reset execution data
     _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'collecting', startedAt: new Date().toISOString() };
 
-    // Show execution in detail pane immediately
+    // Switch to execution tab and render
+    switchSignalTab('execution');
     _renderExecutionDetail();
 
     fetch('/api/signals/scan', {
@@ -13877,15 +14113,14 @@ function runSignalScan() {
 }
 
 function _handleScanEvent(ev) {
-    const log = document.getElementById('signals-scan-log');
+    const statusText = document.getElementById('scan-status-text');
 
     // Accumulate structured data
     switch (ev.type) {
-        case 'domain_start': {
+        case 'domain_start':
             _execData.domains[ev.domain] = { status: 'running', sources: {}, count: 0 };
-            log.innerHTML += `<div class="scan-event">Scanning ${_DOMAIN_LABELS[ev.domain] || ev.domain}...</div>`;
+            statusText.textContent = `Scanning ${_DOMAIN_LABELS[ev.domain] || ev.domain}...`;
             break;
-        }
         case 'source_start': {
             const dom = _execData.domains[ev.domain] || (_execData.domains[ev.domain] = { status: 'running', sources: {}, count: 0 });
             dom.sources[ev.source] = { status: 'running', count: 0, queries: ev.queries || [] };
@@ -13898,31 +14133,33 @@ function _handleScanEvent(ev) {
                 dom.sources[ev.source].count = ev.count || 0;
                 dom.sources[ev.source].queries = ev.queries || dom.sources[ev.source].queries;
             }
-            log.innerHTML += `<div class="scan-event" style="padding-left:8px;color:var(--green)">✓ ${_SIG_SOURCE_LABELS[ev.source] || ev.source}: ${ev.count}</div>`;
             break;
         }
         case 'domain_done': {
             const dom = _execData.domains[ev.domain];
             if (dom) { dom.status = 'done'; dom.count = ev.count || 0; }
+            const done = Object.values(_execData.domains).filter(d => d.status === 'done').length;
+            const total = Object.keys(_execData.domains).length;
+            statusText.textContent = `Collected ${done}/${total} domains`;
             break;
         }
         case 'scan_complete':
             _execData.scan = { total_collected: ev.total_collected, new_inserted: ev.new_inserted };
             _execData.phase = 'synthesizing';
-            log.innerHTML += `<div class="scan-event" style="color:var(--accent)">✓ ${ev.total_collected} collected, ${ev.new_inserted} new</div>`;
+            statusText.textContent = `${ev.total_collected} signals (${ev.new_inserted} new)`;
             break;
         case 'status':
-            log.innerHTML += `<div class="scan-event" style="color:var(--purple)">${escHtml(ev.text)}</div>`;
+            statusText.textContent = ev.text;
             break;
         case 'synthesize_start':
             _execData.synthesis.status = 'running';
             _execData.synthesis.signal_count = ev.signal_count;
             _execData.synthesis.existing_threads = ev.existing_threads;
+            statusText.textContent = 'Synthesizing threads...';
             break;
         case 'new_thread':
             if (!_execData.synthesis.new_threads) _execData.synthesis.new_threads = [];
             _execData.synthesis.new_threads.push({ title: ev.title, signal_count: ev.signal_count });
-            log.innerHTML += `<div class="scan-event" style="color:var(--green)">✦ Thread: ${escHtml(ev.title)}</div>`;
             break;
         case 'assignments_done':
             _execData.synthesis.assigned = ev.assigned;
@@ -13931,10 +14168,35 @@ function _handleScanEvent(ev) {
         case 'synthesize_complete':
             _execData.synthesis.status = 'done';
             break;
+        case 'enrich_start':
+            if (!_execData.enrich) _execData.enrich = {};
+            _execData.enrich.status = 'running';
+            _execData.enrich.total = ev.count;
+            _execData.enrich.enriched = 0;
+            _execData.phase = 'enriching';
+            statusText.textContent = `Fetching ${ev.count} articles...`;
+            break;
+        case 'enrich_progress':
+            if (_execData.enrich) {
+                _execData.enrich.enriched = ev.enriched;
+                statusText.textContent = `Articles: ${ev.enriched}/${_execData.enrich.total}`;
+            }
+            break;
+        case 'enrich_complete':
+            if (!_execData.enrich) _execData.enrich = {};
+            _execData.enrich.status = 'done';
+            _execData.enrich.enriched = ev.enriched;
+            _execData.enrich.total = ev.total;
+            break;
+        case 'enrich_skip':
+            if (!_execData.enrich) _execData.enrich = {};
+            _execData.enrich.status = 'skipped';
+            break;
         case 'entities_start':
             _execData.entities.status = 'running';
             _execData.entities.signal_count = ev.signal_count;
             _execData.phase = 'entities';
+            statusText.textContent = 'Extracting entities...';
             break;
         case 'entities_complete':
             _execData.entities.status = 'done';
@@ -13942,28 +14204,26 @@ function _handleScanEvent(ev) {
             break;
         case 'threads_ready':
             _execData.phase = 'complete';
+            statusText.textContent = 'Scan complete';
             break;
         case 'error':
         case 'synth_error':
-            log.innerHTML += `<div class="scan-event" style="color:var(--red)">⚠ ${escHtml(ev.text || '')}</div>`;
+            statusText.textContent = ev.text || 'Error';
+            statusText.style.color = 'var(--red)';
             break;
     }
-    log.scrollTop = log.scrollHeight;
 
-    // Live-update the execution detail pane
+    // Live-update the execution tab
     _renderExecutionDetail();
 }
 
 function _renderExecutionDetail() {
-    const detailBody = document.getElementById('signals-detail-body');
-    const detailEmpty = document.getElementById('signals-detail-empty');
-    const closeBtn = document.querySelector('.signals-detail-close');
-    if (detailEmpty) detailEmpty.style.display = 'none';
-    if (closeBtn) closeBtn.style.display = 'block';
+    const container = document.getElementById('sig-tab-execution');
+    if (!container) return;
 
     const d = _execData;
     const phase = d.phase || 'idle';
-    const phaseLabels = { collecting: 'Collecting Signals', synthesizing: 'Synthesizing Threads', entities: 'Extracting Entities', complete: 'Complete' };
+    const phaseLabels = { collecting: 'Collecting Signals', synthesizing: 'Synthesizing Threads', enriching: 'Fetching Articles', entities: 'Extracting Entities', complete: 'Complete' };
 
     // Header with phase indicator
     let html = `<div style="margin-bottom:16px">
@@ -14063,6 +14323,24 @@ function _renderExecutionDetail() {
 
     html += `<div class="exec-arrow">↓</div>`;
 
+    // Phase 3.5: Article Enrichment
+    const enr = d.enrich || {};
+    html += `<div class="exec-step ${enr.status === 'done' ? 'open' : ''}">
+        <div class="exec-step-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="exec-step-icon" style="background:rgba(234,179,8,0.15)">📄</div>
+            <div class="exec-step-info">
+                <div class="exec-step-title">Article Text Enrichment</div>
+                <div class="exec-step-subtitle">${enr.status === 'skipped' ? 'All signals already enriched' : `${enr.enriched ?? '...'} / ${enr.total ?? '...'} articles fetched via trafilatura`}</div>
+            </div>
+            <span class="exec-step-badge ${enr.status === 'done' ? 'done' : enr.status === 'skipped' ? 'done' : enr.status === 'running' ? 'running' : ''}">${enr.status === 'done' || enr.status === 'skipped' ? 'Done' : enr.status === 'running' ? 'Running' : '...'}</span>
+        </div>
+        <div class="exec-step-body" style="padding-top:8px">
+            <div style="font-size:11px;color:var(--text-secondary)">Fetches full article text (up to 4,000 chars) for signals assigned to threads. Uses trafilatura for clean extraction (strips nav, ads, footers). Only fetches articles with missing or short body text.</div>
+        </div>
+    </div>`;
+
+    html += `<div class="exec-arrow">↓</div>`;
+
     // Phase 4: Entity Extraction
     const ent = d.entities || {};
     html += `<div class="exec-step">
@@ -14070,34 +14348,29 @@ function _renderExecutionDetail() {
             <div class="exec-step-icon" style="background:rgba(34,197,94,0.15)">🏷️</div>
             <div class="exec-step-info">
                 <div class="exec-step-title">Entity Extraction</div>
-                <div class="exec-step-subtitle">${ent.count ?? '...'} entities extracted (companies, sectors, geographies, regulations)</div>
+                <div class="exec-step-subtitle">${ent.count ?? '...'} entities extracted from enriched article text</div>
             </div>
             <span class="exec-step-badge ${ent.status === 'done' ? 'done' : ent.status === 'running' ? 'running' : ''}">${ent.status === 'done' ? 'Done' : ent.status === 'running' ? 'Running' : '...'}</span>
         </div>
         <div class="exec-step-body" style="padding-top:8px">
-            <div style="font-size:11px;color:var(--text-secondary)">FAST_CHAIN extracts named entities from signal text. Company entities are fuzzy-matched against existing dossiers for cross-module linking.</div>
+            <div style="font-size:11px;color:var(--text-secondary)">FAST_CHAIN extracts named entities (companies, sectors, geographies, people, regulations) from full article text. Company entities are fuzzy-matched against existing dossiers for cross-module linking.</div>
         </div>
     </div>`;
 
-    detailBody.innerHTML = html;
-}
-
-function showExecutionDetail() {
-    _renderExecutionDetail();
+    container.innerHTML = `<div style="padding:12px">${html}</div>`;
 }
 
 function _finishScan() {
     const btn = document.getElementById('signals-scan-btn');
     btn.classList.remove('scanning');
     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Scan Now';
-    // Show "View Last Execution" button
-    const lastExec = document.getElementById('signals-last-exec');
-    if (lastExec) lastExec.style.display = 'block';
-    // Final render of execution detail
+    // Final render of execution
     _renderExecutionDetail();
-    // Reload signals and freshness
+    // Reload data then switch to threads tab to show results
     loadSignals();
     loadSignalFreshness();
+    // Brief delay so data loads before switching
+    setTimeout(() => switchSignalTab('threads'), 1500);
 }
 
 </script>

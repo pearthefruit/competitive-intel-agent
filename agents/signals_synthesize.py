@@ -2,9 +2,12 @@
 
 Threads are persistent patterns that accumulate signals over time. Each scan's
 new signals are either assigned to existing threads or grouped into new ones.
+After thread assignment, article text is fetched for thread signals to enrich
+entity extraction and thread summaries.
 """
 
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from agents.llm import generate_json, generate_text, FAST_CHAIN
 from prompts.signals import (
@@ -72,7 +75,7 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
     prompt = build_thread_assignment_prompt(signals_text, threads_text)
 
     try:
-        result, model = generate_json(prompt, timeout=30, chain=FAST_CHAIN)
+        result = generate_json(prompt, timeout=30, chain=FAST_CHAIN)
     except Exception as e:
         print(f"[synthesize] LLM error: {e}")
         _cb("synthesize_error", {"error": str(e)})
@@ -169,6 +172,70 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
     }
 
 
+def enrich_thread_signals(conn, progress_cb=None, max_per_thread=5):
+    """Fetch full article text for signals that belong to threads.
+
+    Only fetches for signals that have a URL and a short/missing body (<500 chars).
+    Updates signals.body in the DB so entity extraction gets richer input.
+
+    Args:
+        conn: DB connection
+        progress_cb: optional callback(event_type, event_data)
+        max_per_thread: max articles to fetch per thread (avoid hammering)
+
+    Returns count of signals enriched.
+    """
+    from scraper.web_search import fetch_page_text
+
+    _cb = progress_cb or (lambda *a: None)
+
+    # Find signals in threads that need enrichment (short body + has URL)
+    rows = conn.execute(
+        """SELECT DISTINCT s.id, s.url, s.title, LENGTH(s.body) as body_len
+           FROM signals s
+           JOIN signal_cluster_items sci ON sci.signal_id = s.id
+           WHERE s.url IS NOT NULL AND s.url != ''
+             AND (s.body IS NULL OR LENGTH(s.body) < 500)
+           ORDER BY s.collected_at DESC
+           LIMIT ?""",
+        (max_per_thread * 20,),  # reasonable cap
+    ).fetchall()
+
+    if not rows:
+        _cb("enrich_skip", {"reason": "No signals need enrichment"})
+        return 0
+
+    to_fetch = [dict(r) for r in rows]
+    _cb("enrich_start", {"count": len(to_fetch)})
+
+    enriched = 0
+
+    def _fetch_one(sig):
+        try:
+            text = fetch_page_text(sig["url"], max_chars=4000)
+            return sig["id"], text
+        except Exception as e:
+            print(f"[enrich] Failed to fetch {sig['url'][:60]}: {e}")
+            return sig["id"], ""
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(_fetch_one, s): s for s in to_fetch}
+        for future in as_completed(futures):
+            sig_id, text = future.result()
+            if text and len(text) > 100:
+                conn.execute(
+                    "UPDATE signals SET body = ? WHERE id = ?",
+                    (text, sig_id),
+                )
+                enriched += 1
+                if enriched % 5 == 0:
+                    _cb("enrich_progress", {"enriched": enriched, "total": len(to_fetch)})
+
+    conn.commit()
+    _cb("enrich_complete", {"enriched": enriched, "total": len(to_fetch)})
+    return enriched
+
+
 def _update_thread_summary(conn, thread, new_signals):
     """Update a thread's summary to incorporate new signals."""
     signals_text = "\n".join(
@@ -210,7 +277,7 @@ def extract_entities(conn, signals, progress_cb=None):
     prompt = build_entity_extraction_prompt(signals_text)
 
     try:
-        result, model = generate_json(prompt, timeout=30, chain=FAST_CHAIN)
+        result = generate_json(prompt, timeout=30, chain=FAST_CHAIN)
     except Exception as e:
         print(f"[entities] LLM error: {e}")
         _cb("entities_error", {"error": str(e)})
