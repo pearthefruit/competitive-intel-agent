@@ -15747,6 +15747,7 @@ let _boardData = null;
 let _boardDirty = false;
 let _connectingFrom = null; // thread id when drawing a connection
 let _boardSelectedIds = new Set(); // shift-click multi-select for narrative creation
+let _expandedNarratives = new Set(); // narrative IDs that are expanded to show child threads
 
 function _switchBoardMode(mode) {
     _boardMode = mode;
@@ -15827,16 +15828,24 @@ function renderBoard(data) {
         });
     });
 
-    const nodes = data.nodes.map(d => {
+    // Filter nodes: hide narrative_thread nodes unless their narrative is expanded
+    const visibleNodes = data.nodes.filter(d => {
+        if (d.type === 'narrative_thread') return _expandedNarratives.has(d.narrative_id);
+        if (d.type === 'narrative') return !_expandedNarratives.has(d.node_id); // hide super-node when expanded
+        return true;
+    });
+
+    const nodes = visibleNodes.map(d => {
         const copy = {...d};
         if (copy.x == null) { copy.x = Math.random() * (width - 100) + 50; copy.y = Math.random() * (height - 100) + 50; }
         return copy;
     });
 
-    // Edges
-    const edgeData = data.edges || [];
+    // Edges (only between visible thread nodes)
+    const visibleThreadIds = new Set(nodes.filter(n => n.type !== 'narrative').map(n => n.id));
+    const edgeData = (data.edges || []).filter(e => visibleThreadIds.has(e.source) && visibleThreadIds.has(e.target));
     const nodeMap = {};
-    nodes.forEach(n => nodeMap[n.id] = n);
+    nodes.forEach(n => nodeMap[typeof n.id === 'string' ? n.id : n.id] = n);
 
     const link = zoomGroup.append('g').selectAll('line').data(edgeData).join('line')
         .attr('stroke', 'var(--accent)').attr('stroke-width', 2).attr('stroke-opacity', 0.5)
@@ -15850,7 +15859,7 @@ function renderBoard(data) {
     const connectLine = zoomGroup.append('line').attr('class', 'board-connect-line').style('display', 'none');
 
     // Nodes
-    const nodeR = d => Math.sqrt(d.signal_count || 1) * 6 + 10;
+    const nodeR = d => d.type === 'narrative' ? 30 : Math.sqrt(d.signal_count || 1) * 6 + 10;
     let _boardDragged = false;
 
     const node = zoomGroup.append('g').selectAll('g').data(nodes).join('g')
@@ -15906,8 +15915,21 @@ function renderBoard(data) {
                 else _boardSelectedIds.add(d.id);
                 node.select('.board-select-ring').attr('opacity', dd => _boardSelectedIds.has(dd.id) ? 1 : 0);
                 _updateBoardSelectionBar(nodes);
+            } else if (d.type === 'narrative') {
+                switchSignalTab('narratives');
+                setTimeout(() => openNarrativeDetail(d.node_id), 100);
             } else {
                 openThreadDetail(d.id);
+            }
+        })
+        .on('dblclick', (event, d) => {
+            event.stopPropagation();
+            if (d.type === 'narrative') {
+                _expandedNarratives.add(d.node_id);
+                loadBoard();
+            } else if (d.type === 'narrative_thread') {
+                _expandedNarratives.delete(d.narrative_id);
+                loadBoard();
             }
         })
         .on('contextmenu', (event, d) => {
@@ -15926,30 +15948,68 @@ function renderBoard(data) {
     // Draw nodes
     node.each(function(d) {
         const g = d3.select(this);
-        const r = nodeR(d);
-        const color = _DOMAIN_COLORS[d.domain] || '#6b7280';
-        // Selection ring (shift-click)
-        g.append('circle').attr('class', 'board-select-ring')
-            .attr('r', r + 5).attr('fill', 'none')
-            .attr('stroke', 'var(--accent)').attr('stroke-width', 2.5)
-            .attr('opacity', _boardSelectedIds.has(d.id) ? 1 : 0);
-        // Main circle
-        g.append('circle').attr('r', r).attr('fill', color).attr('fill-opacity', 0.8);
-        // Signal count inside node
-        if (d.signal_count > 0) {
-            g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
-                .attr('fill', '#fff').attr('font-size', Math.min(r * 0.7, 14)).attr('font-weight', 700).attr('pointer-events', 'none')
-                .text(d.signal_count);
+
+        if (d.type === 'narrative') {
+            // Narrative super-node: rounded rectangle
+            const w = 160, h = 56, rx = 10;
+            // Selection ring
+            g.append('rect').attr('class', 'board-select-ring')
+                .attr('x', -w/2 - 4).attr('y', -h/2 - 4).attr('width', w + 8).attr('height', h + 8)
+                .attr('rx', rx + 2).attr('fill', 'none')
+                .attr('stroke', 'var(--accent)').attr('stroke-width', 2.5)
+                .attr('opacity', _boardSelectedIds.has(d.id) ? 1 : 0);
+            // Background
+            g.append('rect').attr('x', -w/2).attr('y', -h/2).attr('width', w).attr('height', h)
+                .attr('rx', rx).attr('fill', '#1a1a2e').attr('stroke', 'var(--purple)').attr('stroke-width', 1.5);
+            // Title
+            g.append('text').attr('text-anchor', 'middle').attr('y', -10)
+                .attr('fill', '#fff').attr('font-size', 11).attr('font-weight', 700).attr('pointer-events', 'none')
+                .text(d.title.length > 22 ? d.title.substring(0, 20) + '…' : d.title);
+            // Evidence bar
+            const ev = d.evidence || {};
+            const sup = ev.supporting || 0, con = ev.contradicting || 0, neu = ev.neutral || 0;
+            const total = sup + con + neu;
+            if (total > 0) {
+                const barW = w - 24, barH = 4, barX = -barW/2, barY = 4;
+                g.append('rect').attr('x', barX).attr('y', barY).attr('width', barW).attr('height', barH).attr('rx', 2).attr('fill', '#333');
+                if (sup > 0) g.append('rect').attr('x', barX).attr('y', barY).attr('width', barW * sup/total).attr('height', barH).attr('rx', 2).attr('fill', '#22c55e');
+                if (con > 0) g.append('rect').attr('x', barX + barW * (1 - con/total)).attr('y', barY).attr('width', barW * con/total).attr('height', barH).attr('rx', 2).attr('fill', '#ef4444');
+            }
+            // Stats line
+            g.append('text').attr('text-anchor', 'middle').attr('y', 20)
+                .attr('fill', 'var(--text-muted)').attr('font-size', 9).attr('pointer-events', 'none')
+                .text(`${d.thread_count} threads · ${d.signal_count} signals`);
+            // Expand hint
+            g.append('text').attr('text-anchor', 'middle').attr('y', h/2 + 14)
+                .attr('fill', 'var(--text-muted)').attr('font-size', 8).attr('pointer-events', 'none')
+                .text('double-click to expand');
+        } else {
+            // Thread node (regular or narrative_thread): circle
+            const r = nodeR(d);
+            const color = _DOMAIN_COLORS[d.domain] || '#6b7280';
+            // Selection ring
+            g.append('circle').attr('class', 'board-select-ring')
+                .attr('r', r + 5).attr('fill', 'none')
+                .attr('stroke', 'var(--accent)').attr('stroke-width', 2.5)
+                .attr('opacity', _boardSelectedIds.has(d.id) ? 1 : 0);
+            // Main circle
+            g.append('circle').attr('r', r).attr('fill', color).attr('fill-opacity', 0.8);
+            // Signal count inside
+            if (d.signal_count > 0) {
+                g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
+                    .attr('fill', '#fff').attr('font-size', Math.min(r * 0.7, 14)).attr('font-weight', 700).attr('pointer-events', 'none')
+                    .text(d.signal_count);
+            }
+            // Title below
+            g.append('text').attr('y', r + 14).attr('text-anchor', 'middle')
+                .attr('fill', 'var(--text-secondary)').attr('font-size', 11).attr('font-weight', 600)
+                .text(d.title.length > 30 ? d.title.substring(0, 28) + '…' : d.title);
+            // Domain or collapse hint
+            const domLabel = d.type === 'narrative_thread' ? 'dbl-click to collapse' : (_DOMAIN_LABELS[d.domain] || d.domain);
+            g.append('text').attr('y', r + 26).attr('text-anchor', 'middle')
+                .attr('fill', d.type === 'narrative_thread' ? 'var(--text-muted)' : color).attr('font-size', 9).attr('font-weight', 600)
+                .text(domLabel);
         }
-        // Title below
-        g.append('text').attr('y', r + 14).attr('text-anchor', 'middle')
-            .attr('fill', 'var(--text-secondary)').attr('font-size', 11).attr('font-weight', 600)
-            .text(d.title.length > 30 ? d.title.substring(0, 28) + '…' : d.title);
-        // Domain label
-        const domLabel = _DOMAIN_LABELS[d.domain] || d.domain;
-        g.append('text').attr('y', r + 26).attr('text-anchor', 'middle')
-            .attr('fill', color).attr('font-size', 9).attr('font-weight', 600)
-            .text(domLabel);
     });
 
     _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
@@ -16047,9 +16107,10 @@ function _updateBoardEdges(link, linkLabel, edgeData, nodeMap) {
 }
 
 function _saveBoardPositions(nodes) {
-    const positions = nodes.filter(n => n.pinned).map(n => ({
-        node_type: 'thread', node_id: n.id, x: n.x, y: n.y, pinned: true
-    }));
+    const positions = nodes.filter(n => n.pinned).map(n => {
+        if (n.type === 'narrative') return { node_type: 'narrative', node_id: n.node_id, x: n.x, y: n.y, pinned: true };
+        return { node_type: 'thread', node_id: n.id, x: n.x, y: n.y, pinned: true };
+    });
     fetch('/api/board/positions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

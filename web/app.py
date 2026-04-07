@@ -2763,18 +2763,50 @@ def create_app(db_path="intel.db"):
 
     @app.route("/api/board", methods=["GET"])
     def board_state_api():
-        """Get full board state: positions, notes, threads, connections."""
-        from db import get_board_state, get_signal_clusters, get_thread_links
+        """Get full board state: positions, notes, threads, narratives, connections."""
+        from db import get_board_state, get_signal_clusters, get_thread_links, get_narratives
         from agents.signals_synthesize import compute_thread_momentum
 
         conn = get_connection(db_path)
         board = get_board_state(conn)
+        # Threads NOT in any narrative
         threads = get_signal_clusters(conn, status="all", limit=200, exclude_domain="narrative")
+        orphan_threads = [t for t in threads if not t.get("narrative_id")]
         links = get_thread_links(conn)
+        narratives = get_narratives(conn, status="all")
 
         from db import get_pattern_signal_noise_counts
         nodes = []
-        for t in threads:
+
+        # Narrative super-nodes
+        for n in narratives:
+            key = f"narrative:{n['id']}"
+            pos = board["positions"].get(key)
+            ev = {}
+            # Get evidence counts across all narrative threads
+            stance_rows = conn.execute(
+                """SELECT sci.evidence_stance, COUNT(*) as cnt
+                   FROM signal_cluster_items sci
+                   JOIN signal_clusters sc ON sc.id = sci.cluster_id
+                   WHERE sc.narrative_id = ? GROUP BY sci.evidence_stance""",
+                (n["id"],),
+            ).fetchall()
+            for sr in stance_rows:
+                ev[sr["evidence_stance"]] = sr["cnt"]
+            nodes.append({
+                "id": f"n:{n['id']}", "node_id": n["id"], "type": "narrative",
+                "title": n["title"], "thesis": n.get("thesis", ""),
+                "thread_count": n.get("thread_count", 0),
+                "signal_count": n.get("signal_count", 0),
+                "evidence": ev, "status": n.get("status", "active"),
+                "x": pos["x"] if pos else None, "y": pos["y"] if pos else None,
+                "pinned": bool(pos["pinned"]) if pos else False,
+                # Child thread IDs for expand mode
+                "child_thread_ids": [t["id"] for t in threads if t.get("narrative_id") == n["id"]],
+            })
+
+        # Orphan thread nodes (not in a narrative)
+        for t in orphan_threads:
             t["momentum"] = compute_thread_momentum(conn, t["id"])
             sn = get_pattern_signal_noise_counts(conn, t["id"])
             key = f"thread:{t['id']}"
@@ -2784,6 +2816,20 @@ def create_app(db_path="intel.db"):
                 "domain": t["domain"], "signal_count": sn["signal_count"],
                 "noise_count": sn["noise_count"], "momentum": t["momentum"],
                 "synthesis": t.get("synthesis", ""),
+                "x": pos["x"] if pos else None, "y": pos["y"] if pos else None,
+                "pinned": bool(pos["pinned"]) if pos else False,
+            })
+
+        # Also include narrative child threads (for expand mode) — hidden by default
+        narrative_threads = [t for t in threads if t.get("narrative_id")]
+        for t in narrative_threads:
+            sn = get_pattern_signal_noise_counts(conn, t["id"])
+            key = f"thread:{t['id']}"
+            pos = board["positions"].get(key)
+            nodes.append({
+                "id": t["id"], "type": "narrative_thread", "title": t["title"],
+                "domain": t["domain"], "signal_count": sn["signal_count"],
+                "narrative_id": t["narrative_id"],
                 "x": pos["x"] if pos else None, "y": pos["y"] if pos else None,
                 "pinned": bool(pos["pinned"]) if pos else False,
             })
