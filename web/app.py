@@ -1888,6 +1888,7 @@ def create_app(db_path="intel.db"):
                 scan_q.put((event_type, ev_data or {}))
 
             result_box = [None]
+            synth_result = [None]  # initialized here so save_scan_history always has access
 
             def _run_scan():
                 try:
@@ -1979,8 +1980,7 @@ def create_app(db_path="intel.db"):
 
             # Save scan history (last 3 only)
             from db import save_scan_history
-            _sr = synth_result[0] if auto_synthesize and 'synth_result' in dir() else {}
-            _sr = _sr or {}
+            _sr = synth_result[0] or {}
             save_scan_history(conn, {
                 "total_collected": len(signals),
                 "new_inserted": new_count,
