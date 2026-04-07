@@ -420,7 +420,7 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
                 print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
                 log_llm_call(provider, p["model"], key_hint, "rate_limited", error=err_str[:200], caller=caller)
                 mark_key_unhealthy(provider, key, err_str)
-            elif provider == "gemini" and json_mode and ("400" in err_str or "schema" in err_str.lower() or "constraint" in err_str.lower()):
+            elif provider == "gemini" and ("400" in err_str or "schema" in err_str.lower() or "constraint" in err_str.lower() or "RepeatedComposite" in err_str or "thought_signature" in err_str):
                 # [B] Gemini schema error in structured output mode — retry without json_mode
                 print(f"[llm] {model_id} (key …{key_hint}) schema rejected — retrying as plain text")
                 log_llm_call(provider, p["model"], key_hint, "error", error=f"schema_fallback: {err_str[:150]}", caller=caller)

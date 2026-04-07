@@ -2337,12 +2337,12 @@ def create_app(db_path="intel.db"):
 
             def _run():
                 try:
-                    # Process unassigned signals in batches of 50 (LLM context limit)
+                    # Process unassigned signals in batches of 25 (small for Groq/Cerebras context)
                     total_new = 0
                     total_assigned = 0
-                    for i in range(0, len(unassigned), 50):
-                        batch = unassigned[i:i+50]
-                        _cb("status", {"text": f"Batch {i//50 + 1}: analyzing {len(batch)} signals..."})
+                    for i in range(0, len(unassigned), 25):
+                        batch = unassigned[i:i+25]
+                        _cb("status", {"text": f"Batch {i//25 + 1}: analyzing {len(batch)} signals..."})
                         result = synthesize_into_threads(conn, batch, progress_cb=_cb)
                         total_new += result.get("new_thread_count", 0)
                         total_assigned += result.get("assigned_count", 0)

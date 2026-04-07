@@ -17,15 +17,13 @@ from prompts.signals import (
 )
 
 
-def _format_signals_for_prompt(signals, max_chars=6000):
-    """Format a list of signal dicts into text for LLM prompts."""
+def _format_signals_for_prompt(signals, max_chars=4000):
+    """Format a list of signal dicts into text for LLM prompts.
+    Compact: title only, no body excerpts — keeps prompt small for Groq/Cerebras."""
     lines = []
     char_count = 0
     for s in signals:
-        line = f"[signal_id={s['id']}] [{s['domain']}] {s['title']}"
-        if s.get("body"):
-            body = s["body"][:200]
-            line += f"\n  {body}"
+        line = f"[{s['id']}] [{s['domain']}] {s['title']}"
         if char_count + len(line) > max_chars:
             break
         lines.append(line)
@@ -34,15 +32,13 @@ def _format_signals_for_prompt(signals, max_chars=6000):
 
 
 def _format_threads_for_prompt(threads):
-    """Format existing thread summaries for the assignment prompt."""
+    """Format existing thread summaries for the assignment prompt.
+    Compact: title + signal count only, no synthesis text."""
     if not threads:
         return ""
     lines = []
     for t in threads:
-        line = f"[thread_id={t['id']}] {t['title']} ({t.get('signal_count', 0)} signals)"
-        if t.get("synthesis"):
-            line += f"\n  Summary: {t['synthesis'][:200]}"
-        lines.append(line)
+        lines.append(f"[{t['id']}] {t['title']} ({t.get('signal_count', 0)} signals)")
     return "\n".join(lines)
 
 
@@ -65,7 +61,8 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
         return {"assigned_count": 0, "new_thread_count": 0, "unassigned_count": 0}
 
     # Fetch all existing threads so LLM can assign to any of them
-    existing_threads = get_signal_clusters(conn, status="all", limit=200)
+    # Keep thread list compact for LLM context — exclude narrative threads
+    existing_threads = get_signal_clusters(conn, status="all", limit=50, exclude_domain="narrative")
     _cb("synthesize_start", {"signal_count": len(new_signals), "existing_threads": len(existing_threads)})
 
     # Build prompt and call LLM
