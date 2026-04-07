@@ -2650,6 +2650,201 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify(context)
 
+    # ===================== NARRATIVES =====================
+
+    @app.route("/api/narratives", methods=["GET"])
+    def narratives_list_api():
+        """List all narratives with thread/signal counts."""
+        from db import get_narratives
+        conn = get_connection(db_path)
+        narratives = get_narratives(conn, status=request.args.get("status", "all"))
+        conn.close()
+        return jsonify({"narratives": narratives})
+
+    @app.route("/api/narratives", methods=["POST"])
+    def narratives_create_api():
+        """Create a narrative from a hypothesis. LLM decomposes into sub-claims + queries."""
+        from db import insert_narrative, insert_signal_cluster, link_thread_to_narrative
+        from agents.llm import generate_json, FAST_CHAIN
+        from prompts.narratives import build_narrative_decomposition_prompt
+
+        data = request.json or {}
+        thesis = data.get("thesis", "").strip()
+        reasoning = data.get("reasoning", "").strip()
+        if not thesis:
+            return jsonify({"error": "thesis required"}), 400
+
+        # LLM decomposes the hypothesis
+        prompt = build_narrative_decomposition_prompt(thesis, reasoning)
+        try:
+            result = generate_json(prompt, timeout=30, chain=FAST_CHAIN)
+        except Exception as e:
+            return jsonify({"error": f"LLM error: {e}"}), 500
+
+        if not result:
+            return jsonify({"error": "LLM returned empty result"}), 500
+
+        title = result.get("title", thesis[:60])
+        sub_claims = result.get("sub_claims", [])
+        # Flatten all queries
+        all_queries = []
+        for sc in sub_claims:
+            all_queries.extend(sc.get("queries", []))
+
+        conn = get_connection(db_path)
+        narrative_id = insert_narrative(conn, {
+            "title": title,
+            "thesis": thesis,
+            "reasoning": reasoning,
+            "sub_claims": sub_claims,
+            "search_queries": all_queries,
+        })
+
+        # Create a thread for each sub-claim
+        for sc in sub_claims:
+            cluster_id = insert_signal_cluster(conn, {
+                "domain": "narrative",
+                "title": sc["claim"],
+                "synthesis": "",
+            })
+            link_thread_to_narrative(conn, cluster_id, narrative_id)
+
+        conn.close()
+        return jsonify({
+            "ok": True,
+            "narrative_id": narrative_id,
+            "title": title,
+            "sub_claims": sub_claims,
+            "search_queries": all_queries,
+        })
+
+    @app.route("/api/narratives/<int:narrative_id>", methods=["GET"])
+    def narratives_detail_api(narrative_id):
+        """Get a narrative with its threads and evidence summary."""
+        from db import get_narrative
+        conn = get_connection(db_path)
+        narrative = get_narrative(conn, narrative_id)
+        conn.close()
+        if not narrative:
+            return jsonify({"error": "Not found"}), 404
+        return jsonify(narrative)
+
+    @app.route("/api/narratives/<int:narrative_id>", methods=["PATCH"])
+    def narratives_update_api(narrative_id):
+        """Update a narrative."""
+        from db import update_narrative
+        conn = get_connection(db_path)
+        update_narrative(conn, narrative_id, request.json or {})
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/narratives/<int:narrative_id>", methods=["DELETE"])
+    def narratives_delete_api(narrative_id):
+        """Delete a narrative and unlink its threads."""
+        from db import delete_narrative
+        conn = get_connection(db_path)
+        delete_narrative(conn, narrative_id)
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/narratives/<int:narrative_id>/search", methods=["POST"])
+    def narratives_search_api(narrative_id):
+        """Run targeted searches for a narrative's queries and link results to its threads."""
+        from db import get_narrative, link_signal_to_cluster, insert_signal
+        from scraper.google_news import search_google_news
+        from scraper.hackernews import search_stories
+        from agents.signals_collect import _normalize_signal
+        from agents.llm import generate_json, FAST_CHAIN
+        from prompts.narratives import build_evidence_classification_prompt
+        from datetime import datetime, timedelta
+
+        conn = get_connection(db_path)
+        narrative = get_narrative(conn, narrative_id)
+        if not narrative:
+            conn.close()
+            return jsonify({"error": "Not found"}), 404
+
+        data = request.json or {}
+        # Use provided queries or fall back to stored ones
+        queries = data.get("queries") or narrative.get("search_queries", [])
+        if not queries:
+            conn.close()
+            return jsonify({"error": "No search queries"}), 400
+
+        threads = narrative.get("threads", [])
+        cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        total_found = 0
+        total_new = 0
+        total_classified = 0
+
+        for query in queries[:15]:  # cap at 15 queries per run
+            # Collect signals
+            news = search_google_news(query, max_results=8, days_back=30)
+            hn = search_stories(query, max_results=5, sort="date")
+
+            for item in news + hn:
+                source = "google_news" if item in news else "hackernews"
+                sig = _normalize_signal(item, source, "narrative")
+                if not sig:
+                    continue
+                pub = sig.get("published_at", "")
+                if pub and pub[:10] < cutoff:
+                    continue
+
+                total_found += 1
+                sig_id = insert_signal(conn, sig)
+                if not sig_id:
+                    # Already exists — get existing ID
+                    existing = conn.execute(
+                        "SELECT id FROM signals WHERE content_hash = ?", (sig.get("content_hash"),)
+                    ).fetchone()
+                    if existing:
+                        sig_id = existing["id"]
+                    else:
+                        continue
+
+                total_new += 1
+
+                # Classify evidence stance against the thesis
+                stance = "neutral"
+                try:
+                    cls_prompt = build_evidence_classification_prompt(
+                        narrative["thesis"], sig.get("title", ""), sig.get("body", "")
+                    )
+                    cls_result = generate_json(cls_prompt, timeout=15, chain=FAST_CHAIN)
+                    if cls_result:
+                        stance = cls_result.get("stance", "neutral")
+                        total_classified += 1
+                except Exception:
+                    pass
+
+                # Link to the best-matching thread, or first thread if unclear
+                target_thread = threads[0]["id"] if threads else None
+                if target_thread:
+                    link_signal_to_cluster(conn, target_thread, sig_id)
+                    # Set evidence stance
+                    conn.execute(
+                        "UPDATE signal_cluster_items SET evidence_stance = ? WHERE cluster_id = ? AND signal_id = ?",
+                        (stance, target_thread, sig_id),
+                    )
+
+        # Update narrative timestamp
+        conn.execute(
+            "UPDATE narratives SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (narrative_id,),
+        )
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            "ok": True,
+            "total_found": total_found,
+            "total_new": total_new,
+            "total_classified": total_classified,
+            "queries_run": len(queries[:15]),
+        })
+
     return app
 
 

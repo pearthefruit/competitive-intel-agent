@@ -191,6 +191,20 @@ CREATE TABLE IF NOT EXISTS signals (
     collected_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Narratives: top-level hypotheses that own threads
+CREATE TABLE IF NOT EXISTS narratives (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    thesis TEXT NOT NULL,
+    reasoning TEXT,
+    sub_claims_json TEXT,
+    search_queries_json TEXT,
+    confidence_score INTEGER,
+    status TEXT DEFAULT 'active',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Signal clusters: LLM-synthesized groupings of related signals
 CREATE TABLE IF NOT EXISTS signal_clusters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -300,6 +314,8 @@ def _migrate_db(conn):
         ("campaigns", "signal_cluster_id", "INTEGER"),
         ("signal_clusters", "last_signal_at", "TEXT"),
         ("signals", "signal_status", "TEXT DEFAULT 'signal'"),
+        ("signal_clusters", "narrative_id", "INTEGER REFERENCES narratives(id)"),
+        ("signal_cluster_items", "evidence_stance", "TEXT DEFAULT 'neutral'"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -2350,4 +2366,118 @@ def get_thread_links(conn):
 def delete_thread_link(conn, link_id):
     """Delete a manual thread link."""
     conn.execute("DELETE FROM thread_links WHERE id = ?", (link_id,))
+    conn.commit()
+
+
+# ===================== NARRATIVES =====================
+
+def insert_narrative(conn, data):
+    """Create a new narrative. Returns the new narrative ID."""
+    cur = conn.execute(
+        """INSERT INTO narratives (title, thesis, reasoning, sub_claims_json, search_queries_json, confidence_score)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (data["title"], data["thesis"], data.get("reasoning", ""),
+         json.dumps(data.get("sub_claims", [])), json.dumps(data.get("search_queries", [])),
+         data.get("confidence_score")),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_narratives(conn, status="all", limit=50):
+    """Fetch narratives with thread counts."""
+    where = "WHERE n.status = ?" if status != "all" else ""
+    params = [status, limit] if status != "all" else [limit]
+    rows = conn.execute(
+        f"""SELECT n.*, COUNT(sc.id) as thread_count,
+                   SUM(CASE WHEN sci_cnt.cnt > 0 THEN sci_cnt.cnt ELSE 0 END) as signal_count
+            FROM narratives n
+            LEFT JOIN signal_clusters sc ON sc.narrative_id = n.id
+            LEFT JOIN (SELECT cluster_id, COUNT(*) as cnt FROM signal_cluster_items GROUP BY cluster_id) sci_cnt
+                ON sci_cnt.cluster_id = sc.id
+            {where}
+            GROUP BY n.id ORDER BY n.updated_at DESC LIMIT ?""",
+        params,
+    ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["sub_claims"] = json.loads(d["sub_claims_json"]) if d.get("sub_claims_json") else []
+        d["search_queries"] = json.loads(d["search_queries_json"]) if d.get("search_queries_json") else []
+        result.append(d)
+    return result
+
+
+def get_narrative(conn, narrative_id):
+    """Fetch a single narrative with its threads and evidence summary."""
+    row = conn.execute("SELECT * FROM narratives WHERE id = ?", (narrative_id,)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["sub_claims"] = json.loads(d["sub_claims_json"]) if d.get("sub_claims_json") else []
+    d["search_queries"] = json.loads(d["search_queries_json"]) if d.get("search_queries_json") else []
+    # Get threads belonging to this narrative
+    threads = conn.execute(
+        """SELECT sc.*, COUNT(sci.signal_id) as signal_count
+           FROM signal_clusters sc
+           LEFT JOIN signal_cluster_items sci ON sci.cluster_id = sc.id
+           WHERE sc.narrative_id = ?
+           GROUP BY sc.id ORDER BY sc.last_signal_at DESC""",
+        (narrative_id,),
+    ).fetchall()
+    d["threads"] = [dict(t) for t in threads]
+    # Evidence stance counts across all threads
+    stances = conn.execute(
+        """SELECT sci.evidence_stance, COUNT(*) as cnt
+           FROM signal_cluster_items sci
+           JOIN signal_clusters sc ON sc.id = sci.cluster_id
+           WHERE sc.narrative_id = ?
+           GROUP BY sci.evidence_stance""",
+        (narrative_id,),
+    ).fetchall()
+    d["evidence"] = {s["evidence_stance"]: s["cnt"] for s in stances}
+    return d
+
+
+def update_narrative(conn, narrative_id, data):
+    """Update a narrative's fields."""
+    fields = []
+    params = []
+    for key in ("title", "thesis", "reasoning", "confidence_score", "status"):
+        if key in data:
+            fields.append(f"{key} = ?")
+            params.append(data[key])
+    if "sub_claims" in data:
+        fields.append("sub_claims_json = ?")
+        params.append(json.dumps(data["sub_claims"]))
+    if "search_queries" in data:
+        fields.append("search_queries_json = ?")
+        params.append(json.dumps(data["search_queries"]))
+    if not fields:
+        return
+    fields.append("updated_at = CURRENT_TIMESTAMP")
+    params.append(narrative_id)
+    conn.execute(f"UPDATE narratives SET {', '.join(fields)} WHERE id = ?", params)
+    conn.commit()
+
+
+def delete_narrative(conn, narrative_id):
+    """Delete a narrative and unlink its threads."""
+    conn.execute("UPDATE signal_clusters SET narrative_id = NULL WHERE narrative_id = ?", (narrative_id,))
+    conn.execute("DELETE FROM narratives WHERE id = ?", (narrative_id,))
+    conn.commit()
+
+
+def link_thread_to_narrative(conn, thread_id, narrative_id):
+    """Assign a thread to a narrative."""
+    conn.execute(
+        "UPDATE signal_clusters SET narrative_id = ? WHERE id = ?",
+        (narrative_id, thread_id),
+    )
+    conn.commit()
+
+
+def unlink_thread_from_narrative(conn, thread_id):
+    """Remove a thread from its narrative."""
+    conn.execute("UPDATE signal_clusters SET narrative_id = NULL WHERE id = ?", (thread_id,))
     conn.commit()

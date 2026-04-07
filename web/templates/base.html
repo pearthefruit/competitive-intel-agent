@@ -4174,6 +4174,34 @@
         }
         .second-order-card p { font-size: 12px; color: var(--text-secondary); margin: 0 0 4px; line-height: 1.4; }
 
+        /* ========== Narratives ========== */
+        .narrative-card {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .narrative-card:hover { background: var(--bg-tertiary); }
+        .narrative-card.active { background: var(--accent-dim); border-left: 3px solid var(--accent); }
+        .narrative-card-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+        .narrative-card-thesis { font-size: 11px; color: var(--text-muted); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .narrative-card-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 10px; color: var(--text-muted); }
+        .narrative-evidence-bar { display: flex; height: 4px; border-radius: 2px; overflow: hidden; flex: 1; max-width: 80px; background: var(--bg-tertiary); }
+        .narrative-evidence-bar .supporting { background: #22c55e; }
+        .narrative-evidence-bar .contradicting { background: #ef4444; }
+        .narrative-evidence-bar .neutral { background: #6b7280; }
+        .narrative-badge { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+        .narrative-badge-active { background: rgba(6,182,212,0.15); color: var(--accent); }
+        .narrative-badge-validated { background: rgba(34,197,94,0.15); color: #22c55e; }
+        .narrative-badge-disproven { background: rgba(239,68,68,0.15); color: #ef4444; }
+
+        .narrative-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; display: flex; align-items: center; justify-content: center; }
+        .narrative-modal { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; width: 500px; max-width: 90vw; max-height: 80vh; overflow-y: auto; padding: 24px; }
+        .narrative-modal h3 { font-size: 16px; font-weight: 700; margin-bottom: 16px; color: var(--text-primary); }
+        .narrative-modal label { display: block; font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; margin-top: 12px; }
+        .narrative-modal textarea, .narrative-modal input[type="text"] { width: 100%; padding: 10px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); font-size: 12px; resize: vertical; font-family: inherit; }
+        .narrative-modal textarea:focus, .narrative-modal input[type="text"]:focus { outline: none; border-color: var(--accent); }
+
         /* Signal selection for manual pattern creation */
         .sig-card-select {
             width: 14px; height: 14px; border-radius: 3px;
@@ -5415,6 +5443,7 @@
             <div class="signals-feed-header">
                 <div class="signals-feed-tabs">
                     <button class="sig-feed-tab active" data-tab="threads" onclick="switchSignalTab('threads')">Threads</button>
+                    <button class="sig-feed-tab" data-tab="narratives" onclick="switchSignalTab('narratives')">Narratives</button>
                     <button class="sig-feed-tab" data-tab="raw" onclick="switchSignalTab('raw')">Raw Signals</button>
                     <button class="sig-feed-tab" data-tab="graph" onclick="switchSignalTab('graph')">Graph</button>
                     <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
@@ -5430,6 +5459,13 @@
                         <div style="font-size:32px;margin-bottom:12px">&#128202;</div>
                         <div>No threads yet</div>
                         <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Threads are detected automatically when you scan for signals.</div>
+                    </div>
+                </div>
+                <!-- Narratives view -->
+                <div class="sig-tab-content" id="sig-tab-narratives">
+                    <div id="narratives-list"></div>
+                    <div style="padding:12px">
+                        <button onclick="openNarrativeModal()" style="width:100%;padding:10px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer">+ New Narrative</button>
                     </div>
                 </div>
                 <!-- Raw signals view -->
@@ -13796,7 +13832,8 @@ function switchSignalTab(tab) {
     document.querySelectorAll('.sig-tab-content').forEach(c => c.classList.remove('active'));
     document.getElementById(`sig-tab-${tab}`).classList.add('active');
     if (tab === 'graph') loadGraph();
-    // Show/hide filter input (only useful for patterns and raw tabs)
+    if (tab === 'narratives') loadNarratives();
+    // Show/hide filter input (only useful for threads and raw tabs)
     const searchInput = document.getElementById('signals-search');
     if (searchInput) searchInput.style.display = (tab === 'threads' || tab === 'raw') ? '' : 'none';
     // Clear detail pane on tab switch (except graph — clicking nodes shows detail)
@@ -15624,7 +15661,233 @@ function _finishResynth() {
     loadSignalFreshness();
 }
 
+// ===================== NARRATIVES =====================
+
+let _narrativesCache = [];
+let _activeNarrativeId = null;
+
+function loadNarratives() {
+    fetch('/api/narratives')
+        .then(r => r.json())
+        .then(data => {
+            _narrativesCache = data.narratives || [];
+            renderNarrativesList();
+        });
+}
+
+function renderNarrativesList() {
+    const container = document.getElementById('narratives-list');
+    if (!container) return;
+    if (!_narrativesCache.length) {
+        container.innerHTML = `<div class="signals-empty" style="display:flex">
+            <div style="font-size:32px;margin-bottom:12px">📖</div>
+            <div>No narratives yet</div>
+            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Create a narrative to test a hypothesis with targeted evidence gathering.</div>
+        </div>`;
+        return;
+    }
+    container.innerHTML = _narrativesCache.map(n => {
+        const ev = n.evidence || {};
+        const sup = ev.supporting || 0;
+        const con = ev.contradicting || 0;
+        const neu = ev.neutral || 0;
+        const total = sup + con + neu;
+        const badge = n.status === 'validated' ? 'validated' : n.status === 'disproven' ? 'disproven' : 'active';
+        return `<div class="narrative-card ${n.id === _activeNarrativeId ? 'active' : ''}" onclick="openNarrativeDetail(${n.id})">
+            <div class="narrative-card-title">${escHtml(n.title)}</div>
+            <div class="narrative-card-thesis">${escHtml(n.thesis)}</div>
+            <div class="narrative-card-meta">
+                <span class="narrative-badge narrative-badge-${badge}">${badge}</span>
+                <span>${n.thread_count || 0} threads</span>
+                <span>${n.signal_count || 0} signals</span>
+                ${total > 0 ? `<div class="narrative-evidence-bar">
+                    ${sup > 0 ? `<div class="supporting" style="width:${sup/total*100}%"></div>` : ''}
+                    ${neu > 0 ? `<div class="neutral" style="width:${neu/total*100}%"></div>` : ''}
+                    ${con > 0 ? `<div class="contradicting" style="width:${con/total*100}%"></div>` : ''}
+                </div>` : ''}
+                ${n.confidence_score != null ? `<span>${n.confidence_score}%</span>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function openNarrativeDetail(narrativeId) {
+    _activeNarrativeId = narrativeId;
+    renderNarrativesList();
+    const detailBody = document.getElementById('signals-detail-body');
+    const closeBtn = document.querySelector('.signals-detail-close');
+    if (closeBtn) closeBtn.style.display = 'block';
+    detailBody.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading narrative...</div>';
+
+    fetch(`/api/narratives/${narrativeId}`)
+        .then(r => r.json())
+        .then(n => {
+            if (n.error) { detailBody.innerHTML = `<div style="color:var(--red);padding:20px">${n.error}</div>`; return; }
+            const ev = n.evidence || {};
+            const sup = ev.supporting || 0;
+            const con = ev.contradicting || 0;
+            const neu = ev.neutral || 0;
+            const total = sup + con + neu;
+            const subClaims = n.sub_claims || [];
+            const threads = n.threads || [];
+            const queries = n.search_queries || [];
+
+            detailBody.innerHTML = `
+                <div style="padding:20px">
+                    <h2 style="font-size:16px;font-weight:700;margin-bottom:8px">${escHtml(n.title)}</h2>
+                    <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:12px;padding:10px;background:var(--bg-tertiary);border-radius:8px;border-left:3px solid var(--accent)">${escHtml(n.thesis)}</div>
+                    ${n.reasoning ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px"><strong>Reasoning:</strong> ${escHtml(n.reasoning)}</div>` : ''}
+
+                    <!-- Evidence bar -->
+                    ${total > 0 ? `<div style="margin-bottom:16px">
+                        <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:4px">EVIDENCE</div>
+                        <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--bg-tertiary);margin-bottom:4px">
+                            ${sup > 0 ? `<div style="width:${sup/total*100}%;background:#22c55e"></div>` : ''}
+                            ${neu > 0 ? `<div style="width:${neu/total*100}%;background:#6b7280"></div>` : ''}
+                            ${con > 0 ? `<div style="width:${con/total*100}%;background:#ef4444"></div>` : ''}
+                        </div>
+                        <div style="display:flex;gap:12px;font-size:10px">
+                            <span style="color:#22c55e">${sup} supporting</span>
+                            <span style="color:#6b7280">${neu} neutral</span>
+                            <span style="color:#ef4444">${con} contradicting</span>
+                        </div>
+                    </div>` : ''}
+
+                    <!-- Sub-claims / Threads -->
+                    <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:6px">SUB-CLAIMS (${subClaims.length})</div>
+                    ${subClaims.map((sc, i) => {
+                        const thread = threads[i];
+                        const sigCount = thread ? thread.signal_count || 0 : 0;
+                        return `<div style="padding:8px 12px;background:var(--bg-tertiary);border-radius:8px;margin-bottom:6px;border-left:2px solid var(--purple)">
+                            <div style="font-size:11px;font-weight:600;color:var(--text-primary)">${escHtml(sc.claim)}</div>
+                            <div style="font-size:10px;color:var(--text-muted);margin-top:4px">${sigCount} signals ${thread ? `· <span style="color:var(--accent);cursor:pointer" onclick="openThreadDetail(${thread.id})">View thread →</span>` : ''}</div>
+                        </div>`;
+                    }).join('')}
+
+                    <!-- Search queries -->
+                    <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-top:16px;margin-bottom:6px">SEARCH QUERIES (${queries.length})</div>
+                    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:16px">
+                        ${queries.map(q => `<span style="font-size:10px;padding:3px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-secondary)">${escHtml(q)}</span>`).join('')}
+                    </div>
+
+                    <!-- Actions -->
+                    <button onclick="runNarrativeSearch(${n.id})" id="narrative-search-btn" style="width:100%;padding:10px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:8px">🔍 Run Targeted Search</button>
+                    <button onclick="deleteNarrative(${n.id})" style="width:100%;padding:8px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--red);font-size:11px;cursor:pointer">Delete Narrative</button>
+                </div>`;
+        });
+}
+
+function openNarrativeModal() {
+    document.getElementById('narrative-modal').style.display = 'flex';
+    document.getElementById('narrative-thesis').focus();
+}
+
+function closeNarrativeModal() {
+    document.getElementById('narrative-modal').style.display = 'none';
+    document.getElementById('narrative-thesis').value = '';
+    document.getElementById('narrative-reasoning').value = '';
+    document.getElementById('narrative-create-status').style.display = 'none';
+}
+
+function createNarrative() {
+    const thesis = document.getElementById('narrative-thesis').value.trim();
+    const reasoning = document.getElementById('narrative-reasoning').value.trim();
+    if (!thesis) return;
+
+    const btn = document.getElementById('narrative-create-btn');
+    const status = document.getElementById('narrative-create-status');
+    btn.disabled = true;
+    btn.textContent = 'Decomposing...';
+    status.style.display = 'block';
+    status.textContent = 'AI is breaking your hypothesis into testable sub-claims and generating search queries...';
+
+    fetch('/api/narratives', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thesis, reasoning })
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.textContent = 'Create & Decompose';
+        if (data.ok) {
+            closeNarrativeModal();
+            loadNarratives();
+            setTimeout(() => openNarrativeDetail(data.narrative_id), 300);
+        } else {
+            status.textContent = data.error || 'Failed to create narrative';
+            status.style.color = 'var(--red)';
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        btn.textContent = 'Create & Decompose';
+        status.textContent = 'Network error';
+        status.style.color = 'var(--red)';
+    });
+}
+
+function runNarrativeSearch(narrativeId) {
+    const btn = document.getElementById('narrative-search-btn');
+    btn.disabled = true;
+    btn.textContent = '🔍 Searching...';
+
+    fetch(`/api/narratives/${narrativeId}/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        if (data.ok) {
+            btn.textContent = `✓ Found ${data.total_found} signals, ${data.total_classified} classified`;
+            btn.style.background = 'var(--bg-tertiary)';
+            btn.style.color = 'var(--green)';
+            btn.style.border = '1px solid var(--green)';
+            // Reload to show updated evidence
+            loadNarratives();
+            setTimeout(() => openNarrativeDetail(narrativeId), 500);
+        } else {
+            btn.textContent = data.error || 'Search failed';
+            btn.style.color = 'var(--red)';
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        btn.textContent = 'Search failed';
+        btn.style.color = 'var(--red)';
+    });
+}
+
+function deleteNarrative(narrativeId) {
+    if (!confirm('Delete this narrative? Threads will be unlinked but not deleted.')) return;
+    fetch(`/api/narratives/${narrativeId}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(() => {
+            _activeNarrativeId = null;
+            loadNarratives();
+            closeSignalDetail();
+        });
+}
+
 </script>
+
+<!-- Narrative Create Modal -->
+<div class="narrative-modal-overlay" id="narrative-modal" style="display:none" onclick="if(event.target===this)closeNarrativeModal()">
+    <div class="narrative-modal">
+        <h3>New Narrative</h3>
+        <label>Hypothesis</label>
+        <textarea id="narrative-thesis" rows="3" placeholder="e.g. AI-driven customization will replace traditional SaaS in the long run"></textarea>
+        <label>Reasoning (optional)</label>
+        <textarea id="narrative-reasoning" rows="3" placeholder="e.g. Anyone can build apps with AI now, so people will start building their own little CRUD apps..."></textarea>
+        <div id="narrative-create-status" style="margin-top:12px;font-size:11px;color:var(--text-muted);display:none"></div>
+        <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+            <button onclick="closeNarrativeModal()" style="padding:8px 16px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:12px;cursor:pointer">Cancel</button>
+            <button onclick="createNarrative()" id="narrative-create-btn" style="padding:8px 20px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer">Create &amp; Decompose</button>
+        </div>
+    </div>
+</div>
 
 <!-- Brainstorm Mode overlay -->
 <div class="exec-overlay" id="brainstorm-overlay" onclick="if(event.target===this)closeBrainstorm()">
