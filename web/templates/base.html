@@ -5396,7 +5396,7 @@
                     Scan Now
                 </button>
                 <button id="signals-resynth-btn" onclick="runResynthesize()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--purple);font-size:11px;font-weight:600;cursor:pointer;margin-top:6px">
-                    🧠 Re-detect Patterns
+                    🧠 Re-detect Threads
                 </button>
                 <div class="signals-freshness" id="signals-freshness">No scans yet</div>
             </div>
@@ -5414,8 +5414,8 @@
         <div class="signals-feed" id="signals-feed">
             <div class="signals-feed-header">
                 <div class="signals-feed-tabs">
-                    <button class="sig-feed-tab active" data-tab="threads" onclick="switchSignalTab('threads')">Patterns</button>
-                    <button class="sig-feed-tab" data-tab="raw" onclick="switchSignalTab('raw')">Raw</button>
+                    <button class="sig-feed-tab active" data-tab="threads" onclick="switchSignalTab('threads')">Threads</button>
+                    <button class="sig-feed-tab" data-tab="raw" onclick="switchSignalTab('raw')">Raw Signals</button>
                     <button class="sig-feed-tab" data-tab="graph" onclick="switchSignalTab('graph')">Graph</button>
                     <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
                 </div>
@@ -5428,8 +5428,8 @@
                 <div class="sig-tab-content active" id="sig-tab-threads">
                     <div class="signals-empty" id="signals-threads-empty">
                         <div style="font-size:32px;margin-bottom:12px">&#128202;</div>
-                        <div>No patterns yet</div>
-                        <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Patterns are detected automatically when you scan for signals.</div>
+                        <div>No threads yet</div>
+                        <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Threads are detected automatically when you scan for signals.</div>
                     </div>
                 </div>
                 <!-- Raw signals view -->
@@ -5445,12 +5445,12 @@
                     <div id="sig-graph-container" style="width:100%;height:100%;position:relative">
                         <div class="signals-empty" id="signals-graph-empty">
                             <div style="font-size:32px;margin-bottom:12px">&#128476;</div>
-                            <div>No patterns to visualize</div>
-                            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Run a scan to detect patterns, then view connections here.</div>
+                            <div>No threads to visualize</div>
+                            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Run a scan to detect threads, then view connections here.</div>
                         </div>
                         <svg id="sig-graph-svg" style="width:100%;height:100%;display:none"></svg>
                         <div id="sig-graph-back" style="display:none;position:absolute;top:12px;left:12px;z-index:5">
-                            <button onclick="_zoomOutToPatterns()" style="padding:6px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;backdrop-filter:blur(8px)">← Back to patterns</button>
+                            <button onclick="_zoomOutToPatterns()" style="padding:6px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;backdrop-filter:blur(8px)">← Back to threads</button>
                         </div>
                         <div id="sig-graph-pattern-label" style="display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;font-size:13px;font-weight:700;color:var(--text-primary);background:var(--bg-primary);padding:4px 12px;border-radius:6px;border:1px solid var(--border)"></div>
                         <div id="sig-graph-controls" style="display:none;position:absolute;bottom:12px;left:12px;right:12px;display:flex;gap:8px;align-items:center;justify-content:space-between">
@@ -5516,7 +5516,7 @@
         <!-- PANE 3: Signal Detail -->
         <div class="signals-detail" id="signals-detail">
             <div class="signals-detail-header">
-                <span class="signals-detail-title">Pattern Detail</span>
+                <span class="signals-detail-title">Thread Detail</span>
                 <button class="signals-detail-close" onclick="closeSignalDetail()" style="display:none">&times;</button>
             </div>
             <div class="signals-detail-body" id="signals-detail-body">
@@ -13881,7 +13881,7 @@ function loadSignalFreshness() {
                         <span style="color:var(--text-secondary);font-weight:600">${s.total_collected} signals · ${s.new_inserted} new</span>
                         <span style="color:var(--text-muted)">${escHtml(age)}</span>
                     </div>
-                    <div style="color:var(--text-muted);margin-top:2px">${s.threads_created} patterns · ${s.threads_assigned} assigned</div>
+                    <div style="color:var(--text-muted);margin-top:2px">${s.threads_created} threads · ${s.threads_assigned} assigned</div>
                 </div>`;
             }).join('');
         })
@@ -13958,11 +13958,11 @@ function renderSignalFeed() {
     const barHtml = _rawSelectedSignals.size >= 2
         ? `<div class="sig-create-pattern-bar">
             <span style="font-size:11px;color:var(--text-secondary);font-weight:600">${_rawSelectedSignals.size} selected</span>
-            <button onclick="_createPatternFromSelection()" style="margin-left:auto;padding:6px 14px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">Create Pattern →</button>
+            <button onclick="_createPatternFromSelection()" style="margin-left:auto;padding:6px 14px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">Create Thread →</button>
             <button onclick="_clearRawSelection()" style="padding:6px 10px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer">Clear</button>
            </div>`
         : _rawSelectedSignals.size === 1
-        ? `<div class="sig-create-pattern-bar"><span style="font-size:11px;color:var(--text-muted)">1 selected — select 1 more to create a pattern</span></div>`
+        ? `<div class="sig-create-pattern-bar"><span style="font-size:11px;color:var(--text-muted)">1 selected — select 1 more to create a thread</span></div>`
         : '';
 
     container.innerHTML = html + barHtml;
@@ -13999,8 +13999,8 @@ function renderThreadFeed() {
     if (!filtered.length) {
         container.innerHTML = `<div class="signals-empty">
             <div style="font-size:32px;margin-bottom:12px">&#128202;</div>
-            <div>${_signalsCache.length ? 'No patterns yet — run a scan to detect them' : 'No patterns yet'}</div>
-            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Patterns are detected automatically when you scan for signals.</div>
+            <div>${_signalsCache.length ? 'No threads yet — run a scan to detect them' : 'No threads yet'}</div>
+            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Threads are detected automatically when you scan for signals.</div>
         </div>`;
         return;
     }
@@ -14111,7 +14111,7 @@ function openThreadDetail(threadId) {
     if (card) card.classList.add('active');
 
     const detailBody = _showDetailPane();
-    detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading pattern...</div>`;
+    detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading thread...</div>`;
 
     fetch(`/api/signals/threads/${threadId}`)
         .then(r => r.json())
@@ -14485,7 +14485,7 @@ function renderGraph(data) {
     const unassigned = data.unassigned_signals || 0;
     const sel = document.getElementById('sig-graph-selection');
     if (sel && unassigned > 0 && _selectedThreadIds.size === 0) {
-        sel.innerHTML = `<span style="color:var(--text-muted)">${data.assigned_signals || 0} signals in ${data.nodes.length} patterns · </span><span style="color:var(--purple)">${unassigned} unassigned</span> <span style="color:var(--text-muted);font-size:10px;cursor:pointer" onclick="runResynthesize()" title="Run pattern detection on unassigned signals">(re-detect)</span>`;
+        sel.innerHTML = `<span style="color:var(--text-muted)">${data.assigned_signals || 0} signals in ${data.nodes.length} threads · </span><span style="color:var(--purple)">${unassigned} unassigned</span> <span style="color:var(--text-muted);font-size:10px;cursor:pointer" onclick="runResynthesize()" title="Run thread detection on unassigned signals">(re-detect)</span>`;
     }
 
     // Clear previous
@@ -14706,7 +14706,7 @@ function _updateBrainstormBtn() {
         sel.innerHTML = `${_selectedThreadIds.size} threads selected · <span style="color:var(--accent);cursor:pointer" onclick="linkSelectedThreads()">Link</span>`;
     } else {
         btn.style.display = 'none';
-        sel.textContent = _selectedThreadIds.size === 1 ? '1 pattern selected — Shift+click another to brainstorm' : 'Click to inspect · Shift+click to select';
+        sel.textContent = _selectedThreadIds.size === 1 ? '1 thread selected — Shift+click another to brainstorm' : 'Click to inspect · Shift+click to select';
     }
 }
 
@@ -14815,7 +14815,7 @@ function _zoomIntoPattern(patternId) {
     document.getElementById('sig-graph-back').style.display = 'block';
     const label = document.getElementById('sig-graph-pattern-label');
     const patternNode = _graphData?.nodes.find(n => n.id === patternId);
-    label.textContent = patternNode ? patternNode.title : `Pattern ${patternId}`;
+    label.textContent = patternNode ? patternNode.title : `Thread ${patternId}`;
     label.style.display = 'block';
 
     // Fetch signals for this pattern and render sub-graph
@@ -15064,7 +15064,7 @@ function _renderBrainstormResults(container, result, threadIds) {
     // Actions bar
     const tids = JSON.stringify(threadIds);
     html += `<div style="display:flex;gap:10px;margin-top:24px;padding-top:16px;border-top:1px solid var(--border)">
-        <button onclick="_linkFromBrainstorm(${escHtml(tids)})" style="padding:10px 20px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--purple);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">🔗 Link These Patterns</button>
+        <button onclick="_linkFromBrainstorm(${escHtml(tids)})" style="padding:10px 20px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--purple);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">🔗 Link These Threads</button>
         <button onclick="closeBrainstorm()" style="padding:10px 20px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:12px;cursor:pointer">Close</button>
     </div>`;
 
@@ -15175,7 +15175,7 @@ function _createPatternFromSelection() {
         return s ? s.title : '';
     }).filter(Boolean);
 
-    const title = prompt('Name this pattern:', titles[0] ? titles[0].substring(0, 50) : 'New Pattern');
+    const title = prompt('Name this thread:', titles[0] ? titles[0].substring(0, 50) : 'New Thread');
     if (!title) return;
 
     fetch('/api/signals/patterns', {
@@ -15241,8 +15241,8 @@ function closeSignalDetail() {
     detailBody.innerHTML = `
         <div class="signals-empty" id="signals-detail-empty" style="display:flex">
             <div style="font-size:32px;margin-bottom:12px">&#128270;</div>
-            <div>Select a pattern to view details</div>
-            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click any pattern in the feed or graph.</div>
+            <div>Select a thread to view details</div>
+            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click any thread in the feed or graph.</div>
         </div>`;
     if (closeBtn) closeBtn.style.display = 'none';
 }
@@ -15346,7 +15346,7 @@ function _handleScanEvent(ev) {
             _execData.synthesis.status = 'running';
             _execData.synthesis.signal_count = ev.signal_count;
             _execData.synthesis.existing_threads = ev.existing_threads;
-            statusText.textContent = 'Detecting patterns...';
+            statusText.textContent = 'Detecting threads...';
             break;
         case 'new_thread':
             if (!_execData.synthesis.new_threads) _execData.synthesis.new_threads = [];
@@ -15422,7 +15422,7 @@ function _renderExecutionDetail() {
 function _renderExecutionDetailInner(container) {
     const d = _execData;
     const phase = d.phase || 'idle';
-    const phaseLabels = { collecting: 'Collecting Signals', synthesizing: 'Detecting Patterns', enriching: 'Fetching Articles', entities: 'Extracting Entities', complete: 'Complete' };
+    const phaseLabels = { collecting: 'Collecting Signals', synthesizing: 'Detecting Threads', enriching: 'Fetching Articles', entities: 'Extracting Entities', complete: 'Complete' };
 
     // Header with phase indicator
     let html = `<div style="margin-bottom:16px">
@@ -15502,22 +15502,22 @@ function _renderExecutionDetailInner(container) {
         <div class="exec-step-header" onclick="this.parentElement.classList.toggle('open')">
             <div class="exec-step-icon" style="background:rgba(168,85,247,0.15)">🧠</div>
             <div class="exec-step-info">
-                <div class="exec-step-title">LLM Pattern Detection</div>
-                <div class="exec-step-subtitle">${synth.signal_count || '...'} signals → ${(synth.new_threads || []).length} new patterns, ${synth.assigned || 0} assigned to existing</div>
+                <div class="exec-step-title">LLM Thread Detection</div>
+                <div class="exec-step-subtitle">${synth.signal_count || '...'} signals → ${(synth.new_threads || []).length} new threads, ${synth.assigned || 0} assigned to existing</div>
             </div>
             <span class="exec-step-badge ${synth.status === 'done' ? 'done' : synth.status === 'running' ? 'running' : ''}">${synth.status === 'done' ? 'Done' : synth.status === 'running' ? 'Running' : '...'}</span>
         </div>
         <div class="exec-step-body" style="padding-top:8px">
-            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">FAST_CHAIN assigns each signal to an existing pattern or groups unmatched signals into new patterns (min 2 signals per pattern).</div>`;
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">FAST_CHAIN assigns each signal to an existing thread or groups unmatched signals into new threads (min 2 signals per thread).</div>`;
 
     if (synth.new_threads && synth.new_threads.length) {
-        html += `<div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:4px">NEW PATTERNS DETECTED</div>`;
+        html += `<div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:4px">NEW THREADS DETECTED</div>`;
         for (const t of synth.new_threads) {
             html += `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:11px"><strong>${escHtml(t.title)}</strong> <span style="color:var(--text-muted)">(${t.signal_count} signals)</span></div>`;
         }
     }
     if (synth.assigned) {
-        html += `<div style="margin-top:8px;font-size:11px;color:var(--text-secondary)">${synth.assigned} signals matched to ${synth.threads_updated || 0} existing patterns (summaries updated via LLM)</div>`;
+        html += `<div style="margin-top:8px;font-size:11px;color:var(--text-secondary)">${synth.assigned} signals matched to ${synth.threads_updated || 0} existing threads (summaries updated via LLM)</div>`;
     }
     html += `</div></div>`;
 
@@ -15577,7 +15577,7 @@ function runResynthesize() {
     btn.disabled = true;
     btn.textContent = '🧠 Detecting...';
     statusEl.style.display = 'block';
-    statusText.textContent = 'Re-detecting patterns...';
+    statusText.textContent = 'Re-detecting threads...';
 
     fetch('/api/signals/resynthesize', { method: 'POST' })
         .then(response => {
@@ -15611,7 +15611,7 @@ function runResynthesize() {
 function _finishResynth() {
     const btn = document.getElementById('signals-resynth-btn');
     btn.disabled = false;
-    btn.textContent = '🧠 Re-detect Patterns';
+    btn.textContent = '🧠 Re-detect Threads';
     loadSignals();
     loadSignalFreshness();
 }
@@ -15626,7 +15626,7 @@ function _finishResynth() {
                 <span style="font-size:24px">🧠</span>
                 <div>
                     <div>Generate Insight</div>
-                    <div class="exec-overlay-subtitle" id="brainstorm-subtitle">Analyzing connected patterns...</div>
+                    <div class="exec-overlay-subtitle" id="brainstorm-subtitle">Analyzing connected threads...</div>
                 </div>
             </div>
             <button class="exec-overlay-close" onclick="closeBrainstorm()">&times;</button>

@@ -2312,7 +2312,7 @@ def create_app(db_path="intel.db"):
             unassigned = [dict(r) for r in unassigned]
 
             if not unassigned:
-                yield f"data: {json.dumps({'type': 'status', 'text': 'All signals are already in patterns.'})}\n\n"
+                yield f"data: {json.dumps({'type': 'status', 'text': 'All signals are already in threads.'})}\n\n"
                 yield f"data: {json.dumps({'type': 'resynth_complete', 'new_patterns': 0, 'assigned': 0})}\n\n"
                 conn.close()
                 return
