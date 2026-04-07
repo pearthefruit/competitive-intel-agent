@@ -2759,6 +2759,19 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True})
 
+    @app.route("/api/narratives/<int:narrative_id>/link-thread", methods=["POST"])
+    def narratives_link_thread_api(narrative_id):
+        """Link an existing thread to a narrative."""
+        from db import link_thread_to_narrative
+        data = request.json or {}
+        thread_id = data.get("thread_id")
+        if not thread_id:
+            return jsonify({"error": "thread_id required"}), 400
+        conn = get_connection(db_path)
+        link_thread_to_narrative(conn, thread_id, narrative_id)
+        conn.close()
+        return jsonify({"ok": True})
+
     @app.route("/api/narratives/<int:narrative_id>/search", methods=["POST"])
     def narratives_search_api(narrative_id):
         """Run targeted searches for a narrative's queries. SSE-streamed."""

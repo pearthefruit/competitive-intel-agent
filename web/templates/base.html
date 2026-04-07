@@ -14054,19 +14054,35 @@ function renderThreadFeed() {
         const lifecycleLabel = lifecycle === 'dormant' ? `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px">dormant · ${m.days_since_last || 0}d</span>` :
                                lifecycle === 'cooling' ? `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px">cooling</span>` : '';
 
+        const checked = _selectedThreadsForNarrative.has(t.id);
         return `<div class="thread-card ${t.id === _activeThreadId ? 'active' : ''}" data-id="${t.id}" style="${dormantStyle}">
-            <div class="thread-card-title">${escHtml(t.title)}</div>
-            ${t.synthesis ? `<div class="thread-card-summary">${escHtml(t.synthesis)}</div>` : ''}
-            <div class="thread-card-meta">
-                <span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700">${escHtml(domLabel)}</span>
-                <span class="thread-card-stat">${t.signal_count || 0} signals</span>
-                <span class="thread-card-stat">${escHtml(age)}</span>
-                <span class="thread-momentum ${escHtml(mDir)}">${mLabel}</span>
-                ${lifecycleLabel}
+            <div style="display:flex;align-items:start;gap:8px">
+                <input type="checkbox" ${checked ? 'checked' : ''} onclick="event.stopPropagation();_toggleThreadForNarrative(${t.id})" style="margin-top:3px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
+                <div style="flex:1;min-width:0">
+                    <div class="thread-card-title">${escHtml(t.title)}</div>
+                    ${t.synthesis ? `<div class="thread-card-summary">${escHtml(t.synthesis)}</div>` : ''}
+                    <div class="thread-card-meta">
+                        <span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700">${escHtml(domLabel)}</span>
+                        <span class="thread-card-stat">${t.signal_count || 0} signals</span>
+                        <span class="thread-card-stat">${escHtml(age)}</span>
+                        <span class="thread-momentum ${escHtml(mDir)}">${mLabel}</span>
+                        ${lifecycleLabel}
+                    </div>
+                </div>
             </div>
         </div>`;
     }).join('');
-    container.innerHTML = html;
+    // Selection action bar
+    const selCount = _selectedThreadsForNarrative.size;
+    const actionBar = selCount > 0
+        ? `<div style="position:sticky;bottom:0;padding:8px 12px;background:var(--bg-secondary);border-top:1px solid var(--border);display:flex;align-items:center;gap:8px">
+            <span style="font-size:11px;color:var(--text-secondary);font-weight:600">${selCount} selected</span>
+            ${selCount >= 2 ? `<button onclick="_createNarrativeFromThreads()" style="padding:5px 12px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer;margin-left:auto">📖 Create Narrative</button>` : `<span style="font-size:10px;color:var(--text-muted);margin-left:auto">Select 1 more to create narrative</span>`}
+            <button onclick="_selectedThreadsForNarrative.clear();renderThreadFeed()" style="padding:5px 8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer">Clear</button>
+        </div>`
+        : '';
+
+    container.innerHTML = html + actionBar;
 }
 
 function openSignalDetail(signalId) {
@@ -15675,6 +15691,29 @@ function _finishResynth() {
 
 let _narrativesCache = [];
 let _activeNarrativeId = null;
+let _selectedThreadsForNarrative = new Set();
+
+function _toggleThreadForNarrative(threadId) {
+    if (_selectedThreadsForNarrative.has(threadId)) _selectedThreadsForNarrative.delete(threadId);
+    else _selectedThreadsForNarrative.add(threadId);
+    renderThreadFeed();
+}
+
+function _createNarrativeFromThreads() {
+    const ids = [..._selectedThreadsForNarrative];
+    const threads = ids.map(id => _threadsCache.find(t => t.id === id)).filter(Boolean);
+    const titles = threads.map(t => t.title).join('; ');
+
+    // Pre-fill the modal with a thesis derived from the selected threads
+    document.getElementById('narrative-modal').style.display = 'flex';
+    document.getElementById('narrative-thesis').value = '';
+    document.getElementById('narrative-reasoning').value = 'Based on these threads: ' + titles;
+    document.getElementById('narrative-thesis').focus();
+
+    // Store thread IDs so we can link them after creation
+    window._pendingNarrativeThreadIds = ids;
+}
+
 
 function loadNarratives() {
     fetch('/api/narratives')
@@ -15824,9 +15863,26 @@ function createNarrative() {
         btn.disabled = false;
         btn.textContent = 'Create & Decompose';
         if (data.ok) {
+            // Link pre-selected threads to the new narrative
+            const pendingIds = window._pendingNarrativeThreadIds || [];
+            if (pendingIds.length) {
+                Promise.all(pendingIds.map(tid =>
+                    fetch(`/api/narratives/${data.narrative_id}/link-thread`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ thread_id: tid })
+                    })
+                )).then(() => {
+                    _selectedThreadsForNarrative.clear();
+                    window._pendingNarrativeThreadIds = null;
+                    loadNarratives();
+                    setTimeout(() => { switchSignalTab('narratives'); openNarrativeDetail(data.narrative_id); }, 300);
+                });
+            } else {
+                loadNarratives();
+                setTimeout(() => openNarrativeDetail(data.narrative_id), 300);
+            }
             closeNarrativeModal();
-            loadNarratives();
-            setTimeout(() => openNarrativeDetail(data.narrative_id), 300);
         } else {
             status.textContent = data.error || 'Failed to create narrative';
             status.style.color = 'var(--red)';
