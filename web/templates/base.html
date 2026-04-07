@@ -4078,6 +4078,14 @@
         .graph-edge.manual { stroke: var(--purple); stroke-opacity: 0.4; stroke-dasharray: 6 4; }
         .graph-edge-label { fill: var(--text-muted); font-size: 8px; pointer-events: none; }
 
+        /* Signal sub-graph nodes */
+        .signal-node { cursor: pointer; }
+        .signal-node:hover circle { filter: brightness(1.4); }
+        .signal-node text { fill: var(--text-secondary); font-size: 9px; pointer-events: none; }
+        .signal-node.noise circle { opacity: 0.25; }
+        .signal-node.noise text { opacity: 0.3; }
+        .signal-edge { stroke: rgba(168,85,247,0.15); stroke-width: 1px; }
+
         /* Graph fullscreen */
         #sig-tab-graph.graph-fullscreen {
             position: fixed;
@@ -5425,6 +5433,10 @@
                             <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Run a scan to detect patterns, then view connections here.</div>
                         </div>
                         <svg id="sig-graph-svg" style="width:100%;height:100%;display:none"></svg>
+                        <div id="sig-graph-back" style="display:none;position:absolute;top:12px;left:12px;z-index:5">
+                            <button onclick="_zoomOutToPatterns()" style="padding:6px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;backdrop-filter:blur(8px)">← Back to patterns</button>
+                        </div>
+                        <div id="sig-graph-pattern-label" style="display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;font-size:13px;font-weight:700;color:var(--text-primary);background:var(--bg-primary);padding:4px 12px;border-radius:6px;border:1px solid var(--border)"></div>
                         <div id="sig-graph-controls" style="display:none;position:absolute;bottom:12px;left:12px;right:12px;display:flex;gap:8px;align-items:center;justify-content:space-between">
                             <div style="display:flex;gap:4px;align-items:center">
                                 <button onclick="_graphZoom(1.3)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom in">+</button>
@@ -14351,6 +14363,8 @@ function openEntityPopover(event, entityType, entityValue) {
 let _graphData = null;
 let _graphSimulation = null;
 let _selectedThreadIds = new Set();
+let _graphMode = 'patterns'; // 'patterns' or 'signals'
+let _zoomedPatternId = null;
 
 function loadGraph() {
     fetch('/api/signals/graph')
@@ -14441,10 +14455,10 @@ function renderGraph(data) {
         .on('click', (event, d) => {
             event.stopPropagation();
             if (event.shiftKey) {
-                // Shift+click = select for brainstorm
                 _toggleThreadSelection(d.id);
             } else {
-                // Regular click = view detail
+                // Regular click = zoom into pattern's signals
+                _zoomIntoPattern(d.id);
                 openThreadDetail(d.id);
             }
         });
@@ -14631,6 +14645,135 @@ function _graphReset() {
     const zb = svg.node().__zoomBehavior;
     if (zb) svg.transition().duration(300).call(zb.transform, d3.zoomIdentity);
 }
+function _zoomIntoPattern(patternId) {
+    _graphMode = 'signals';
+    _zoomedPatternId = patternId;
+
+    // Show back button and pattern label
+    document.getElementById('sig-graph-back').style.display = 'block';
+    const label = document.getElementById('sig-graph-pattern-label');
+    const patternNode = _graphData?.nodes.find(n => n.id === patternId);
+    label.textContent = patternNode ? patternNode.title : `Pattern ${patternId}`;
+    label.style.display = 'block';
+
+    // Fetch signals for this pattern and render sub-graph
+    fetch(`/api/signals/patterns/${patternId}/signals`)
+        .then(r => r.json())
+        .then(data => _renderSignalSubGraph(data))
+        .catch(e => console.error('[graph] zoom-in error:', e));
+}
+
+function _zoomOutToPatterns() {
+    _graphMode = 'patterns';
+    _zoomedPatternId = null;
+    document.getElementById('sig-graph-back').style.display = 'none';
+    document.getElementById('sig-graph-pattern-label').style.display = 'none';
+    if (_graphData) renderGraph(_graphData);
+}
+
+function _renderSignalSubGraph(data) {
+    const container = document.getElementById('sig-graph-container');
+    const svg = d3.select('#sig-graph-svg');
+    svg.selectAll('*').remove();
+
+    const width = container.clientWidth;
+    const height = container.clientHeight - 40;
+    svg.attr('viewBox', [0, 0, width, height]);
+
+    const signals = data.signals || [];
+    const edges = data.edges || [];
+    const pattern = data.pattern || {};
+    const domColor = _DOMAIN_COLORS[pattern.domain] || '#6b7280';
+
+    if (!signals.length) return;
+
+    // Zoom behavior
+    const zoomGroup = svg.append('g');
+    const zoomBehavior = d3.zoom()
+        .scaleExtent([0.3, 4])
+        .filter(event => {
+            if (event.type === 'wheel' || event.type === 'dblclick') return true;
+            if (event.target.closest && event.target.closest('.signal-node')) return false;
+            return true;
+        })
+        .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
+    svg.call(zoomBehavior);
+    svg.node().__zoomBehavior = zoomBehavior;
+
+    const nodes = signals.map(s => ({...s}));
+    const links = edges.map(e => ({...e}));
+
+    // Source icon mapping
+    const srcIcons = { google_news: '📰', reddit: '💬', hackernews: '🟧', fred: '📈', targeted: '🎯' };
+
+    const sim = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(80))
+        .force('charge', d3.forceManyBody().strength(-150))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(30));
+
+    // Edges
+    const link = zoomGroup.append('g')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('class', 'signal-edge');
+
+    // Edge labels
+    const linkLabel = zoomGroup.append('g')
+        .selectAll('text')
+        .data(links)
+        .join('text')
+        .attr('class', 'graph-edge-label')
+        .attr('text-anchor', 'middle')
+        .text(d => (d.shared || []).slice(0, 1).map(e => e.name).join(''));
+
+    // Signal nodes
+    const node = zoomGroup.append('g')
+        .selectAll('g')
+        .data(nodes)
+        .join('g')
+        .attr('class', d => 'signal-node' + (d.signal_status === 'noise' ? ' noise' : ''))
+        .call(d3.drag()
+            .on('start', (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+            .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+            .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+        )
+        .on('click', (event, d) => {
+            event.stopPropagation();
+            openSignalDetail(d.id);
+        });
+
+    // Signal circles — smaller than pattern nodes
+    node.append('circle')
+        .attr('r', 8)
+        .attr('fill', domColor)
+        .attr('fill-opacity', 0.6)
+        .attr('stroke', domColor)
+        .attr('stroke-width', 1.5);
+
+    // Source icon inside
+    node.append('text')
+        .attr('dy', 4)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', '8px')
+        .text(d => srcIcons[d.source] || '•');
+
+    // Title labels
+    node.append('text')
+        .attr('dy', 22)
+        .attr('text-anchor', 'middle')
+        .text(d => d.title.length > 40 ? d.title.substring(0, 38) + '…' : d.title);
+
+    sim.on('tick', () => {
+        link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+        linkLabel.attr('x', d => (d.source.x + d.target.x) / 2)
+            .attr('y', d => (d.source.y + d.target.y) / 2);
+        node.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+}
+
 function toggleGraphFullscreen() {
     const tab = document.getElementById('sig-tab-graph');
     tab.classList.toggle('graph-fullscreen');

@@ -2206,6 +2206,60 @@ def create_app(db_path="intel.db"):
             "audit": audit,
         })
 
+    @app.route("/api/signals/patterns/<int:pattern_id>/signals", methods=["GET"])
+    def signals_pattern_signals_api(pattern_id):
+        """Get signals inside a pattern for sub-graph rendering."""
+        conn = get_connection(db_path)
+        signals = conn.execute(
+            """SELECT s.id, s.title, s.domain, s.source, s.source_name, s.url,
+                      s.published_at, s.signal_status, LENGTH(s.body) as body_len
+               FROM signals s
+               JOIN signal_cluster_items sci ON sci.signal_id = s.id
+               WHERE sci.cluster_id = ?
+               ORDER BY s.collected_at DESC""",
+            (pattern_id,),
+        ).fetchall()
+
+        # Get pattern info
+        pattern = conn.execute(
+            "SELECT id, title, domain, synthesis FROM signal_clusters WHERE id = ?",
+            (pattern_id,),
+        ).fetchone()
+
+        # Get entities for these signals
+        entities = conn.execute(
+            """SELECT DISTINCT entity_type, COALESCE(normalized_value, entity_value) as name, signal_id
+               FROM signal_entities
+               WHERE signal_id IN (SELECT signal_id FROM signal_cluster_items WHERE cluster_id = ?)""",
+            (pattern_id,),
+        ).fetchall()
+
+        # Build entity-based edges between signals (shared entities)
+        sig_entities = {}
+        for e in entities:
+            sid = e["signal_id"]
+            if sid not in sig_entities:
+                sig_entities[sid] = set()
+            sig_entities[sid].add((e["entity_type"], e["name"]))
+
+        edges = []
+        sig_ids = [s["id"] for s in signals]
+        for i, a in enumerate(sig_ids):
+            for b in sig_ids[i+1:]:
+                shared = (sig_entities.get(a, set()) & sig_entities.get(b, set()))
+                if shared:
+                    edges.append({
+                        "source": a, "target": b,
+                        "shared": [{"type": t, "name": n} for t, n in shared],
+                    })
+
+        conn.close()
+        return jsonify({
+            "pattern": dict(pattern) if pattern else None,
+            "signals": [dict(s) for s in signals],
+            "edges": edges,
+        })
+
     @app.route("/api/signals/patterns", methods=["POST"])
     def signals_create_pattern_api():
         """Manually create a pattern from selected signal IDs."""
