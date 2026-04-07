@@ -2241,6 +2241,21 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"brainstorms": brainstorms})
 
+    @app.route("/api/signals/brainstorms/<int:brainstorm_id>", methods=["GET"])
+    def signals_brainstorm_detail_api(brainstorm_id):
+        """Fetch a single past brainstorm."""
+        from db import get_brainstorm, get_signal_clusters
+        conn = get_connection(db_path)
+        b = get_brainstorm(conn, brainstorm_id)
+        if not b:
+            conn.close()
+            return jsonify({"error": "Brainstorm not found"}), 404
+        # Enrich with thread titles and data
+        all_threads = {t["id"]: t for t in get_signal_clusters(conn, status="active", limit=100)}
+        b["threads"] = [all_threads.get(tid, {"id": tid, "title": f"Thread {tid}", "domain": "unknown"}) for tid in b.get("thread_ids", [])]
+        conn.close()
+        return jsonify(b)
+
     @app.route("/api/signals/thread-links", methods=["GET"])
     def signals_thread_links_list_api():
         """List manual thread links."""

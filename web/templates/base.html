@@ -4078,6 +4078,15 @@
         .graph-edge.manual { stroke: var(--purple); stroke-opacity: 0.4; stroke-dasharray: 6 4; }
         .graph-edge-label { fill: var(--text-muted); font-size: 8px; pointer-events: none; }
 
+        /* Graph fullscreen */
+        #sig-tab-graph.graph-fullscreen {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 9998;
+            background: var(--bg-primary);
+            padding: 0;
+        }
+
         /* Brainstorm overlay content */
         .brainstorm-threads {
             display: flex;
@@ -5336,6 +5345,10 @@
                     <span class="sig-domain-count" id="sig-count-regulatory">—</span>
                 </button>
             </div>
+            <div class="signals-brainstorm-list" id="signals-brainstorm-list" style="display:none;padding:8px 12px;border-top:1px solid var(--border)">
+                <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Past Brainstorms</div>
+                <div id="brainstorm-list-items"></div>
+            </div>
             <div class="signals-actions">
                 <button class="signals-scan-btn" id="signals-scan-btn" onclick="runSignalScan()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
@@ -5393,6 +5406,7 @@
                                 <button onclick="_graphZoom(1.3)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom in">+</button>
                                 <button onclick="_graphZoom(0.7)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom out">−</button>
                                 <button onclick="_graphReset()" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Reset zoom">⟲</button>
+                                <button onclick="toggleGraphFullscreen()" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Fullscreen">⛶</button>
                             </div>
                             <div id="sig-graph-selection" style="font-size:11px;color:var(--text-muted)"></div>
                             <button id="sig-brainstorm-btn" onclick="openBrainstormMode()" style="display:none;padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">🧠 Brainstorm →</button>
@@ -13710,16 +13724,33 @@ function filterSignalDomain(domain) {
 
 function loadSignals() {
     const params = new URLSearchParams({ days_back: 7, limit: 300 });
-    // Load both raw signals and threads in parallel
+    // Load raw signals, threads, and brainstorms in parallel
     Promise.all([
         fetch('/api/signals?' + params).then(r => r.json()),
         fetch('/api/signals/threads').then(r => r.json()),
-    ]).then(([sigData, threadData]) => {
+        fetch('/api/signals/brainstorms').then(r => r.json()),
+    ]).then(([sigData, threadData, brainstormData]) => {
         _signalsCache = sigData.signals || [];
         _threadsCache = threadData.threads || [];
         renderSignalFeed();
         renderThreadFeed();
+        _renderBrainstormList(brainstormData.brainstorms || []);
     }).catch(e => console.error('[signals] load error:', e));
+}
+
+function _renderBrainstormList(brainstorms) {
+    const container = document.getElementById('signals-brainstorm-list');
+    const items = document.getElementById('brainstorm-list-items');
+    if (!brainstorms.length) { container.style.display = 'none'; return; }
+    container.style.display = 'block';
+    items.innerHTML = brainstorms.slice(0, 8).map(b => {
+        const titles = (b.thread_titles || []).join(' × ');
+        const date = b.created_at ? _timeAgo(b.created_at) : '';
+        return `<div onclick="openPastBrainstorm(${b.id})" style="padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer;transition:color 0.15s" onmouseenter="this.style.color='var(--accent)'" onmouseleave="this.style.color=''">
+            <div style="font-size:11px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(titles)}</div>
+            <div style="font-size:9px;color:var(--text-muted)">${escHtml(date)} · ${(b.hypotheses || []).length} hypotheses</div>
+        </div>`;
+    }).join('');
 }
 
 function loadSignalFreshness() {
@@ -14024,10 +14055,9 @@ function openThreadDetail(threadId) {
                         <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">Signals (${signals.length})</div>
                         ${signalListHtml || '<div style="color:var(--text-muted);font-size:12px">No signals</div>'}
                     </div>
-                    <div style="padding:12px 20px;border-top:1px solid var(--border)">
-                        <button onclick="exploreThreadAsNiche(${thread.id})" style="width:100%;padding:10px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer">
-                            Explore as Niche →
-                        </button>
+                    <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px">
+                        <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:2px">Actions</div>
+                        ${_buildThreadActions(thread, entities)}
                     </div>
                 </div>
             `;
@@ -14039,13 +14069,52 @@ function openThreadDetail(threadId) {
         });
 }
 
-function exploreThreadAsNiche(threadId) {
-    const t = _threadsCache.find(x => x.id === threadId);
-    if (!t) return;
-    // Switch to Prospecting and pre-fill the niche input
+function _buildThreadActions(thread, entities) {
+    const actions = [];
+    const companies = (entities || []).filter(e => e.entity_type === 'company');
+    const sectors = (entities || []).filter(e => e.entity_type === 'sector');
+    const companyNames = [...new Set(companies.map(e => e.normalized_value || e.entity_value))];
+    const sectorNames = [...new Set(sectors.map(e => e.entity_value))];
+
+    const btnStyle = 'padding:8px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;text-align:left;display:flex;align-items:center;gap:6px;transition:all 0.15s;';
+
+    // If thread has companies, offer to research them
+    if (companyNames.length) {
+        const top = companyNames.slice(0, 3);
+        actions.push(`<button onclick="_threadActionResearch('${escHtml(top[0].replace(/'/g, "\\'"))}')" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--accent)">🔬 Research ${escHtml(top[0])}</button>`);
+        if (top.length > 1) {
+            actions.push(`<button onclick="_threadActionDiscover('${escHtml(top.join(', ').replace(/'/g, "\\'"))}')" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary)">🔍 Discover companies like ${escHtml(top.slice(0, 2).join(', '))}</button>`);
+        }
+    }
+
+    // If thread has sectors, offer to discover in that niche
+    if (sectorNames.length) {
+        const niche = sectorNames[0] + (thread.synthesis ? ' — ' + thread.title : '');
+        actions.push(`<button onclick="_threadActionDiscover('${escHtml(niche.replace(/'/g, "\\'"))}')" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary)">📊 Discover companies in ${escHtml(sectorNames[0])}</button>`);
+    }
+
+    // Always offer to search for more signals
+    actions.push(`<button onclick="_threadActionSearchMore('${escHtml(thread.title.replace(/'/g, "\\'"))}')" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted)">📡 Search for more signals</button>`);
+
+    return actions.join('');
+}
+
+function _threadActionResearch(companyName) {
+    switchModule('research');
+    _prefillResearchChat(companyName);
+}
+
+function _threadActionDiscover(niche) {
     switchModule('prospecting');
-    const nicheInput = document.getElementById('prospect-niche-input');
-    if (nicheInput) nicheInput.value = t.title;
+    const input = document.getElementById('prospect-niche-input');
+    if (input) input.value = niche;
+}
+
+function _threadActionSearchMore(query) {
+    // Run a targeted scan with specific queries based on the thread
+    switchSignalTab('execution');
+    // For now, just trigger a normal scan — in future this could be a targeted search
+    runSignalScan();
 }
 
 function openEntityPopover(event, entityType, entityValue) {
@@ -14367,8 +14436,6 @@ function _updateBrainstormBtn() {
 function linkSelectedThreads() {
     if (_selectedThreadIds.size < 2) return;
     const ids = [..._selectedThreadIds];
-    const label = prompt('Label for this link (optional):') || '';
-    // Link all pairs
     const promises = [];
     for (let i = 0; i < ids.length; i++) {
         for (let j = i + 1; j < ids.length; j++) {
@@ -14376,15 +14443,12 @@ function linkSelectedThreads() {
                 fetch('/api/signals/thread-links', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ thread_a_id: ids[i], thread_b_id: ids[j], label })
+                    body: JSON.stringify({ thread_a_id: ids[i], thread_b_id: ids[j], label: 'manual' })
                 })
             );
         }
     }
-    Promise.all(promises).then(() => {
-        // Reload graph to show new edges
-        loadGraph();
-    });
+    Promise.all(promises).then(() => loadGraph());
 }
 
 function _graphZoom(factor) {
@@ -14396,6 +14460,12 @@ function _graphReset() {
     const svg = d3.select('#sig-graph-svg');
     const zb = svg.node().__zoomBehavior;
     if (zb) svg.transition().duration(300).call(zb.transform, d3.zoomIdentity);
+}
+function toggleGraphFullscreen() {
+    const tab = document.getElementById('sig-tab-graph');
+    tab.classList.toggle('graph-fullscreen');
+    // Re-render graph at new size after transition
+    if (_graphData) setTimeout(() => renderGraph(_graphData), 50);
 }
 
 // ===================== BRAINSTORM MODE =====================
@@ -14510,7 +14580,34 @@ function _renderBrainstormResults(container, result, threadIds) {
         </div>`;
     }
 
+    // Actions bar
+    const tids = JSON.stringify(threadIds);
+    html += `<div style="display:flex;gap:10px;margin-top:24px;padding-top:16px;border-top:1px solid var(--border)">
+        <button onclick="_linkFromBrainstorm(${escHtml(tids)})" style="padding:10px 20px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--purple);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">🔗 Link These Threads</button>
+        <button onclick="closeBrainstorm()" style="padding:10px 20px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:12px;cursor:pointer">Close</button>
+    </div>`;
+
     container.innerHTML = html;
+}
+
+function _linkFromBrainstorm(threadIds) {
+    const promises = [];
+    for (let i = 0; i < threadIds.length; i++) {
+        for (let j = i + 1; j < threadIds.length; j++) {
+            promises.push(
+                fetch('/api/signals/thread-links', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ thread_a_id: threadIds[i], thread_b_id: threadIds[j], label: 'brainstorm' })
+                })
+            );
+        }
+    }
+    Promise.all(promises).then(() => {
+        // Visual feedback
+        const btn = event.target.closest('button');
+        if (btn) { btn.textContent = '✓ Linked'; btn.style.color = 'var(--green)'; btn.disabled = true; }
+    });
 }
 
 function investigateHypothesis(query) {
@@ -14520,8 +14617,47 @@ function investigateHypothesis(query) {
     if (input) input.value = query;
 }
 
+function openPastBrainstorm(brainstormId) {
+    const overlay = document.getElementById('brainstorm-overlay');
+    const content = document.getElementById('brainstorm-content');
+    const subtitle = document.getElementById('brainstorm-subtitle');
+    overlay.classList.add('visible');
+    subtitle.textContent = 'Loading...';
+    content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading brainstorm...</div>';
+
+    fetch(`/api/signals/brainstorms/${brainstormId}`)
+        .then(r => r.json())
+        .then(b => {
+            if (b.error) { content.innerHTML = `<div style="color:var(--red)">${escHtml(b.error)}</div>`; return; }
+            const threads = b.threads || [];
+            subtitle.textContent = threads.map(t => t.title).join(' × ');
+            // Re-use the render function
+            const result = {
+                connection_summary: b.connection_summary,
+                hypotheses: b.hypotheses || [],
+                second_order_effects: b.second_order_effects || [],
+                questions_to_investigate: b.questions_to_investigate || [],
+            };
+            // Build thread cards HTML first
+            content.innerHTML = `<div class="brainstorm-threads">
+                ${threads.map(t => {
+                    const domColor = _DOMAIN_COLORS[t.domain] || '#6b7280';
+                    return `<div class="brainstorm-thread-card" style="border-left:3px solid ${domColor}">
+                        <h3>${escHtml(t.title)}</h3>
+                        <p>${escHtml(t.synthesis || 'No summary')}</p>
+                    </div>`;
+                }).join('')}
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:16px">Brainstormed ${b.created_at ? _timeAgo(b.created_at) : 'previously'}</div>`;
+            _renderBrainstormResults(content, result, b.thread_ids || []);
+        })
+        .catch(() => { content.innerHTML = '<div style="color:var(--red)">Failed to load</div>'; });
+}
+
 function closeBrainstorm() {
     document.getElementById('brainstorm-overlay').classList.remove('visible');
+    // Reload graph to show any new links
+    if (_signalTab === 'graph') loadGraph();
 }
 
 function _prefillResearchChat(companyName) {
@@ -14537,13 +14673,16 @@ function _prefillResearchChat(companyName) {
 function closeSignalDetail() {
     _activeSignalId = null;
     _activeThreadId = null;
+    ++_detailRequestId; // cancel any pending fetches
     document.querySelectorAll('.sig-card, .thread-card').forEach(c => c.classList.remove('active'));
     const detailBody = document.getElementById('signals-detail-body');
     const detailEmpty = document.getElementById('signals-detail-empty');
     const closeBtn = document.querySelector('.signals-detail-close');
+    // Reset to empty state
+    detailBody.innerHTML = '';
+    detailBody.appendChild(detailEmpty);
     detailEmpty.style.display = 'flex';
     if (closeBtn) closeBtn.style.display = 'none';
-    detailBody.querySelectorAll('.sig-detail-card').forEach(c => c.remove());
 }
 
 // Structured execution data (persists for "View Last Execution" button)
