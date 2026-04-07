@@ -14233,8 +14233,18 @@ function openThreadDetail(threadId) {
                 </div>
             ` : '';
 
+            const narr = thread.narrative;
+            const narrativeBreadcrumb = narr
+                ? `<div style="padding:8px 16px;border-bottom:1px solid var(--border);font-size:11px;display:flex;align-items:center;gap:4px">
+                    <span style="color:var(--accent);cursor:pointer" onclick="switchSignalTab('narratives');setTimeout(()=>openNarrativeDetail(${narr.id}),100)">📖 ${escHtml(narr.title)}</span>
+                    <span style="color:var(--text-muted)">→</span>
+                    <span style="color:var(--text-secondary)">${escHtml(thread.title).substring(0, 50)}</span>
+                </div>`
+                : '';
+
             detailBody.innerHTML = `
                 <div class="sig-detail-card">
+                    ${narrativeBreadcrumb}
                     <div class="sig-detail-hero" style="border-left: 4px solid ${domColor}">
                         <h2>${escHtml(thread.title)}</h2>
                         <div class="sig-detail-meta">

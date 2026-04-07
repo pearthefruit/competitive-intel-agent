@@ -2062,6 +2062,14 @@ def create_app(db_path="intel.db"):
         ).fetchall()
         detail["entities"] = [dict(e) for e in entities]
 
+        # Include parent narrative info if this thread belongs to one
+        if detail.get("narrative_id"):
+            narr_row = conn.execute(
+                "SELECT id, title FROM narratives WHERE id = ?", (detail["narrative_id"],)
+            ).fetchone()
+            if narr_row:
+                detail["narrative"] = {"id": narr_row["id"], "title": narr_row["title"]}
+
         conn.close()
         return jsonify(detail)
 
@@ -2775,9 +2783,17 @@ def create_app(db_path="intel.db"):
             conn = get_connection(db_path)
             narr = get_narrative(conn, narrative_id)
             threads = narr.get("threads", [])
+            sub_claims = narr.get("sub_claims", [])
             cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-            capped = queries[:15]
 
+            # Build query → thread mapping: each sub-claim's queries route to its thread
+            query_to_thread = {}
+            for i, sc in enumerate(sub_claims):
+                thread_id = threads[i]["id"] if i < len(threads) else (threads[0]["id"] if threads else None)
+                for q in sc.get("queries", []):
+                    query_to_thread[q] = thread_id
+
+            capped = queries[:15]
             total_found = 0
             total_new = 0
             total_classified = 0
@@ -2785,6 +2801,7 @@ def create_app(db_path="intel.db"):
             yield f"data: {json.dumps({'type': 'start', 'total_queries': len(capped)})}\n\n"
 
             for qi, query in enumerate(capped):
+                target_thread = query_to_thread.get(query, threads[0]["id"] if threads else None)
                 yield f"data: {json.dumps({'type': 'query_start', 'index': qi + 1, 'total': len(capped), 'query': query})}\n\n"
 
                 news = search_google_news(query, max_results=8, days_back=30)
@@ -2826,13 +2843,15 @@ def create_app(db_path="intel.db"):
                     except Exception:
                         pass
 
-                    # Link to best-matching thread
-                    target_thread = threads[0]["id"] if threads else None
                     if target_thread:
                         link_signal_to_cluster(conn, target_thread, sig_id)
                         conn.execute(
                             "UPDATE signal_cluster_items SET evidence_stance = ? WHERE cluster_id = ? AND signal_id = ?",
                             (stance, target_thread, sig_id),
+                        )
+                        conn.execute(
+                            "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (target_thread,),
                         )
 
                     yield f"data: {json.dumps({'type': 'signal', 'title': sig.get('title', '')[:80], 'stance': stance, 'source': source})}\n\n"
