@@ -14645,6 +14645,45 @@ function _graphReset() {
     const zb = svg.node().__zoomBehavior;
     if (zb) svg.transition().duration(300).call(zb.transform, d3.zoomIdentity);
 }
+function _showSignalNodeDetail(s) {
+    ++_detailRequestId;
+    const detailBody = _showDetailPane();
+    const domLabel = _DOMAIN_LABELS[s.domain] || s.domain;
+    const domColor = _DOMAIN_COLORS[s.domain] || '#6b7280';
+    const dateStr = s.published_at ? s.published_at.substring(0, 10) : '';
+    const isNoise = s.signal_status === 'noise';
+
+    detailBody.innerHTML = `
+        <div class="sig-detail-card">
+            <div class="sig-detail-hero" style="border-left: 4px solid ${domColor}">
+                <h2>${escHtml(s.title)}</h2>
+                <div class="sig-detail-meta">
+                    <span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700">${escHtml(domLabel)}</span>
+                    <span style="font-size:11px;color:var(--text-muted)">${escHtml(s.source_name || s.source)}</span>
+                    <span style="font-size:11px;color:var(--text-muted)">${escHtml(dateStr)}</span>
+                    ${isNoise ? '<span style="font-size:10px;color:var(--red);font-weight:600">NOISE</span>' : ''}
+                </div>
+            </div>
+            <div class="sig-detail-body-text" id="sig-node-body-${s.id}">${s.body_len > 100 ? '<span style="color:var(--text-muted);font-style:italic;cursor:pointer" onclick="_fetchSignalNodeArticle(${s.id})">Click to load article text...</span>' : '<span style="color:var(--text-muted);font-style:italic;cursor:pointer" onclick="_fetchSignalNodeArticle(${s.id})">Click to load article text...</span>'}</div>
+            <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px">
+                ${s.url ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px;text-decoration:none">Open source →</a>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function _fetchSignalNodeArticle(sigId) {
+    const el = document.getElementById('sig-node-body-' + sigId);
+    if (!el) return;
+    el.innerHTML = '<span style="color:var(--text-muted)">Loading...</span>';
+    fetch('/api/signals/' + sigId + '/fetch-article', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            el.textContent = data.ok && data.body ? data.body : 'Could not load article text';
+        })
+        .catch(() => { el.textContent = 'Failed to fetch'; });
+}
+
 function _zoomIntoPattern(patternId) {
     _graphMode = 'signals';
     _zoomedPatternId = patternId;
@@ -14707,10 +14746,10 @@ function _renderSignalSubGraph(data) {
     const srcIcons = { google_news: '📰', reddit: '💬', hackernews: '🟧', fred: '📈', targeted: '🎯' };
 
     const sim = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(links).id(d => d.id).distance(80))
-        .force('charge', d3.forceManyBody().strength(-150))
+        .force('link', d3.forceLink(links).id(d => d.id).distance(160))
+        .force('charge', d3.forceManyBody().strength(-300))
         .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(30));
+        .force('collision', d3.forceCollide().radius(50));
 
     // Edges
     const link = zoomGroup.append('g')
@@ -14741,29 +14780,32 @@ function _renderSignalSubGraph(data) {
         )
         .on('click', (event, d) => {
             event.stopPropagation();
-            openSignalDetail(d.id);
+            _showSignalNodeDetail(d);
         });
 
-    // Signal circles — smaller than pattern nodes
+    // Signal circles
     node.append('circle')
-        .attr('r', 8)
+        .attr('r', 16)
         .attr('fill', domColor)
         .attr('fill-opacity', 0.6)
         .attr('stroke', domColor)
-        .attr('stroke-width', 1.5);
+        .attr('stroke-width', 2);
 
     // Source icon inside
     node.append('text')
-        .attr('dy', 4)
+        .attr('dy', 5)
         .attr('text-anchor', 'middle')
-        .attr('font-size', '8px')
+        .attr('font-size', '12px')
         .text(d => srcIcons[d.source] || '•');
 
-    // Title labels
+    // Title labels — larger, wrapped
     node.append('text')
-        .attr('dy', 22)
+        .attr('dy', 32)
         .attr('text-anchor', 'middle')
-        .text(d => d.title.length > 40 ? d.title.substring(0, 38) + '…' : d.title);
+        .attr('font-size', '11px')
+        .attr('fill', 'var(--text-secondary)')
+        .attr('font-weight', '600')
+        .text(d => d.title.length > 45 ? d.title.substring(0, 43) + '…' : d.title);
 
     sim.on('tick', () => {
         link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
