@@ -331,8 +331,9 @@ def extract_entities(conn, signals, progress_cb=None):
 def compute_thread_momentum(conn, thread_id, window_days=7):
     """Compute momentum for a thread: signals this period vs last period.
 
-    Returns dict: {this_period, last_period, direction, label}
+    Returns dict: {this_period, last_period, direction, lifecycle, days_since_last}
     direction: 'accelerating' | 'stable' | 'fading'
+    lifecycle: 'active' | 'cooling' | 'dormant'
     """
     now_count = conn.execute(
         """SELECT COUNT(*) as cnt FROM signal_cluster_items sci
@@ -350,6 +351,24 @@ def compute_thread_momentum(conn, thread_id, window_days=7):
         (thread_id, f"-{window_days * 2} days", f"-{window_days} days"),
     ).fetchone()["cnt"]
 
+    # Days since last signal in this thread
+    last_signal = conn.execute(
+        """SELECT MAX(s.collected_at) as last_at FROM signal_cluster_items sci
+           JOIN signals s ON s.id = sci.signal_id
+           WHERE sci.cluster_id = ?""",
+        (thread_id,),
+    ).fetchone()["last_at"]
+
+    days_since = 0
+    if last_signal:
+        from datetime import datetime
+        try:
+            last_dt = datetime.fromisoformat(last_signal.replace("Z", "+00:00")) if "T" in last_signal else datetime.strptime(last_signal, "%Y-%m-%d %H:%M:%S")
+            days_since = (datetime.now() - last_dt).days
+        except Exception:
+            pass
+
+    # Direction
     if now_count > prev_count and now_count >= 2:
         direction = "accelerating"
     elif now_count < prev_count and prev_count >= 2:
@@ -357,8 +376,18 @@ def compute_thread_momentum(conn, thread_id, window_days=7):
     else:
         direction = "stable"
 
+    # Lifecycle based on recency
+    if days_since >= 14:
+        lifecycle = "dormant"
+    elif days_since >= 7 or (now_count == 0 and prev_count == 0):
+        lifecycle = "cooling"
+    else:
+        lifecycle = "active"
+
     return {
         "this_period": now_count,
         "last_period": prev_count,
         "direction": direction,
+        "lifecycle": lifecycle,
+        "days_since_last": days_since,
     }

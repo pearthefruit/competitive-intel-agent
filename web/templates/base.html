@@ -13846,12 +13846,16 @@ function renderThreadFeed() {
     const html = filtered.map(t => {
         const m = t.momentum || {};
         const mDir = m.direction || 'stable';
-        const mLabel = {accelerating: '↑ Accelerating', stable: '→ Stable', fading: '↓ Fading'}[mDir] || '→ Stable';
+        const mLabel = {accelerating: '↑ Accelerating', stable: '→ Stable', fading: '↓ Decelerating'}[mDir] || '→ Stable';
+        const lifecycle = m.lifecycle || 'active';
         const domLabel = _DOMAIN_LABELS[t.domain] || t.domain;
         const domColor = _DOMAIN_COLORS[t.domain] || '#6b7280';
         const age = t.last_signal_at ? _timeAgo(t.last_signal_at) : _timeAgo(t.created_at);
+        const dormantStyle = lifecycle === 'dormant' ? 'opacity:0.45;' : lifecycle === 'cooling' ? 'opacity:0.7;' : '';
+        const lifecycleLabel = lifecycle === 'dormant' ? `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px">dormant · ${m.days_since_last || 0}d</span>` :
+                               lifecycle === 'cooling' ? `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px">cooling</span>` : '';
 
-        return `<div class="thread-card ${t.id === _activeThreadId ? 'active' : ''}" data-id="${t.id}">
+        return `<div class="thread-card ${t.id === _activeThreadId ? 'active' : ''}" data-id="${t.id}" style="${dormantStyle}">
             <div class="thread-card-title">${escHtml(t.title)}</div>
             ${t.synthesis ? `<div class="thread-card-summary">${escHtml(t.synthesis)}</div>` : ''}
             <div class="thread-card-meta">
@@ -13859,6 +13863,7 @@ function renderThreadFeed() {
                 <span class="thread-card-stat">${t.signal_count || 0} signals</span>
                 <span class="thread-card-stat">${escHtml(age)}</span>
                 <span class="thread-momentum ${escHtml(mDir)}">${mLabel}</span>
+                ${lifecycleLabel}
             </div>
         </div>`;
     }).join('');
@@ -13959,7 +13964,7 @@ function openThreadDetail(threadId) {
             const domColor = _DOMAIN_COLORS[thread.domain] || '#6b7280';
             const m = thread.momentum || {};
             const mDir = m.direction || 'stable';
-            const mLabel = {accelerating: '↑ Accelerating', stable: '→ Stable', fading: '↓ Fading'}[mDir];
+            const mLabel = {accelerating: '↑ Accelerating', stable: '→ Stable', fading: '↓ Decelerating'}[mDir];
             const signals = thread.signals || [];
             const entities = thread.entities || [];
 
@@ -14240,11 +14245,29 @@ function renderGraph(data) {
         )
         .on('click', (event, d) => {
             event.stopPropagation();
-            _toggleThreadSelection(d.id);
-            openThreadDetail(d.id);
+            if (event.shiftKey) {
+                // Shift+click = select for brainstorm
+                _toggleThreadSelection(d.id);
+            } else {
+                // Regular click = view detail
+                openThreadDetail(d.id);
+            }
         });
 
-    const nodeR = d => Math.sqrt(d.signal_count || 1) * 6 + 10;
+    const _lifecycle = d => (d.momentum && d.momentum.lifecycle) || 'active';
+    const nodeR = d => {
+        const base = Math.sqrt(d.signal_count || 1) * 6 + 10;
+        const lc = _lifecycle(d);
+        if (lc === 'dormant') return base * 0.6;
+        if (lc === 'cooling') return base * 0.8;
+        return base;
+    };
+    const nodeOpacity = d => {
+        const lc = _lifecycle(d);
+        if (lc === 'dormant') return 0.3;
+        if (lc === 'cooling') return 0.5;
+        return 0.75;
+    };
 
     // Selection ring (outer glow) — rendered first so it's behind the main circle
     node.append('circle')
@@ -14260,7 +14283,7 @@ function renderGraph(data) {
         .attr('class', 'node-circle')
         .attr('r', nodeR)
         .attr('fill', d => _DOMAIN_COLORS[d.domain] || '#6b7280')
-        .attr('fill-opacity', 0.75)
+        .attr('fill-opacity', nodeOpacity)
         .attr('stroke', d => _DOMAIN_COLORS[d.domain] || '#6b7280')
         .attr('stroke-width', 2);
 
@@ -14337,7 +14360,7 @@ function _updateBrainstormBtn() {
         sel.innerHTML = `${_selectedThreadIds.size} threads selected · <span style="color:var(--accent);cursor:pointer" onclick="linkSelectedThreads()">Link</span>`;
     } else {
         btn.style.display = 'none';
-        sel.textContent = _selectedThreadIds.size === 1 ? '1 thread selected — select 1 more to brainstorm' : 'Click nodes to select threads';
+        sel.textContent = _selectedThreadIds.size === 1 ? '1 selected — Shift+click another to brainstorm' : 'Click to inspect · Shift+click to select';
     }
 }
 
