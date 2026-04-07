@@ -14702,9 +14702,9 @@ function runSignalScan() {
     // Reset execution data
     _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'collecting', startedAt: new Date().toISOString() };
 
-    // Switch to execution tab and render
+    // Switch to execution tab and render (setTimeout ensures DOM has updated)
     switchSignalTab('execution');
-    _renderExecutionDetail();
+    setTimeout(() => _renderExecutionDetail(), 0);
 
     fetch('/api/signals/scan', {
         method: 'POST',
@@ -14848,6 +14848,14 @@ function _renderExecutionDetail() {
     const container = document.getElementById('sig-tab-execution');
     if (!container) return;
 
+    try { _renderExecutionDetailInner(container); }
+    catch (e) {
+        console.error('[exec] Render error:', e);
+        container.innerHTML = '<div style="padding:20px;color:var(--red)">Execution render error: ' + e.message + '</div>';
+    }
+}
+
+function _renderExecutionDetailInner(container) {
     const d = _execData;
     const phase = d.phase || 'idle';
     const phaseLabels = { collecting: 'Collecting Signals', synthesizing: 'Synthesizing Threads', enriching: 'Fetching Articles', entities: 'Extracting Entities', complete: 'Complete' };
