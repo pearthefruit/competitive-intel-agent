@@ -4078,7 +4078,8 @@
             font-size: 12px; flex-shrink: 0;
         }
         /* Graph node styling */
-        .graph-node { cursor: pointer; }
+        .graph-node { cursor: pointer; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
+        .graph-node:hover { filter: drop-shadow(0 2px 8px rgba(0,0,0,0.6)) brightness(1.15); }
         .graph-node circle.node-circle { transition: all 0.15s; }
         .graph-node .select-ring { opacity: 0; transition: opacity 0.2s; }
         .graph-node.selected .select-ring { opacity: 1; animation: pulse-ring 2s ease-in-out infinite; }
@@ -14730,14 +14731,18 @@ function renderGraph(data) {
                 .attr('fill', color)
                 .attr('fill-opacity', op * 0.2);
         } else {
-            // Solid circle
+            // Solid circle with subtle inner gradient effect
             g.append('circle')
                 .attr('class', 'node-circle')
                 .attr('r', r)
                 .attr('fill', color)
-                .attr('fill-opacity', op)
-                .attr('stroke', color)
-                .attr('stroke-width', 2);
+                .attr('fill-opacity', op);
+            // Inner highlight for depth
+            g.append('circle')
+                .attr('r', r * 0.55)
+                .attr('fill', '#fff')
+                .attr('fill-opacity', 0.08)
+                .attr('pointer-events', 'none');
         }
     });
 
@@ -15909,15 +15914,28 @@ function renderBoard(data) {
         const g = d3.select(this);
         const r = nodeR(d);
         const color = _DOMAIN_COLORS[d.domain] || '#6b7280';
-        g.append('circle').attr('r', r).attr('fill', color).attr('fill-opacity', 0.75)
-            .attr('stroke', d.pinned ? '#fff' : 'none').attr('stroke-width', d.pinned ? 1.5 : 0)
-            .attr('stroke-dasharray', d.pinned ? '3 2' : '');
+        // Outer glow ring
+        g.append('circle').attr('r', r + 3).attr('fill', 'none')
+            .attr('stroke', color).attr('stroke-width', 1).attr('stroke-opacity', 0.3);
+        // Main circle
+        g.append('circle').attr('r', r).attr('fill', color).attr('fill-opacity', 0.8);
+        // Inner highlight
+        g.append('circle').attr('r', r * 0.55).attr('fill', '#fff').attr('fill-opacity', 0.08).attr('pointer-events', 'none');
+        // Signal count inside node
+        if (d.signal_count > 0) {
+            g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
+                .attr('fill', '#fff').attr('font-size', Math.min(r * 0.7, 14)).attr('font-weight', 700).attr('pointer-events', 'none')
+                .text(d.signal_count);
+        }
+        // Title below
         g.append('text').attr('y', r + 14).attr('text-anchor', 'middle')
             .attr('fill', 'var(--text-secondary)').attr('font-size', 11).attr('font-weight', 600)
             .text(d.title.length > 30 ? d.title.substring(0, 28) + '…' : d.title);
+        // Domain label
+        const domLabel = _DOMAIN_LABELS[d.domain] || d.domain;
         g.append('text').attr('y', r + 26).attr('text-anchor', 'middle')
-            .attr('fill', 'var(--text-muted)').attr('font-size', 9)
-            .text(`Thread · ${d.signal_count} signals`);
+            .attr('fill', color).attr('font-size', 9).attr('font-weight', 600)
+            .text(domLabel);
     });
 
     _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
