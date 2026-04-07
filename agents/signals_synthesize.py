@@ -64,8 +64,8 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
     if not new_signals:
         return {"assigned_count": 0, "new_thread_count": 0, "unassigned_count": 0}
 
-    # Fetch existing active threads
-    existing_threads = get_signal_clusters(conn, status="active", limit=50)
+    # Fetch all existing threads so LLM can assign to any of them
+    existing_threads = get_signal_clusters(conn, status="all", limit=200)
     _cb("synthesize_start", {"signal_count": len(new_signals), "existing_threads": len(existing_threads)})
 
     # Build prompt and call LLM
