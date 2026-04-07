@@ -2749,101 +2749,107 @@ def create_app(db_path="intel.db"):
 
     @app.route("/api/narratives/<int:narrative_id>/search", methods=["POST"])
     def narratives_search_api(narrative_id):
-        """Run targeted searches for a narrative's queries and link results to its threads."""
-        from db import get_narrative, link_signal_to_cluster, insert_signal
-        from scraper.google_news import search_google_news
-        from scraper.hackernews import search_stories
-        from agents.signals_collect import _normalize_signal
-        from agents.llm import generate_json, FAST_CHAIN
-        from prompts.narratives import build_evidence_classification_prompt
-        from datetime import datetime, timedelta
+        """Run targeted searches for a narrative's queries. SSE-streamed."""
+        from db import get_narrative
 
         conn = get_connection(db_path)
         narrative = get_narrative(conn, narrative_id)
+        conn.close()
         if not narrative:
-            conn.close()
             return jsonify({"error": "Not found"}), 404
 
         data = request.json or {}
-        # Use provided queries or fall back to stored ones
         queries = data.get("queries") or narrative.get("search_queries", [])
         if not queries:
-            conn.close()
             return jsonify({"error": "No search queries"}), 400
 
-        threads = narrative.get("threads", [])
-        cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        def generate():
+            from db import link_signal_to_cluster, insert_signal
+            from scraper.google_news import search_google_news
+            from scraper.hackernews import search_stories
+            from agents.signals_collect import _normalize_signal
+            from agents.llm import generate_json, FAST_CHAIN
+            from prompts.narratives import build_evidence_classification_prompt
+            from datetime import datetime, timedelta
 
-        total_found = 0
-        total_new = 0
-        total_classified = 0
+            conn = get_connection(db_path)
+            narr = get_narrative(conn, narrative_id)
+            threads = narr.get("threads", [])
+            cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+            capped = queries[:15]
 
-        for query in queries[:15]:  # cap at 15 queries per run
-            # Collect signals
-            news = search_google_news(query, max_results=8, days_back=30)
-            hn = search_stories(query, max_results=5, sort="date")
+            total_found = 0
+            total_new = 0
+            total_classified = 0
 
-            for item in news + hn:
-                source = "google_news" if item in news else "hackernews"
-                sig = _normalize_signal(item, source, "narrative")
-                if not sig:
-                    continue
-                pub = sig.get("published_at", "")
-                if pub and pub[:10] < cutoff:
-                    continue
+            yield f"data: {json.dumps({'type': 'start', 'total_queries': len(capped)})}\n\n"
 
-                total_found += 1
-                sig_id = insert_signal(conn, sig)
-                if not sig_id:
-                    # Already exists — get existing ID
-                    existing = conn.execute(
-                        "SELECT id FROM signals WHERE content_hash = ?", (sig.get("content_hash"),)
-                    ).fetchone()
-                    if existing:
-                        sig_id = existing["id"]
-                    else:
+            for qi, query in enumerate(capped):
+                yield f"data: {json.dumps({'type': 'query_start', 'index': qi + 1, 'total': len(capped), 'query': query})}\n\n"
+
+                news = search_google_news(query, max_results=8, days_back=30)
+                hn = search_stories(query, max_results=5, sort="date")
+                q_found = 0
+
+                for item in news + hn:
+                    source = "google_news" if item in news else "hackernews"
+                    sig = _normalize_signal(item, source, "narrative")
+                    if not sig:
+                        continue
+                    pub = sig.get("published_at", "")
+                    if pub and pub[:10] < cutoff:
                         continue
 
-                total_new += 1
+                    total_found += 1
+                    q_found += 1
+                    sig_id = insert_signal(conn, sig)
+                    if not sig_id:
+                        existing = conn.execute(
+                            "SELECT id FROM signals WHERE content_hash = ?", (sig.get("content_hash"),)
+                        ).fetchone()
+                        sig_id = existing["id"] if existing else None
+                        if not sig_id:
+                            continue
 
-                # Classify evidence stance against the thesis
-                stance = "neutral"
-                try:
-                    cls_prompt = build_evidence_classification_prompt(
-                        narrative["thesis"], sig.get("title", ""), sig.get("body", "")
-                    )
-                    cls_result = generate_json(cls_prompt, timeout=15, chain=FAST_CHAIN)
-                    if cls_result:
-                        stance = cls_result.get("stance", "neutral")
-                        total_classified += 1
-                except Exception:
-                    pass
+                    total_new += 1
 
-                # Link to the best-matching thread, or first thread if unclear
-                target_thread = threads[0]["id"] if threads else None
-                if target_thread:
-                    link_signal_to_cluster(conn, target_thread, sig_id)
-                    # Set evidence stance
-                    conn.execute(
-                        "UPDATE signal_cluster_items SET evidence_stance = ? WHERE cluster_id = ? AND signal_id = ?",
-                        (stance, target_thread, sig_id),
-                    )
+                    # Classify evidence stance
+                    stance = "neutral"
+                    try:
+                        cls_prompt = build_evidence_classification_prompt(
+                            narr["thesis"], sig.get("title", ""), sig.get("body", "")
+                        )
+                        cls_result = generate_json(cls_prompt, timeout=15, chain=FAST_CHAIN)
+                        if cls_result:
+                            stance = cls_result.get("stance", "neutral")
+                            total_classified += 1
+                    except Exception:
+                        pass
 
-        # Update narrative timestamp
-        conn.execute(
-            "UPDATE narratives SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (narrative_id,),
-        )
-        conn.commit()
-        conn.close()
+                    # Link to best-matching thread
+                    target_thread = threads[0]["id"] if threads else None
+                    if target_thread:
+                        link_signal_to_cluster(conn, target_thread, sig_id)
+                        conn.execute(
+                            "UPDATE signal_cluster_items SET evidence_stance = ? WHERE cluster_id = ? AND signal_id = ?",
+                            (stance, target_thread, sig_id),
+                        )
 
-        return jsonify({
-            "ok": True,
-            "total_found": total_found,
-            "total_new": total_new,
-            "total_classified": total_classified,
-            "queries_run": len(queries[:15]),
-        })
+                    yield f"data: {json.dumps({'type': 'signal', 'title': sig.get('title', '')[:80], 'stance': stance, 'source': source})}\n\n"
+
+                yield f"data: {json.dumps({'type': 'query_done', 'index': qi + 1, 'query': query, 'found': q_found})}\n\n"
+
+            conn.execute(
+                "UPDATE narratives SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (narrative_id,),
+            )
+            conn.commit()
+            conn.close()
+
+            yield f"data: {json.dumps({'type': 'complete', 'total_found': total_found, 'total_new': total_new, 'total_classified': total_classified})}\n\n"
+
+        return Response(generate(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     return app
 

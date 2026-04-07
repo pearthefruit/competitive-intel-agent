@@ -5463,10 +5463,10 @@
                 </div>
                 <!-- Narratives view -->
                 <div class="sig-tab-content" id="sig-tab-narratives">
-                    <div id="narratives-list"></div>
-                    <div style="padding:12px">
-                        <button onclick="openNarrativeModal()" style="width:100%;padding:10px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer">+ New Narrative</button>
+                    <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center">
+                        <button onclick="openNarrativeModal()" style="padding:5px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:10px;font-weight:600;cursor:pointer;margin-left:auto">+ New Narrative</button>
                     </div>
+                    <div id="narratives-list"></div>
                 </div>
                 <!-- Raw signals view -->
                 <div class="sig-tab-content" id="sig-tab-raw">
@@ -15771,8 +15771,11 @@ function openNarrativeDetail(narrativeId) {
                     </div>
 
                     <!-- Actions -->
-                    <button onclick="runNarrativeSearch(${n.id})" id="narrative-search-btn" style="width:100%;padding:10px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;margin-bottom:8px">🔍 Run Targeted Search</button>
-                    <button onclick="deleteNarrative(${n.id})" style="width:100%;padding:8px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--red);font-size:11px;cursor:pointer">Delete Narrative</button>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <button onclick="runNarrativeSearch(${n.id})" id="narrative-search-btn" style="padding:6px 14px;background:var(--bg-tertiary);border:1px solid var(--accent);border-radius:6px;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px">🔍 Run Search</button>
+                        <button onclick="deleteNarrative(${n.id})" style="padding:6px 10px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer;margin-left:auto">Delete</button>
+                    </div>
+                    <div id="narrative-search-log" style="display:none;margin-top:12px;max-height:200px;overflow-y:auto;font-size:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:8px"></div>
                 </div>`;
         });
 }
@@ -15829,35 +15832,65 @@ function createNarrative() {
 
 function runNarrativeSearch(narrativeId) {
     const btn = document.getElementById('narrative-search-btn');
+    const log = document.getElementById('narrative-search-log');
     btn.disabled = true;
     btn.textContent = '🔍 Searching...';
+    log.style.display = 'block';
+    log.innerHTML = '<div style="color:var(--text-muted)">Starting targeted search...</div>';
+
+    const stanceColors = { supporting: '#22c55e', contradicting: '#ef4444', neutral: '#6b7280' };
 
     fetch(`/api/narratives/${narrativeId}/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({})
     })
-    .then(r => r.json())
-    .then(data => {
-        btn.disabled = false;
-        if (data.ok) {
-            btn.textContent = `✓ Found ${data.total_found} signals, ${data.total_classified} classified`;
-            btn.style.background = 'var(--bg-tertiary)';
-            btn.style.color = 'var(--green)';
-            btn.style.border = '1px solid var(--green)';
-            // Reload to show updated evidence
-            loadNarratives();
-            setTimeout(() => openNarrativeDetail(narrativeId), 500);
-        } else {
-            btn.textContent = data.error || 'Search failed';
-            btn.style.color = 'var(--red)';
+    .then(response => {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        function read() {
+            reader.read().then(({ done, value }) => {
+                if (done) { _finishNarrativeSearch(narrativeId, btn); return; }
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    try {
+                        const ev = JSON.parse(line.substring(6));
+                        if (ev.type === 'query_start') {
+                            log.innerHTML += `<div style="margin-top:6px;font-weight:600;color:var(--text-secondary)">Query ${ev.index}/${ev.total}: <span style="color:var(--accent)">${escHtml(ev.query)}</span></div>`;
+                            btn.textContent = `🔍 Query ${ev.index}/${ev.total}...`;
+                        } else if (ev.type === 'signal') {
+                            const c = stanceColors[ev.stance] || '#6b7280';
+                            log.innerHTML += `<div style="padding:2px 0;color:var(--text-muted)"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${c};margin-right:4px"></span>${escHtml(ev.title)}</div>`;
+                            log.scrollTop = log.scrollHeight;
+                        } else if (ev.type === 'query_done') {
+                            log.innerHTML += `<div style="color:var(--text-muted);font-size:9px;padding-left:10px">${ev.found} results</div>`;
+                        } else if (ev.type === 'complete') {
+                            log.innerHTML += `<div style="margin-top:8px;font-weight:600;color:var(--green)">Done — ${ev.total_found} signals found, ${ev.total_classified} classified</div>`;
+                        }
+                    } catch (e) {}
+                }
+                read();
+            }).catch(() => _finishNarrativeSearch(narrativeId, btn));
         }
+        read();
     })
     .catch(() => {
         btn.disabled = false;
-        btn.textContent = 'Search failed';
-        btn.style.color = 'var(--red)';
+        btn.textContent = '🔍 Run Search';
+        log.innerHTML += '<div style="color:var(--red)">Network error</div>';
     });
+}
+
+function _finishNarrativeSearch(narrativeId, btn) {
+    btn.disabled = false;
+    btn.textContent = '🔍 Run Search';
+    loadNarratives();
+    setTimeout(() => openNarrativeDetail(narrativeId), 500);
 }
 
 function deleteNarrative(narrativeId) {
