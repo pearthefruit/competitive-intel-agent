@@ -15134,15 +15134,17 @@ function _toggleSignalArticle(signalId, el) {
 function closeSignalDetail() {
     _activeSignalId = null;
     _activeThreadId = null;
-    ++_detailRequestId; // cancel any pending fetches
+    ++_detailRequestId;
     document.querySelectorAll('.sig-card, .thread-card').forEach(c => c.classList.remove('active'));
     const detailBody = document.getElementById('signals-detail-body');
-    const detailEmpty = document.getElementById('signals-detail-empty');
     const closeBtn = document.querySelector('.signals-detail-close');
-    // Reset to empty state
-    detailBody.innerHTML = '';
-    detailBody.appendChild(detailEmpty);
-    detailEmpty.style.display = 'flex';
+    // Reset to empty state — recreate since innerHTML destroys it
+    detailBody.innerHTML = `
+        <div class="signals-empty" id="signals-detail-empty" style="display:flex">
+            <div style="font-size:32px;margin-bottom:12px">&#128270;</div>
+            <div>Select a pattern to view details</div>
+            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click any pattern in the feed or graph.</div>
+        </div>`;
     if (closeBtn) closeBtn.style.display = 'none';
 }
 
