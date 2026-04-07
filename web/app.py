@@ -2104,16 +2104,17 @@ def create_app(db_path="intel.db"):
 
     @app.route("/api/signals/search", methods=["POST"])
     def signals_targeted_search_api():
-        """Run a targeted signal search for a specific query. Returns new signals found."""
+        """Run a targeted signal search for a specific query. Optionally link results to a pattern."""
         data = request.json or {}
         query = data.get("query", "").strip()
+        pattern_id = data.get("pattern_id")  # optional: link new signals to this pattern
         if not query:
             return jsonify({"error": "query required"}), 400
 
         from scraper.google_news import search_google_news
         from scraper.hackernews import search_stories
         from agents.signals_collect import _content_hash, _normalize_signal
-        from db import insert_signals_batch
+        from db import insert_signal, link_signal_to_cluster
 
         results = []
         # Search Google News
@@ -2130,7 +2131,34 @@ def create_app(db_path="intel.db"):
                 results.append(sig)
 
         conn = get_connection(db_path)
-        new_count = insert_signals_batch(conn, results)
+        new_count = 0
+        linked_count = 0
+        for sig in results:
+            sig_id = insert_signal(conn, sig)
+            if sig_id:
+                new_count += 1
+                # Link new signals to the pattern
+                if pattern_id:
+                    link_signal_to_cluster(conn, pattern_id, sig_id)
+                    linked_count += 1
+            elif pattern_id:
+                # Signal already exists — try to link it anyway
+                existing = conn.execute(
+                    "SELECT id FROM signals WHERE content_hash = ?", (sig["content_hash"],)
+                ).fetchone()
+                if existing:
+                    link_signal_to_cluster(conn, pattern_id, existing["id"])
+                    linked_count += 1
+        conn.commit()
+
+        # Update pattern's last_signal_at if we linked anything
+        if pattern_id and linked_count > 0:
+            conn.execute(
+                "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (pattern_id,),
+            )
+            conn.commit()
+
         conn.close()
 
         return jsonify({
@@ -2138,7 +2166,7 @@ def create_app(db_path="intel.db"):
             "query": query,
             "total_found": len(results),
             "new_inserted": new_count,
-            "signals": results[:20],
+            "linked_to_pattern": linked_count,
         })
 
     @app.route("/api/signals/scan-history", methods=["GET"])

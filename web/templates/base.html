@@ -5431,7 +5431,7 @@
         <!-- PANE 3: Signal Detail -->
         <div class="signals-detail" id="signals-detail">
             <div class="signals-detail-header">
-                <span class="signals-detail-title">Detail</span>
+                <span class="signals-detail-title">Pattern Detail</span>
                 <button class="signals-detail-close" onclick="closeSignalDetail()" style="display:none">&times;</button>
             </div>
             <div class="signals-detail-body" id="signals-detail-body">
@@ -13710,6 +13710,9 @@ function switchSignalTab(tab) {
     document.querySelectorAll('.sig-tab-content').forEach(c => c.classList.remove('active'));
     document.getElementById(`sig-tab-${tab}`).classList.add('active');
     if (tab === 'graph') loadGraph();
+    // Show/hide filter input (only useful for patterns and raw tabs)
+    const searchInput = document.getElementById('signals-search');
+    if (searchInput) searchInput.style.display = (tab === 'threads' || tab === 'raw') ? '' : 'none';
     // Clear detail pane on tab switch (except graph — clicking nodes shows detail)
     if (tab !== 'graph') closeSignalDetail();
 }
@@ -14118,7 +14121,7 @@ function _buildThreadActions(thread, entities) {
     }
 
     // Always offer to search for more signals
-    actions.push(`<button onclick="_threadActionSearchMore('${escHtml(thread.title.replace(/'/g, "\\'"))}')" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted)">📡 Search for more signals</button>`);
+    actions.push(`<button onclick="_threadActionSearchMore('${escHtml(thread.title.replace(/'/g, "\\'"))}', ${thread.id})" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted)">📡 Search for more signals</button>`);
 
     return actions.join('');
 }
@@ -14134,26 +14137,28 @@ function _threadActionDiscover(niche) {
     if (input) input.value = niche;
 }
 
-function _threadActionSearchMore(query) {
-    // Run a targeted search for this pattern's topic
+function _threadActionSearchMore(query, patternId) {
+    // Run a targeted search and link results to this pattern
     const btn = event.target.closest('button');
     if (btn) { btn.textContent = '📡 Searching...'; btn.disabled = true; }
 
     fetch('/api/signals/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query })
+        body: JSON.stringify({ query, pattern_id: patternId })
     })
     .then(r => r.json())
     .then(data => {
         if (btn) {
-            btn.textContent = data.new_inserted > 0
-                ? `✓ Found ${data.new_inserted} new signals`
-                : '✓ No new signals found';
-            btn.style.color = data.new_inserted > 0 ? 'var(--green)' : 'var(--text-muted)';
+            const parts = [];
+            if (data.new_inserted > 0) parts.push(`${data.new_inserted} new`);
+            if (data.linked_to_pattern > 0) parts.push(`${data.linked_to_pattern} linked`);
+            btn.textContent = parts.length ? `✓ ${parts.join(', ')}` : '✓ No new signals';
+            btn.style.color = data.linked_to_pattern > 0 ? 'var(--green)' : 'var(--text-muted)';
         }
-        // Reload feed to show new signals
-        if (data.new_inserted > 0) loadSignals();
+        // Reload feed and refresh this pattern's detail
+        loadSignals();
+        if (patternId) openThreadDetail(patternId);
     })
     .catch(() => {
         if (btn) { btn.textContent = 'Search failed'; btn.style.color = 'var(--red)'; }
