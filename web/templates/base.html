@@ -15746,6 +15746,7 @@ let _boardMode = 'graph'; // 'graph' or 'board'
 let _boardData = null;
 let _boardDirty = false;
 let _connectingFrom = null; // thread id when drawing a connection
+let _boardSelectedIds = new Set(); // shift-click multi-select for narrative creation
 
 function _switchBoardMode(mode) {
     _boardMode = mode;
@@ -15810,8 +15811,11 @@ function renderBoard(data) {
     svg.on('dblclick.zoom', null);
     svg.node().__zoomBehavior = zoomBehavior;
 
-    // Double-click on empty space → create note
+    // Double-click on empty space → create note (use event coordinates to avoid zoom interference)
     svg.on('dblclick', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.target.closest('.graph-node')) return;
         const [x, y] = d3.pointer(event, zoomGroup.node());
         _showInlineInput(event.clientX, event.clientY, 'Add a note...', '', (text) => {
             if (!text) return;
@@ -15873,7 +15877,7 @@ function renderBoard(data) {
         )
         .on('click', (event, d) => {
             event.stopPropagation();
-            if (_boardDragged) return; // don't open detail after drag
+            if (_boardDragged) return;
             if (_connectingFrom != null && _connectingFrom !== d.id) {
                 const fromId = _connectingFrom;
                 _cancelConnect();
@@ -15896,6 +15900,12 @@ function renderBoard(data) {
                         }
                     });
                 });
+            } else if (event.shiftKey) {
+                // Shift-click: toggle selection for narrative creation
+                if (_boardSelectedIds.has(d.id)) _boardSelectedIds.delete(d.id);
+                else _boardSelectedIds.add(d.id);
+                node.select('.board-select-ring').attr('opacity', dd => _boardSelectedIds.has(dd.id) ? 1 : 0);
+                _updateBoardSelectionBar(nodes);
             } else {
                 openThreadDetail(d.id);
             }
@@ -15918,6 +15928,11 @@ function renderBoard(data) {
         const g = d3.select(this);
         const r = nodeR(d);
         const color = _DOMAIN_COLORS[d.domain] || '#6b7280';
+        // Selection ring (shift-click)
+        g.append('circle').attr('class', 'board-select-ring')
+            .attr('r', r + 5).attr('fill', 'none')
+            .attr('stroke', 'var(--accent)').attr('stroke-width', 2.5)
+            .attr('opacity', _boardSelectedIds.has(d.id) ? 1 : 0);
         // Main circle
         g.append('circle').attr('r', r).attr('fill', color).attr('fill-opacity', 0.8);
         // Signal count inside node
@@ -15939,13 +15954,16 @@ function renderBoard(data) {
 
     _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
 
-    // Render sticky notes as HTML overlays
+    // Render sticky notes as HTML overlays (positioned in zoom-transformed space)
+    const initTransform = d3.zoomTransform(svg.node());
     (data.notes || []).forEach(note => {
         const div = document.createElement('div');
         div.className = 'board-note';
         div.style.background = note.color || '#eab308';
-        div.style.left = note.x + 'px';
-        div.style.top = note.y + 'px';
+        div.style.left = (initTransform.x + note.x * initTransform.k) + 'px';
+        div.style.top = (initTransform.y + note.y * initTransform.k) + 'px';
+        div.style.transform = `scale(${initTransform.k})`;
+        div.style.transformOrigin = '0 0';
         div.dataset.bx = note.x;
         div.dataset.by = note.y;
         div.dataset.id = note.id;
@@ -16006,8 +16024,14 @@ function renderBoard(data) {
         if (e.key === 'Escape') _cancelConnect();
     });
     svg.on('click.cancel', (event) => {
-        // Only cancel if clicking on SVG background, not on a node
-        if (!event.target.closest('.graph-node')) _cancelConnect();
+        if (event.target.closest('.graph-node')) return;
+        _cancelConnect();
+        // Clear board selection if clicking empty space (without shift)
+        if (!event.shiftKey && _boardSelectedIds.size > 0) {
+            _boardSelectedIds.clear();
+            node.select('.board-select-ring').attr('opacity', 0);
+            _updateBoardSelectionBar(nodes);
+        }
     });
 
     // Status text
@@ -16035,6 +16059,31 @@ function _saveBoardPositions(nodes) {
 
 function _deleteBoardNote(noteId) {
     fetch(`/api/board/notes/${noteId}`, { method: 'DELETE' }).then(() => loadBoard());
+}
+
+function _updateBoardSelectionBar(nodes) {
+    const sel = document.getElementById('sig-graph-selection');
+    if (!sel) return;
+    const count = _boardSelectedIds.size;
+    if (count === 0) {
+        sel.innerHTML = `<span style="color:var(--text-muted)">${(nodes||[]).length} threads · right-click to connect · shift-click to select · double-click to add note</span>`;
+    } else if (count === 1) {
+        sel.innerHTML = `<span style="color:var(--accent);font-weight:600">1 selected</span> <span style="color:var(--text-muted)">— shift-click more to create narrative</span> <span style="color:var(--text-muted);cursor:pointer;text-decoration:underline" onclick="_boardSelectedIds.clear();loadBoard()">clear</span>`;
+    } else {
+        const ids = [..._boardSelectedIds];
+        sel.innerHTML = `<span style="color:var(--accent);font-weight:600">${count} selected</span> <button onclick="_boardCreateNarrative()" style="margin-left:8px;padding:4px 12px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer">📖 Create Narrative</button> <span style="color:var(--text-muted);cursor:pointer;text-decoration:underline;margin-left:4px" onclick="_boardSelectedIds.clear();loadBoard()">clear</span>`;
+    }
+}
+
+function _boardCreateNarrative() {
+    const ids = [..._boardSelectedIds];
+    const threads = ids.map(id => (_boardData?.nodes || []).find(n => n.id === id)).filter(Boolean);
+    const titles = threads.map(t => t.title).join('; ');
+    document.getElementById('narrative-modal').style.display = 'flex';
+    document.getElementById('narrative-thesis').value = '';
+    document.getElementById('narrative-reasoning').value = 'Based on these threads: ' + titles;
+    document.getElementById('narrative-thesis').focus();
+    window._pendingNarrativeThreadIds = ids;
 }
 
 // ===================== NARRATIVES =====================
