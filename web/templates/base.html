@@ -14404,16 +14404,16 @@ function renderGraph(data) {
     const zoomBehavior = d3.zoom()
         .scaleExtent([0.3, 4])
         .filter(event => {
-            // Allow scroll wheel zoom always, but only allow pan from background (not nodes)
             if (event.type === 'wheel') return true;
-            if (event.type === 'dblclick') return true;
-            // For mousedown/touchstart: only allow if target is the SVG background, not a node
+            // Block zoom on nodes (let D3 drag handle those)
             const target = event.target;
             if (target.closest && target.closest('.graph-node')) return false;
-            return true;
+            return !event.button; // only left-click for pan
         })
         .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
     svg.call(zoomBehavior);
+    // Disable double-click zoom (we use dblclick for pattern zoom-in)
+    svg.on('dblclick.zoom', null);
     svg.node().__zoomBehavior = zoomBehavior;
 
     // Build D3 force simulation
@@ -14421,10 +14421,10 @@ function renderGraph(data) {
     const links = data.edges.map(d => ({...d}));
 
     _graphSimulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(links).id(d => d.id).distance(140))
-        .force('charge', d3.forceManyBody().strength(-300))
+        .force('link', d3.forceLink(links).id(d => d.id).distance(70))
+        .force('charge', d3.forceManyBody().strength(-80))
         .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(d => Math.sqrt(d.signal_count || 1) * 8 + 24));
+        .force('collision', d3.forceCollide().radius(d => Math.sqrt(d.signal_count || 1) * 6 + 16));
 
     // Edges (inside zoom group)
     const link = zoomGroup.append('g')
@@ -14459,10 +14459,13 @@ function renderGraph(data) {
             if (event.shiftKey) {
                 _toggleThreadSelection(d.id);
             } else {
-                // Regular click = zoom into pattern's signals
-                _zoomIntoPattern(d.id);
                 openThreadDetail(d.id);
             }
+        })
+        .on('dblclick', (event, d) => {
+            event.stopPropagation();
+            _zoomIntoPattern(d.id);
+            openThreadDetail(d.id);
         });
 
     const _lifecycle = d => (d.momentum && d.momentum.lifecycle) || 'active';
@@ -14752,12 +14755,13 @@ function _renderSignalSubGraph(data) {
     const zoomBehavior = d3.zoom()
         .scaleExtent([0.3, 4])
         .filter(event => {
-            if (event.type === 'wheel' || event.type === 'dblclick') return true;
+            if (event.type === 'wheel') return true;
             if (event.target.closest && event.target.closest('.signal-node')) return false;
-            return true;
+            return !event.button;
         })
         .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
     svg.call(zoomBehavior);
+    svg.on('dblclick.zoom', null);
     svg.node().__zoomBehavior = zoomBehavior;
 
     const nodes = signals.map(s => ({...s}));
@@ -14766,13 +14770,12 @@ function _renderSignalSubGraph(data) {
     // Source icon mapping
     const srcIcons = { google_news: '📰', reddit: '💬', hackernews: '🟧', fred: '📈', targeted: '🎯' };
 
-    // Adaptive spacing based on signal count
-    const spacing = Math.max(60, 200 / Math.sqrt(signals.length));
+    const spacing = Math.max(40, 120 / Math.sqrt(signals.length));
     const sim = d3.forceSimulation(nodes)
         .force('link', d3.forceLink(links).id(d => d.id).distance(spacing))
-        .force('charge', d3.forceManyBody().strength(-120))
+        .force('charge', d3.forceManyBody().strength(-60))
         .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(28));
+        .force('collision', d3.forceCollide().radius(22));
     _graphSimulation = sim;
 
     // Edges
