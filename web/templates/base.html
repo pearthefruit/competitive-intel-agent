@@ -4078,8 +4078,8 @@
             font-size: 12px; flex-shrink: 0;
         }
         /* Graph node styling */
-        .graph-node { cursor: pointer; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
-        .graph-node:hover { filter: drop-shadow(0 2px 8px rgba(0,0,0,0.6)) brightness(1.15); }
+        .graph-node { cursor: pointer; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); transition: filter 0.15s; }
+        .graph-node:hover { filter: drop-shadow(0 0 12px rgba(255,255,255,0.3)) brightness(1.4); }
         .graph-node circle.node-circle { transition: all 0.15s; }
         .graph-node .select-ring { opacity: 0; transition: opacity 0.2s; }
         .graph-node.selected .select-ring { opacity: 1; animation: pulse-ring 2s ease-in-out infinite; }
@@ -14731,18 +14731,11 @@ function renderGraph(data) {
                 .attr('fill', color)
                 .attr('fill-opacity', op * 0.2);
         } else {
-            // Solid circle with subtle inner gradient effect
             g.append('circle')
                 .attr('class', 'node-circle')
                 .attr('r', r)
                 .attr('fill', color)
                 .attr('fill-opacity', op);
-            // Inner highlight for depth
-            g.append('circle')
-                .attr('r', r * 0.55)
-                .attr('fill', '#fff')
-                .attr('fill-opacity', 0.08)
-                .attr('pointer-events', 'none');
         }
     });
 
@@ -15914,13 +15907,8 @@ function renderBoard(data) {
         const g = d3.select(this);
         const r = nodeR(d);
         const color = _DOMAIN_COLORS[d.domain] || '#6b7280';
-        // Outer glow ring
-        g.append('circle').attr('r', r + 3).attr('fill', 'none')
-            .attr('stroke', color).attr('stroke-width', 1).attr('stroke-opacity', 0.3);
         // Main circle
         g.append('circle').attr('r', r).attr('fill', color).attr('fill-opacity', 0.8);
-        // Inner highlight
-        g.append('circle').attr('r', r * 0.55).attr('fill', '#fff').attr('fill-opacity', 0.08).attr('pointer-events', 'none');
         // Signal count inside node
         if (d.signal_count > 0) {
             g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
