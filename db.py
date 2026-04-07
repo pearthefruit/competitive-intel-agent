@@ -2072,6 +2072,18 @@ def get_signals(conn, domain=None, days_back=7, limit=200):
     return [dict(r) for r in rows]
 
 
+def get_unassigned_signals(conn, days_back=1, limit=300):
+    """Fetch signals not yet assigned to any thread, within recency window."""
+    rows = conn.execute(
+        """SELECT s.* FROM signals s
+           LEFT JOIN signal_cluster_items sci ON sci.signal_id = s.id
+           WHERE sci.id IS NULL AND s.collected_at >= datetime('now', ?)
+           ORDER BY s.collected_at DESC LIMIT ?""",
+        (f"-{days_back} days", limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_signal_counts_by_domain(conn, days_back=7):
     """Get signal counts per domain for the last N days."""
     rows = conn.execute(

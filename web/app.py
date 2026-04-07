@@ -1934,9 +1934,10 @@ def create_app(db_path="intel.db"):
                 yield f"data: {json.dumps({'type': 'status', 'text': 'Synthesizing signals into threads...'})}\n\n"
 
                 from agents.signals_synthesize import synthesize_into_threads, enrich_thread_signals, extract_entities
+                from db import get_unassigned_signals
 
-                # Fetch the recently inserted signals (last 1 day to catch this scan)
-                recent = get_signals(conn, days_back=1, limit=300)
+                # Only synthesize signals not already assigned to a thread
+                recent = get_unassigned_signals(conn, days_back=1, limit=300)
 
                 synth_q = queue.Queue()
                 synth_result = [None]
