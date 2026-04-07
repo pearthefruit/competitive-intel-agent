@@ -2150,7 +2150,7 @@ def link_signal_to_cluster(conn, cluster_id, signal_id):
         pass
 
 
-def get_signal_clusters(conn, domain=None, status="active", limit=50, min_signals=0):
+def get_signal_clusters(conn, domain=None, status="active", limit=50, min_signals=0, exclude_domain=None):
     """Fetch signal clusters (threads) with signal counts, sorted by most recently active."""
     where = []
     params = []
@@ -2160,6 +2160,9 @@ def get_signal_clusters(conn, domain=None, status="active", limit=50, min_signal
     if domain:
         where.append("sc.domain = ?")
         params.append(domain)
+    if exclude_domain:
+        where.append("sc.domain != ?")
+        params.append(exclude_domain)
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     having_sql = f"HAVING COUNT(sci.signal_id) >= {int(min_signals)}" if min_signals > 0 else ""
     rows = conn.execute(

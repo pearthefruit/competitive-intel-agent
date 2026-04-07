@@ -2018,7 +2018,9 @@ def create_app(db_path="intel.db"):
         from agents.signals_synthesize import compute_thread_momentum
 
         conn = get_connection(db_path)
-        threads = get_signal_clusters(conn, domain=domain, status=status, limit=limit)
+        # Exclude narrative threads from the Threads tab (they live in their narrative)
+        exclude = None if domain else "narrative"
+        threads = get_signal_clusters(conn, domain=domain, status=status, limit=limit, exclude_domain=exclude)
 
         # Enrich with momentum
         for t in threads:
@@ -2409,9 +2411,11 @@ def create_app(db_path="intel.db"):
         domain = request.args.get("domain") or None
         limit = int(request.args.get("limit", 200))
         min_signals = int(request.args.get("min_signals", 0))
+        # Exclude narrative threads from graph by default (they belong in their narrative context)
+        exclude_domain = None if domain else "narrative"
 
         conn = get_connection(db_path)
-        threads = get_signal_clusters(conn, status=status, limit=limit, domain=domain, min_signals=min_signals)
+        threads = get_signal_clusters(conn, status=status, limit=limit, domain=domain, min_signals=min_signals, exclude_domain=exclude_domain)
 
         # Build nodes
         nodes = []
