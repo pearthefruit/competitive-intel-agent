@@ -5477,9 +5477,9 @@
         <div class="signals-feed" id="signals-feed">
             <div class="signals-feed-header">
                 <div class="signals-feed-tabs">
-                    <button class="sig-feed-tab active" data-tab="threads" onclick="switchSignalTab('threads')">Threads</button>
+                    <button class="sig-feed-tab active" data-tab="raw" onclick="switchSignalTab('raw')">Signals</button>
+                    <button class="sig-feed-tab" data-tab="threads" onclick="switchSignalTab('threads')">Threads</button>
                     <button class="sig-feed-tab" data-tab="narratives" onclick="switchSignalTab('narratives')">Narratives</button>
-                    <button class="sig-feed-tab" data-tab="raw" onclick="switchSignalTab('raw')">Raw Signals</button>
                     <button class="sig-feed-tab" data-tab="graph" onclick="switchSignalTab('graph')">Graph</button>
                     <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
                 </div>
@@ -5489,7 +5489,7 @@
             </div>
             <div class="signals-feed-body" id="signals-feed-body">
                 <!-- Threads view (default) -->
-                <div class="sig-tab-content active" id="sig-tab-threads">
+                <div class="sig-tab-content" id="sig-tab-threads">
                     <div class="signals-empty" id="signals-threads-empty">
                         <div style="font-size:32px;margin-bottom:12px">&#128202;</div>
                         <div>No threads yet</div>
@@ -5504,7 +5504,7 @@
                     <div id="narratives-list"></div>
                 </div>
                 <!-- Raw signals view -->
-                <div class="sig-tab-content" id="sig-tab-raw">
+                <div class="sig-tab-content active" id="sig-tab-raw">
                     <div class="signals-empty" id="signals-empty">
                         <div style="font-size:32px;margin-bottom:12px">&#128225;</div>
                         <div>No signals collected yet</div>
@@ -13860,7 +13860,7 @@ let _threadsCache = [];
 let _signalsDomainFilter = 'all';
 let _activeSignalId = null;
 let _activeThreadId = null;
-let _signalTab = 'threads';
+let _signalTab = 'raw';
 let _detailRequestId = 0; // monotonic counter to cancel stale fetches
 let _rawSelectedSignals = new Set(); // selected signal IDs in Raw tab for pattern creation
 
@@ -14093,10 +14093,10 @@ function renderThreadFeed() {
         const lifecycleLabel = lifecycle === 'dormant' ? `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px">dormant · ${m.days_since_last || 0}d</span>` :
                                lifecycle === 'cooling' ? `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px">cooling</span>` : '';
 
-        const checked = _selectedThreadsForNarrative.has(t.id);
+        const checked = _selectedThreadsForNarrative.has(t.id) ? ' checked' : '';
         return `<div class="thread-card ${t.id === _activeThreadId ? 'active' : ''}" data-id="${t.id}" style="${dormantStyle}">
             <div style="display:flex;align-items:start;gap:8px">
-                <input type="checkbox" ${checked ? 'checked' : ''} onclick="event.stopPropagation();_toggleThreadForNarrative(${t.id})" style="margin-top:3px;accent-color:var(--accent);cursor:pointer;flex-shrink:0">
+                <div class="sig-card-select${checked}" onclick="event.stopPropagation();_toggleThreadForNarrative(${t.id})">✓</div>
                 <div style="flex:1;min-width:0">
                     <div class="thread-card-title">${escHtml(t.title)}</div>
                     ${t.synthesis ? `<div class="thread-card-summary">${escHtml(t.synthesis)}</div>` : ''}
@@ -14613,13 +14613,7 @@ function renderGraph(data) {
     const zoomGroup = svg.append('g').attr('class', 'graph-zoom-group');
     const zoomBehavior = d3.zoom()
         .scaleExtent([0.3, 4])
-        .filter(event => {
-            if (event.type === 'wheel') return true;
-            if (event.target.closest && event.target.closest('.graph-node')) return false;
-            // Only allow middle-mouse pan (button 1), block left-click pan to prevent zoom-on-hold
-            if (event.type === 'mousedown') return event.button === 1;
-            return false;
-        })
+        .filter(event => event.type === 'wheel')
         .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
     svg.call(zoomBehavior);
     svg.on('dblclick.zoom', null);
@@ -14960,11 +14954,7 @@ function _renderSignalSubGraph(data) {
     const zoomGroup = svg.append('g');
     const zoomBehavior = d3.zoom()
         .scaleExtent([0.3, 4])
-        .filter(event => {
-            if (event.type === 'wheel') return true;
-            if (event.target.closest && event.target.closest('.signal-node')) return false;
-            return !event.button;
-        })
+        .filter(event => event.type === 'wheel')
         .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
     svg.call(zoomBehavior);
     svg.on('dblclick.zoom', null);
@@ -16156,7 +16146,24 @@ let _selectedThreadsForNarrative = new Set();
 function _toggleThreadForNarrative(threadId) {
     if (_selectedThreadsForNarrative.has(threadId)) _selectedThreadsForNarrative.delete(threadId);
     else _selectedThreadsForNarrative.add(threadId);
-    renderThreadFeed();
+    // Update checkbox visuals without full re-render
+    document.querySelectorAll(`.thread-card[data-id="${threadId}"] .sig-card-select`).forEach(el => {
+        el.classList.toggle('checked', _selectedThreadsForNarrative.has(threadId));
+    });
+    // Update action bar
+    const container = document.getElementById('sig-tab-threads');
+    const existing = container.querySelector('[data-thread-action-bar]');
+    if (existing) existing.remove();
+    const selCount = _selectedThreadsForNarrative.size;
+    if (selCount > 0) {
+        const bar = document.createElement('div');
+        bar.setAttribute('data-thread-action-bar', '1');
+        bar.style.cssText = 'position:sticky;bottom:0;padding:8px 12px;background:var(--bg-secondary);border-top:1px solid var(--border);display:flex;align-items:center;gap:8px';
+        bar.innerHTML = `<span style="font-size:11px;color:var(--text-secondary);font-weight:600">${selCount} selected</span>` +
+            (selCount >= 2 ? `<button onclick="_createNarrativeFromThreads()" style="padding:5px 12px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer;margin-left:auto">📖 Create Narrative</button>` : `<span style="font-size:10px;color:var(--text-muted);margin-left:auto">Select 1 more to create narrative</span>`) +
+            `<button onclick="_selectedThreadsForNarrative.clear();renderThreadFeed()" style="padding:5px 8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer">Clear</button>`;
+        container.appendChild(bar);
+    }
 }
 
 function _createNarrativeFromThreads() {
