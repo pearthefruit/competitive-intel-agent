@@ -5443,6 +5443,8 @@
                                 <button onclick="_graphZoom(0.7)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom out">−</button>
                                 <button onclick="_graphReset()" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Reset zoom">⟲</button>
                                 <button onclick="toggleGraphFullscreen()" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Fullscreen">⛶</button>
+                                <span style="font-size:9px;color:var(--text-muted);margin-left:4px">Spacing</span>
+                                <input type="range" id="graph-spacing" min="30" max="200" value="100" style="width:60px;height:14px;accent-color:var(--accent)" oninput="_adjustGraphSpacing(this.value)">
                             </div>
                             <div id="sig-graph-selection" style="font-size:11px;color:var(--text-muted)"></div>
                             <button id="sig-brainstorm-btn" onclick="openBrainstormMode()" style="display:none;padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">🧠 Generate Insight →</button>
@@ -14645,6 +14647,14 @@ function _graphReset() {
     const zb = svg.node().__zoomBehavior;
     if (zb) svg.transition().duration(300).call(zb.transform, d3.zoomIdentity);
 }
+function _adjustGraphSpacing(val) {
+    if (!_graphSimulation) return;
+    const v = parseInt(val);
+    _graphSimulation.force('charge').strength(-v * 2);
+    _graphSimulation.force('link').distance(v);
+    _graphSimulation.alpha(0.5).restart();
+}
+
 function _showSignalNodeDetail(s) {
     ++_detailRequestId;
     const detailBody = _showDetailPane();
@@ -14652,9 +14662,17 @@ function _showSignalNodeDetail(s) {
     const domColor = _DOMAIN_COLORS[s.domain] || '#6b7280';
     const dateStr = s.published_at ? s.published_at.substring(0, 10) : '';
     const isNoise = s.signal_status === 'noise';
+    const patternId = _zoomedPatternId;
+    const patternNode = _graphData?.nodes.find(n => n.id === patternId);
+    const patternTitle = patternNode ? patternNode.title : '';
 
     detailBody.innerHTML = `
-        <div class="sig-detail-card">
+        ${patternTitle ? `<div style="padding:8px 16px;border-bottom:1px solid var(--border);font-size:11px;display:flex;align-items:center;gap:4px">
+            <span style="color:var(--accent);cursor:pointer" onclick="openThreadDetail(${patternId})">📊 ${escHtml(patternTitle)}</span>
+            <span style="color:var(--text-muted)">→</span>
+            <span style="color:var(--text-secondary);font-weight:600">Signal</span>
+        </div>` : ''}
+        <div class="sig-detail-card" style="border:none;border-radius:0">
             <div class="sig-detail-hero" style="border-left: 4px solid ${domColor}">
                 <h2>${escHtml(s.title)}</h2>
                 <div class="sig-detail-meta">
@@ -14664,8 +14682,11 @@ function _showSignalNodeDetail(s) {
                     ${isNoise ? '<span style="font-size:10px;color:var(--red);font-weight:600">NOISE</span>' : ''}
                 </div>
             </div>
-            <div class="sig-detail-body-text" id="sig-node-body-${s.id}">${s.body_len > 100 ? '<span style="color:var(--text-muted);font-style:italic;cursor:pointer" onclick="_fetchSignalNodeArticle(${s.id})">Click to load article text...</span>' : '<span style="color:var(--text-muted);font-style:italic;cursor:pointer" onclick="_fetchSignalNodeArticle(${s.id})">Click to load article text...</span>'}</div>
-            <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px">
+            <div class="sig-detail-body-text" id="sig-node-body-${s.id}">
+                ${s.body_snippet ? `<div style="margin-bottom:8px">${escHtml(s.body_snippet)}${s.body_len > 300 ? '...' : ''}</div>` : ''}
+                ${s.url ? `<div style="color:var(--accent);cursor:pointer;font-size:11px" onclick="_fetchSignalNodeArticle(${s.id})">Load full article →</div>` : ''}
+            </div>
+            <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
                 ${s.url ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px;text-decoration:none">Open source →</a>` : ''}
             </div>
         </div>
@@ -14745,11 +14766,14 @@ function _renderSignalSubGraph(data) {
     // Source icon mapping
     const srcIcons = { google_news: '📰', reddit: '💬', hackernews: '🟧', fred: '📈', targeted: '🎯' };
 
+    // Adaptive spacing based on signal count
+    const spacing = Math.max(60, 200 / Math.sqrt(signals.length));
     const sim = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(links).id(d => d.id).distance(160))
-        .force('charge', d3.forceManyBody().strength(-300))
+        .force('link', d3.forceLink(links).id(d => d.id).distance(spacing))
+        .force('charge', d3.forceManyBody().strength(-120))
         .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(50));
+        .force('collision', d3.forceCollide().radius(28));
+    _graphSimulation = sim;
 
     // Edges
     const link = zoomGroup.append('g')

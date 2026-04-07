@@ -2212,7 +2212,7 @@ def create_app(db_path="intel.db"):
         conn = get_connection(db_path)
         signals = conn.execute(
             """SELECT s.id, s.title, s.domain, s.source, s.source_name, s.url,
-                      s.published_at, s.signal_status, LENGTH(s.body) as body_len
+                      s.published_at, s.signal_status, SUBSTR(s.body, 1, 300) as body_snippet, LENGTH(s.body) as body_len
                FROM signals s
                JOIN signal_cluster_items sci ON sci.signal_id = s.id
                WHERE sci.cluster_id = ?
