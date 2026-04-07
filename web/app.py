@@ -2102,6 +2102,45 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": False, "body": row["body"] or "", "error": "Could not extract article text"})
 
+    @app.route("/api/signals/search", methods=["POST"])
+    def signals_targeted_search_api():
+        """Run a targeted signal search for a specific query. Returns new signals found."""
+        data = request.json or {}
+        query = data.get("query", "").strip()
+        if not query:
+            return jsonify({"error": "query required"}), 400
+
+        from scraper.google_news import search_google_news
+        from scraper.hackernews import search_stories
+        from agents.signals_collect import _content_hash, _normalize_signal
+        from db import insert_signals_batch
+
+        results = []
+        # Search Google News
+        news = search_google_news(query, max_results=10, days_back=14)
+        for item in news:
+            sig = _normalize_signal(item, "google_news", "targeted")
+            if sig:
+                results.append(sig)
+        # Search HackerNews
+        hn = search_stories(query, max_results=8, sort="date")
+        for item in hn:
+            sig = _normalize_signal(item, "hackernews", "targeted")
+            if sig:
+                results.append(sig)
+
+        conn = get_connection(db_path)
+        new_count = insert_signals_batch(conn, results)
+        conn.close()
+
+        return jsonify({
+            "ok": True,
+            "query": query,
+            "total_found": len(results),
+            "new_inserted": new_count,
+            "signals": results[:20],
+        })
+
     @app.route("/api/signals/scan-history", methods=["GET"])
     def signals_scan_history_api():
         """Fetch last 3 scan results."""
