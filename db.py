@@ -299,6 +299,7 @@ def _migrate_db(conn):
         ("jobs", "source_board", "TEXT"),
         ("campaigns", "signal_cluster_id", "INTEGER"),
         ("signal_clusters", "last_signal_at", "TEXT"),
+        ("signals", "signal_status", "TEXT DEFAULT 'signal'"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -2190,6 +2191,27 @@ def insert_signal_entity(conn, entity_dict):
         ),
     )
     return cur.lastrowid
+
+
+def set_signal_status(conn, signal_id, status):
+    """Set a signal's status ('signal' or 'noise')."""
+    conn.execute("UPDATE signals SET signal_status = ? WHERE id = ?", (status, signal_id))
+    conn.commit()
+
+
+def get_pattern_signal_noise_counts(conn, pattern_id):
+    """Get signal vs noise counts for a pattern."""
+    row = conn.execute(
+        """SELECT
+             COUNT(*) as total,
+             SUM(CASE WHEN COALESCE(s.signal_status, 'signal') = 'signal' THEN 1 ELSE 0 END) as signal_count,
+             SUM(CASE WHEN s.signal_status = 'noise' THEN 1 ELSE 0 END) as noise_count
+           FROM signal_cluster_items sci
+           JOIN signals s ON s.id = sci.signal_id
+           WHERE sci.cluster_id = ?""",
+        (pattern_id,),
+    ).fetchone()
+    return {"total": row["total"], "signal_count": row["signal_count"], "noise_count": row["noise_count"]}
 
 
 def save_scan_history(conn, scan_data):

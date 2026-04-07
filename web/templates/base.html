@@ -4150,6 +4150,23 @@
         }
         .second-order-card p { font-size: 12px; color: var(--text-secondary); margin: 0 0 4px; line-height: 1.4; }
 
+        /* Signal selection for manual pattern creation */
+        .sig-card-select {
+            width: 14px; height: 14px; border-radius: 3px;
+            border: 1.5px solid var(--border); background: none;
+            cursor: pointer; flex-shrink: 0; transition: all 0.15s;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; color: transparent; margin-top: 2px;
+        }
+        .sig-card-select.checked { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .sig-create-pattern-bar {
+            position: sticky; bottom: 0; left: 0; right: 0;
+            padding: 10px; background: var(--bg-primary);
+            border-top: 1px solid var(--border);
+            display: flex; align-items: center; gap: 8px;
+            z-index: 10;
+        }
+
         /* Entity chips */
         .ent-chip {
             display: inline-block;
@@ -5346,7 +5363,7 @@
                 </button>
             </div>
             <div class="signals-brainstorm-list" id="signals-brainstorm-list" style="display:none;padding:8px 12px;border-top:1px solid var(--border)">
-                <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Threads</div>
+                <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Insights</div>
                 <div id="brainstorm-list-items"></div>
             </div>
             <div class="signals-actions">
@@ -5416,7 +5433,7 @@
                                 <button onclick="toggleGraphFullscreen()" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Fullscreen">⛶</button>
                             </div>
                             <div id="sig-graph-selection" style="font-size:11px;color:var(--text-muted)"></div>
-                            <button id="sig-brainstorm-btn" onclick="openBrainstormMode()" style="display:none;padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">🧠 Brainstorm →</button>
+                            <button id="sig-brainstorm-btn" onclick="openBrainstormMode()" style="display:none;padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">🧠 Generate Insight →</button>
                         </div>
                     </div>
                 </div>
@@ -13705,6 +13722,7 @@ let _activeSignalId = null;
 let _activeThreadId = null;
 let _signalTab = 'threads';
 let _detailRequestId = 0; // monotonic counter to cancel stale fetches
+let _rawSelectedSignals = new Set(); // selected signal IDs in Raw tab for pattern creation
 
 function switchSignalTab(tab) {
     _signalTab = tab;
@@ -13853,18 +13871,36 @@ function renderSignalFeed() {
     const html = filtered.map(s => {
         const domLabel = _DOMAIN_LABELS[s.domain] || s.domain;
         const dateStr = s.published_at ? s.published_at.substring(0, 10) : '';
+        const checked = _rawSelectedSignals.has(s.id) ? ' checked' : '';
         return `<div class="sig-card sig-domain-${escHtml(s.domain)} ${s.id === _activeSignalId ? 'active' : ''}"
                      data-id="${s.id}">
-            <div class="sig-card-header">
-                <span class="sig-card-domain">${escHtml(domLabel)}</span>
-                <span class="sig-card-source">${escHtml(s.source_name || s.source)}</span>
-                <span class="sig-card-date">${escHtml(dateStr)}</span>
+            <div style="display:flex;gap:8px;align-items:start">
+                <div class="sig-card-select${checked}" data-sig-id="${s.id}" onclick="event.stopPropagation();_toggleRawSelect(${s.id})">✓</div>
+                <div style="flex:1;min-width:0">
+                    <div class="sig-card-header">
+                        <span class="sig-card-domain">${escHtml(domLabel)}</span>
+                        <span class="sig-card-source">${escHtml(s.source_name || s.source)}</span>
+                        <span class="sig-card-date">${escHtml(dateStr)}</span>
+                    </div>
+                    <div class="sig-card-title">${escHtml(s.title)}</div>
+                    ${s.body ? `<div class="sig-card-body">${escHtml(s.body.substring(0, 200))}</div>` : ''}
+                </div>
             </div>
-            <div class="sig-card-title">${escHtml(s.title)}</div>
-            ${s.body ? `<div class="sig-card-body">${escHtml(s.body.substring(0, 200))}</div>` : ''}
         </div>`;
     }).join('');
-    container.innerHTML = html;
+
+    // Add create pattern bar if signals are selected
+    const barHtml = _rawSelectedSignals.size >= 2
+        ? `<div class="sig-create-pattern-bar">
+            <span style="font-size:11px;color:var(--text-secondary);font-weight:600">${_rawSelectedSignals.size} selected</span>
+            <button onclick="_createPatternFromSelection()" style="margin-left:auto;padding:6px 14px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">Create Pattern →</button>
+            <button onclick="_clearRawSelection()" style="padding:6px 10px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer">Clear</button>
+           </div>`
+        : _rawSelectedSignals.size === 1
+        ? `<div class="sig-create-pattern-bar"><span style="font-size:11px;color:var(--text-muted)">1 selected — select 1 more to create a pattern</span></div>`
+        : '';
+
+    container.innerHTML = html + barHtml;
 }
 
 // Single event delegation on the feed body — handles both tabs
@@ -14053,17 +14089,39 @@ function openThreadDetail(threadId) {
                 </div>`;
             }).join('');
 
-            const signalListHtml = signals.map(s => {
+            const sigSignals = signals.filter(s => s.signal_status !== 'noise');
+            const sigNoise = signals.filter(s => s.signal_status === 'noise');
+
+            const _renderSignalItem = (s, isNoise) => {
                 const dateStr = s.published_at ? s.published_at.substring(0, 10) : '';
-                return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
-                    <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:3px">${escHtml(s.title)}</div>
-                    <div style="font-size:10px;color:var(--text-muted);display:flex;gap:8px">
-                        <span>${escHtml(s.source_name || s.source)}</span>
-                        <span>${escHtml(dateStr)}</span>
-                        ${s.url ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">source →</a>` : ''}
+                const opacity = isNoise ? 'opacity:0.4;' : '';
+                const toggleLabel = isNoise ? 'Promote' : 'Noise';
+                const toggleStatus = isNoise ? 'signal' : 'noise';
+                return `<div id="sig-item-${s.id}" style="padding:8px 0;border-bottom:1px solid var(--border);${opacity}">
+                    <div style="display:flex;align-items:start;gap:6px">
+                        <div style="flex:1;min-width:0;cursor:pointer" onclick="_toggleSignalArticle(${s.id}, this)">
+                            <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:3px">${escHtml(s.title)}</div>
+                            <div style="font-size:10px;color:var(--text-muted);display:flex;gap:8px;flex-wrap:wrap">
+                                <span>${escHtml(s.source_name || s.source)}</span>
+                                <span>${escHtml(dateStr)}</span>
+                                ${s.url ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none" onclick="event.stopPropagation()">source →</a>` : ''}
+                            </div>
+                        </div>
+                        <button onclick="_setSignalStatus(${s.id}, '${toggleStatus}', ${thread.id})" style="flex-shrink:0;padding:2px 6px;background:none;border:1px solid var(--border);border-radius:4px;font-size:9px;color:var(--text-muted);cursor:pointer" title="${toggleLabel}">${isNoise ? '↑' : '↓'}</button>
                     </div>
+                    <div id="sig-article-${s.id}" style="display:none"></div>
                 </div>`;
-            }).join('');
+            };
+
+            const signalListHtml = sigSignals.map(s => _renderSignalItem(s, false)).join('');
+            const noiseListHtml = sigNoise.length ? `
+                <div style="margin-top:12px;padding-top:8px;border-top:1px dashed var(--border)">
+                    <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+                        ↓ ${sigNoise.length} noise signal(s) — click to toggle
+                    </div>
+                    <div style="display:none">${sigNoise.map(s => _renderSignalItem(s, true)).join('')}</div>
+                </div>
+            ` : '';
 
             detailBody.innerHTML = `
                 <div class="sig-detail-card">
@@ -14082,8 +14140,9 @@ function openThreadDetail(threadId) {
                         ${entHtml}
                     </div>` : ''}
                     <div style="padding:12px 20px;border-top:1px solid var(--border)">
-                        <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">Signals (${signals.length})</div>
+                        <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">Signals (${sigSignals.length})${sigNoise.length ? ` · <span style="color:var(--text-muted)">${sigNoise.length} noise</span>` : ''}</div>
                         ${signalListHtml || '<div style="color:var(--text-muted);font-size:12px">No signals</div>'}
+                        ${noiseListHtml}
                     </div>
                     <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px">
                         <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:2px">Actions</div>
@@ -14414,14 +14473,47 @@ function renderGraph(data) {
         .attr('stroke-width', 2)
         .attr('stroke-dasharray', '4 3');
 
-    // Main node circle
-    node.append('circle')
-        .attr('class', 'node-circle')
-        .attr('r', nodeR)
-        .attr('fill', d => _DOMAIN_COLORS[d.domain] || '#6b7280')
-        .attr('fill-opacity', nodeOpacity)
-        .attr('stroke', d => _DOMAIN_COLORS[d.domain] || '#6b7280')
-        .attr('stroke-width', 2);
+    // Main node: donut if noise exists, solid circle otherwise
+    const arc = d3.arc();
+    node.each(function(d) {
+        const g = d3.select(this);
+        const r = nodeR(d);
+        const color = _DOMAIN_COLORS[d.domain] || '#6b7280';
+        const op = nodeOpacity(d);
+        const total = d.total_count || d.signal_count || 1;
+        const noise = d.noise_count || 0;
+        const sigRatio = total > 0 ? (total - noise) / total : 1;
+
+        if (noise > 0) {
+            // Donut: signal portion in domain color, noise in dark
+            const thickness = Math.max(4, r * 0.3);
+            // Signal arc
+            g.append('path')
+                .attr('class', 'node-circle')
+                .attr('d', arc({ innerRadius: r - thickness, outerRadius: r, startAngle: 0, endAngle: sigRatio * 2 * Math.PI }))
+                .attr('fill', color)
+                .attr('fill-opacity', op);
+            // Noise arc
+            g.append('path')
+                .attr('d', arc({ innerRadius: r - thickness, outerRadius: r, startAngle: sigRatio * 2 * Math.PI, endAngle: 2 * Math.PI }))
+                .attr('fill', '#ef4444')
+                .attr('fill-opacity', op * 0.5);
+            // Inner fill
+            g.append('circle')
+                .attr('r', r - thickness)
+                .attr('fill', color)
+                .attr('fill-opacity', op * 0.2);
+        } else {
+            // Solid circle
+            g.append('circle')
+                .attr('class', 'node-circle')
+                .attr('r', r)
+                .attr('fill', color)
+                .attr('fill-opacity', op)
+                .attr('stroke', color)
+                .attr('stroke-width', 2);
+        }
+    });
 
     // Selection checkmark
     node.append('text')
@@ -14661,7 +14753,7 @@ function _renderBrainstormResults(container, result, threadIds) {
     // Actions bar
     const tids = JSON.stringify(threadIds);
     html += `<div style="display:flex;gap:10px;margin-top:24px;padding-top:16px;border-top:1px solid var(--border)">
-        <button onclick="_linkFromBrainstorm(${escHtml(tids)})" style="padding:10px 20px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--purple);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">🔗 Link These Threads</button>
+        <button onclick="_linkFromBrainstorm(${escHtml(tids)})" style="padding:10px 20px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--purple);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">🔗 Link These Patterns</button>
         <button onclick="closeBrainstorm()" style="padding:10px 20px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:12px;cursor:pointer">Close</button>
     </div>`;
 
@@ -14746,6 +14838,85 @@ function _prefillResearchChat(companyName) {
         input.value = `Run a full profile on ${companyName}`;
         input.focus();
     }
+}
+
+function _toggleRawSelect(sigId) {
+    if (_rawSelectedSignals.has(sigId)) _rawSelectedSignals.delete(sigId);
+    else _rawSelectedSignals.add(sigId);
+    // Toggle visual directly
+    const el = document.querySelector(`.sig-card-select[data-sig-id="${sigId}"]`);
+    if (el) el.classList.toggle('checked');
+    // Update create pattern bar
+    renderSignalFeed();
+}
+
+function _clearRawSelection() {
+    _rawSelectedSignals.clear();
+    renderSignalFeed();
+}
+
+function _createPatternFromSelection() {
+    if (_rawSelectedSignals.size < 2) return;
+    const ids = [..._rawSelectedSignals];
+    // Get titles for preview
+    const titles = ids.map(id => {
+        const s = _signalsCache.find(x => x.id == id);
+        return s ? s.title : '';
+    }).filter(Boolean);
+
+    const title = prompt('Name this pattern:', titles[0] ? titles[0].substring(0, 50) : 'New Pattern');
+    if (!title) return;
+
+    fetch('/api/signals/patterns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, signal_ids: ids })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            _rawSelectedSignals.clear();
+            loadSignals();
+            // Switch to patterns tab to see the new pattern
+            setTimeout(() => switchSignalTab('threads'), 500);
+        }
+    });
+}
+
+function _setSignalStatus(signalId, status, patternId) {
+    fetch(`/api/signals/${signalId}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+    }).then(() => {
+        // Refresh the pattern detail to reflect the change
+        if (patternId) openThreadDetail(patternId);
+    });
+}
+
+function _toggleSignalArticle(signalId, el) {
+    const articleDiv = document.getElementById(`sig-article-${signalId}`);
+    if (!articleDiv) return;
+    if (articleDiv.style.display === 'block') {
+        articleDiv.style.display = 'none';
+        return;
+    }
+    // Show loading, then fetch
+    articleDiv.style.display = 'block';
+    articleDiv.innerHTML = '<div style="padding:8px;font-size:11px;color:var(--text-muted)">Loading article...</div>';
+
+    fetch(`/api/signals/${signalId}/fetch-article`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok && data.body) {
+                articleDiv.innerHTML = `<div style="padding:8px 0;font-size:11px;color:var(--text-secondary);line-height:1.5;border-left:2px solid var(--border);padding-left:10px;margin-top:6px">${escHtml(data.body).substring(0, 2000)}</div>`;
+            } else {
+                articleDiv.innerHTML = `<div style="padding:8px;font-size:11px;color:var(--text-muted)">Could not load article text</div>`;
+            }
+        })
+        .catch(() => {
+            articleDiv.innerHTML = `<div style="padding:8px;font-size:11px;color:var(--red)">Failed to fetch</div>`;
+        });
 }
 
 function closeSignalDetail() {
@@ -15141,8 +15312,8 @@ function _finishResynth() {
             <div class="exec-overlay-title" style="display:flex;align-items:center;gap:10px">
                 <span style="font-size:24px">🧠</span>
                 <div>
-                    <div>Brainstorm Mode</div>
-                    <div class="exec-overlay-subtitle" id="brainstorm-subtitle">Analyzing connected threads...</div>
+                    <div>Generate Insight</div>
+                    <div class="exec-overlay-subtitle" id="brainstorm-subtitle">Analyzing connected patterns...</div>
                 </div>
             </div>
             <button class="exec-overlay-close" onclick="closeBrainstorm()">&times;</button>

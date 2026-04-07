@@ -2075,6 +2075,19 @@ def create_app(db_path="intel.db"):
             return jsonify({"error": "Cluster not found"}), 404
         return jsonify(detail)
 
+    @app.route("/api/signals/<int:signal_id>/status", methods=["POST"])
+    def signals_set_status_api(signal_id):
+        """Set a signal's status (signal or noise)."""
+        data = request.json or {}
+        status = data.get("status", "signal")
+        if status not in ("signal", "noise"):
+            return jsonify({"error": "status must be 'signal' or 'noise'"}), 400
+        from db import set_signal_status
+        conn = get_connection(db_path)
+        set_signal_status(conn, signal_id, status)
+        conn.close()
+        return jsonify({"ok": True, "signal_id": signal_id, "status": status})
+
     @app.route("/api/signals/<int:signal_id>/fetch-article", methods=["POST"])
     def signals_fetch_article_api(signal_id):
         """Fetch full article text for a signal on demand."""
@@ -2193,6 +2206,41 @@ def create_app(db_path="intel.db"):
             "audit": audit,
         })
 
+    @app.route("/api/signals/patterns", methods=["POST"])
+    def signals_create_pattern_api():
+        """Manually create a pattern from selected signal IDs."""
+        data = request.json or {}
+        title = data.get("title", "").strip()
+        signal_ids = data.get("signal_ids", [])
+        if not title or len(signal_ids) < 2:
+            return jsonify({"error": "title and at least 2 signal_ids required"}), 400
+
+        from db import insert_signal_cluster, link_signal_to_cluster
+
+        conn = get_connection(db_path)
+        # Determine domain from signals
+        domains = conn.execute(
+            f"SELECT domain, COUNT(*) as cnt FROM signals WHERE id IN ({','.join('?' * len(signal_ids))}) GROUP BY domain ORDER BY cnt DESC",
+            signal_ids,
+        ).fetchall()
+        domain = domains[0]["domain"] if domains else "economics"
+
+        pattern_id = insert_signal_cluster(conn, {
+            "domain": domain,
+            "title": title,
+            "synthesis": data.get("summary", ""),
+        })
+        conn.execute(
+            "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (pattern_id,),
+        )
+        for sid in signal_ids:
+            link_signal_to_cluster(conn, pattern_id, sid)
+        conn.commit()
+        conn.close()
+
+        return jsonify({"ok": True, "pattern_id": pattern_id})
+
     @app.route("/api/signals/resynthesize", methods=["POST"])
     def signals_resynthesize_api():
         """Re-run pattern detection on recent signals. SSE-streamed."""
@@ -2268,7 +2316,7 @@ def create_app(db_path="intel.db"):
     @app.route("/api/signals/graph", methods=["GET"])
     def signals_graph_api():
         """Build graph data: thread nodes + entity-based edges."""
-        from db import get_signal_clusters
+        from db import get_signal_clusters, get_pattern_signal_noise_counts
         from agents.signals_synthesize import compute_thread_momentum
 
         conn = get_connection(db_path)
@@ -2278,11 +2326,14 @@ def create_app(db_path="intel.db"):
         nodes = []
         for t in threads:
             t["momentum"] = compute_thread_momentum(conn, t["id"])
+            sn = get_pattern_signal_noise_counts(conn, t["id"])
             nodes.append({
                 "id": t["id"],
                 "title": t["title"],
                 "domain": t["domain"],
-                "signal_count": t.get("signal_count", 0),
+                "signal_count": sn["signal_count"],
+                "noise_count": sn["noise_count"],
+                "total_count": sn["total"],
                 "synthesis": t.get("synthesis", ""),
                 "momentum": t["momentum"],
             })
