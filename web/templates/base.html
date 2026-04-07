@@ -14411,6 +14411,7 @@ function _threadActionSearchMore(query, patternId) {
         }
         // Reload feed and refresh this pattern's detail
         loadSignals();
+        if (_boardMode === 'board') loadBoard();
         if (patternId) setTimeout(() => openThreadDetail(patternId), 500);
     })
     .catch(() => {
@@ -15875,15 +15876,25 @@ function renderBoard(data) {
             if (_boardDragged) return; // don't open detail after drag
             if (_connectingFrom != null && _connectingFrom !== d.id) {
                 const fromId = _connectingFrom;
-                _connectingFrom = null;
-                connectLine.style('display', 'none');
-                svg.on('mousemove.connect', null);
-                _showInlineInput(event.clientX, event.clientY, 'Label (optional)', '', (label) => {
+                _cancelConnect();
+                _showInlineInput(event.clientX, event.clientY, 'Label (optional — AI will suggest)', '', (label) => {
+                    const sel = document.getElementById('sig-graph-selection');
+                    if (sel) sel.innerHTML = '<span style="color:var(--accent)">Connecting + AI analyzing...</span>';
                     fetch('/api/board/connect', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ source: fromId, target: d.id, label })
-                    }).then(() => loadBoard());
+                    })
+                    .then(r => r.json())
+                    .then(result => {
+                        loadBoard();
+                        if (result.assessment) {
+                            const a = result.assessment;
+                            const color = a.makes_sense ? 'var(--green)' : 'var(--red)';
+                            if (sel) sel.innerHTML = `<span style="color:${color};font-weight:600">${a.makes_sense ? '✓' : '✗'} "${result.label}"</span> <span style="color:var(--text-muted)">— ${escHtml(a.reasoning || '')}</span>`;
+                            setTimeout(() => { if (sel) sel.innerHTML = ''; }, 8000);
+                        }
+                    });
                 });
             } else {
                 openThreadDetail(d.id);
@@ -15982,13 +15993,21 @@ function renderBoard(data) {
         container.appendChild(div);
     });
 
-    // Cancel connection on escape
+    // Cancel connection on escape or click on empty space
+    function _cancelConnect() {
+        if (_connectingFrom == null) return;
+        _connectingFrom = null;
+        connectLine.style('display', 'none');
+        svg.on('mousemove.connect', null);
+        const sel = document.getElementById('sig-graph-selection');
+        if (sel) sel.innerHTML = `<span style="color:var(--text-muted)">${nodes.length} threads · ${(data.notes||[]).length} notes · right-click to connect · double-click to add note</span>`;
+    }
     document.addEventListener('keydown', function _escConn(e) {
-        if (e.key === 'Escape' && _connectingFrom != null) {
-            _connectingFrom = null;
-            connectLine.style('display', 'none');
-            svg.on('mousemove.connect', null);
-        }
+        if (e.key === 'Escape') _cancelConnect();
+    });
+    svg.on('click.cancel', (event) => {
+        // Only cancel if clicking on SVG background, not on a node
+        if (!event.target.closest('.graph-node')) _cancelConnect();
     });
 
     // Status text

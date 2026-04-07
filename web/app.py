@@ -2837,16 +2837,55 @@ def create_app(db_path="intel.db"):
 
     @app.route("/api/board/connect", methods=["POST"])
     def board_connect_api():
-        """Create a labeled connection between two threads."""
-        from db import add_thread_link
+        """Create a labeled connection between two threads. Optionally LLM-validates."""
+        from db import add_thread_link, get_cluster_detail
         data = request.json or {}
         a, b = data.get("source"), data.get("target")
         if not a or not b:
             return jsonify({"error": "source and target required"}), 400
+
         conn = get_connection(db_path)
-        link_id = add_thread_link(conn, a, b, data.get("label", ""))
+
+        # LLM validation — assess the connection and suggest a label
+        llm_assessment = None
+        try:
+            from agents.llm import generate_json, FAST_CHAIN
+            thread_a = get_cluster_detail(conn, a)
+            thread_b = get_cluster_detail(conn, b)
+            if thread_a and thread_b:
+                sigs_a = ', '.join(s['title'] for s in (thread_a.get('signals') or [])[:5])
+                sigs_b = ', '.join(s['title'] for s in (thread_b.get('signals') or [])[:5])
+                prompt = f"""Two signal threads are being connected on an investigation board.
+
+Thread A: "{thread_a['title']}"
+{f'Signals: {sigs_a}' if sigs_a else ''}
+
+Thread B: "{thread_b['title']}"
+{f'Signals: {sigs_b}' if sigs_b else ''}
+
+User's label: "{data.get('label', '') or 'none provided'}"
+
+Return JSON:
+{{
+  "makes_sense": true/false,
+  "suggested_label": "short relationship label (e.g. 'drives', 'contradicts', 'caused by', 'amplifies')",
+  "reasoning": "one sentence explaining the connection"
+}}"""
+                llm_assessment = generate_json(prompt, timeout=15, chain=FAST_CHAIN)
+        except Exception:
+            pass
+
+        label = data.get("label", "")
+        if not label and llm_assessment and llm_assessment.get("suggested_label"):
+            label = llm_assessment["suggested_label"]
+
+        link_id = add_thread_link(conn, a, b, label)
         conn.close()
-        return jsonify({"ok": True, "id": link_id})
+
+        result = {"ok": True, "id": link_id, "label": label}
+        if llm_assessment:
+            result["assessment"] = llm_assessment
+        return jsonify(result)
 
     @app.route("/api/board/connect/<int:link_id>", methods=["DELETE"])
     def board_disconnect_api(link_id):
