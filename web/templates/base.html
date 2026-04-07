@@ -14069,26 +14069,34 @@ function openSignalDetail(signalId) {
     `;
 }
 
-function fetchArticleText(signalId) {
+function fetchArticleText(signalId, attempt) {
+    attempt = attempt || 1;
+    const maxAttempts = 3;
     const btn = document.getElementById('sig-fetch-btn-' + signalId);
     const textEl = document.getElementById('sig-detail-text-' + signalId);
-    if (btn) { btn.textContent = 'Fetching...'; btn.disabled = true; }
+    if (btn) { btn.textContent = attempt > 1 ? `Retry ${attempt}/${maxAttempts}...` : 'Fetching...'; btn.disabled = true; }
 
     fetch('/api/signals/' + signalId + '/fetch-article', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
             if (data.ok && data.body) {
                 textEl.textContent = data.body;
-                // Update cache too
                 const cached = _signalsCache.find(x => x.id == signalId);
                 if (cached) cached.body = data.body;
                 if (btn) btn.remove();
+            } else if (attempt < maxAttempts) {
+                if (btn) btn.textContent = `Retry ${attempt + 1}/${maxAttempts}...`;
+                setTimeout(() => fetchArticleText(signalId, attempt + 1), 1500);
             } else {
-                if (btn) { btn.textContent = 'Could not fetch'; btn.style.color = 'var(--red)'; }
+                if (btn) { btn.textContent = 'Retry'; btn.style.color = 'var(--red)'; btn.disabled = false; btn.onclick = () => fetchArticleText(signalId, 1); }
             }
         })
         .catch(() => {
-            if (btn) { btn.textContent = 'Fetch failed'; btn.style.color = 'var(--red)'; }
+            if (attempt < maxAttempts) {
+                setTimeout(() => fetchArticleText(signalId, attempt + 1), 1500);
+            } else {
+                if (btn) { btn.textContent = 'Retry'; btn.style.color = 'var(--red)'; btn.disabled = false; btn.onclick = () => fetchArticleText(signalId, 1); }
+            }
         });
 }
 
