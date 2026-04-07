@@ -14405,6 +14405,13 @@ function renderGraph(data) {
     svg.style('display', 'block');
     controls.style.display = 'flex';
 
+    // Show unassigned signal count
+    const unassigned = data.unassigned_signals || 0;
+    const sel = document.getElementById('sig-graph-selection');
+    if (sel && unassigned > 0 && _selectedThreadIds.size === 0) {
+        sel.innerHTML = `<span style="color:var(--text-muted)">${data.assigned_signals || 0} signals in ${data.nodes.length} patterns · </span><span style="color:var(--purple)">${unassigned} unassigned</span> <span style="color:var(--text-muted);font-size:10px;cursor:pointer" onclick="runResynthesize()" title="Run pattern detection on unassigned signals">(re-detect)</span>`;
+    }
+
     // Clear previous
     svg.selectAll('*').remove();
     _selectedThreadIds.clear();

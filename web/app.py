@@ -2297,14 +2297,26 @@ def create_app(db_path="intel.db"):
 
     @app.route("/api/signals/resynthesize", methods=["POST"])
     def signals_resynthesize_api():
-        """Re-run pattern detection on recent signals. SSE-streamed."""
+        """Re-run pattern detection on unassigned signals. SSE-streamed."""
         def generate():
             from agents.signals_synthesize import synthesize_into_threads, enrich_thread_signals, extract_entities
-            from db import get_signals
 
             conn = get_connection(db_path)
-            recent = get_signals(conn, days_back=14, limit=500)
-            yield f"data: {json.dumps({'type': 'status', 'text': f'Re-analyzing {len(recent)} signals...'})}\n\n"
+            # Get signals NOT yet assigned to any pattern
+            unassigned = conn.execute(
+                """SELECT * FROM signals
+                   WHERE id NOT IN (SELECT signal_id FROM signal_cluster_items)
+                   ORDER BY collected_at DESC LIMIT 200"""
+            ).fetchall()
+            unassigned = [dict(r) for r in unassigned]
+
+            if not unassigned:
+                yield f"data: {json.dumps({'type': 'status', 'text': 'All signals are already in patterns.'})}\n\n"
+                yield f"data: {json.dumps({'type': 'resynth_complete', 'new_patterns': 0, 'assigned': 0})}\n\n"
+                conn.close()
+                return
+
+            yield f"data: {json.dumps({'type': 'status', 'text': f'Analyzing {len(unassigned)} unassigned signals...'})}\n\n"
 
             synth_q = queue.Queue()
             result_box = [None]
@@ -2314,13 +2326,24 @@ def create_app(db_path="intel.db"):
 
             def _run():
                 try:
-                    result = synthesize_into_threads(conn, recent, progress_cb=_cb)
-                    result_box[0] = result
+                    # Process unassigned signals in batches of 50 (LLM context limit)
+                    total_new = 0
+                    total_assigned = 0
+                    for i in range(0, len(unassigned), 50):
+                        batch = unassigned[i:i+50]
+                        _cb("status", {"text": f"Batch {i//50 + 1}: analyzing {len(batch)} signals..."})
+                        result = synthesize_into_threads(conn, batch, progress_cb=_cb)
+                        total_new += result.get("new_thread_count", 0)
+                        total_assigned += result.get("assigned_count", 0)
+                    result_box[0] = {"new_thread_count": total_new, "assigned_count": total_assigned}
                     _cb("status", {"text": "Enriching articles..."})
                     enrich_thread_signals(conn, progress_cb=_cb)
-                    enriched = get_signals(conn, days_back=14, limit=500)
                     _cb("status", {"text": "Extracting entities..."})
-                    extract_entities(conn, enriched, progress_cb=_cb)
+                    # Extract entities from newly assigned signals
+                    newly_assigned = conn.execute(
+                        """SELECT * FROM signals WHERE id IN (SELECT signal_id FROM signal_cluster_items) ORDER BY collected_at DESC LIMIT 200"""
+                    ).fetchall()
+                    extract_entities(conn, [dict(r) for r in newly_assigned], progress_cb=_cb)
                 except Exception as exc:
                     synth_q.put(("error", {"text": str(exc)}))
                 finally:
@@ -2436,8 +2459,18 @@ def create_app(db_path="intel.db"):
                     "manual": True,
                 })
 
+        # Count unassigned signals
+        total_signals = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+        assigned_signals = conn.execute("SELECT COUNT(DISTINCT signal_id) FROM signal_cluster_items").fetchone()[0]
+
         conn.close()
-        return jsonify({"nodes": nodes, "edges": edges})
+        return jsonify({
+            "nodes": nodes,
+            "edges": edges,
+            "total_signals": total_signals,
+            "assigned_signals": assigned_signals,
+            "unassigned_signals": total_signals - assigned_signals,
+        })
 
     @app.route("/api/signals/brainstorm", methods=["POST"])
     def signals_brainstorm_api():
