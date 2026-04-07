@@ -2105,6 +2105,8 @@ def create_app(db_path="intel.db"):
     @app.route("/api/signals/search", methods=["POST"])
     def signals_targeted_search_api():
         """Run a targeted signal search for a specific query. Optionally link results to a pattern."""
+        from datetime import datetime, timedelta
+
         data = request.json or {}
         query = data.get("query", "").strip()
         pattern_id = data.get("pattern_id")  # optional: link new signals to this pattern
@@ -2113,22 +2115,45 @@ def create_app(db_path="intel.db"):
 
         from scraper.google_news import search_google_news
         from scraper.hackernews import search_stories
-        from agents.signals_collect import _content_hash, _normalize_signal
+        from agents.signals_collect import _normalize_signal
         from db import insert_signal, link_signal_to_cluster
+
+        cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        # Track audit data per source
+        audit = {"sources": [], "filtered_stale": 0}
 
         results = []
         # Search Google News
-        news = search_google_news(query, max_results=10, days_back=14)
-        for item in news:
+        news_raw = search_google_news(query, max_results=12, days_back=30)
+        news_fresh = []
+        for item in news_raw:
             sig = _normalize_signal(item, "google_news", "targeted")
-            if sig:
-                results.append(sig)
+            if not sig:
+                continue
+            # Filter stale: drop if published_at is set and older than cutoff
+            pub = sig.get("published_at", "")
+            if pub and pub < cutoff:
+                audit["filtered_stale"] += 1
+                continue
+            news_fresh.append(sig)
+            results.append(sig)
+        audit["sources"].append({"source": "Google News", "query": query, "raw": len(news_raw), "after_filter": len(news_fresh)})
+
         # Search HackerNews
-        hn = search_stories(query, max_results=8, sort="date")
-        for item in hn:
+        hn_raw = search_stories(query, max_results=8, sort="date")
+        hn_fresh = []
+        for item in hn_raw:
             sig = _normalize_signal(item, "hackernews", "targeted")
-            if sig:
-                results.append(sig)
+            if not sig:
+                continue
+            pub = sig.get("published_at", "")
+            if pub and pub[:10] < cutoff:
+                audit["filtered_stale"] += 1
+                continue
+            hn_fresh.append(sig)
+            results.append(sig)
+        audit["sources"].append({"source": "Hacker News", "query": query, "raw": len(hn_raw), "after_filter": len(hn_fresh)})
 
         conn = get_connection(db_path)
         new_count = 0
@@ -2137,12 +2162,10 @@ def create_app(db_path="intel.db"):
             sig_id = insert_signal(conn, sig)
             if sig_id:
                 new_count += 1
-                # Link new signals to the pattern
                 if pattern_id:
                     link_signal_to_cluster(conn, pattern_id, sig_id)
                     linked_count += 1
             elif pattern_id:
-                # Signal already exists — try to link it anyway
                 existing = conn.execute(
                     "SELECT id FROM signals WHERE content_hash = ?", (sig["content_hash"],)
                 ).fetchone()
@@ -2151,7 +2174,6 @@ def create_app(db_path="intel.db"):
                     linked_count += 1
         conn.commit()
 
-        # Update pattern's last_signal_at if we linked anything
         if pattern_id and linked_count > 0:
             conn.execute(
                 "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -2167,7 +2189,62 @@ def create_app(db_path="intel.db"):
             "total_found": len(results),
             "new_inserted": new_count,
             "linked_to_pattern": linked_count,
+            "filtered_stale": audit["filtered_stale"],
+            "audit": audit,
         })
+
+    @app.route("/api/signals/resynthesize", methods=["POST"])
+    def signals_resynthesize_api():
+        """Re-run pattern detection on recent signals. SSE-streamed."""
+        def generate():
+            from agents.signals_synthesize import synthesize_into_threads, enrich_thread_signals, extract_entities
+            from db import get_signals
+
+            conn = get_connection(db_path)
+            recent = get_signals(conn, days_back=14, limit=500)
+            yield f"data: {json.dumps({'type': 'status', 'text': f'Re-analyzing {len(recent)} signals...'})}\n\n"
+
+            synth_q = queue.Queue()
+            result_box = [None]
+
+            def _cb(event_type, ev_data):
+                synth_q.put((event_type, ev_data or {}))
+
+            def _run():
+                try:
+                    result = synthesize_into_threads(conn, recent, progress_cb=_cb)
+                    result_box[0] = result
+                    _cb("status", {"text": "Enriching articles..."})
+                    enrich_thread_signals(conn, progress_cb=_cb)
+                    enriched = get_signals(conn, days_back=14, limit=500)
+                    _cb("status", {"text": "Extracting entities..."})
+                    extract_entities(conn, enriched, progress_cb=_cb)
+                except Exception as exc:
+                    synth_q.put(("error", {"text": str(exc)}))
+                finally:
+                    synth_q.put(("_done", {}))
+
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+
+            while True:
+                try:
+                    ev_type, ev_data = synth_q.get(timeout=0.5)
+                except queue.Empty:
+                    yield ": keepalive\n\n"
+                    continue
+                if ev_type == "_done":
+                    break
+                yield f"data: {json.dumps({'type': ev_type, **ev_data})}\n\n"
+
+            t.join(timeout=120)
+            sr = result_box[0] or {}
+            yield f"data: {json.dumps({'type': 'resynth_complete', 'new_patterns': sr.get('new_thread_count', 0), 'assigned': sr.get('assigned_count', 0)})}\n\n"
+
+            conn.close()
+
+        return Response(generate(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     @app.route("/api/signals/scan-history", methods=["GET"])
     def signals_scan_history_api():

@@ -5354,6 +5354,9 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                     Scan Now
                 </button>
+                <button id="signals-resynth-btn" onclick="runResynthesize()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--purple);font-size:11px;font-weight:600;cursor:pointer;margin-top:6px">
+                    🧠 Re-detect Patterns
+                </button>
                 <div class="signals-freshness" id="signals-freshness">No scans yet</div>
             </div>
             <div class="signals-scan-history" id="signals-scan-history" style="display:none;padding:6px 12px;border-top:1px solid var(--border)">
@@ -14140,6 +14143,7 @@ function _threadActionDiscover(niche) {
 function _threadActionSearchMore(query, patternId) {
     // Run a targeted search and link results to this pattern
     const btn = event.target.closest('button');
+    const actionsDiv = btn ? btn.parentElement : null;
     if (btn) { btn.textContent = '📡 Searching...'; btn.disabled = true; }
 
     fetch('/api/signals/search', {
@@ -14153,12 +14157,27 @@ function _threadActionSearchMore(query, patternId) {
             const parts = [];
             if (data.new_inserted > 0) parts.push(`${data.new_inserted} new`);
             if (data.linked_to_pattern > 0) parts.push(`${data.linked_to_pattern} linked`);
+            if (data.filtered_stale > 0) parts.push(`${data.filtered_stale} stale filtered`);
             btn.textContent = parts.length ? `✓ ${parts.join(', ')}` : '✓ No new signals';
             btn.style.color = data.linked_to_pattern > 0 ? 'var(--green)' : 'var(--text-muted)';
         }
+        // Show audit trail below the button
+        if (actionsDiv && data.audit) {
+            const auditEl = document.createElement('div');
+            auditEl.style.cssText = 'margin-top:8px;padding:10px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;font-size:10px';
+            auditEl.innerHTML = `<div style="font-weight:700;color:var(--text-secondary);margin-bottom:6px">Search Audit</div>` +
+                (data.audit.sources || []).map(s =>
+                    `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
+                        <span style="color:var(--text-secondary)">${escHtml(s.source)}</span>
+                        <span style="color:var(--text-muted)"><span class="exec-query-chip">${escHtml(s.query)}</span> ${s.raw} found → ${s.after_filter} fresh</span>
+                    </div>`
+                ).join('') +
+                (data.filtered_stale > 0 ? `<div style="margin-top:4px;color:var(--text-muted)">🕐 ${data.filtered_stale} article(s) older than 30 days filtered out</div>` : '');
+            actionsDiv.appendChild(auditEl);
+        }
         // Reload feed and refresh this pattern's detail
         loadSignals();
-        if (patternId) openThreadDetail(patternId);
+        if (patternId) setTimeout(() => openThreadDetail(patternId), 500);
     })
     .catch(() => {
         if (btn) { btn.textContent = 'Search failed'; btn.style.color = 'var(--red)'; }
@@ -15061,13 +15080,56 @@ function _finishScan() {
     const btn = document.getElementById('signals-scan-btn');
     btn.classList.remove('scanning');
     btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Scan Now';
-    // Final render of execution
     _renderExecutionDetail();
-    // Reload data then switch to threads tab to show results
     loadSignals();
     loadSignalFreshness();
-    // Brief delay so data loads before switching
-    setTimeout(() => switchSignalTab('threads'), 1500); // switch to Patterns tab
+    setTimeout(() => switchSignalTab('threads'), 1500);
+}
+
+function runResynthesize() {
+    const btn = document.getElementById('signals-resynth-btn');
+    const statusEl = document.getElementById('signals-scan-status');
+    const statusText = document.getElementById('scan-status-text');
+    btn.disabled = true;
+    btn.textContent = '🧠 Detecting...';
+    statusEl.style.display = 'block';
+    statusText.textContent = 'Re-detecting patterns...';
+
+    fetch('/api/signals/resynthesize', { method: 'POST' })
+        .then(response => {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            function read() {
+                reader.read().then(({ done, value }) => {
+                    if (done) { _finishResynth(); return; }
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        try {
+                            const ev = JSON.parse(line.substring(6));
+                            if (ev.type === 'status') statusText.textContent = ev.text;
+                            else if (ev.type === 'new_thread') statusText.textContent = `New pattern: ${ev.title}`;
+                            else if (ev.type === 'resynth_complete') statusText.textContent = `${ev.new_patterns} new patterns, ${ev.assigned} signals assigned`;
+                        } catch (e) {}
+                    }
+                    read();
+                }).catch(() => _finishResynth());
+            }
+            read();
+        })
+        .catch(() => _finishResynth());
+}
+
+function _finishResynth() {
+    const btn = document.getElementById('signals-resynth-btn');
+    btn.disabled = false;
+    btn.textContent = '🧠 Re-detect Patterns';
+    loadSignals();
+    loadSignalFreshness();
 }
 
 </script>
