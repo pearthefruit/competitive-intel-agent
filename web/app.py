@@ -2152,6 +2152,21 @@ def create_app(db_path="intel.db"):
                         "weight": len(shared),
                     })
 
+        # Also include manual thread links as edges
+        from db import get_thread_links
+        manual_links = get_thread_links(conn)
+        edge_keys = set((e["source"], e["target"]) for e in edges)
+        for ml in manual_links:
+            a, b = ml["thread_a_id"], ml["thread_b_id"]
+            if (a, b) not in edge_keys and (b, a) not in edge_keys:
+                edges.append({
+                    "source": a,
+                    "target": b,
+                    "shared_entities": [{"type": "manual", "name": ml.get("label") or "user linked"}],
+                    "weight": 2,
+                    "manual": True,
+                })
+
         conn.close()
         return jsonify({"nodes": nodes, "edges": edges})
 
@@ -2195,18 +2210,71 @@ def create_app(db_path="intel.db"):
             for (etype, ename), tids in shared.items()
         ) or "No shared entities found — these threads may be connected by theme rather than specific entities."
 
-        conn.close()
-
         threads_text = "\n\n".join(threads_text_parts)
         prompt = build_brainstorm_prompt(threads_text, shared_text)
 
         try:
             result = generate_json(prompt, timeout=45, chain=FAST_CHAIN)
             if not result:
+                conn.close()
                 return jsonify({"error": "LLM returned no result"}), 500
+            # Persist brainstorm
+            from db import save_brainstorm
+            brainstorm_id = save_brainstorm(conn, thread_ids, result)
+            result["brainstorm_id"] = brainstorm_id
+            conn.close()
             return jsonify(result)
         except Exception as e:
+            conn.close()
             return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/signals/brainstorms", methods=["GET"])
+    def signals_brainstorms_list_api():
+        """List previous brainstorm sessions."""
+        from db import get_brainstorms, get_signal_clusters
+        conn = get_connection(db_path)
+        brainstorms = get_brainstorms(conn)
+        # Enrich with thread titles
+        all_threads = {t["id"]: t for t in get_signal_clusters(conn, status="active", limit=100)}
+        for b in brainstorms:
+            b["thread_titles"] = [all_threads.get(tid, {}).get("title", f"Thread {tid}") for tid in b.get("thread_ids", [])]
+        conn.close()
+        return jsonify({"brainstorms": brainstorms})
+
+    @app.route("/api/signals/thread-links", methods=["GET"])
+    def signals_thread_links_list_api():
+        """List manual thread links."""
+        from db import get_thread_links
+        conn = get_connection(db_path)
+        links = get_thread_links(conn)
+        conn.close()
+        return jsonify({"links": links})
+
+    @app.route("/api/signals/thread-links", methods=["POST"])
+    def signals_thread_link_create_api():
+        """Create a manual link between two threads."""
+        data = request.json or {}
+        thread_a = data.get("thread_a_id")
+        thread_b = data.get("thread_b_id")
+        label = data.get("label", "")
+        if not thread_a or not thread_b:
+            return jsonify({"error": "thread_a_id and thread_b_id required"}), 400
+        from db import add_thread_link
+        conn = get_connection(db_path)
+        link_id = add_thread_link(conn, thread_a, thread_b, label)
+        conn.close()
+        if link_id:
+            return jsonify({"ok": True, "link_id": link_id})
+        return jsonify({"ok": False, "error": "Link already exists"})
+
+    @app.route("/api/signals/thread-links/<int:link_id>", methods=["DELETE"])
+    def signals_thread_link_delete_api(link_id):
+        """Delete a manual thread link."""
+        from db import delete_thread_link
+        conn = get_connection(db_path)
+        delete_thread_link(conn, link_id)
+        conn.close()
+        return jsonify({"ok": True})
 
     @app.route("/api/signals/entity-context/<entity_type>/<path:entity_value>", methods=["GET"])
     def signals_entity_context_api(entity_type, entity_value):

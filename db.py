@@ -213,6 +213,27 @@ CREATE TABLE IF NOT EXISTS signal_cluster_items (
     UNIQUE(cluster_id, signal_id)
 );
 
+-- Brainstorm sessions: persisted hypothesis generation from connected threads
+CREATE TABLE IF NOT EXISTS brainstorms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_ids TEXT NOT NULL,
+    connection_summary TEXT,
+    hypotheses_json TEXT,
+    second_order_json TEXT,
+    questions_json TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Manual thread links created by the user
+CREATE TABLE IF NOT EXISTS thread_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_a_id INTEGER NOT NULL REFERENCES signal_clusters(id),
+    thread_b_id INTEGER NOT NULL REFERENCES signal_clusters(id),
+    label TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(thread_a_id, thread_b_id)
+);
+
 -- Extracted entities from signals for entity linking
 CREATE TABLE IF NOT EXISTS signal_entities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2163,4 +2184,83 @@ def update_cluster_status(conn, cluster_id, status):
         "UPDATE signal_clusters SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (status, cluster_id),
     )
+    conn.commit()
+
+
+# ── Brainstorm helpers ─────────────────────────────────────────────────
+
+def save_brainstorm(conn, thread_ids, result):
+    """Persist a brainstorm session. Returns brainstorm id."""
+    cur = conn.execute(
+        """INSERT INTO brainstorms (thread_ids, connection_summary, hypotheses_json, second_order_json, questions_json)
+           VALUES (?, ?, ?, ?, ?)""",
+        (
+            json.dumps(thread_ids),
+            result.get("connection_summary", ""),
+            json.dumps(result.get("hypotheses", [])),
+            json.dumps(result.get("second_order_effects", [])),
+            json.dumps(result.get("questions_to_investigate", [])),
+        ),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_brainstorms(conn, limit=20):
+    """Fetch recent brainstorm sessions."""
+    rows = conn.execute(
+        "SELECT * FROM brainstorms ORDER BY created_at DESC LIMIT ?", (limit,)
+    ).fetchall()
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["thread_ids"] = json.loads(d["thread_ids"]) if d.get("thread_ids") else []
+        d["hypotheses"] = json.loads(d["hypotheses_json"]) if d.get("hypotheses_json") else []
+        d["second_order_effects"] = json.loads(d["second_order_json"]) if d.get("second_order_json") else []
+        d["questions_to_investigate"] = json.loads(d["questions_json"]) if d.get("questions_json") else []
+        results.append(d)
+    return results
+
+
+def get_brainstorm(conn, brainstorm_id):
+    """Fetch a single brainstorm session."""
+    row = conn.execute("SELECT * FROM brainstorms WHERE id = ?", (brainstorm_id,)).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    d["thread_ids"] = json.loads(d["thread_ids"]) if d.get("thread_ids") else []
+    d["hypotheses"] = json.loads(d["hypotheses_json"]) if d.get("hypotheses_json") else []
+    d["second_order_effects"] = json.loads(d["second_order_json"]) if d.get("second_order_json") else []
+    d["questions_to_investigate"] = json.loads(d["questions_json"]) if d.get("questions_json") else []
+    return d
+
+
+# ── Thread link helpers ────────────────────────────────────────────────
+
+def add_thread_link(conn, thread_a_id, thread_b_id, label=None):
+    """Create a manual link between two threads. Returns link id or None if exists."""
+    # Normalize order
+    a, b = min(thread_a_id, thread_b_id), max(thread_a_id, thread_b_id)
+    try:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO thread_links (thread_a_id, thread_b_id, label) VALUES (?, ?, ?)",
+            (a, b, label),
+        )
+        conn.commit()
+        return cur.lastrowid if cur.rowcount > 0 else None
+    except Exception:
+        return None
+
+
+def get_thread_links(conn):
+    """Fetch all manual thread links."""
+    rows = conn.execute(
+        "SELECT * FROM thread_links ORDER BY created_at DESC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_thread_link(conn, link_id):
+    """Delete a manual thread link."""
+    conn.execute("DELETE FROM thread_links WHERE id = ?", (link_id,))
     conn.commit()

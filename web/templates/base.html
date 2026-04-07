@@ -4063,12 +4063,19 @@
         }
         /* Graph node styling */
         .graph-node { cursor: pointer; }
-        .graph-node circle { transition: all 0.15s; }
-        .graph-node.selected circle { stroke: var(--accent); stroke-width: 3px; }
-        .graph-node:hover circle { filter: brightness(1.3); }
-        .graph-node text { fill: var(--text-secondary); font-size: 10px; font-weight: 600; pointer-events: none; }
-        .graph-edge { stroke: rgba(255,255,255,0.08); stroke-width: 1px; }
-        .graph-edge.highlighted { stroke: var(--accent); stroke-opacity: 0.5; }
+        .graph-node circle.node-circle { transition: all 0.15s; }
+        .graph-node .select-ring { opacity: 0; transition: opacity 0.2s; }
+        .graph-node.selected .select-ring { opacity: 1; animation: pulse-ring 2s ease-in-out infinite; }
+        .graph-node.selected circle.node-circle { filter: brightness(1.4); }
+        .graph-node.selected .select-check { opacity: 1; }
+        .graph-node .select-check { opacity: 0; transition: opacity 0.15s; }
+        @keyframes pulse-ring { 0%,100% { stroke-opacity: 0.3; } 50% { stroke-opacity: 0.7; } }
+        .graph-node:hover circle.node-circle { filter: brightness(1.3); }
+        .graph-node text.node-label { fill: var(--text-secondary); font-size: 10px; font-weight: 600; pointer-events: none; }
+        .graph-node text.node-count { fill: #fff; font-size: 10px; font-weight: 700; pointer-events: none; }
+        .graph-edge { stroke: rgba(255,255,255,0.08); stroke-width: 1px; transition: all 0.2s; }
+        .graph-edge.highlighted { stroke: var(--accent); stroke-opacity: 0.6; stroke-width: 2.5px; }
+        .graph-edge.manual { stroke: var(--purple); stroke-opacity: 0.4; stroke-dasharray: 6 4; }
         .graph-edge-label { fill: var(--text-muted); font-size: 8px; pointer-events: none; }
 
         /* Brainstorm overlay content */
@@ -5382,8 +5389,13 @@
                         </div>
                         <svg id="sig-graph-svg" style="width:100%;height:100%;display:none"></svg>
                         <div id="sig-graph-controls" style="display:none;position:absolute;bottom:12px;left:12px;right:12px;display:flex;gap:8px;align-items:center;justify-content:space-between">
+                            <div style="display:flex;gap:4px;align-items:center">
+                                <button onclick="_graphZoom(1.3)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom in">+</button>
+                                <button onclick="_graphZoom(0.7)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom out">−</button>
+                                <button onclick="_graphReset()" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Reset zoom">⟲</button>
+                            </div>
                             <div id="sig-graph-selection" style="font-size:11px;color:var(--text-muted)"></div>
-                            <button id="sig-brainstorm-btn" onclick="openBrainstormMode()" style="display:none;padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">Brainstorm →</button>
+                            <button id="sig-brainstorm-btn" onclick="openBrainstormMode()" style="display:none;padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">🧠 Brainstorm →</button>
                         </div>
                     </div>
                 </div>
@@ -13671,6 +13683,7 @@ let _signalsDomainFilter = 'all';
 let _activeSignalId = null;
 let _activeThreadId = null;
 let _signalTab = 'threads';
+let _detailRequestId = 0; // monotonic counter to cancel stale fetches
 
 function switchSignalTab(tab) {
     _signalTab = tab;
@@ -13857,17 +13870,14 @@ function openSignalDetail(signalId) {
     const s = _signalsCache.find(x => x.id == signalId);
     if (!s) { console.warn('[signals] Signal not found in cache:', signalId); return; }
     _activeSignalId = s.id;
+    ++_detailRequestId; // cancel any pending thread detail fetches
 
     // Highlight active card
     document.querySelectorAll('.sig-card').forEach(c => c.classList.remove('active'));
     const card = document.querySelector(`.sig-card[data-id="${s.id}"]`);
     if (card) card.classList.add('active');
 
-    const detailBody = document.getElementById('signals-detail-body');
-    const detailEmpty = document.getElementById('signals-detail-empty');
-    const closeBtn = document.querySelector('.signals-detail-close');
-    if (detailEmpty) detailEmpty.style.display = 'none';
-    if (closeBtn) closeBtn.style.display = 'block';
+    const detailBody = _showDetailPane();
 
     const domLabel = _DOMAIN_LABELS[s.domain] || s.domain;
     const domColor = _DOMAIN_COLORS[s.domain] || '#6b7280';
@@ -13915,24 +13925,32 @@ function fetchArticleText(signalId) {
         });
 }
 
+function _showDetailPane() {
+    const detailBody = document.getElementById('signals-detail-body');
+    const detailEmpty = document.getElementById('signals-detail-empty');
+    const closeBtn = document.querySelector('.signals-detail-close');
+    if (detailEmpty) detailEmpty.style.display = 'none';
+    if (closeBtn) closeBtn.style.display = 'block';
+    return detailBody;
+}
+
 function openThreadDetail(threadId) {
     _activeThreadId = threadId;
-    // Highlight active thread card
+    const myRequest = ++_detailRequestId; // capture this request's ID
+
+    // Highlight active thread card + graph node
     document.querySelectorAll('.thread-card').forEach(c => c.classList.remove('active'));
     const card = document.querySelector(`.thread-card[data-id="${threadId}"]`);
     if (card) card.classList.add('active');
 
-    const detailBody = document.getElementById('signals-detail-body');
-    const detailEmpty = document.getElementById('signals-detail-empty');
-    const closeBtn = document.querySelector('.signals-detail-close');
-    detailEmpty.style.display = 'none';
-    if (closeBtn) closeBtn.style.display = 'block';
-
+    const detailBody = _showDetailPane();
     detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading thread...</div>`;
 
     fetch(`/api/signals/threads/${threadId}`)
         .then(r => r.json())
         .then(thread => {
+            // Stale guard: if another request was made after this one, discard
+            if (myRequest !== _detailRequestId) return;
             if (!thread || thread.error) {
                 detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--red)">Thread not found</div>`;
                 return;
@@ -14010,6 +14028,7 @@ function openThreadDetail(threadId) {
             `;
         })
         .catch(e => {
+            if (myRequest !== _detailRequestId) return;
             console.error('[signals] thread detail error:', e);
             detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--red)">Failed to load thread</div>`;
         });
@@ -14164,26 +14183,43 @@ function renderGraph(data) {
 
     svg.attr('viewBox', [0, 0, width, height]);
 
+    // Zoom behavior — filter out clicks on nodes so they pass through to click handlers
+    const zoomGroup = svg.append('g').attr('class', 'graph-zoom-group');
+    const zoomBehavior = d3.zoom()
+        .scaleExtent([0.3, 4])
+        .filter(event => {
+            // Allow scroll wheel zoom always, but only allow pan from background (not nodes)
+            if (event.type === 'wheel') return true;
+            if (event.type === 'dblclick') return true;
+            // For mousedown/touchstart: only allow if target is the SVG background, not a node
+            const target = event.target;
+            if (target.closest && target.closest('.graph-node')) return false;
+            return true;
+        })
+        .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
+    svg.call(zoomBehavior);
+    svg.node().__zoomBehavior = zoomBehavior;
+
     // Build D3 force simulation
     const nodes = data.nodes.map(d => ({...d}));
     const links = data.edges.map(d => ({...d}));
 
     _graphSimulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(links).id(d => d.id).distance(120))
-        .force('charge', d3.forceManyBody().strength(-200))
+        .force('link', d3.forceLink(links).id(d => d.id).distance(140))
+        .force('charge', d3.forceManyBody().strength(-300))
         .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(d => Math.sqrt(d.signal_count || 1) * 8 + 20));
+        .force('collision', d3.forceCollide().radius(d => Math.sqrt(d.signal_count || 1) * 8 + 24));
 
-    // Edges
-    const link = svg.append('g')
+    // Edges (inside zoom group)
+    const link = zoomGroup.append('g')
         .selectAll('line')
         .data(links)
         .join('line')
-        .attr('class', 'graph-edge')
+        .attr('class', d => 'graph-edge' + (d.manual ? ' manual' : ''))
         .attr('stroke-width', d => Math.max(1, d.weight * 1.5));
 
-    // Edge labels (shared entity names)
-    const linkLabel = svg.append('g')
+    // Edge labels
+    const linkLabel = zoomGroup.append('g')
         .selectAll('text')
         .data(links)
         .join('text')
@@ -14191,8 +14227,8 @@ function renderGraph(data) {
         .attr('text-anchor', 'middle')
         .text(d => d.shared_entities.slice(0, 2).map(e => e.name).join(', '));
 
-    // Nodes
-    const node = svg.append('g')
+    // Nodes (inside zoom group)
+    const node = zoomGroup.append('g')
         .selectAll('g')
         .data(nodes)
         .join('g')
@@ -14205,31 +14241,50 @@ function renderGraph(data) {
         .on('click', (event, d) => {
             event.stopPropagation();
             _toggleThreadSelection(d.id);
-            // Also show thread detail in right pane
             openThreadDetail(d.id);
         });
 
-    // Node circles
+    const nodeR = d => Math.sqrt(d.signal_count || 1) * 6 + 10;
+
+    // Selection ring (outer glow) — rendered first so it's behind the main circle
     node.append('circle')
-        .attr('r', d => Math.sqrt(d.signal_count || 1) * 6 + 8)
+        .attr('class', 'select-ring')
+        .attr('r', d => nodeR(d) + 6)
+        .attr('fill', 'none')
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 2)
+        .attr('stroke-dasharray', '4 3');
+
+    // Main node circle
+    node.append('circle')
+        .attr('class', 'node-circle')
+        .attr('r', nodeR)
         .attr('fill', d => _DOMAIN_COLORS[d.domain] || '#6b7280')
-        .attr('fill-opacity', 0.7)
+        .attr('fill-opacity', 0.75)
         .attr('stroke', d => _DOMAIN_COLORS[d.domain] || '#6b7280')
-        .attr('stroke-width', 1.5);
+        .attr('stroke-width', 2);
+
+    // Selection checkmark
+    node.append('text')
+        .attr('class', 'select-check')
+        .attr('dx', d => nodeR(d) - 2)
+        .attr('dy', d => -nodeR(d) + 4)
+        .attr('font-size', '12px')
+        .attr('fill', '#22c55e')
+        .text('✓');
 
     // Node labels
     node.append('text')
-        .attr('dy', d => Math.sqrt(d.signal_count || 1) * 6 + 20)
+        .attr('class', 'node-label')
+        .attr('dy', d => nodeR(d) + 14)
         .attr('text-anchor', 'middle')
-        .text(d => d.title.length > 30 ? d.title.substring(0, 28) + '...' : d.title);
+        .text(d => d.title.length > 35 ? d.title.substring(0, 33) + '…' : d.title);
 
-    // Signal count badge
+    // Signal count inside node
     node.append('text')
+        .attr('class', 'node-count')
         .attr('dy', 4)
         .attr('text-anchor', 'middle')
-        .attr('fill', '#fff')
-        .attr('font-size', '10px')
-        .attr('font-weight', '700')
         .text(d => d.signal_count || '');
 
     // Tick
@@ -14246,10 +14301,12 @@ function renderGraph(data) {
     });
 
     // Click background to deselect
-    svg.on('click', () => {
-        _selectedThreadIds.clear();
-        _updateGraphSelection();
-        _updateBrainstormBtn();
+    svg.on('click', (event) => {
+        if (event.target === svg.node()) {
+            _selectedThreadIds.clear();
+            _updateGraphSelection();
+            _updateBrainstormBtn();
+        }
     });
 }
 
@@ -14277,11 +14334,45 @@ function _updateBrainstormBtn() {
     if (!btn) return;
     if (_selectedThreadIds.size >= 2) {
         btn.style.display = 'block';
-        sel.textContent = `${_selectedThreadIds.size} threads selected`;
+        sel.innerHTML = `${_selectedThreadIds.size} threads selected · <span style="color:var(--accent);cursor:pointer" onclick="linkSelectedThreads()">Link</span>`;
     } else {
         btn.style.display = 'none';
-        sel.textContent = _selectedThreadIds.size === 1 ? '1 thread selected — select 1 more to brainstorm' : 'Click nodes to select threads for brainstorm';
+        sel.textContent = _selectedThreadIds.size === 1 ? '1 thread selected — select 1 more to brainstorm' : 'Click nodes to select threads';
     }
+}
+
+function linkSelectedThreads() {
+    if (_selectedThreadIds.size < 2) return;
+    const ids = [..._selectedThreadIds];
+    const label = prompt('Label for this link (optional):') || '';
+    // Link all pairs
+    const promises = [];
+    for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+            promises.push(
+                fetch('/api/signals/thread-links', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ thread_a_id: ids[i], thread_b_id: ids[j], label })
+                })
+            );
+        }
+    }
+    Promise.all(promises).then(() => {
+        // Reload graph to show new edges
+        loadGraph();
+    });
+}
+
+function _graphZoom(factor) {
+    const svg = d3.select('#sig-graph-svg');
+    const zb = svg.node().__zoomBehavior;
+    if (zb) svg.transition().duration(300).call(zb.scaleBy, factor);
+}
+function _graphReset() {
+    const svg = d3.select('#sig-graph-svg');
+    const zb = svg.node().__zoomBehavior;
+    if (zb) svg.transition().duration(300).call(zb.transform, d3.zoomIdentity);
 }
 
 // ===================== BRAINSTORM MODE =====================
