@@ -2759,6 +2759,104 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True})
 
+    # ===================== BOARD =====================
+
+    @app.route("/api/board", methods=["GET"])
+    def board_state_api():
+        """Get full board state: positions, notes, threads, connections."""
+        from db import get_board_state, get_signal_clusters, get_thread_links
+        from agents.signals_synthesize import compute_thread_momentum
+
+        conn = get_connection(db_path)
+        board = get_board_state(conn)
+        threads = get_signal_clusters(conn, status="all", limit=200, exclude_domain="narrative")
+        links = get_thread_links(conn)
+
+        from db import get_pattern_signal_noise_counts
+        nodes = []
+        for t in threads:
+            t["momentum"] = compute_thread_momentum(conn, t["id"])
+            sn = get_pattern_signal_noise_counts(conn, t["id"])
+            key = f"thread:{t['id']}"
+            pos = board["positions"].get(key)
+            nodes.append({
+                "id": t["id"], "type": "thread", "title": t["title"],
+                "domain": t["domain"], "signal_count": sn["signal_count"],
+                "noise_count": sn["noise_count"], "momentum": t["momentum"],
+                "synthesis": t.get("synthesis", ""),
+                "x": pos["x"] if pos else None, "y": pos["y"] if pos else None,
+                "pinned": bool(pos["pinned"]) if pos else False,
+            })
+
+        conn.close()
+        return jsonify({
+            "nodes": nodes,
+            "edges": [{"source": l["thread_a_id"], "target": l["thread_b_id"],
+                        "label": l.get("label", ""), "id": l["id"]} for l in links],
+            "notes": board["notes"],
+        })
+
+    @app.route("/api/board/positions", methods=["POST"])
+    def board_save_positions_api():
+        """Save board node positions (batch)."""
+        from db import save_board_positions_batch
+        data = request.json or {}
+        positions = data.get("positions", [])
+        conn = get_connection(db_path)
+        save_board_positions_batch(conn, positions)
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/board/notes", methods=["POST"])
+    def board_create_note_api():
+        """Create a sticky note."""
+        from db import insert_board_note
+        data = request.json or {}
+        conn = get_connection(db_path)
+        note_id = insert_board_note(conn, data.get("text", ""), data.get("x", 0), data.get("y", 0), data.get("color", "#eab308"))
+        conn.close()
+        return jsonify({"ok": True, "id": note_id})
+
+    @app.route("/api/board/notes/<int:note_id>", methods=["PATCH"])
+    def board_update_note_api(note_id):
+        """Update a sticky note."""
+        from db import update_board_note
+        conn = get_connection(db_path)
+        update_board_note(conn, note_id, **(request.json or {}))
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/board/notes/<int:note_id>", methods=["DELETE"])
+    def board_delete_note_api(note_id):
+        """Delete a sticky note."""
+        from db import delete_board_note
+        conn = get_connection(db_path)
+        delete_board_note(conn, note_id)
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/board/connect", methods=["POST"])
+    def board_connect_api():
+        """Create a labeled connection between two threads."""
+        from db import add_thread_link
+        data = request.json or {}
+        a, b = data.get("source"), data.get("target")
+        if not a or not b:
+            return jsonify({"error": "source and target required"}), 400
+        conn = get_connection(db_path)
+        link_id = add_thread_link(conn, a, b, data.get("label", ""))
+        conn.close()
+        return jsonify({"ok": True, "id": link_id})
+
+    @app.route("/api/board/connect/<int:link_id>", methods=["DELETE"])
+    def board_disconnect_api(link_id):
+        """Remove a connection."""
+        from db import delete_thread_link
+        conn = get_connection(db_path)
+        delete_thread_link(conn, link_id)
+        conn.close()
+        return jsonify({"ok": True})
+
     @app.route("/api/narratives/<int:narrative_id>/link-thread", methods=["POST"])
     def narratives_link_thread_api(narrative_id):
         """Link an existing thread to a narrative."""

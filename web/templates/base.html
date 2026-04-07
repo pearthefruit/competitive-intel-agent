@@ -4174,6 +4174,40 @@
         }
         .second-order-card p { font-size: 12px; color: var(--text-secondary); margin: 0 0 4px; line-height: 1.4; }
 
+        /* ========== Board ========== */
+        .board-note {
+            position: absolute;
+            min-width: 100px;
+            max-width: 180px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            line-height: 1.4;
+            cursor: move;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            color: #000;
+            word-break: break-word;
+        }
+        .board-note-delete {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--red);
+            color: #fff;
+            font-size: 10px;
+            border: none;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+        .board-note:hover .board-note-delete { display: flex; }
+        .board-connect-line { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; opacity: 0.7; pointer-events: none; }
+
         /* ========== Narratives ========== */
         .narrative-card {
             padding: 12px 16px;
@@ -5491,6 +5525,10 @@
                         <div id="sig-graph-pattern-label" style="display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;font-size:13px;font-weight:700;color:var(--text-primary);background:var(--bg-primary);padding:4px 12px;border-radius:6px;border:1px solid var(--border)"></div>
                         <div id="sig-graph-controls" style="display:none;position:absolute;bottom:12px;left:12px;right:12px;display:flex;gap:8px;align-items:center;justify-content:space-between">
                             <div style="display:flex;gap:4px;align-items:center">
+                                <div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-right:4px">
+                                    <button onclick="_switchBoardMode('graph')" id="mode-graph-btn" style="padding:4px 10px;background:var(--accent);border:none;color:#fff;font-size:10px;font-weight:600;cursor:pointer">Graph</button>
+                                    <button onclick="_switchBoardMode('board')" id="mode-board-btn" style="padding:4px 10px;background:var(--bg-tertiary);border:none;color:var(--text-muted);font-size:10px;font-weight:600;cursor:pointer">Board</button>
+                                </div>
                                 <button onclick="_graphZoom(1.3)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom in">+</button>
                                 <button onclick="_graphZoom(0.7)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom out">−</button>
                                 <button onclick="_graphReset()" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Reset zoom">⟲</button>
@@ -15685,6 +15723,267 @@ function _finishResynth() {
     btn.textContent = '🧠 Re-detect Threads';
     loadSignals();
     loadSignalFreshness();
+}
+
+// ===================== BOARD =====================
+
+let _boardMode = 'graph'; // 'graph' or 'board'
+let _boardData = null;
+let _boardDirty = false;
+let _connectingFrom = null; // thread id when drawing a connection
+
+function _switchBoardMode(mode) {
+    _boardMode = mode;
+    document.getElementById('mode-graph-btn').style.background = mode === 'graph' ? 'var(--accent)' : 'var(--bg-tertiary)';
+    document.getElementById('mode-graph-btn').style.color = mode === 'graph' ? '#fff' : 'var(--text-muted)';
+    document.getElementById('mode-board-btn').style.background = mode === 'board' ? 'var(--accent)' : 'var(--bg-tertiary)';
+    document.getElementById('mode-board-btn').style.color = mode === 'board' ? '#fff' : 'var(--text-muted)';
+
+    if (mode === 'board') loadBoard();
+    else loadGraph();
+}
+
+function loadBoard() {
+    fetch('/api/board')
+        .then(r => r.json())
+        .then(data => {
+            _boardData = data;
+            renderBoard(data);
+        });
+}
+
+function renderBoard(data) {
+    const container = document.getElementById('sig-graph-container');
+    const svg = d3.select('#sig-graph-svg');
+    const empty = document.getElementById('signals-graph-empty');
+    const controls = document.getElementById('sig-graph-controls');
+
+    empty.style.display = 'none';
+    svg.style('display', 'block');
+    controls.style.display = 'flex';
+
+    svg.selectAll('*').remove();
+    // Remove old notes
+    container.querySelectorAll('.board-note').forEach(n => n.remove());
+
+    const width = container.clientWidth;
+    const height = container.clientHeight - 40;
+    svg.attr('viewBox', [0, 0, width, height]);
+
+    const zoomGroup = svg.append('g').attr('class', 'graph-zoom-group');
+    const zoomBehavior = d3.zoom()
+        .scaleExtent([0.2, 5])
+        .filter(event => {
+            if (event.type === 'wheel') return true;
+            if (event.target.closest && event.target.closest('.graph-node')) return false;
+            if (event.target.closest && event.target.closest('.board-note')) return false;
+            return !event.button;
+        })
+        .on('zoom', (event) => {
+            zoomGroup.attr('transform', event.transform);
+            // Move HTML notes with the zoom
+            container.querySelectorAll('.board-note').forEach(n => {
+                const ox = parseFloat(n.dataset.bx);
+                const oy = parseFloat(n.dataset.by);
+                n.style.left = (event.transform.x + ox * event.transform.k) + 'px';
+                n.style.top = (event.transform.y + oy * event.transform.k) + 'px';
+                n.style.transform = `scale(${event.transform.k})`;
+                n.style.transformOrigin = '0 0';
+            });
+        });
+    svg.call(zoomBehavior);
+    svg.on('dblclick.zoom', null);
+    svg.node().__zoomBehavior = zoomBehavior;
+
+    // Double-click on empty space → create note
+    svg.on('dblclick', (event) => {
+        const [x, y] = d3.pointer(event, zoomGroup.node());
+        const text = prompt('Add a note:');
+        if (!text) return;
+        fetch('/api/board/notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, x, y })
+        }).then(() => loadBoard());
+    });
+
+    const nodes = data.nodes.map(d => {
+        const copy = {...d};
+        if (copy.x == null) { copy.x = Math.random() * (width - 100) + 50; copy.y = Math.random() * (height - 100) + 50; }
+        return copy;
+    });
+
+    // Edges
+    const edgeData = data.edges || [];
+    const nodeMap = {};
+    nodes.forEach(n => nodeMap[n.id] = n);
+
+    const link = zoomGroup.append('g').selectAll('line').data(edgeData).join('line')
+        .attr('stroke', 'var(--accent)').attr('stroke-width', 2).attr('stroke-opacity', 0.5)
+        .attr('stroke-dasharray', '6 4');
+
+    const linkLabel = zoomGroup.append('g').selectAll('text').data(edgeData).join('text')
+        .attr('text-anchor', 'middle').attr('font-size', 10).attr('fill', 'var(--text-muted)')
+        .text(d => d.label || '');
+
+    // Temporary line for drawing connections
+    const connectLine = zoomGroup.append('line').attr('class', 'board-connect-line').style('display', 'none');
+
+    // Nodes
+    const nodeR = d => Math.sqrt(d.signal_count || 1) * 6 + 10;
+    const node = zoomGroup.append('g').selectAll('g').data(nodes).join('g')
+        .attr('class', 'graph-node')
+        .attr('transform', d => `translate(${d.x},${d.y})`)
+        .call(d3.drag()
+            .on('start', (event, d) => { d._dragging = true; })
+            .on('drag', (event, d) => {
+                d.x = event.x; d.y = event.y;
+                d3.select(event.sourceEvent.target.closest('.graph-node')).attr('transform', `translate(${d.x},${d.y})`);
+                _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
+                _boardDirty = true;
+            })
+            .on('end', (event, d) => {
+                d._dragging = false;
+                d.pinned = true;
+                _saveBoardPositions(nodes);
+            })
+        )
+        .on('click', (event, d) => {
+            event.stopPropagation();
+            if (_connectingFrom != null && _connectingFrom !== d.id) {
+                // Complete connection
+                const label = prompt('Connection label (optional):', '');
+                if (label !== null) {
+                    fetch('/api/board/connect', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ source: _connectingFrom, target: d.id, label })
+                    }).then(() => loadBoard());
+                }
+                _connectingFrom = null;
+                connectLine.style('display', 'none');
+                svg.on('mousemove.connect', null);
+            } else {
+                openThreadDetail(d.id);
+            }
+        })
+        .on('contextmenu', (event, d) => {
+            event.preventDefault();
+            event.stopPropagation();
+            // Start connection drawing
+            _connectingFrom = d.id;
+            connectLine.attr('x1', d.x).attr('y1', d.y).style('display', 'block');
+            svg.on('mousemove.connect', (mEvent) => {
+                const [mx, my] = d3.pointer(mEvent, zoomGroup.node());
+                connectLine.attr('x2', mx).attr('y2', my);
+            });
+        });
+
+    // Draw nodes
+    node.each(function(d) {
+        const g = d3.select(this);
+        const r = nodeR(d);
+        const color = _DOMAIN_COLORS[d.domain] || '#6b7280';
+        g.append('circle').attr('r', r).attr('fill', color).attr('fill-opacity', 0.75)
+            .attr('stroke', d.pinned ? '#fff' : 'none').attr('stroke-width', d.pinned ? 1.5 : 0)
+            .attr('stroke-dasharray', d.pinned ? '3 2' : '');
+        g.append('text').attr('y', r + 14).attr('text-anchor', 'middle')
+            .attr('fill', 'var(--text-secondary)').attr('font-size', 11).attr('font-weight', 600)
+            .text(d.title.length > 30 ? d.title.substring(0, 28) + '…' : d.title);
+        g.append('text').attr('y', r + 26).attr('text-anchor', 'middle')
+            .attr('fill', 'var(--text-muted)').attr('font-size', 9)
+            .text(`${d.signal_count} signals`);
+    });
+
+    _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
+
+    // Render sticky notes as HTML overlays
+    (data.notes || []).forEach(note => {
+        const div = document.createElement('div');
+        div.className = 'board-note';
+        div.style.background = note.color || '#eab308';
+        div.style.left = note.x + 'px';
+        div.style.top = note.y + 'px';
+        div.dataset.bx = note.x;
+        div.dataset.by = note.y;
+        div.dataset.id = note.id;
+        div.innerHTML = `${escHtml(note.text)}<button class="board-note-delete" onclick="event.stopPropagation();_deleteBoardNote(${note.id})">×</button>`;
+        div.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            const newText = prompt('Edit note:', note.text);
+            if (newText !== null) {
+                fetch(`/api/board/notes/${note.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: newText })
+                }).then(() => loadBoard());
+            }
+        });
+        // Drag note
+        let dragStartX, dragStartY, noteStartX, noteStartY;
+        div.addEventListener('mousedown', (e) => {
+            if (e.target.classList.contains('board-note-delete')) return;
+            e.stopPropagation();
+            dragStartX = e.clientX; dragStartY = e.clientY;
+            noteStartX = parseFloat(div.dataset.bx); noteStartY = parseFloat(div.dataset.by);
+            const onMove = (me) => {
+                const t = d3.zoomTransform(svg.node());
+                const dx = (me.clientX - dragStartX) / t.k;
+                const dy = (me.clientY - dragStartY) / t.k;
+                div.dataset.bx = noteStartX + dx;
+                div.dataset.by = noteStartY + dy;
+                div.style.left = (t.x + (noteStartX + dx) * t.k) + 'px';
+                div.style.top = (t.y + (noteStartY + dy) * t.k) + 'px';
+            };
+            const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                fetch(`/api/board/notes/${note.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ x: parseFloat(div.dataset.bx), y: parseFloat(div.dataset.by) })
+                });
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+        container.appendChild(div);
+    });
+
+    // Cancel connection on escape
+    document.addEventListener('keydown', function _escConn(e) {
+        if (e.key === 'Escape' && _connectingFrom != null) {
+            _connectingFrom = null;
+            connectLine.style('display', 'none');
+            svg.on('mousemove.connect', null);
+        }
+    });
+
+    // Status text
+    const sel = document.getElementById('sig-graph-selection');
+    if (sel) sel.innerHTML = `<span style="color:var(--text-muted)">${nodes.length} threads · ${(data.notes||[]).length} notes · right-click to connect · double-click to add note</span>`;
+}
+
+function _updateBoardEdges(link, linkLabel, edgeData, nodeMap) {
+    link.attr('x1', d => nodeMap[d.source]?.x || 0).attr('y1', d => nodeMap[d.source]?.y || 0)
+        .attr('x2', d => nodeMap[d.target]?.x || 0).attr('y2', d => nodeMap[d.target]?.y || 0);
+    linkLabel.attr('x', d => ((nodeMap[d.source]?.x||0) + (nodeMap[d.target]?.x||0)) / 2)
+        .attr('y', d => ((nodeMap[d.source]?.y||0) + (nodeMap[d.target]?.y||0)) / 2 - 6);
+}
+
+function _saveBoardPositions(nodes) {
+    const positions = nodes.filter(n => n.pinned).map(n => ({
+        node_type: 'thread', node_id: n.id, x: n.x, y: n.y, pinned: true
+    }));
+    fetch('/api/board/positions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ positions })
+    });
+}
+
+function _deleteBoardNote(noteId) {
+    fetch(`/api/board/notes/${noteId}`, { method: 'DELETE' }).then(() => loadBoard());
 }
 
 // ===================== NARRATIVES =====================

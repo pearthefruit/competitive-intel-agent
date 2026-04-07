@@ -262,6 +262,27 @@ CREATE TABLE IF NOT EXISTS thread_links (
     UNIQUE(thread_a_id, thread_b_id)
 );
 
+-- Board positions: pinned node locations for investigation board
+CREATE TABLE IF NOT EXISTS board_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_type TEXT NOT NULL DEFAULT 'thread',
+    node_id INTEGER NOT NULL,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    pinned INTEGER DEFAULT 1,
+    UNIQUE(node_type, node_id)
+);
+
+-- Board notes: sticky notes on the investigation board
+CREATE TABLE IF NOT EXISTS board_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    color TEXT DEFAULT '#eab308',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Extracted entities from signals for entity linking
 CREATE TABLE IF NOT EXISTS signal_entities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2483,4 +2504,75 @@ def link_thread_to_narrative(conn, thread_id, narrative_id):
 def unlink_thread_from_narrative(conn, thread_id):
     """Remove a thread from its narrative."""
     conn.execute("UPDATE signal_clusters SET narrative_id = NULL WHERE id = ?", (thread_id,))
+    conn.commit()
+
+
+# ===================== BOARD =====================
+
+def get_board_state(conn):
+    """Get all board positions and notes."""
+    positions = conn.execute("SELECT * FROM board_positions").fetchall()
+    notes = conn.execute("SELECT * FROM board_notes").fetchall()
+    return {
+        "positions": {f"{r['node_type']}:{r['node_id']}": dict(r) for r in positions},
+        "notes": [dict(n) for n in notes],
+    }
+
+
+def save_board_position(conn, node_type, node_id, x, y, pinned=True):
+    """Save or update a node's board position."""
+    conn.execute(
+        """INSERT INTO board_positions (node_type, node_id, x, y, pinned)
+           VALUES (?, ?, ?, ?, ?) ON CONFLICT(node_type, node_id)
+           DO UPDATE SET x = ?, y = ?, pinned = ?""",
+        (node_type, node_id, x, y, int(pinned), x, y, int(pinned)),
+    )
+    conn.commit()
+
+
+def save_board_positions_batch(conn, positions):
+    """Save multiple board positions at once."""
+    for p in positions:
+        conn.execute(
+            """INSERT INTO board_positions (node_type, node_id, x, y, pinned)
+               VALUES (?, ?, ?, ?, ?) ON CONFLICT(node_type, node_id)
+               DO UPDATE SET x = ?, y = ?, pinned = ?""",
+            (p["node_type"], p["node_id"], p["x"], p["y"], int(p.get("pinned", True)),
+             p["x"], p["y"], int(p.get("pinned", True))),
+        )
+    conn.commit()
+
+
+def delete_board_position(conn, node_type, node_id):
+    """Remove a node from the board."""
+    conn.execute("DELETE FROM board_positions WHERE node_type = ? AND node_id = ?", (node_type, node_id))
+    conn.commit()
+
+
+def insert_board_note(conn, text, x, y, color="#eab308"):
+    """Create a sticky note on the board."""
+    cur = conn.execute(
+        "INSERT INTO board_notes (text, x, y, color) VALUES (?, ?, ?, ?)",
+        (text, x, y, color),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_board_note(conn, note_id, text=None, x=None, y=None, color=None):
+    """Update a board note."""
+    fields, params = [], []
+    if text is not None: fields.append("text = ?"); params.append(text)
+    if x is not None: fields.append("x = ?"); params.append(x)
+    if y is not None: fields.append("y = ?"); params.append(y)
+    if color is not None: fields.append("color = ?"); params.append(color)
+    if not fields: return
+    params.append(note_id)
+    conn.execute(f"UPDATE board_notes SET {', '.join(fields)} WHERE id = ?", params)
+    conn.commit()
+
+
+def delete_board_note(conn, note_id):
+    """Delete a board note."""
+    conn.execute("DELETE FROM board_notes WHERE id = ?", (note_id,))
     conn.commit()
