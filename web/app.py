@@ -2101,6 +2101,113 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"freshness": freshness, "counts": counts})
 
+    @app.route("/api/signals/graph", methods=["GET"])
+    def signals_graph_api():
+        """Build graph data: thread nodes + entity-based edges."""
+        from db import get_signal_clusters
+        from agents.signals_synthesize import compute_thread_momentum
+
+        conn = get_connection(db_path)
+        threads = get_signal_clusters(conn, status="active", limit=50)
+
+        # Build nodes
+        nodes = []
+        for t in threads:
+            t["momentum"] = compute_thread_momentum(conn, t["id"])
+            nodes.append({
+                "id": t["id"],
+                "title": t["title"],
+                "domain": t["domain"],
+                "signal_count": t.get("signal_count", 0),
+                "synthesis": t.get("synthesis", ""),
+                "momentum": t["momentum"],
+            })
+
+        # Find shared entities between threads to build edges
+        # Get all entities grouped by thread (via cluster_id or signal_id → cluster)
+        thread_entities = {}
+        for t in threads:
+            ents = conn.execute(
+                """SELECT DISTINCT entity_type, COALESCE(normalized_value, entity_value) as name
+                   FROM signal_entities
+                   WHERE cluster_id = ? OR signal_id IN
+                     (SELECT signal_id FROM signal_cluster_items WHERE cluster_id = ?)""",
+                (t["id"], t["id"]),
+            ).fetchall()
+            thread_entities[t["id"]] = [(e["entity_type"], e["name"]) for e in ents]
+
+        # Build edges from shared entities (2+ shared = edge)
+        edges = []
+        thread_ids = [t["id"] for t in threads]
+        for i, tid_a in enumerate(thread_ids):
+            for tid_b in thread_ids[i+1:]:
+                ents_a = set(thread_entities.get(tid_a, []))
+                ents_b = set(thread_entities.get(tid_b, []))
+                shared = ents_a & ents_b
+                if len(shared) >= 1:  # at least 1 shared entity creates an edge
+                    edges.append({
+                        "source": tid_a,
+                        "target": tid_b,
+                        "shared_entities": [{"type": t, "name": n} for t, n in shared],
+                        "weight": len(shared),
+                    })
+
+        conn.close()
+        return jsonify({"nodes": nodes, "edges": edges})
+
+    @app.route("/api/signals/brainstorm", methods=["POST"])
+    def signals_brainstorm_api():
+        """Generate hypotheses from connected threads."""
+        data = request.json or {}
+        thread_ids = data.get("thread_ids", [])
+        if len(thread_ids) < 2:
+            return jsonify({"error": "Select at least 2 threads"}), 400
+
+        from db import get_cluster_detail
+        from agents.llm import generate_json, FAST_CHAIN
+        from prompts.signals import build_brainstorm_prompt
+
+        conn = get_connection(db_path)
+
+        # Build thread summaries
+        threads_text_parts = []
+        all_entities = {}
+        for tid in thread_ids[:4]:
+            detail = get_cluster_detail(conn, tid)
+            if not detail:
+                continue
+            threads_text_parts.append(
+                f"[Thread: {detail['title']}] Domain: {detail['domain']}\n"
+                f"Summary: {detail.get('synthesis', 'No summary')}\n"
+                f"Signals ({len(detail.get('signals', []))}):\n" +
+                "\n".join(f"  - {s['title']}" for s in detail.get("signals", [])[:5])
+            )
+            for e in detail.get("entities", []):
+                key = (e["entity_type"], e.get("normalized_value") or e["entity_value"])
+                if key not in all_entities:
+                    all_entities[key] = set()
+                all_entities[key].add(tid)
+
+        # Find shared entities
+        shared = {k: v for k, v in all_entities.items() if len(v) >= 2}
+        shared_text = "\n".join(
+            f"- {etype}: {ename} (appears in {len(tids)} threads)"
+            for (etype, ename), tids in shared.items()
+        ) or "No shared entities found — these threads may be connected by theme rather than specific entities."
+
+        conn.close()
+
+        threads_text = "\n\n".join(threads_text_parts)
+        prompt = build_brainstorm_prompt(threads_text, shared_text)
+
+        try:
+            result = generate_json(prompt, timeout=45, chain=FAST_CHAIN)
+            if not result:
+                return jsonify({"error": "LLM returned no result"}), 500
+            return jsonify(result)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.route("/api/signals/entity-context/<entity_type>/<path:entity_value>", methods=["GET"])
     def signals_entity_context_api(entity_type, entity_value):
         """Get context for an entity — dossier info for companies, campaigns for sectors."""

@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -4060,6 +4061,79 @@
             display: flex; align-items: center; justify-content: center;
             font-size: 12px; flex-shrink: 0;
         }
+        /* Graph node styling */
+        .graph-node { cursor: pointer; }
+        .graph-node circle { transition: all 0.15s; }
+        .graph-node.selected circle { stroke: var(--accent); stroke-width: 3px; }
+        .graph-node:hover circle { filter: brightness(1.3); }
+        .graph-node text { fill: var(--text-secondary); font-size: 10px; font-weight: 600; pointer-events: none; }
+        .graph-edge { stroke: rgba(255,255,255,0.08); stroke-width: 1px; }
+        .graph-edge.highlighted { stroke: var(--accent); stroke-opacity: 0.5; }
+        .graph-edge-label { fill: var(--text-muted); font-size: 8px; pointer-events: none; }
+
+        /* Brainstorm overlay content */
+        .brainstorm-threads {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+        .brainstorm-thread-card {
+            flex: 1;
+            min-width: 200px;
+            padding: 16px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-secondary);
+        }
+        .brainstorm-thread-card h3 { font-size: 14px; margin: 0 0 6px; color: var(--text-primary); }
+        .brainstorm-thread-card p { font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.4; }
+        .brainstorm-section { margin-bottom: 24px; }
+        .brainstorm-section-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .hypothesis-card {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 10px;
+            background: var(--bg-secondary);
+        }
+        .hypothesis-card h4 { font-size: 13px; font-weight: 700; color: var(--text-primary); margin: 0 0 8px; }
+        .hypothesis-card p { font-size: 12px; color: var(--text-secondary); margin: 0 0 8px; line-height: 1.5; }
+        .hypothesis-confidence {
+            display: inline-block;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+        .hypothesis-confidence.high { background: rgba(34,197,94,0.15); color: #22c55e; }
+        .hypothesis-confidence.medium { background: rgba(234,179,8,0.15); color: #eab308; }
+        .hypothesis-confidence.low { background: rgba(107,114,128,0.15); color: #6b7280; }
+        .hypothesis-investigate {
+            font-size: 11px;
+            color: var(--accent);
+            cursor: pointer;
+            margin-top: 8px;
+            display: inline-block;
+        }
+        .hypothesis-investigate:hover { text-decoration: underline; }
+        .second-order-card {
+            padding: 12px 16px;
+            border-left: 3px solid var(--purple);
+            background: var(--bg-secondary);
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 8px;
+        }
+        .second-order-card p { font-size: 12px; color: var(--text-secondary); margin: 0 0 4px; line-height: 1.4; }
+
         /* Entity chips */
         .ent-chip {
             display: inline-block;
@@ -5274,6 +5348,7 @@
                 <div class="signals-feed-tabs">
                     <button class="sig-feed-tab active" data-tab="threads" onclick="switchSignalTab('threads')">Threads</button>
                     <button class="sig-feed-tab" data-tab="raw" onclick="switchSignalTab('raw')">Raw</button>
+                    <button class="sig-feed-tab" data-tab="graph" onclick="switchSignalTab('graph')">Graph</button>
                     <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
                 </div>
                 <div class="signals-feed-controls">
@@ -5295,6 +5370,21 @@
                         <div style="font-size:32px;margin-bottom:12px">&#128225;</div>
                         <div>No signals collected yet</div>
                         <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click <strong>Scan Now</strong> to collect signals across all domains.</div>
+                    </div>
+                </div>
+                <!-- Graph view -->
+                <div class="sig-tab-content" id="sig-tab-graph" style="padding:0">
+                    <div id="sig-graph-container" style="width:100%;height:100%;position:relative">
+                        <div class="signals-empty" id="signals-graph-empty">
+                            <div style="font-size:32px;margin-bottom:12px">&#128476;</div>
+                            <div>No threads to visualize</div>
+                            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Run a scan to create threads, then view connections here.</div>
+                        </div>
+                        <svg id="sig-graph-svg" style="width:100%;height:100%;display:none"></svg>
+                        <div id="sig-graph-controls" style="display:none;position:absolute;bottom:12px;left:12px;right:12px;display:flex;gap:8px;align-items:center;justify-content:space-between">
+                            <div id="sig-graph-selection" style="font-size:11px;color:var(--text-muted)"></div>
+                            <button id="sig-brainstorm-btn" onclick="openBrainstormMode()" style="display:none;padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">Brainstorm →</button>
+                        </div>
                     </div>
                 </div>
                 <!-- Execution view -->
@@ -13588,8 +13678,9 @@ function switchSignalTab(tab) {
     document.querySelector(`.sig-feed-tab[data-tab="${tab}"]`).classList.add('active');
     document.querySelectorAll('.sig-tab-content').forEach(c => c.classList.remove('active'));
     document.getElementById(`sig-tab-${tab}`).classList.add('active');
-    // Clear detail pane on tab switch
-    closeSignalDetail();
+    if (tab === 'graph') loadGraph();
+    // Clear detail pane on tab switch (except graph — clicking nodes shows detail)
+    if (tab !== 'graph') closeSignalDetail();
 }
 
 function renderActiveSignalTab() {
@@ -14036,6 +14127,289 @@ function openEntityPopover(event, entityType, entityValue) {
         });
 }
 
+// ===================== GRAPH VIEW =====================
+
+let _graphData = null;
+let _graphSimulation = null;
+let _selectedThreadIds = new Set();
+
+function loadGraph() {
+    fetch('/api/signals/graph')
+        .then(r => r.json())
+        .then(data => {
+            _graphData = data;
+            if (data.nodes.length) renderGraph(data);
+        })
+        .catch(e => console.error('[graph] load error:', e));
+}
+
+function renderGraph(data) {
+    const container = document.getElementById('sig-graph-container');
+    const svg = d3.select('#sig-graph-svg');
+    const empty = document.getElementById('signals-graph-empty');
+    const controls = document.getElementById('sig-graph-controls');
+
+    if (!data.nodes.length) { empty.style.display = 'flex'; return; }
+    empty.style.display = 'none';
+    svg.style('display', 'block');
+    controls.style.display = 'flex';
+
+    // Clear previous
+    svg.selectAll('*').remove();
+    _selectedThreadIds.clear();
+    _updateBrainstormBtn();
+
+    const width = container.clientWidth;
+    const height = container.clientHeight - 40; // leave room for controls
+
+    svg.attr('viewBox', [0, 0, width, height]);
+
+    // Build D3 force simulation
+    const nodes = data.nodes.map(d => ({...d}));
+    const links = data.edges.map(d => ({...d}));
+
+    _graphSimulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(120))
+        .force('charge', d3.forceManyBody().strength(-200))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(d => Math.sqrt(d.signal_count || 1) * 8 + 20));
+
+    // Edges
+    const link = svg.append('g')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('class', 'graph-edge')
+        .attr('stroke-width', d => Math.max(1, d.weight * 1.5));
+
+    // Edge labels (shared entity names)
+    const linkLabel = svg.append('g')
+        .selectAll('text')
+        .data(links)
+        .join('text')
+        .attr('class', 'graph-edge-label')
+        .attr('text-anchor', 'middle')
+        .text(d => d.shared_entities.slice(0, 2).map(e => e.name).join(', '));
+
+    // Nodes
+    const node = svg.append('g')
+        .selectAll('g')
+        .data(nodes)
+        .join('g')
+        .attr('class', 'graph-node')
+        .call(d3.drag()
+            .on('start', (event, d) => { if (!event.active) _graphSimulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+            .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+            .on('end', (event, d) => { if (!event.active) _graphSimulation.alphaTarget(0); d.fx = null; d.fy = null; })
+        )
+        .on('click', (event, d) => {
+            event.stopPropagation();
+            _toggleThreadSelection(d.id);
+            // Also show thread detail in right pane
+            openThreadDetail(d.id);
+        });
+
+    // Node circles
+    node.append('circle')
+        .attr('r', d => Math.sqrt(d.signal_count || 1) * 6 + 8)
+        .attr('fill', d => _DOMAIN_COLORS[d.domain] || '#6b7280')
+        .attr('fill-opacity', 0.7)
+        .attr('stroke', d => _DOMAIN_COLORS[d.domain] || '#6b7280')
+        .attr('stroke-width', 1.5);
+
+    // Node labels
+    node.append('text')
+        .attr('dy', d => Math.sqrt(d.signal_count || 1) * 6 + 20)
+        .attr('text-anchor', 'middle')
+        .text(d => d.title.length > 30 ? d.title.substring(0, 28) + '...' : d.title);
+
+    // Signal count badge
+    node.append('text')
+        .attr('dy', 4)
+        .attr('text-anchor', 'middle')
+        .attr('fill', '#fff')
+        .attr('font-size', '10px')
+        .attr('font-weight', '700')
+        .text(d => d.signal_count || '');
+
+    // Tick
+    _graphSimulation.on('tick', () => {
+        link
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
+        linkLabel
+            .attr('x', d => (d.source.x + d.target.x) / 2)
+            .attr('y', d => (d.source.y + d.target.y) / 2);
+        node.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+
+    // Click background to deselect
+    svg.on('click', () => {
+        _selectedThreadIds.clear();
+        _updateGraphSelection();
+        _updateBrainstormBtn();
+    });
+}
+
+function _toggleThreadSelection(threadId) {
+    if (_selectedThreadIds.has(threadId)) {
+        _selectedThreadIds.delete(threadId);
+    } else {
+        if (_selectedThreadIds.size >= 4) return; // max 4
+        _selectedThreadIds.add(threadId);
+    }
+    _updateGraphSelection();
+    _updateBrainstormBtn();
+}
+
+function _updateGraphSelection() {
+    d3.selectAll('.graph-node').classed('selected', d => _selectedThreadIds.has(d.id));
+    d3.selectAll('.graph-edge').classed('highlighted', d =>
+        _selectedThreadIds.has(d.source.id || d.source) && _selectedThreadIds.has(d.target.id || d.target)
+    );
+}
+
+function _updateBrainstormBtn() {
+    const btn = document.getElementById('sig-brainstorm-btn');
+    const sel = document.getElementById('sig-graph-selection');
+    if (!btn) return;
+    if (_selectedThreadIds.size >= 2) {
+        btn.style.display = 'block';
+        sel.textContent = `${_selectedThreadIds.size} threads selected`;
+    } else {
+        btn.style.display = 'none';
+        sel.textContent = _selectedThreadIds.size === 1 ? '1 thread selected — select 1 more to brainstorm' : 'Click nodes to select threads for brainstorm';
+    }
+}
+
+// ===================== BRAINSTORM MODE =====================
+
+function openBrainstormMode() {
+    if (_selectedThreadIds.size < 2) return;
+    const overlay = document.getElementById('brainstorm-overlay');
+    const content = document.getElementById('brainstorm-content');
+    const subtitle = document.getElementById('brainstorm-subtitle');
+    overlay.classList.add('visible');
+
+    const ids = [..._selectedThreadIds];
+    const threadNames = ids.map(id => {
+        const n = _graphData?.nodes.find(n => n.id === id);
+        return n ? n.title : `Thread ${id}`;
+    });
+    subtitle.textContent = threadNames.join(' × ');
+
+    // Show selected threads while loading
+    content.innerHTML = `
+        <div class="brainstorm-threads">
+            ${ids.map(id => {
+                const n = _graphData?.nodes.find(n => n.id === id);
+                if (!n) return '';
+                const domColor = _DOMAIN_COLORS[n.domain] || '#6b7280';
+                return `<div class="brainstorm-thread-card" style="border-left:3px solid ${domColor}">
+                    <h3>${escHtml(n.title)}</h3>
+                    <p>${escHtml(n.synthesis || 'No summary')}</p>
+                    <div style="margin-top:6px"><span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700">${escHtml(_DOMAIN_LABELS[n.domain] || n.domain)}</span> <span style="font-size:10px;color:var(--text-muted)">${n.signal_count} signals</span></div>
+                </div>`;
+            }).join('')}
+        </div>
+        <div style="text-align:center;padding:24px;color:var(--text-muted)">
+            <div style="font-size:18px;margin-bottom:8px">🧠</div>
+            Generating hypotheses...
+        </div>
+    `;
+
+    // Call brainstorm API
+    fetch('/api/signals/brainstorm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thread_ids: ids })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.error) {
+            content.querySelector('div:last-child').innerHTML = `<div style="color:var(--red)">${escHtml(result.error)}</div>`;
+            return;
+        }
+        _renderBrainstormResults(content, result, ids);
+    })
+    .catch(e => {
+        content.querySelector('div:last-child').innerHTML = `<div style="color:var(--red)">Failed to generate hypotheses</div>`;
+    });
+}
+
+function _renderBrainstormResults(container, result, threadIds) {
+    // Keep the thread cards at the top, replace the loading section
+    const threadCards = container.querySelector('.brainstorm-threads').outerHTML;
+
+    let html = threadCards;
+
+    // Connection summary
+    if (result.connection_summary) {
+        html += `<div class="brainstorm-section">
+            <div class="brainstorm-section-title">🔗 Connection</div>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;padding:12px 16px;background:var(--bg-secondary);border-radius:10px;border:1px solid var(--border)">${escHtml(result.connection_summary)}</div>
+        </div>`;
+    }
+
+    // Hypotheses
+    if (result.hypotheses && result.hypotheses.length) {
+        html += `<div class="brainstorm-section">
+            <div class="brainstorm-section-title">💡 Hypotheses</div>
+            ${result.hypotheses.map(h => `
+                <div class="hypothesis-card">
+                    <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
+                        <h4>${escHtml(h.title)}</h4>
+                        <span class="hypothesis-confidence ${h.confidence || 'medium'}">${(h.confidence || 'medium').toUpperCase()}</span>
+                    </div>
+                    <p>${escHtml(h.reasoning)}</p>
+                    ${h.investigate ? `<div class="hypothesis-investigate" onclick="investigateHypothesis('${escHtml(h.investigate.replace(/'/g, "\\'"))}')">🔍 Investigate: ${escHtml(h.investigate)}</div>` : ''}
+                </div>
+            `).join('')}
+        </div>`;
+    }
+
+    // Second-order effects
+    if (result.second_order_effects && result.second_order_effects.length) {
+        html += `<div class="brainstorm-section">
+            <div class="brainstorm-section-title">🌊 Second-Order Effects</div>
+            ${result.second_order_effects.map(e => `
+                <div class="second-order-card">
+                    <p><strong>${escHtml(e.effect)}</strong></p>
+                    ${e.affected_sectors?.length ? `<div style="font-size:10px;color:var(--text-muted)">Sectors: ${e.affected_sectors.map(s => escHtml(s)).join(', ')}</div>` : ''}
+                    ${e.affected_companies?.length ? `<div style="font-size:10px;color:var(--text-muted)">Companies: ${e.affected_companies.map(c => escHtml(c)).join(', ')}</div>` : ''}
+                </div>
+            `).join('')}
+        </div>`;
+    }
+
+    // Questions to investigate
+    if (result.questions_to_investigate && result.questions_to_investigate.length) {
+        html += `<div class="brainstorm-section">
+            <div class="brainstorm-section-title">❓ Questions to Investigate</div>
+            ${result.questions_to_investigate.map(q => `
+                <div style="padding:8px 12px;margin-bottom:6px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);font-size:12px;color:var(--text-secondary);cursor:pointer" onclick="investigateHypothesis('${escHtml(q.replace(/'/g, "\\'"))}')">
+                    🔍 ${escHtml(q)}
+                </div>
+            `).join('')}
+        </div>`;
+    }
+
+    container.innerHTML = html;
+}
+
+function investigateHypothesis(query) {
+    closeBrainstorm();
+    switchModule('prospecting');
+    const input = document.getElementById('prospect-niche-input');
+    if (input) input.value = query;
+}
+
+function closeBrainstorm() {
+    document.getElementById('brainstorm-overlay').classList.remove('visible');
+}
+
 function _prefillResearchChat(companyName) {
     // Create a new chat and pre-fill the input with a company research prompt
     if (typeof newChat === 'function') newChat();
@@ -14374,6 +14748,25 @@ function _finishScan() {
 }
 
 </script>
+
+<!-- Brainstorm Mode overlay -->
+<div class="exec-overlay" id="brainstorm-overlay" onclick="if(event.target===this)closeBrainstorm()">
+    <div class="exec-overlay-inner">
+        <div class="exec-overlay-header">
+            <div class="exec-overlay-title" style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:24px">🧠</span>
+                <div>
+                    <div>Brainstorm Mode</div>
+                    <div class="exec-overlay-subtitle" id="brainstorm-subtitle">Analyzing connected threads...</div>
+                </div>
+            </div>
+            <button class="exec-overlay-close" onclick="closeBrainstorm()">&times;</button>
+        </div>
+        <div id="brainstorm-content" style="padding:24px 0">
+            <div style="text-align:center;color:var(--text-muted);padding:40px">Generating hypotheses...</div>
+        </div>
+    </div>
+</div>
 
 <!-- Fullscreen execution overlay -->
 <div class="exec-overlay" id="exec-overlay" onclick="if(event.target===this)closeExecOverlay()">
