@@ -5356,6 +5356,10 @@
                 </button>
                 <div class="signals-freshness" id="signals-freshness">No scans yet</div>
             </div>
+            <div class="signals-scan-history" id="signals-scan-history" style="display:none;padding:6px 12px;border-top:1px solid var(--border)">
+                <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Recent Scans</div>
+                <div id="scan-history-items"></div>
+            </div>
             <div class="signals-scan-status" id="signals-scan-status" style="display:none">
                 <div class="scan-status-text" id="scan-status-text"></div>
                 <div class="scan-status-link" onclick="switchSignalTab('execution')" style="cursor:pointer;font-size:10px;color:var(--accent);margin-top:4px">View execution →</div>
@@ -13759,18 +13763,38 @@ function loadSignalFreshness() {
         .then(data => {
             const fresh = data.freshness || {};
             const counts = data.counts || {};
-            // Update domain counts in sidebar
             for (const [dom, cnt] of Object.entries(counts)) {
                 const el = document.getElementById(`sig-count-${dom}`);
                 if (el) el.textContent = cnt;
             }
-            // Update freshness text
             const el = document.getElementById('signals-freshness');
             const times = Object.values(fresh);
             if (times.length) {
                 const latest = times.sort().reverse()[0];
                 el.textContent = 'Last scan: ' + _timeAgo(latest);
             }
+        })
+        .catch(() => {});
+
+    // Also load scan history
+    fetch('/api/signals/scan-history')
+        .then(r => r.json())
+        .then(data => {
+            const scans = data.scans || [];
+            const container = document.getElementById('signals-scan-history');
+            const items = document.getElementById('scan-history-items');
+            if (!scans.length) { container.style.display = 'none'; return; }
+            container.style.display = 'block';
+            items.innerHTML = scans.map(s => {
+                const age = _timeAgo(s.created_at);
+                return `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:10px;cursor:pointer" onclick="switchSignalTab('execution')">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <span style="color:var(--text-secondary);font-weight:600">${s.total_collected} signals · ${s.new_inserted} new</span>
+                        <span style="color:var(--text-muted)">${escHtml(age)}</span>
+                    </div>
+                    <div style="color:var(--text-muted);margin-top:2px">${s.threads_created} threads created · ${s.threads_assigned} assigned</div>
+                </div>`;
+            }).join('');
         })
         .catch(() => {});
 }

@@ -1977,6 +1977,17 @@ def create_app(db_path="intel.db"):
                 sr = synth_result[0] or {}
                 yield f"data: {json.dumps({'type': 'threads_ready', 'assigned': sr.get('assigned_count', 0), 'new_threads': sr.get('new_thread_count', 0)})}\n\n"
 
+            # Save scan history (last 3 only)
+            from db import save_scan_history
+            _sr = synth_result[0] if auto_synthesize and 'synth_result' in dir() else {}
+            _sr = _sr or {}
+            save_scan_history(conn, {
+                "total_collected": len(signals),
+                "new_inserted": new_count,
+                "threads_created": _sr.get("new_thread_count", 0),
+                "threads_assigned": _sr.get("assigned_count", 0),
+            })
+
             conn.close()
 
         return Response(generate(), mimetype="text/event-stream",
@@ -2090,6 +2101,15 @@ def create_app(db_path="intel.db"):
 
         conn.close()
         return jsonify({"ok": False, "body": row["body"] or "", "error": "Could not extract article text"})
+
+    @app.route("/api/signals/scan-history", methods=["GET"])
+    def signals_scan_history_api():
+        """Fetch last 3 scan results."""
+        from db import get_scan_history
+        conn = get_connection(db_path)
+        history = get_scan_history(conn)
+        conn.close()
+        return jsonify({"scans": history})
 
     @app.route("/api/signals/freshness", methods=["GET"])
     def signals_freshness_api():

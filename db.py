@@ -213,6 +213,20 @@ CREATE TABLE IF NOT EXISTS signal_cluster_items (
     UNIQUE(cluster_id, signal_id)
 );
 
+-- Scan history: last few execution results (not full pipeline, just outcomes)
+CREATE TABLE IF NOT EXISTS scan_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    total_collected INTEGER,
+    new_inserted INTEGER,
+    domains_json TEXT,
+    threads_created INTEGER DEFAULT 0,
+    threads_assigned INTEGER DEFAULT 0,
+    articles_enriched INTEGER DEFAULT 0,
+    entities_extracted INTEGER DEFAULT 0,
+    duration_seconds REAL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Brainstorm sessions: persisted hypothesis generation from connected threads
 CREATE TABLE IF NOT EXISTS brainstorms (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2176,6 +2190,44 @@ def insert_signal_entity(conn, entity_dict):
         ),
     )
     return cur.lastrowid
+
+
+def save_scan_history(conn, scan_data):
+    """Save a scan result. Keeps only the last 3 entries."""
+    conn.execute(
+        """INSERT INTO scan_history
+           (total_collected, new_inserted, domains_json, threads_created, threads_assigned,
+            articles_enriched, entities_extracted, duration_seconds)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            scan_data.get("total_collected", 0),
+            scan_data.get("new_inserted", 0),
+            json.dumps(scan_data.get("domains", {})),
+            scan_data.get("threads_created", 0),
+            scan_data.get("threads_assigned", 0),
+            scan_data.get("articles_enriched", 0),
+            scan_data.get("entities_extracted", 0),
+            scan_data.get("duration_seconds"),
+        ),
+    )
+    # Prune to last 3
+    conn.execute(
+        "DELETE FROM scan_history WHERE id NOT IN (SELECT id FROM scan_history ORDER BY created_at DESC LIMIT 3)"
+    )
+    conn.commit()
+
+
+def get_scan_history(conn):
+    """Fetch the last 3 scan results."""
+    rows = conn.execute(
+        "SELECT * FROM scan_history ORDER BY created_at DESC LIMIT 3"
+    ).fetchall()
+    results = []
+    for r in rows:
+        d = dict(r)
+        d["domains"] = json.loads(d["domains_json"]) if d.get("domains_json") else {}
+        results.append(d)
+    return results
 
 
 def update_cluster_status(conn, cluster_id, status):
