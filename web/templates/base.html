@@ -3941,11 +3941,27 @@
             color: var(--text-primary);
         }
         .signals-detail-close {
-            background: none;
-            border: none;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
             color: var(--text-muted);
-            font-size: 18px;
+            font-size: 15px;
             cursor: pointer;
+            transition: all 0.15s;
+        }
+        .signals-detail-close:hover {
+            background: rgba(239,68,68,0.15);
+            border-color: rgba(239,68,68,0.3);
+            color: #ef4444;
+            transform: scale(1.1);
+        }
+        .signals-detail-close:active {
+            transform: scale(0.95);
         }
         .signals-detail-body {
             flex: 1;
