@@ -37,6 +37,20 @@ REQUEST_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+def _resolve_google_news_url(url):
+    """Decode Google News RSS redirect URL to the actual article URL.
+    Delegates to the google_news module's resolver which has multiple fallbacks.
+    """
+    if "news.google.com/rss/articles/" not in url:
+        return url
+    try:
+        from scraper.google_news import _resolve_google_news_url as _gn_resolve
+        return _gn_resolve(url)
+    except Exception as e:
+        print(f"[search] Google News resolve failed: {e}")
+    return url
+
+
 def _extract_article_bs4(html, max_chars=3000):
     """Extract article text using semantic selectors, then full-page fallback."""
     soup = BeautifulSoup(html, "html.parser")
@@ -66,6 +80,12 @@ def fetch_page_text(url, max_chars=3000):
     HTTP chain: httpx → curl_cffi (browser TLS impersonation) on failure.
     """
     if not url.startswith("http"):
+        return ""
+
+    # Resolve Google News redirect URLs to actual article URLs
+    url = _resolve_google_news_url(url)
+    if "news.google.com/rss/articles/" in url:
+        print(f"[search] Skipping unresolved Google News URL: {url[:80]}")
         return ""
 
     html = ""

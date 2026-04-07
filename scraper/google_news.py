@@ -41,22 +41,41 @@ def _resolve_google_news_url(google_url):
 
     Google News wraps article links in redirect URLs like:
     https://news.google.com/rss/articles/CBMi...
-    Follow the redirect to get the real URL.
+    These use JS redirects (not HTTP 3xx), so we decode the base64 payload.
+    Falls back to fetching the page and extracting the canonical/redirect URL.
     """
-    if not google_url or "news.google.com" not in google_url:
+    if not google_url or "news.google.com/rss/articles/" not in google_url:
         return google_url
+
+    # Method 1: googlenewsdecoder (fast, offline)
     try:
-        resp = httpx.head(
-            google_url,
-            headers=_HEADERS,
-            follow_redirects=True,
-            timeout=8,
-        )
-        final_url = str(resp.url)
-        if "news.google.com" not in final_url:
-            return final_url
-    except Exception:
-        pass
+        from googlenewsdecoder import new_decoderv1
+        result = new_decoderv1(google_url, interval=2)
+        if result.get("status") and result.get("decoded_url"):
+            print(f"[google_news] Decoded: {result['decoded_url'][:100]}")
+            return result["decoded_url"]
+    except Exception as e:
+        print(f"[google_news] Decoder failed: {e}")
+
+    # Method 2: Fetch page with curl_cffi and look for redirect in JS/meta
+    try:
+        from curl_cffi import requests as cffi_requests
+        resp = cffi_requests.get(google_url, impersonate="chrome", timeout=12, allow_redirects=True)
+        final = str(resp.url)
+        if "news.google.com" not in final:
+            print(f"[google_news] Redirect resolved: {final[:100]}")
+            return final
+        # Check for meta refresh or canonical
+        import re
+        meta = re.search(r'<meta[^>]*http-equiv=["\']refresh["\'][^>]*url=(["\']?)([^"\'\s>]+)', resp.text, re.I)
+        if meta:
+            resolved = meta.group(2)
+            print(f"[google_news] Meta refresh resolved: {resolved[:100]}")
+            return resolved
+    except Exception as e:
+        print(f"[google_news] Fetch fallback failed: {e}")
+
+    print(f"[google_news] Could not resolve: {google_url[:80]}")
     return google_url
 
 
