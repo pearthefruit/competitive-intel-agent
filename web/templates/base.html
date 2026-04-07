@@ -14607,20 +14607,19 @@ function renderGraph(data) {
 
     svg.attr('viewBox', [0, 0, width, height]);
 
-    // Zoom behavior — filter out clicks on nodes so they pass through to click handlers
+    // Zoom behavior — wheel to zoom, middle-click to pan. Left-click reserved for nodes.
     const zoomGroup = svg.append('g').attr('class', 'graph-zoom-group');
     const zoomBehavior = d3.zoom()
         .scaleExtent([0.3, 4])
         .filter(event => {
             if (event.type === 'wheel') return true;
-            // Block zoom on nodes (let D3 drag handle those)
-            const target = event.target;
-            if (target.closest && target.closest('.graph-node')) return false;
-            return !event.button; // only left-click for pan
+            if (event.target.closest && event.target.closest('.graph-node')) return false;
+            // Only allow middle-mouse pan (button 1), block left-click pan to prevent zoom-on-hold
+            if (event.type === 'mousedown') return event.button === 1;
+            return false;
         })
         .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
     svg.call(zoomBehavior);
-    // Disable double-click zoom (we use dblclick for pattern zoom-in)
     svg.on('dblclick.zoom', null);
     svg.node().__zoomBehavior = zoomBehavior;
 
@@ -15705,8 +15704,8 @@ function runResynthesize() {
                         try {
                             const ev = JSON.parse(line.substring(6));
                             if (ev.type === 'status') statusText.textContent = ev.text;
-                            else if (ev.type === 'new_thread') statusText.textContent = `New pattern: ${ev.title}`;
-                            else if (ev.type === 'resynth_complete') statusText.textContent = `${ev.new_patterns} new patterns, ${ev.assigned} signals assigned`;
+                            else if (ev.type === 'new_thread') { statusText.textContent = `New thread: ${ev.title}`; statusText.style.color = 'var(--green)'; }
+                            else if (ev.type === 'resynth_complete') { statusText.textContent = `✓ ${ev.new_patterns} new threads, ${ev.assigned} signals assigned`; statusText.style.color = 'var(--green)'; }
                         } catch (e) {}
                     }
                     read();
@@ -15726,6 +15725,23 @@ function _finishResynth() {
 }
 
 // ===================== BOARD =====================
+
+// Inline input popup — replaces browser prompt()
+function _showInlineInput(x, y, placeholder, defaultVal, onSubmit) {
+    const existing = document.getElementById('board-inline-input');
+    if (existing) existing.remove();
+    const div = document.createElement('div');
+    div.id = 'board-inline-input';
+    div.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:200;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:8px;box-shadow:0 4px 16px rgba(0,0,0,.5);display:flex;gap:4px;align-items:center`;
+    div.innerHTML = `<input type="text" value="${escHtml(defaultVal || '')}" placeholder="${escHtml(placeholder)}" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;width:180px;outline:none" autofocus>
+        <button style="padding:6px 10px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">OK</button>`;
+    document.body.appendChild(div);
+    const input = div.querySelector('input');
+    const submit = () => { const v = input.value; div.remove(); onSubmit(v); };
+    div.querySelector('button').onclick = submit;
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') div.remove(); });
+    requestAnimationFrame(() => input.focus());
+}
 
 let _boardMode = 'graph'; // 'graph' or 'board'
 let _boardData = null;
@@ -15798,13 +15814,14 @@ function renderBoard(data) {
     // Double-click on empty space → create note
     svg.on('dblclick', (event) => {
         const [x, y] = d3.pointer(event, zoomGroup.node());
-        const text = prompt('Add a note:');
-        if (!text) return;
-        fetch('/api/board/notes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, x, y })
-        }).then(() => loadBoard());
+        _showInlineInput(event.clientX, event.clientY, 'Add a note...', '', (text) => {
+            if (!text) return;
+            fetch('/api/board/notes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, x, y })
+            }).then(() => loadBoard());
+        });
     });
 
     const nodes = data.nodes.map(d => {
@@ -15831,38 +15848,45 @@ function renderBoard(data) {
 
     // Nodes
     const nodeR = d => Math.sqrt(d.signal_count || 1) * 6 + 10;
+    let _boardDragged = false;
+
     const node = zoomGroup.append('g').selectAll('g').data(nodes).join('g')
         .attr('class', 'graph-node')
         .attr('transform', d => `translate(${d.x},${d.y})`)
         .call(d3.drag()
-            .on('start', (event, d) => { d._dragging = true; })
-            .on('drag', (event, d) => {
+            .on('start', function(event, d) {
+                _boardDragged = false;
+                d._el = d3.select(this);
+            })
+            .on('drag', function(event, d) {
+                _boardDragged = true;
                 d.x = event.x; d.y = event.y;
-                d3.select(event.sourceEvent.target.closest('.graph-node')).attr('transform', `translate(${d.x},${d.y})`);
+                d._el.attr('transform', `translate(${d.x},${d.y})`);
                 _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
-                _boardDirty = true;
             })
             .on('end', (event, d) => {
-                d._dragging = false;
-                d.pinned = true;
-                _saveBoardPositions(nodes);
+                if (_boardDragged) {
+                    d.pinned = true;
+                    _saveBoardPositions(nodes);
+                }
+                delete d._el;
             })
         )
         .on('click', (event, d) => {
             event.stopPropagation();
+            if (_boardDragged) return; // don't open detail after drag
             if (_connectingFrom != null && _connectingFrom !== d.id) {
-                // Complete connection
-                const label = prompt('Connection label (optional):', '');
-                if (label !== null) {
-                    fetch('/api/board/connect', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ source: _connectingFrom, target: d.id, label })
-                    }).then(() => loadBoard());
-                }
+                const fromId = _connectingFrom;
                 _connectingFrom = null;
                 connectLine.style('display', 'none');
                 svg.on('mousemove.connect', null);
+                _showInlineInput(event.clientX, event.clientY, 'Label (optional)', '', (label) => {
+                    fetch('/api/board/connect', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ source: fromId, target: d.id, label })
+                    }).then(() => loadBoard());
+                });
             } else {
                 openThreadDetail(d.id);
             }
@@ -15870,9 +15894,10 @@ function renderBoard(data) {
         .on('contextmenu', (event, d) => {
             event.preventDefault();
             event.stopPropagation();
-            // Start connection drawing
             _connectingFrom = d.id;
             connectLine.attr('x1', d.x).attr('y1', d.y).style('display', 'block');
+            const sel = document.getElementById('sig-graph-selection');
+            if (sel) sel.innerHTML = `<span style="color:var(--accent);font-weight:600">🔗 Connecting from "${escHtml(d.title.substring(0,30))}" — click target node · Esc to cancel</span>`;
             svg.on('mousemove.connect', (mEvent) => {
                 const [mx, my] = d3.pointer(mEvent, zoomGroup.node());
                 connectLine.attr('x2', mx).attr('y2', my);
@@ -15892,7 +15917,7 @@ function renderBoard(data) {
             .text(d.title.length > 30 ? d.title.substring(0, 28) + '…' : d.title);
         g.append('text').attr('y', r + 26).attr('text-anchor', 'middle')
             .attr('fill', 'var(--text-muted)').attr('font-size', 9)
-            .text(`${d.signal_count} signals`);
+            .text(`Thread · ${d.signal_count} signals`);
     });
 
     _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
@@ -15910,14 +15935,15 @@ function renderBoard(data) {
         div.innerHTML = `${escHtml(note.text)}<button class="board-note-delete" onclick="event.stopPropagation();_deleteBoardNote(${note.id})">×</button>`;
         div.addEventListener('dblclick', (e) => {
             e.stopPropagation();
-            const newText = prompt('Edit note:', note.text);
-            if (newText !== null) {
-                fetch(`/api/board/notes/${note.id}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: newText })
-                }).then(() => loadBoard());
-            }
+            _showInlineInput(e.clientX, e.clientY, 'Edit note', note.text, (newText) => {
+                if (newText !== null && newText !== '') {
+                    fetch(`/api/board/notes/${note.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: newText })
+                    }).then(() => loadBoard());
+                }
+            });
         });
         // Drag note
         let dragStartX, dragStartY, noteStartX, noteStartY;
