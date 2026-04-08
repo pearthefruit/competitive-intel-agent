@@ -5449,6 +5449,12 @@
                     <span class="sig-domain-count" id="sig-count-regulatory">—</span>
                 </button>
             </div>
+            <div style="padding:4px 12px;border-top:1px solid var(--border);display:flex;gap:4px;flex-wrap:wrap">
+                <button class="sig-domain-btn active" data-srctype="all" onclick="_filterSourceType('all')" style="padding:2px 8px;font-size:9px">All</button>
+                <button class="sig-domain-btn" data-srctype="government" onclick="_filterSourceType('government')" style="padding:2px 8px;font-size:9px">🏛 Gov</button>
+                <button class="sig-domain-btn" data-srctype="news" onclick="_filterSourceType('news')" style="padding:2px 8px;font-size:9px">📰 News</button>
+                <button class="sig-domain-btn" data-srctype="social" onclick="_filterSourceType('social')" style="padding:2px 8px;font-size:9px">💬 Social</button>
+            </div>
             <div class="signals-brainstorm-list" id="signals-brainstorm-list" style="display:none;padding:8px 12px;border-top:1px solid var(--border)">
                 <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Brainstorms</div>
                 <div id="brainstorm-list-items"></div>
@@ -5459,6 +5465,14 @@
                     <button onclick="_runCustomSearch()" style="padding:7px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">🔍</button>
                 </div>
                 <div id="custom-search-status" style="display:none;font-size:10px;color:var(--text-muted);margin-bottom:6px;padding:0 4px"></div>
+                <div id="scan-domain-toggles" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">
+                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="economics" checked style="accent-color:#3b82f6;width:11px;height:11px"> Econ</label>
+                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="finance" checked style="accent-color:#22c55e;width:11px;height:11px"> Finance</label>
+                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="geopolitics" checked style="accent-color:#ef4444;width:11px;height:11px"> Geo</label>
+                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="tech_ai" checked style="accent-color:#a855f7;width:11px;height:11px"> Tech</label>
+                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="labor" checked style="accent-color:#eab308;width:11px;height:11px"> Labor</label>
+                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="regulatory" checked style="accent-color:#f97316;width:11px;height:11px"> Reg</label>
+                </div>
                 <button class="signals-scan-btn" id="signals-scan-btn" onclick="runSignalScan()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                     Scan Now
@@ -13864,6 +13878,14 @@ const _DOMAIN_COLORS = {
 let _signalsCache = [];
 let _threadsCache = [];
 let _signalsDomainFilter = 'all';
+let _signalsSourceTypeFilter = 'all';
+
+function _filterSourceType(srcType) {
+    _signalsSourceTypeFilter = srcType;
+    document.querySelectorAll('.sig-domain-btn[data-srctype]').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.sig-domain-btn[data-srctype="${srcType}"]`).classList.add('active');
+    renderActiveSignalTab();
+}
 let _activeSignalId = null;
 let _activeThreadId = null;
 let _signalTab = 'raw';
@@ -13996,6 +14018,9 @@ function renderSignalFeed() {
     let filtered = _signalsCache;
     if (_signalsDomainFilter !== 'all') {
         filtered = filtered.filter(s => s.domain === _signalsDomainFilter);
+    }
+    if (_signalsSourceTypeFilter !== 'all') {
+        filtered = filtered.filter(s => (s.source_type || 'news') === _signalsSourceTypeFilter);
     }
     if (search) {
         filtered = filtered.filter(s =>
@@ -15517,8 +15542,12 @@ function runSignalScan() {
     statusEl.style.display = 'block';
     statusText.textContent = 'Starting scan...';
 
+    // Get selected domains from checkboxes
+    const selectedDomains = [...document.querySelectorAll('.scan-domain-cb:checked')].map(cb => cb.value);
+    if (!selectedDomains.length) { alert('Select at least one domain'); return; }
+
     // Reset execution data
-    _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'collecting', startedAt: new Date().toISOString() };
+    _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'collecting', startedAt: new Date().toISOString(), narrativeSearch: null };
     _execExpandedDomains.clear();
 
     // Switch to execution tab and render (setTimeout ensures DOM has updated)
@@ -15528,7 +15557,7 @@ function runSignalScan() {
     fetch('/api/signals/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        body: JSON.stringify({ domains: selectedDomains })
     }).then(response => {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();

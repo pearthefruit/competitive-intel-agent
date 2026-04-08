@@ -350,6 +350,7 @@ def _migrate_db(conn):
         ("campaigns", "signal_cluster_id", "INTEGER"),
         ("signal_clusters", "last_signal_at", "TEXT"),
         ("signals", "signal_status", "TEXT DEFAULT 'signal'"),
+        ("signals", "source_type", "TEXT DEFAULT 'news'"),
         ("signal_clusters", "narrative_id", "INTEGER REFERENCES narratives(id)"),
         ("signal_cluster_items", "evidence_stance", "TEXT DEFAULT 'neutral'"),
     ]
@@ -2074,8 +2075,8 @@ def insert_signal(conn, signal_dict):
     try:
         cur = conn.execute(
             """INSERT OR IGNORE INTO signals
-               (source, domain, title, url, body, published_at, source_name, content_hash, raw_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (source, domain, title, url, body, published_at, source_name, content_hash, raw_json, source_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 signal_dict["source"],
                 signal_dict["domain"],
@@ -2086,6 +2087,7 @@ def insert_signal(conn, signal_dict):
                 signal_dict.get("source_name", ""),
                 signal_dict["content_hash"],
                 signal_dict.get("raw_json"),
+                signal_dict.get("source_type", "news"),
             ),
         )
         return cur.lastrowid if cur.rowcount > 0 else None

@@ -55,6 +55,8 @@ def _normalize_signal(item, source, domain):
     # Auto-classify domain for targeted/narrative signals
     if domain in ("targeted", "narrative"):
         domain = _classify_domain(title, body)
+    # Determine source type
+    source_type = item.get("source_type") or ("government" if source == "gov_rss" else "social" if source in ("reddit", "hackernews") else "news")
     return {
         "source": source,
         "domain": domain,
@@ -63,6 +65,7 @@ def _normalize_signal(item, source, domain):
         "body": body,
         "published_at": item.get("date") or "",
         "source_name": item.get("source") or source,
+        "source_type": source_type,
         "content_hash": _content_hash(source, url, title),
     }
 
@@ -310,15 +313,57 @@ def _collect_regulatory(max_per_source=10, progress_cb=None):
     return signals
 
 
+def _collect_gov_for_domain(domain, max_per_source=10, progress_cb=None):
+    """Collect government RSS signals relevant to a specific domain."""
+    _cb = progress_cb or (lambda *a: None)
+    signals = []
+    try:
+        from scraper.gov_rss import GOV_FEEDS, fetch_gov_feed
+    except ImportError:
+        return signals
+
+    domain_feeds = {k: v for k, v in GOV_FEEDS.items() if v["domain"] == domain}
+    if not domain_feeds:
+        return signals
+
+    feed_names = list(domain_feeds.keys())
+    _cb("source_start", {"source": "gov_rss", "domain": domain, "feeds": feed_names})
+    for key in feed_names:
+        items = fetch_gov_feed(key, max_results=max_per_source, days_back=7)
+        for item in items:
+            sig = _normalize_signal(item, "gov_rss", domain)
+            if sig:
+                sig["source_name"] = item.get("source", key)
+                signals.append(sig)
+    _cb("source_done", {"source": "gov_rss", "count": len(signals), "feeds": feed_names})
+    return signals
+
+
 # ── Domain registry ───────────────────────────────────────────────────
 
+def _wrap_with_gov(collector_fn):
+    """Wrap a domain collector to also fetch government RSS feeds."""
+    domain = {v: k for k, v in {
+        "economics": _collect_economics, "finance": _collect_finance,
+        "geopolitics": _collect_geopolitics, "tech_ai": _collect_tech_ai,
+        "labor": _collect_labor, "regulatory": _collect_regulatory,
+    }.items()}.get(collector_fn)
+
+    def wrapped(max_per_source=10, progress_cb=None):
+        signals = collector_fn(max_per_source=max_per_source, progress_cb=progress_cb)
+        if domain:
+            signals.extend(_collect_gov_for_domain(domain, max_per_source=max_per_source, progress_cb=progress_cb))
+        return signals
+    return wrapped
+
+
 DOMAIN_COLLECTORS = {
-    "economics": _collect_economics,
-    "finance": _collect_finance,
-    "geopolitics": _collect_geopolitics,
-    "tech_ai": _collect_tech_ai,
-    "labor": _collect_labor,
-    "regulatory": _collect_regulatory,
+    "economics": _wrap_with_gov(_collect_economics),
+    "finance": _wrap_with_gov(_collect_finance),
+    "geopolitics": _wrap_with_gov(_collect_geopolitics),
+    "tech_ai": _wrap_with_gov(_collect_tech_ai),
+    "labor": _wrap_with_gov(_collect_labor),
+    "regulatory": _wrap_with_gov(_collect_regulatory),
 }
 
 ALL_DOMAINS = list(DOMAIN_COLLECTORS.keys())
