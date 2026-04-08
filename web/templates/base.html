@@ -15363,7 +15363,9 @@ function _renderHighlightPills() {
     // Action buttons when 2+ threads highlighted
     if (unionIds.size >= 2) {
         const btnBase = 'padding:3px 8px;border-radius:12px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;border:none;';
-        html += `<span onclick="_linkHighlighted()" style="${btnBase}background:linear-gradient(135deg,#06b6d4,#a855f7);color:#fff" title="Create connections between highlighted threads">🔗 Link ${unionIds.size}</span>`;
+        if (unionIds.size <= 6) {
+            html += `<span onclick="_linkHighlighted()" style="${btnBase}background:linear-gradient(135deg,#06b6d4,#a855f7);color:#fff" title="Create connections between highlighted threads">🔗 Link ${unionIds.size}</span>`;
+        }
         html += `<span onclick="_brainstormHighlighted()" style="${btnBase}background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff" title="Brainstorm connections between highlighted threads">🧠 Brainstorm ${unionIds.size}</span>`;
     }
 
