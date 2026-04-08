@@ -57,11 +57,8 @@ CRITICAL RULES:
 
 
 def build_entity_extraction_prompt(signals_text):
-    """Prompt for FAST_CHAIN to extract named entities from signal text.
-
-    Extracts companies, sectors, geographies, and key figures mentioned.
-    """
-    return f"""Extract named entities from these news signals. Focus on specific, identifiable entities.
+    """Prompt to extract entities including concepts and events from signals."""
+    return f"""Extract entities from these news signals. Extract BOTH named entities AND thematic concepts.
 
 SIGNALS:
 {signals_text}
@@ -76,20 +73,29 @@ Return JSON only:
         {{"type": "sector", "value": "semiconductors"}},
         {{"type": "geography", "value": "Taiwan"}},
         {{"type": "person", "value": "Jensen Huang"}},
-        {{"type": "regulation", "value": "CHIPS Act"}}
+        {{"type": "regulation", "value": "CHIPS Act"}},
+        {{"type": "concept", "value": "supply chain reshoring"}},
+        {{"type": "event", "value": "US-China trade war 2026"}}
       ]
     }}
   ]
 }}
 
+Entity types:
+- company: specific companies. ALWAYS normalize (e.g. "NVDA" → "NVIDIA Corporation")
+- sector: broad industry categories ("semiconductors", "fintech", "pharmaceuticals")
+- geography: countries or major regions
+- person: named individuals with influence on the story
+- regulation: specific laws, policies, executive orders
+- concept: thematic ideas that connect across domains ("tariffs", "remote work", "AI automation", "supply chain reshoring", "workforce displacement", "inflation pressure"). These are the MOST VALUABLE — they link stories that share no companies or sectors but are driven by the same forces
+- event: specific time-anchored happenings ("Iran-Israel conflict 2026", "FOMC March 2026 meeting", "Trump tariff executive order")
+
 Rules:
-- type must be one of: company, sector, geography, person, regulation
-- For companies: ALWAYS include the full company name in "normalized" (e.g., "CALM" → "Cal-Maine Foods, Inc.", "NVDA" → "NVIDIA Corporation")
-- Do NOT extract stock tickers alone — always resolve to the company name
-- sector should be broad industry categories: "semiconductors", "cloud computing", "pharmaceuticals", "retail", "financial services"
-- geography should be countries or major regions, not cities
-- Only extract entities that are specifically named — not generic mentions
-- If a signal has no extractable entities, omit it from the list
+- Extract 2-4 concepts per signal — these are the ideas BEHIND the news, not the news itself
+- Concepts should be 2-4 words, lowercase, reusable across signals ("AI automation" not "AI is automating jobs at Block")
+- Events should be specific enough to be unique but general enough to connect signals
+- For companies: resolve tickers to full names in "normalized"
+- Omit signals with no extractable entities
 - Return ONLY the JSON object"""
 
 
@@ -190,6 +196,6 @@ Rules:
 - BAD: "Technology Trends", "Market Changes", "Labor Issues"
 - GOOD: "FAANG AI Infrastructure Hiring Freeze", "Semiconductor Supply Chain Reshoring", "Remote Work Adoption in Creative Industries"
 - Every signal must appear in exactly one group (either a proposed split or remaining)
-- Don't create a sub-thread with only 1 signal unless it's truly distinct
+- Every sub-thread MUST have at least 2 signals — never create a sub-thread with only 1 signal
 - The remaining group catches signals that are genuinely miscellaneous — rename it to something specific if possible
 - Return ONLY the JSON object"""

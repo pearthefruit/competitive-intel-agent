@@ -14252,16 +14252,19 @@ function openThreadDetail(threadId) {
                 if (!entsByType[type].find(x => x.toLowerCase() === val.toLowerCase())) entsByType[type].push(val);
             });
 
-            const _entIcon = {company: '🏢', sector: '📊', geography: '📍', person: '👤', regulation: '⚖️'};
-            const _entClickable = ['company', 'sector', 'geography'];
-            const entHtml = Object.entries(entsByType).map(([type, vals]) => {
+            const _entIcon = {company: '🏢', sector: '📊', geography: '📍', person: '👤', regulation: '⚖️', concept: '💡', event: '📅'};
+            const _entClickable = ['company', 'sector', 'geography', 'concept', 'event'];
+            // Reorder: concepts first (most valuable for connections)
+            const typeOrder = ['concept', 'event', 'company', 'sector', 'geography', 'person', 'regulation'];
+            const sortedEntTypes = Object.entries(entsByType).sort((a, b) => (typeOrder.indexOf(a[0]) === -1 ? 99 : typeOrder.indexOf(a[0])) - (typeOrder.indexOf(b[0]) === -1 ? 99 : typeOrder.indexOf(b[0])));
+            const entHtml = sortedEntTypes.map(([type, vals]) => {
                 const icon = _entIcon[type] || '🔹';
                 const clickable = _entClickable.includes(type);
                 return `<div style="margin-bottom:8px">
                     <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">${escHtml(type)}</span><br>
                     ${vals.map(v => {
                         const cls = clickable ? 'ent-chip ent-chip-clickable' : 'ent-chip';
-                        const onclick = clickable ? `onclick="openEntityPopover(event, '${escHtml(type)}', '${escHtml(v.replace(/'/g, "\\'"))}')"` : '';
+                        const onclick = clickable ? `onclick="_highlightEntityOnBoard('${escHtml(type)}', '${escHtml(v.replace(/'/g, "\\'"))}')"` : '';
                         return `<span class="${cls}" data-type="${escHtml(type)}" ${onclick}>${icon} ${escHtml(v)}</span>`;
                     }).join('')}
                 </div>`;
@@ -14325,9 +14328,13 @@ function openThreadDetail(threadId) {
                     </div>
                     ${thread.synthesis ? `<div class="sig-detail-body-text">${escHtml(thread.synthesis)}</div>` : ''}
                     ${entHtml ? `<div style="padding:12px 20px;border-top:1px solid var(--border)">
-                        <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">Extracted Entities</div>
+                        <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">Entities <span style="font-weight:400;color:var(--text-muted)">(click to find connections)</span></div>
                         ${entHtml}
                     </div>` : ''}
+                    <div id="related-threads-${thread.id}" style="padding:12px 20px;border-top:1px solid var(--border);display:none">
+                        <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">🔗 Related Threads</div>
+                        <div id="related-threads-list-${thread.id}" style="color:var(--text-muted);font-size:11px">Loading...</div>
+                    </div>
                     <div style="padding:12px 20px;border-top:1px solid var(--border)">
                         <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">Signals (${sigSignals.length})${sigNoise.length ? ` · <span style="color:var(--text-muted)">${sigNoise.length} noise</span>` : ''}</div>
                         ${signalListHtml || '<div style="color:var(--text-muted);font-size:12px">No signals</div>'}
@@ -14339,6 +14346,8 @@ function openThreadDetail(threadId) {
                     </div>
                 </div>
             `;
+            // Load related threads asynchronously
+            setTimeout(() => _loadRelatedThreads(thread.id), 100);
         })
         .catch(e => {
             if (myRequest !== _detailRequestId) return;
@@ -14410,6 +14419,60 @@ function _runCustomSearch() {
     .catch(() => {
         status.innerHTML = '<span style="color:var(--red)">Search failed</span>';
     });
+}
+
+function _loadRelatedThreads(threadId) {
+    fetch(`/api/signals/threads/${threadId}/related`)
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById(`related-threads-${threadId}`);
+            const list = document.getElementById(`related-threads-list-${threadId}`);
+            if (!container || !list) return;
+            const related = data.related || [];
+            if (!related.length) { container.style.display = 'none'; return; }
+            container.style.display = 'block';
+            list.innerHTML = related.map(r => {
+                const color = _DOMAIN_COLORS[r.domain] || '#6b7280';
+                const sharedText = r.shared_entities.map(e => `${_entIcon[e.type] || '🔹'} ${e.name}`).join(', ');
+                return `<div style="padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="openThreadDetail(${r.id})">
+                    <div style="font-size:11px;font-weight:600;color:var(--text-primary)">${escHtml(r.title)}</div>
+                    <div style="font-size:9px;color:var(--text-muted);margin-top:2px">${r.shared_count} shared: ${escHtml(sharedText)}</div>
+                </div>`;
+            }).join('');
+        });
+}
+const _entIcon = {company: '🏢', sector: '📊', geography: '📍', person: '👤', regulation: '⚖️', concept: '💡', event: '📅'};
+
+function _highlightEntityOnBoard(entityType, entityValue) {
+    // Switch to board tab and highlight nodes containing this entity
+    if (_signalTab !== 'graph') switchSignalTab('graph');
+    // Find threads with this entity via the board data
+    if (!_boardData) return;
+    const sel = document.getElementById('sig-graph-selection');
+    if (sel) sel.innerHTML = `<span style="color:var(--accent)">Highlighting threads with ${_entIcon[entityType] || '🔹'} "${escHtml(entityValue)}"...</span>`;
+
+    // Fetch entity matches from API
+    fetch(`/api/signals/entity-threads?type=${encodeURIComponent(entityType)}&value=${encodeURIComponent(entityValue)}`)
+        .then(r => r.json())
+        .then(data => {
+            const matchIds = new Set(data.thread_ids || []);
+            // Highlight matching nodes, dim others
+            document.querySelectorAll('.graph-node').forEach(n => {
+                const nid = parseInt(n.dataset.nodeId);
+                if (matchIds.has(nid)) {
+                    n.style.filter = 'brightness(1.5) drop-shadow(0 0 12px rgba(6,182,212,0.6))';
+                } else if (nid) {
+                    n.style.filter = 'brightness(0.3)';
+                }
+            });
+            if (sel) sel.innerHTML = `<span style="color:var(--accent)">${_entIcon[entityType] || '🔹'} "${escHtml(entityValue)}" — ${matchIds.size} threads · <span style="cursor:pointer;text-decoration:underline" onclick="_clearBoardHighlight()">clear</span></span>`;
+        });
+}
+
+function _clearBoardHighlight() {
+    document.querySelectorAll('.graph-node').forEach(n => n.style.filter = '');
+    const sel = document.getElementById('sig-graph-selection');
+    if (sel) sel.innerHTML = '';
 }
 
 function _proposeThreadSplit(threadId) {

@@ -270,7 +270,19 @@ def extract_entities(conn, signals, progress_cb=None):
 
     _cb("entities_start", {"signal_count": len(signals)})
 
-    signals_text = _format_signals_for_prompt(signals, max_chars=8000)
+    # Use richer format for entity extraction — include body excerpt for concepts/events
+    lines = []
+    char_count = 0
+    for s in signals:
+        line = f"[{s['id']}] {s['title']}"
+        body = (s.get('body') or '')[:300].strip()
+        if body:
+            line += f"\n  {body}"
+        if char_count + len(line) > 8000:
+            break
+        lines.append(line)
+        char_count += len(line)
+    signals_text = "\n".join(lines)
     prompt = build_entity_extraction_prompt(signals_text)
 
     try:

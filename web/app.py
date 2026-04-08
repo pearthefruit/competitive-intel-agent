@@ -2114,8 +2114,8 @@ def create_app(db_path="intel.db"):
             return jsonify({"error": "Thread not found"}), 404
 
         signals = detail.get("signals", [])
-        if len(signals) < 3:
-            return jsonify({"error": "Thread needs at least 3 signals to split"}), 400
+        if len(signals) < 6:
+            return jsonify({"error": "Thread needs at least 6 signals to split"}), 400
 
         signals_text = "\n".join(
             f"[{s['id']}] {s['title']}" for s in signals
@@ -2129,6 +2129,21 @@ def create_app(db_path="intel.db"):
 
         if not result:
             return jsonify({"error": "LLM returned no result"}), 500
+
+        # Drop any proposed sub-thread with fewer than 2 signals — merge back to remaining
+        proposed = result.get("proposed_splits", [])
+        remaining = result.get("remaining") or {"title": None, "signal_ids": []}
+        filtered = []
+        for split in proposed:
+            if len(split.get("signal_ids", [])) >= 2:
+                filtered.append(split)
+            else:
+                remaining["signal_ids"].extend(split.get("signal_ids", []))
+        result["proposed_splits"] = filtered
+        result["remaining"] = remaining
+
+        if len(filtered) < 2:
+            return jsonify({"error": "Not enough distinct groupings found — thread may already be focused"}), 400
 
         return jsonify({"ok": True, "thread_id": thread_id, "thread_title": detail["title"], **result})
 
@@ -2163,6 +2178,70 @@ def create_app(db_path="intel.db"):
         conn.commit()
         conn.close()
         return jsonify({"ok": True, "created": created})
+
+    @app.route("/api/signals/entity-threads", methods=["GET"])
+    def signals_entity_threads_api():
+        """Find all thread IDs containing a specific entity."""
+        entity_type = request.args.get("type", "")
+        entity_value = request.args.get("value", "")
+        conn = get_connection(db_path)
+        rows = conn.execute(
+            """SELECT DISTINCT sc.id FROM signal_clusters sc
+               JOIN signal_cluster_items sci ON sci.cluster_id = sc.id
+               JOIN signal_entities se ON se.signal_id = sci.signal_id
+               WHERE se.entity_type = ? AND (
+                 LOWER(se.entity_value) = LOWER(?) OR
+                 LOWER(se.normalized_value) = LOWER(?)
+               )""",
+            (entity_type, entity_value, entity_value),
+        ).fetchall()
+        conn.close()
+        return jsonify({"thread_ids": [r["id"] for r in rows]})
+
+    @app.route("/api/signals/threads/<int:thread_id>/related", methods=["GET"])
+    def signals_thread_related_api(thread_id):
+        """Find threads that share entities with this thread."""
+        conn = get_connection(db_path)
+        # Get this thread's entities
+        my_entities = conn.execute(
+            """SELECT DISTINCT entity_type, COALESCE(normalized_value, entity_value) as name
+               FROM signal_entities
+               WHERE cluster_id = ? OR signal_id IN
+                 (SELECT signal_id FROM signal_cluster_items WHERE cluster_id = ?)""",
+            (thread_id, thread_id),
+        ).fetchall()
+        my_ent_set = {(e["entity_type"], e["name"].lower()) for e in my_entities}
+        if not my_ent_set:
+            conn.close()
+            return jsonify({"related": []})
+
+        # Find other threads that share entities
+        all_threads = conn.execute(
+            "SELECT id, title, domain FROM signal_clusters WHERE id != ? AND domain != 'narrative'",
+            (thread_id,),
+        ).fetchall()
+
+        related = []
+        for t in all_threads:
+            t_ents = conn.execute(
+                """SELECT DISTINCT entity_type, COALESCE(normalized_value, entity_value) as name
+                   FROM signal_entities
+                   WHERE cluster_id = ? OR signal_id IN
+                     (SELECT signal_id FROM signal_cluster_items WHERE cluster_id = ?)""",
+                (t["id"], t["id"]),
+            ).fetchall()
+            t_ent_set = {(e["entity_type"], e["name"].lower()) for e in t_ents}
+            shared = my_ent_set & t_ent_set
+            if len(shared) >= 1:
+                shared_list = [{"type": s[0], "name": s[1]} for s in list(shared)[:5]]
+                related.append({
+                    "id": t["id"], "title": t["title"], "domain": t["domain"],
+                    "shared_count": len(shared), "shared_entities": shared_list,
+                })
+
+        related.sort(key=lambda x: x["shared_count"], reverse=True)
+        conn.close()
+        return jsonify({"related": related[:10]})
 
     @app.route("/api/signals/reassign", methods=["POST"])
     def signals_reassign_api():
@@ -2314,6 +2393,16 @@ def create_app(db_path="intel.db"):
                 (pattern_id,),
             )
             conn.commit()
+
+        # Extract entities from newly inserted signals
+        if new_count > 0:
+            try:
+                from agents.signals_synthesize import extract_entities
+                from db import get_signals
+                recent = get_signals(conn, days_back=1, limit=new_count + 10)
+                extract_entities(conn, recent)
+            except Exception as e:
+                print(f"[search] Entity extraction failed: {e}")
 
         conn.close()
 
