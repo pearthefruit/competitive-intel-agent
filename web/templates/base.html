@@ -15977,6 +15977,10 @@ let _boardSelectedIds = new Set(); // shift-click multi-select for narrative cre
 let _expandedNarratives = new Set(); // narrative IDs that are expanded to show child threads
 
 function loadBoard() {
+    // Collapse detail pane in board view for full width
+    const detailPane = document.getElementById('signals-detail');
+    if (detailPane && !_activeThreadId && !_activeNarrativeId) detailPane.style.display = 'none';
+
     fetch('/api/board')
         .then(r => r.json())
         .then(data => {
@@ -16001,7 +16005,8 @@ function renderBoard(data) {
 
     const width = container.clientWidth;
     const height = container.clientHeight - 40;
-    svg.attr('viewBox', [0, 0, width, height]);
+    // No viewBox — let D3 zoom be the sole viewport controller
+    svg.attr('width', '100%').attr('height', '100%').attr('viewBox', null);
 
     const zoomGroup = svg.append('g').attr('class', 'graph-zoom-group');
     const zoomBehavior = d3.zoom()
@@ -16030,6 +16035,9 @@ function renderBoard(data) {
     svg.node().__zoomBehavior = zoomBehavior;
     // Restore previous zoom transform if available (prevents flash on reload)
     if (_boardZoomTransform) {
+        // Apply directly to avoid triggering a zoom event that causes jitter
+        zoomGroup.attr('transform', _boardZoomTransform);
+        // Sync D3's internal zoom state
         svg.call(zoomBehavior.transform, _boardZoomTransform);
     }
 
