@@ -15777,15 +15777,25 @@ function _showInlineInput(x, y, placeholder, defaultVal, onSubmit) {
     if (existing) existing.remove();
     const div = document.createElement('div');
     div.id = 'board-inline-input';
-    div.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:200;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:8px;box-shadow:0 4px 16px rgba(0,0,0,.5);display:flex;gap:4px;align-items:center`;
+    // Keep within viewport
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const left = Math.min(x, vw - 280), top = Math.min(y, vh - 50);
+    div.style.cssText = `position:fixed;left:${left}px;top:${top}px;z-index:200;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:8px;box-shadow:0 4px 16px rgba(0,0,0,.5);display:flex;gap:4px;align-items:center`;
     div.innerHTML = `<input type="text" value="${escHtml(defaultVal || '')}" placeholder="${escHtml(placeholder)}" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;width:180px;outline:none" autofocus>
-        <button style="padding:6px 10px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">OK</button>`;
+        <button class="iip-ok" style="padding:6px 10px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">OK</button>
+        <button class="iip-cancel" style="padding:6px 6px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer">✕</button>`;
     document.body.appendChild(div);
     const input = div.querySelector('input');
-    const submit = () => { const v = input.value; div.remove(); onSubmit(v); };
-    div.querySelector('button').onclick = submit;
-    input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') div.remove(); });
-    requestAnimationFrame(() => input.focus());
+    const dismiss = () => div.remove();
+    const submit = () => { const v = input.value; dismiss(); onSubmit(v); };
+    div.querySelector('.iip-ok').onclick = submit;
+    div.querySelector('.iip-cancel').onclick = dismiss;
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') dismiss(); });
+    // Click outside to dismiss
+    setTimeout(() => document.addEventListener('mousedown', function _outside(e) {
+        if (!div.contains(e.target)) { dismiss(); document.removeEventListener('mousedown', _outside); }
+    }), 0);
+    requestAnimationFrame(() => { input.focus(); input.select(); });
 }
 
 let _boardData = null;
@@ -16053,8 +16063,12 @@ function renderBoard(data) {
 
     _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
 
-    // Make edge labels clickable to edit
-    linkLabel.style('cursor', 'pointer')
+    // Make edge labels clickable to edit — show placeholder for empty labels on hover
+    linkLabel.style('cursor', 'pointer').style('pointer-events', 'all')
+        .text(d => d.label || '···')
+        .attr('fill', d => d.label ? 'var(--text-muted)' : 'transparent')
+        .on('mouseenter', function(event, d) { if (!d.label) d3.select(this).attr('fill', 'var(--text-muted)'); })
+        .on('mouseleave', function(event, d) { if (!d.label) d3.select(this).attr('fill', 'transparent'); })
         .on('click', (event, d) => {
             event.stopPropagation();
             _showInlineInput(event.clientX, event.clientY, 'Edit label', d.label || '', (newLabel) => {
