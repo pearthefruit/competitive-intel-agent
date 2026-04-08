@@ -16402,6 +16402,7 @@ function _loadTimeline() {
 function _renderTimeline(data) {
     const container = document.getElementById('timeline-content');
     if (!container) return;
+    if (!data) { container.innerHTML = '<div style="padding:12px;font-size:10px;color:var(--text-muted)">No timeline data</div>'; return; }
 
     const signals = data.signals || [];
     const threadSpans = data.thread_spans || [];
@@ -16411,9 +16412,11 @@ function _renderTimeline(data) {
     }
 
     // Date range
-    const dates = signals.map(s => s.published_at?.substring(0, 10)).filter(Boolean).sort();
+    const dates = signals.map(s => (s.published_at || '').substring(0, 10)).filter(d => d && d.length === 10).sort();
+    if (!dates.length) { container.innerHTML = '<div style="padding:12px;font-size:10px;color:var(--text-muted)">No dated signals</div>'; return; }
     const minDate = new Date(dates[0]);
     const maxDate = new Date(dates[dates.length - 1]);
+    if (isNaN(minDate) || isNaN(maxDate)) { container.innerHTML = '<div style="padding:12px;font-size:10px;color:var(--text-muted)">Invalid date range</div>'; return; }
     const rangeDays = Math.max(1, (maxDate - minDate) / 86400000);
 
     // Sort threads by first signal date, then by count
