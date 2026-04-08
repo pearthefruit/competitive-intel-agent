@@ -16649,6 +16649,7 @@ function _toggleSignalArticle(signalId, el) {
 function closeSignalDetail() {
     _activeSignalId = null;
     _activeThreadId = null;
+    _activeNarrativeId = null;
     ++_detailRequestId;
     document.querySelectorAll('.sig-card, .thread-card, .narrative-card').forEach(c => c.classList.remove('active'));
     const detailPane = document.getElementById('signals-detail');
@@ -17667,7 +17668,7 @@ function renderBoard(data) {
             _updateBoardSelectionBar(nodes);
         }
         // Dismiss detail pane on empty board click
-        if (_activeThreadId || _activeSignalId) {
+        if (_activeThreadId || _activeSignalId || _activeNarrativeId) {
             closeSignalDetail();
         }
     });
