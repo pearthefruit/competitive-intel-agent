@@ -2510,22 +2510,19 @@ def create_app(db_path="intel.db"):
     def signals_resynthesize_api():
         """Re-run pattern detection on unassigned signals. SSE-streamed."""
         def generate():
-            from agents.signals_synthesize import synthesize_into_threads, enrich_thread_signals, extract_entities
-            from agents.signals_classify import keyword_assign
-
-            conn = get_connection(db_path)
-            # Get signals NOT yet assigned to any pattern
-            unassigned = conn.execute(
+            # Pre-fetch unassigned signals on main thread, pass data (not conn) to worker
+            pre_conn = get_connection(db_path)
+            unassigned = pre_conn.execute(
                 """SELECT * FROM signals
                    WHERE id NOT IN (SELECT signal_id FROM signal_cluster_items)
                    ORDER BY collected_at DESC LIMIT 500"""
             ).fetchall()
             unassigned = [dict(r) for r in unassigned]
+            pre_conn.close()
 
             if not unassigned:
                 yield f"data: {json.dumps({'type': 'status', 'text': 'All signals are already in threads.'})}\n\n"
                 yield f"data: {json.dumps({'type': 'resynth_complete', 'new_patterns': 0, 'assigned': 0})}\n\n"
-                conn.close()
                 return
 
             yield f"data: {json.dumps({'type': 'status', 'text': f'Analyzing {len(unassigned)} unassigned signals...'})}\n\n"
@@ -2537,6 +2534,10 @@ def create_app(db_path="intel.db"):
                 synth_q.put((event_type, ev_data or {}))
 
             def _run():
+                # Create connection inside the thread — SQLite requires same-thread access
+                from agents.signals_synthesize import synthesize_into_threads, enrich_thread_signals, extract_entities
+                from agents.signals_classify import keyword_assign
+                conn = get_connection(db_path)
                 try:
                     # ── Tier 1: TF-IDF keyword assignment (instant, no LLM) ──
                     _cb("status", {"text": f"Tier 1: keyword matching {len(unassigned)} signals..."})
@@ -2581,6 +2582,7 @@ def create_app(db_path="intel.db"):
                     traceback.print_exc()
                     synth_q.put(("error", {"text": str(exc)}))
                 finally:
+                    conn.close()
                     synth_q.put(("_done", {}))
 
             t = threading.Thread(target=_run, daemon=True)
@@ -2599,8 +2601,6 @@ def create_app(db_path="intel.db"):
             t.join(timeout=300)
             sr = result_box[0] or {}
             yield f"data: {json.dumps({'type': 'resynth_complete', 'new_patterns': sr.get('new_thread_count', 0), 'assigned': sr.get('assigned_count', 0), 'keyword_assigned': sr.get('keyword_assigned', 0), 'llm_assigned': sr.get('llm_assigned', 0), 'needs_review': sr.get('needs_review', 0)})}\n\n"
-
-            conn.close()
 
         return Response(generate(), mimetype="text/event-stream",
                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
