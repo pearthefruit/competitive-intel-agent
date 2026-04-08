@@ -14481,6 +14481,16 @@ function openThreadDetail(threadId) {
             window._threadDetailId = thread.id;
             // Load related threads asynchronously
             setTimeout(() => _loadRelatedThreads(thread.id), 100);
+
+            // Auto-apply highlight keywords to signal search if highlights are active
+            if (_boardHighlights.length) {
+                const hlQuery = _boardHighlights.map(h => h.label).join(' ');
+                const searchInput = document.getElementById('thread-signal-search');
+                if (searchInput) {
+                    searchInput.value = hlQuery;
+                    setTimeout(() => _filterThreadSignals(hlQuery), 50);
+                }
+            }
         })
         .catch(e => {
             if (myRequest !== _detailRequestId) return;
@@ -14527,9 +14537,14 @@ function _filterThreadSignals(query) {
         const sig = sigMap[sigId];
         if (!sig) { el.style.opacity = '0.2'; return; }
 
-        const titleMatch = (sig.title || '').toLowerCase().includes(_threadSearchQuery);
-        const bodyMatch = (sig.body || '').toLowerCase().includes(_threadSearchQuery);
-        const sourceMatch = (sig.source_name || sig.source || '').toLowerCase().includes(_threadSearchQuery);
+        // Support multi-keyword search (space-separated terms match ANY)
+        const _searchTerms = _threadSearchQuery.split(/\s+/).filter(t => t.length >= 2);
+        const titleLower = (sig.title || '').toLowerCase();
+        const bodyLower = (sig.body || '').toLowerCase();
+        const sourceLower = (sig.source_name || sig.source || '').toLowerCase();
+        const titleMatch = _searchTerms.some(t => titleLower.includes(t));
+        const bodyMatch = _searchTerms.some(t => bodyLower.includes(t));
+        const sourceMatch = _searchTerms.some(t => sourceLower.includes(t));
 
         if (titleMatch || bodyMatch || sourceMatch) {
             el.style.opacity = '';
@@ -14585,7 +14600,10 @@ function _removeHighlights(el) {
 
 function _highlightText(text, query) {
     if (!query) return escHtml(text);
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Support multi-keyword: split by spaces, highlight each term
+    const terms = query.split(/\s+/).filter(t => t.length >= 2);
+    if (!terms.length) return escHtml(text);
+    const escaped = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
     const re = new RegExp(`(${escaped})`, 'gi');
     return escHtml(text).replace(re, '<mark class="sig-search-hl" style="background:#a855f740;color:var(--text-primary);border-radius:2px;padding:0 1px">$1</mark>');
 }
@@ -15006,6 +15024,7 @@ function _removeBoardHighlight(idx) {
 
 function _clearBoardHighlight() {
     _boardHighlights = [];
+    _restoreHighlightPositions();
     document.querySelectorAll('.graph-node').forEach(n => {
         n.style.filter = '';
         n.classList.remove('board-dimmed');
@@ -15018,12 +15037,17 @@ function _clearBoardHighlight() {
     if (countEl) countEl.textContent = '';
 }
 
+let _hlOriginalPositions = {}; // {nodeId: {x, y}} — saved before clustering
+let _hlClusterAnim = null;
+
 function _applyBoardHighlights() {
     // Compute union of all highlighted thread IDs
     const unionIds = new Set();
     _boardHighlights.forEach(h => h.threadIds.forEach(id => unionIds.add(id)));
 
-    document.querySelectorAll('.graph-node').forEach(n => {
+    const allNodes = document.querySelectorAll('.graph-node');
+
+    allNodes.forEach(n => {
         const nid = parseInt(n.dataset.nodeId);
         // Remove old badges
         const oldBadge = n.querySelector('.board-match-badge');
@@ -15036,15 +15060,12 @@ function _applyBoardHighlights() {
         }
 
         if (unionIds.has(nid)) {
-            // Count how many highlights match this node
             const matchCount = _boardHighlights.filter(h => h.threadIds.has(nid)).length;
             const total = _boardHighlights.length;
-            // Brighter glow for nodes matching more highlights
             const glowIntensity = matchCount >= total ? '1.5' : '1.2';
             const glowColor = matchCount >= 2 ? 'rgba(6,182,212,0.7)' : 'rgba(168,85,247,0.5)';
             n.style.filter = `brightness(${glowIntensity}) drop-shadow(0 0 12px ${glowColor})`;
 
-            // Badge showing match count if multiple highlights active
             if (total > 1) {
                 const badge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                 badge.classList.add('board-match-badge');
@@ -15067,6 +15088,100 @@ function _applyBoardHighlights() {
             n.classList.add('board-dimmed');
         }
     });
+
+    // Cluster highlighted nodes toward their centroid
+    if (unionIds.size >= 2 && _boardHighlights.length) {
+        _clusterHighlightedNodes(unionIds);
+    }
+}
+
+function _clusterHighlightedNodes(unionIds) {
+    if (_hlClusterAnim) cancelAnimationFrame(_hlClusterAnim);
+
+    const nodes = [];
+    document.querySelectorAll('.graph-node').forEach(n => {
+        const nid = parseInt(n.dataset.nodeId);
+        if (!nid || !unionIds.has(nid)) return;
+        const m = n.getAttribute('transform')?.match(/translate\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/);
+        if (!m) return;
+        const x = parseFloat(m[1]), y = parseFloat(m[2]);
+        // Save original position if not already saved
+        if (!_hlOriginalPositions[nid]) _hlOriginalPositions[nid] = { x, y };
+        nodes.push({ el: n, nid, x, y });
+    });
+
+    if (nodes.length < 2) return;
+
+    // Compute centroid of highlighted nodes
+    const cx = nodes.reduce((s, n) => s + n.x, 0) / nodes.length;
+    const cy = nodes.reduce((s, n) => s + n.y, 0) / nodes.length;
+
+    // Animate nodes toward centroid with spacing
+    const targetSpread = Math.max(80, nodes.length * 30); // spread out a bit around centroid
+    let frame = 0;
+    const totalFrames = 30;
+
+    function animate() {
+        frame++;
+        const t = Math.min(frame / totalFrames, 1);
+        const ease = t * (2 - t); // ease-out
+
+        nodes.forEach((n, i) => {
+            // Target: arranged in a circle around centroid
+            const angle = (i / nodes.length) * Math.PI * 2;
+            const tx = cx + Math.cos(angle) * targetSpread;
+            const ty = cy + Math.sin(angle) * targetSpread;
+
+            const nx = n.x + (tx - n.x) * ease;
+            const ny = n.y + (ty - n.y) * ease;
+            n.el.setAttribute('transform', `translate(${nx},${ny})`);
+        });
+
+        if (frame < totalFrames) {
+            _hlClusterAnim = requestAnimationFrame(animate);
+        }
+    }
+    _hlClusterAnim = requestAnimationFrame(animate);
+}
+
+function _restoreHighlightPositions() {
+    if (_hlClusterAnim) { cancelAnimationFrame(_hlClusterAnim); _hlClusterAnim = null; }
+
+    const entries = Object.entries(_hlOriginalPositions);
+    if (!entries.length) return;
+
+    let frame = 0;
+    const totalFrames = 20;
+
+    // Read current positions
+    const current = {};
+    entries.forEach(([nid]) => {
+        const el = document.querySelector(`.graph-node[data-node-id="${nid}"]`);
+        if (!el) return;
+        const m = el.getAttribute('transform')?.match(/translate\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/);
+        if (m) current[nid] = { el, x: parseFloat(m[1]), y: parseFloat(m[2]) };
+    });
+
+    function animate() {
+        frame++;
+        const t = Math.min(frame / totalFrames, 1);
+        const ease = t * (2 - t);
+
+        entries.forEach(([nid, orig]) => {
+            const c = current[nid];
+            if (!c) return;
+            const nx = c.x + (orig.x - c.x) * ease;
+            const ny = c.y + (orig.y - c.y) * ease;
+            c.el.setAttribute('transform', `translate(${nx},${ny})`);
+        });
+
+        if (frame < totalFrames) {
+            requestAnimationFrame(animate);
+        } else {
+            _hlOriginalPositions = {};
+        }
+    }
+    requestAnimationFrame(animate);
 }
 
 function _renderHighlightPills() {
@@ -15101,7 +15216,7 @@ function _renderHighlightPills() {
         html += `<span onclick="_brainstormHighlighted()" style="${btnBase}background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff" title="Brainstorm connections between highlighted threads">🧠 Brainstorm ${unionIds.size}</span>`;
     }
 
-    html += `<span onclick="_clearBoardHighlight();document.getElementById('board-keyword-search').value=''" style="font-size:9px;color:var(--text-muted);cursor:pointer;text-decoration:underline;padding:3px 4px;white-space:nowrap">clear all</span>`;
+    html += `<span onclick="_clearBoardHighlight();document.getElementById('board-keyword-search').value=''" style="display:inline-flex;align-items:center;gap:3px;padding:3px 8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:12px;font-size:10px;color:#ef4444;font-weight:600;cursor:pointer;white-space:nowrap" title="Clear all highlights">✕ Clear</span>`;
     tray.innerHTML = html;
     if (sel) sel.innerHTML = `<span style="color:var(--text-muted)">${_boardHighlights.length} filter${_boardHighlights.length > 1 ? 's' : ''} · ${unionIds.size} threads</span>`;
 }
