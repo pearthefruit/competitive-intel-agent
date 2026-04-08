@@ -4175,6 +4175,24 @@
         }
         .second-order-card p { font-size: 12px; color: var(--text-secondary); margin: 0 0 4px; line-height: 1.4; }
 
+        /* ========== Signal Drag ========== */
+        .sig-draggable { cursor: grab; }
+        .sig-draggable:active { cursor: grabbing; }
+        .sig-dragging { opacity: 0.4; }
+        .sig-drag-badge {
+            position: fixed; z-index: 300; pointer-events: none;
+            padding: 4px 10px; background: var(--accent); color: #fff;
+            border-radius: 12px; font-size: 11px; font-weight: 700;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        @keyframes node-absorb {
+            0% { transform: scale(1); filter: brightness(1); }
+            30% { transform: scale(1.3); filter: brightness(1.6); }
+            100% { transform: scale(1); filter: brightness(1); }
+        }
+        .graph-node.drop-target circle { filter: brightness(1.5) drop-shadow(0 0 12px rgba(6,182,212,0.6)); }
+        .graph-node.absorbing { animation: node-absorb 0.5s ease-out; }
+
         /* ========== Board ========== */
         .board-note {
             position: absolute;
@@ -14257,8 +14275,9 @@ function openThreadDetail(threadId) {
                 const opacity = isNoise ? 'opacity:0.4;' : '';
                 const toggleLabel = isNoise ? 'Promote' : 'Noise';
                 const toggleStatus = isNoise ? 'signal' : 'noise';
-                return `<div id="sig-item-${s.id}" style="padding:8px 0;border-bottom:1px solid var(--border);${opacity}">
+                return `<div id="sig-item-${s.id}" class="sig-draggable" draggable="true" data-sig-id="${s.id}" data-from-thread="${thread.id}" style="padding:8px 0;border-bottom:1px solid var(--border);${opacity}">
                     <div style="display:flex;align-items:start;gap:6px">
+                        <div class="sig-card-select" data-drag-select="${s.id}" onclick="event.stopPropagation();_toggleDragSelect(${s.id})" style="margin-top:3px">✓</div>
                         <div style="flex:1;min-width:0;cursor:pointer" onclick="_toggleSignalArticle(${s.id}, this)">
                             <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:3px">${escHtml(s.title)}</div>
                             <div style="font-size:10px;color:var(--text-muted);display:flex;gap:8px;flex-wrap:wrap">
@@ -16060,6 +16079,7 @@ function renderBoard(data) {
 
     const node = zoomGroup.append('g').selectAll('g').data(nodes).join('g')
         .attr('class', 'graph-node')
+        .attr('data-node-id', d => d.type === 'narrative' ? '' : d.id)
         .attr('transform', d => `translate(${d.x},${d.y})`)
         .call(d3.drag()
             .on('start', function(event, d) {
@@ -16364,9 +16384,12 @@ function renderBoard(data) {
         }
     });
 
+    // Set up drag-to-reassign drop targets
+    _setupBoardDropTargets(svg, zoomGroup, nodes);
+
     // Status text
     const sel = document.getElementById('sig-graph-selection');
-    if (sel) sel.innerHTML = `<span style="color:var(--text-muted)">${nodes.length} threads · ${(data.notes||[]).length} notes · right-click to connect · double-click to add note</span>`;
+    if (sel) sel.innerHTML = `<span style="color:var(--text-muted)">${nodes.length} threads · ${(data.notes||[]).length} notes · drag signals to reassign</span>`;
 }
 
 function _updateBoardEdges(link, linkLabel, edgeData, nodeMap) {
@@ -16390,6 +16413,137 @@ function _saveBoardPositions(nodes) {
 
 function _deleteBoardNote(noteId) {
     fetch(`/api/board/notes/${noteId}`, { method: 'DELETE' }).then(() => loadBoard());
+}
+
+// ===================== SIGNAL DRAG-TO-REASSIGN =====================
+
+let _dragSelectedSignals = new Set();
+let _dragFromThreadId = null;
+let _dragBadge = null;
+
+function _toggleDragSelect(sigId) {
+    if (_dragSelectedSignals.has(sigId)) _dragSelectedSignals.delete(sigId);
+    else _dragSelectedSignals.add(sigId);
+    const el = document.querySelector(`[data-drag-select="${sigId}"]`);
+    if (el) el.classList.toggle('checked', _dragSelectedSignals.has(sigId));
+}
+
+// Set up drag events on the detail pane (delegated)
+document.addEventListener('dragstart', function(e) {
+    const item = e.target.closest('.sig-draggable');
+    if (!item) return;
+    const sigId = parseInt(item.dataset.sigId);
+    _dragFromThreadId = parseInt(item.dataset.fromThread);
+
+    // If this signal isn't selected, select only it
+    if (!_dragSelectedSignals.has(sigId)) {
+        _dragSelectedSignals.clear();
+        document.querySelectorAll('[data-drag-select]').forEach(el => el.classList.remove('checked'));
+        _dragSelectedSignals.add(sigId);
+        const el = document.querySelector(`[data-drag-select="${sigId}"]`);
+        if (el) el.classList.add('checked');
+    }
+
+    // Dim dragged items
+    _dragSelectedSignals.forEach(id => {
+        const el = document.getElementById(`sig-item-${id}`);
+        if (el) el.classList.add('sig-dragging');
+    });
+
+    // Create floating badge
+    _dragBadge = document.createElement('div');
+    _dragBadge.className = 'sig-drag-badge';
+    _dragBadge.textContent = `${_dragSelectedSignals.size} signal${_dragSelectedSignals.size > 1 ? 's' : ''}`;
+    document.body.appendChild(_dragBadge);
+
+    e.dataTransfer.setData('text/plain', JSON.stringify([..._dragSelectedSignals]));
+    e.dataTransfer.effectAllowed = 'move';
+    // Use transparent drag image (we show our own badge)
+    const img = new Image(); img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    e.dataTransfer.setDragImage(img, 0, 0);
+});
+
+document.addEventListener('drag', function(e) {
+    if (_dragBadge && e.clientX > 0) {
+        _dragBadge.style.left = (e.clientX + 12) + 'px';
+        _dragBadge.style.top = (e.clientY - 12) + 'px';
+    }
+});
+
+document.addEventListener('dragend', function(e) {
+    // Clean up
+    _dragSelectedSignals.forEach(id => {
+        const el = document.getElementById(`sig-item-${id}`);
+        if (el) el.classList.remove('sig-dragging');
+    });
+    if (_dragBadge) { _dragBadge.remove(); _dragBadge = null; }
+    // Remove drop target highlights
+    document.querySelectorAll('.graph-node.drop-target').forEach(n => n.classList.remove('drop-target'));
+});
+
+// Board drop handling — set up in renderBoard
+function _setupBoardDropTargets(svg, zoomGroup, nodes) {
+    const svgEl = svg.node();
+
+    svgEl.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+
+        // Find nearest thread node
+        const [mx, my] = d3.pointer(e, zoomGroup.node());
+        let closest = null, closestDist = Infinity;
+        nodes.forEach(n => {
+            if (n.type === 'narrative') return;
+            if (n.id === _dragFromThreadId) return; // can't drop on source
+            const dist = Math.sqrt((n.x - mx) ** 2 + (n.y - my) ** 2);
+            const r = Math.sqrt(n.signal_count || 1) * 6 + 10;
+            if (dist < r + 30 && dist < closestDist) { closest = n; closestDist = dist; }
+        });
+
+        // Highlight drop target
+        document.querySelectorAll('.graph-node.drop-target').forEach(n => n.classList.remove('drop-target'));
+        if (closest) {
+            const nodeEl = document.querySelector(`.graph-node[data-node-id="${closest.id}"]`);
+            if (nodeEl) nodeEl.classList.add('drop-target');
+        }
+    });
+
+    svgEl.addEventListener('dragleave', function(e) {
+        if (!svgEl.contains(e.relatedTarget)) {
+            document.querySelectorAll('.graph-node.drop-target').forEach(n => n.classList.remove('drop-target'));
+        }
+    });
+
+    svgEl.addEventListener('drop', function(e) {
+        e.preventDefault();
+        const targetEl = document.querySelector('.graph-node.drop-target');
+        if (!targetEl) return;
+
+        const toThreadId = parseInt(targetEl.dataset.nodeId);
+        const signalIds = [..._dragSelectedSignals];
+        if (!toThreadId || !signalIds.length) return;
+
+        // Animate the absorb
+        targetEl.classList.remove('drop-target');
+        targetEl.classList.add('absorbing');
+        setTimeout(() => targetEl.classList.remove('absorbing'), 500);
+
+        // API call to reassign
+        fetch('/api/signals/reassign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ signal_ids: signalIds, from_thread_id: _dragFromThreadId, to_thread_id: toThreadId })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                _dragSelectedSignals.clear();
+                // Refresh both the detail pane and the board
+                openThreadDetail(_dragFromThreadId);
+                loadBoard();
+            }
+        });
+    });
 }
 
 function _showNarrativeInBoardPane(narrativeId) {

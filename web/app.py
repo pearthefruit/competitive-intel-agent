@@ -2099,6 +2099,38 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True})
 
+    @app.route("/api/signals/reassign", methods=["POST"])
+    def signals_reassign_api():
+        """Move signals from one thread to another."""
+        from db import link_signal_to_cluster
+        data = request.json or {}
+        signal_ids = data.get("signal_ids", [])
+        from_thread_id = data.get("from_thread_id")
+        to_thread_id = data.get("to_thread_id")
+        if not signal_ids or not to_thread_id:
+            return jsonify({"error": "signal_ids and to_thread_id required"}), 400
+
+        conn = get_connection(db_path)
+        moved = 0
+        for sig_id in signal_ids:
+            # Remove from old thread if specified
+            if from_thread_id:
+                conn.execute(
+                    "DELETE FROM signal_cluster_items WHERE cluster_id = ? AND signal_id = ?",
+                    (from_thread_id, sig_id),
+                )
+            # Add to new thread
+            link_signal_to_cluster(conn, to_thread_id, sig_id)
+            moved += 1
+
+        # Update timestamps
+        if from_thread_id:
+            conn.execute("UPDATE signal_clusters SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (from_thread_id,))
+        conn.execute("UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (to_thread_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "moved": moved})
+
     @app.route("/api/signals/<int:signal_id>/status", methods=["POST"])
     def signals_set_status_api(signal_id):
         """Set a signal's status (signal or noise)."""
