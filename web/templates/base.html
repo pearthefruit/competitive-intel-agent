@@ -5585,14 +5585,14 @@
                             <button onclick="_zoomOutToPatterns()" style="padding:6px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;backdrop-filter:blur(8px)">← Back to threads</button>
                         </div>
                         <div id="sig-graph-pattern-label" style="display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;font-size:13px;font-weight:700;color:var(--text-primary);background:var(--bg-primary);padding:4px 12px;border-radius:6px;border:1px solid var(--border)"></div>
-                        <div id="board-search-bar" style="display:none;position:absolute;top:12px;right:12px;z-index:5;gap:6px;align-items:flex-start;flex-direction:column">
+                        <div id="board-search-bar" style="display:none;position:absolute;top:12px;right:12px;z-index:50;gap:6px;align-items:flex-start;flex-direction:column;pointer-events:auto">
                             <div style="display:flex;gap:6px;align-items:center">
                                 <div style="position:relative;display:flex;align-items:center">
                                     <input id="board-keyword-search" type="text" placeholder="Search all signals..." onkeydown="if(event.key==='Enter'){_boardKeywordSearch(this.value);this.value=''}else if(event.key==='Escape'){this.value='';this.blur()}" style="width:220px;padding:6px 28px 6px 10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:11px;outline:none;backdrop-filter:blur(8px);transition:border-color 0.15s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
                                     <span onclick="_boardKeywordSearch(document.getElementById('board-keyword-search').value);document.getElementById('board-keyword-search').value=''" style="position:absolute;right:8px;cursor:pointer;font-size:12px;color:var(--text-muted)" title="Search">🔍</span>
                                 </div>
                             </div>
-                            <div id="board-highlight-pills" style="display:none;flex-wrap:wrap;gap:4px;max-width:320px"></div>
+                            <div id="board-highlight-pills" style="display:none;flex-wrap:wrap;gap:4px;max-width:360px;padding:6px 8px;background:rgba(10,10,10,0.85);backdrop-filter:blur(8px);border-radius:8px;border:1px solid var(--border)"></div>
                         </div>
                         <div id="sig-graph-controls" style="display:none;position:absolute;bottom:12px;left:12px;right:12px">
                             <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:space-between">
@@ -15060,6 +15060,7 @@ function _clearBoardHighlight() {
     _restoreHighlightPositions();
     document.querySelectorAll('.graph-node').forEach(n => {
         n.style.filter = '';
+        n.style.pointerEvents = '';
         n.classList.remove('board-dimmed');
         const badge = n.querySelector('.board-match-badge');
         if (badge) badge.remove();
@@ -15088,6 +15089,7 @@ function _applyBoardHighlights() {
         if (oldBadge) oldBadge.remove();
 
         n.classList.remove('board-dimmed');
+        n.style.pointerEvents = '';
         if (!_boardHighlights.length) {
             n.style.filter = '';
             return;
@@ -15126,12 +15128,13 @@ function _applyBoardHighlights() {
                 n.appendChild(badge);
             }
         } else if (nid) {
-            n.style.filter = 'brightness(0.5)';
+            n.style.filter = 'brightness(0.25) saturate(0.3)';
+            n.style.pointerEvents = 'none';
             n.classList.add('board-dimmed');
         }
     });
 
-    // Cluster highlighted nodes toward their centroid
+    // Cluster highlighted nodes toward their centroid + push dimmed nodes outward
     if (unionIds.size >= 2 && _boardHighlights.length) {
         _clusterHighlightedNodes(unionIds);
     }
@@ -15204,6 +15207,25 @@ function _clusterHighlightedNodes(unionIds) {
         });
     });
 
+    // Collect dimmed nodes to push outward
+    const outerRadius = cumulativeRadius + 100;
+    const dimmedNodes = [];
+    document.querySelectorAll('.graph-node.board-dimmed').forEach(n => {
+        const nid = parseInt(n.dataset.nodeId);
+        if (!nid) return;
+        const transform = n.getAttribute('transform');
+        if (!transform) return;
+        const m = transform.match(/translate\(\s*([-\d.e+]+)[,\s]+([-\d.e+]+)\s*\)/);
+        if (!m) return;
+        const x = parseFloat(m[1]), y = parseFloat(m[2]);
+        if (!_hlOriginalPositions[nid]) _hlOriginalPositions[nid] = { x, y };
+        // Push outward from centroid
+        const dx = x - cx, dy = y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const pushDist = Math.max(outerRadius + 50, dist * 1.3);
+        dimmedNodes.push({ el: n, nid, x, y, tx: cx + (dx / dist) * pushDist, ty: cy + (dy / dist) * pushDist });
+    });
+
     // Animate
     let frame = 0;
     const totalFrames = 30;
@@ -15219,15 +15241,20 @@ function _clusterHighlightedNodes(unionIds) {
             const nx = n.x + (tgt.tx - n.x) * ease;
             const ny = n.y + (tgt.ty - n.y) * ease;
             n.el.setAttribute('transform', `translate(${nx},${ny})`);
-            // Sync D3 data so drag, click, and connections use the visual position
             const d = n.el.__data__;
             if (d) { d.x = nx; d.y = ny; }
+        });
+
+        // Push dimmed nodes outward
+        dimmedNodes.forEach(n => {
+            const nx = n.x + (n.tx - n.x) * ease;
+            const ny = n.y + (n.ty - n.y) * ease;
+            n.el.setAttribute('transform', `translate(${nx},${ny})`);
         });
 
         if (frame < totalFrames) {
             _hlClusterAnim = requestAnimationFrame(animate);
         } else {
-            // Auto-zoom to fit the cluster
             _zoomToCluster(cx, cy, cumulativeRadius, nodes);
         }
     }
