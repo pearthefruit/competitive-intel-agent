@@ -16215,14 +16215,16 @@ function renderBoard(data) {
         } else {
             // Thread node (regular or narrative_thread): circle
             const r = nodeR(d);
-            const color = _DOMAIN_COLORS[d.domain] || '#6b7280';
+            const isNarrThread = d.type === 'narrative_thread';
+            const color = isNarrThread ? '#8b5cf6' : (_DOMAIN_COLORS[d.domain] || '#6b7280');
             // Selection ring
             g.append('circle').attr('class', 'board-select-ring')
                 .attr('r', r + 5).attr('fill', 'none')
                 .attr('stroke', 'var(--accent)').attr('stroke-width', 2.5)
                 .attr('opacity', _boardSelectedIds.has(d.id) ? 1 : 0);
             // Main circle
-            g.append('circle').attr('r', r).attr('fill', color).attr('fill-opacity', 0.8);
+            g.append('circle').attr('r', r).attr('fill', color).attr('fill-opacity', isNarrThread ? 0.6 : 0.8)
+                .attr('stroke', isNarrThread ? '#8b5cf6' : 'none').attr('stroke-width', isNarrThread ? 1.5 : 0);
             // Signal count inside
             if (d.signal_count > 0) {
                 g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
@@ -16234,12 +16236,34 @@ function renderBoard(data) {
                 .attr('fill', 'var(--text-secondary)').attr('font-size', 11).attr('font-weight', 600)
                 .text(d.title.length > 30 ? d.title.substring(0, 28) + '…' : d.title);
             // Domain or collapse hint
-            const domLabel = d.type === 'narrative_thread' ? 'dbl-click to collapse' : (_DOMAIN_LABELS[d.domain] || d.domain);
+            const domLabel = isNarrThread ? 'dbl-click to collapse' : (_DOMAIN_LABELS[d.domain] || d.domain);
             g.append('text').attr('y', r + 26).attr('text-anchor', 'middle')
-                .attr('fill', d.type === 'narrative_thread' ? 'var(--text-muted)' : color).attr('font-size', 9).attr('font-weight', 600)
+                .attr('fill', isNarrThread ? 'var(--purple)' : color).attr('font-size', 9).attr('font-weight', 600)
                 .text(domLabel);
         }
     });
+
+    // Draw connection lines between sibling narrative threads
+    const narrativeThreadNodes = nodes.filter(n => n.type === 'narrative_thread');
+    const siblingGroups = {};
+    narrativeThreadNodes.forEach(n => {
+        const key = n.narrative_id;
+        if (!siblingGroups[key]) siblingGroups[key] = [];
+        siblingGroups[key].push(n);
+    });
+    const siblingLinks = [];
+    Object.values(siblingGroups).forEach(group => {
+        for (let i = 0; i < group.length; i++) {
+            for (let j = i + 1; j < group.length; j++) {
+                siblingLinks.push({ source: group[i], target: group[j] });
+            }
+        }
+    });
+    zoomGroup.insert('g', ':first-child').selectAll('line').data(siblingLinks).join('line')
+        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y)
+        .attr('stroke', '#8b5cf6').attr('stroke-width', 1).attr('stroke-opacity', 0.3)
+        .attr('stroke-dasharray', '4 4');
 
     _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
 
