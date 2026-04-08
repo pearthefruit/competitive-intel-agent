@@ -2322,8 +2322,8 @@ def create_app(db_path="intel.db"):
         data = request.json or {}
         title = data.get("title", "").strip()
         signal_ids = data.get("signal_ids", [])
-        if not title or len(signal_ids) < 2:
-            return jsonify({"error": "title and at least 2 signal_ids required"}), 400
+        if not title or not signal_ids:
+            return jsonify({"error": "title and signal_ids required"}), 400
 
         from db import insert_signal_cluster, link_signal_to_cluster
 

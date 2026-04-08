@@ -16517,32 +16517,67 @@ function _setupBoardDropTargets(svg, zoomGroup, nodes) {
     svgEl.addEventListener('drop', function(e) {
         e.preventDefault();
         const targetEl = document.querySelector('.graph-node.drop-target');
-        if (!targetEl) return;
-
-        const toThreadId = parseInt(targetEl.dataset.nodeId);
         const signalIds = [..._dragSelectedSignals];
-        if (!toThreadId || !signalIds.length) return;
+        if (!signalIds.length) return;
 
-        // Animate the absorb
-        targetEl.classList.remove('drop-target');
-        targetEl.classList.add('absorbing');
-        setTimeout(() => targetEl.classList.remove('absorbing'), 500);
+        if (targetEl) {
+            // Drop on existing thread
+            const toThreadId = parseInt(targetEl.dataset.nodeId);
+            if (!toThreadId) return;
+            targetEl.classList.remove('drop-target');
+            targetEl.classList.add('absorbing');
+            setTimeout(() => targetEl.classList.remove('absorbing'), 500);
 
-        // API call to reassign
-        fetch('/api/signals/reassign', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ signal_ids: signalIds, from_thread_id: _dragFromThreadId, to_thread_id: toThreadId })
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                _dragSelectedSignals.clear();
-                // Refresh both the detail pane and the board
-                openThreadDetail(_dragFromThreadId);
-                loadBoard();
-            }
-        });
+            fetch('/api/signals/reassign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ signal_ids: signalIds, from_thread_id: _dragFromThreadId, to_thread_id: toThreadId })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    _dragSelectedSignals.clear();
+                    openThreadDetail(_dragFromThreadId);
+                    loadBoard();
+                }
+            });
+        } else {
+            // Drop on empty space — create new thread
+            const [dropX, dropY] = d3.pointer(e, zoomGroup.node());
+            _showInlineInput(e.clientX, e.clientY, 'New thread name...', '', (title) => {
+                if (!title) return;
+                fetch('/api/signals/patterns', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title, signal_ids: signalIds })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        const newThreadId = data.pattern_id || data.cluster_id || data.id;
+                        // Remove from old thread
+                        if (_dragFromThreadId) {
+                            fetch('/api/signals/reassign', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ signal_ids: signalIds, from_thread_id: _dragFromThreadId, to_thread_id: newThreadId })
+                            }).then(() => {
+                                // Save position at drop location
+                                fetch('/api/board/positions', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ positions: [{ node_type: 'thread', node_id: newThreadId, x: dropX, y: dropY, pinned: true }] })
+                                }).then(() => {
+                                    _dragSelectedSignals.clear();
+                                    openThreadDetail(_dragFromThreadId);
+                                    loadBoard();
+                                });
+                            });
+                        }
+                    }
+                });
+            });
+        }
     });
 }
 
