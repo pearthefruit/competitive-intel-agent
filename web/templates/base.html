@@ -18152,9 +18152,7 @@ function _dismissHypothesis(hypId) {
 function openNarrativeDetail(narrativeId) {
     _activeNarrativeId = narrativeId;
     renderNarrativesList();
-    const detailBody = document.getElementById('signals-detail-body');
-    const closeBtn = document.querySelector('.signals-detail-close');
-    if (closeBtn) closeBtn.style.display = 'block';
+    const detailBody = _showDetailPane('Narrative Detail');
     detailBody.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading narrative...</div>';
 
     fetch(`/api/narratives/${narrativeId}`)
