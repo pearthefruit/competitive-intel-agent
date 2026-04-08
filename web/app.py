@@ -3495,8 +3495,93 @@ Return JSON:
         return jsonify({"ok": True})
 
     @app.route("/api/narratives/<int:narrative_id>/search", methods=["POST"])
+    @app.route("/api/narratives/<int:narrative_id>/scan-internal", methods=["POST"])
+    def narratives_scan_internal_api(narrative_id):
+        """Phase 1: Search existing signals for each sub-claim. No external API calls."""
+        from db import get_narrative, link_signal_to_cluster
+
+        conn = get_connection(db_path)
+        narrative = get_narrative(conn, narrative_id)
+        if not narrative:
+            conn.close()
+            return jsonify({"error": "Not found"}), 404
+
+        sub_claims = narrative.get("sub_claims", [])
+        threads = narrative.get("threads", [])
+        thesis = narrative.get("thesis", "")
+
+        results = []
+        total_linked = 0
+
+        for i, sc in enumerate(sub_claims):
+            claim = sc.get("claim", "")
+            # Build search terms: claim text + queries
+            search_terms = [claim] + sc.get("queries", [])
+            search_text = " ".join(search_terms).lower()
+            # Extract key words (3+ chars, skip stopwords)
+            stopwords = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been', 'will', 'with', 'that', 'this', 'from', 'they', 'were', 'said', 'each', 'which', 'their', 'what', 'about', 'would', 'there', 'could', 'other', 'into', 'more', 'some', 'than', 'them', 'very', 'when', 'come', 'made', 'after', 'back', 'only', 'also'}
+            keywords = [w for w in search_text.split() if len(w) >= 3 and w not in stopwords][:10]
+
+            if not keywords:
+                results.append({"claim": claim, "matches": [], "linked": 0})
+                continue
+
+            # Search existing signals by keyword match in title or body
+            like_clauses = " OR ".join(["(s.title LIKE ? COLLATE NOCASE OR s.body LIKE ? COLLATE NOCASE)"] * min(len(keywords), 5))
+            params = []
+            for kw in keywords[:5]:
+                params.extend([f"%{kw}%", f"%{kw}%"])
+
+            matches = conn.execute(
+                f"""SELECT DISTINCT s.id, s.title, s.source_name, s.published_at,
+                           sci.cluster_id as thread_id
+                    FROM signals s
+                    LEFT JOIN signal_cluster_items sci ON sci.signal_id = s.id
+                    WHERE s.signal_status != 'noise' AND ({like_clauses})
+                    ORDER BY s.published_at DESC LIMIT 20""",
+                params,
+            ).fetchall()
+
+            # Link matches to the sub-claim's thread
+            thread_id = threads[i]["id"] if i < len(threads) else None
+            linked = 0
+            match_list = []
+            for m in matches:
+                match_list.append({
+                    "id": m["id"], "title": m["title"],
+                    "source_name": m["source_name"] or "",
+                    "published_at": (m["published_at"] or "")[:10],
+                    "already_in_thread": m["thread_id"] == thread_id if thread_id else False,
+                })
+                # Auto-link if not already in this thread
+                if thread_id and m["thread_id"] != thread_id:
+                    try:
+                        link_signal_to_cluster(conn, thread_id, m["id"])
+                        conn.execute(
+                            "UPDATE signal_cluster_items SET evidence_stance = 'neutral' WHERE cluster_id = ? AND signal_id = ?",
+                            (thread_id, m["id"]),
+                        )
+                        linked += 1
+                    except Exception:
+                        pass  # already linked
+
+            total_linked += linked
+            results.append({"claim": claim, "matches": match_list, "linked": linked, "total": len(match_list)})
+
+        if total_linked > 0:
+            conn.commit()
+
+        conn.close()
+        return jsonify({
+            "ok": True,
+            "narrative_id": narrative_id,
+            "sub_claims": results,
+            "total_linked": total_linked,
+        })
+
+    @app.route("/api/narratives/<int:narrative_id>/search", methods=["POST"])
     def narratives_search_api(narrative_id):
-        """Run targeted searches for a narrative's queries. SSE-streamed."""
+        """Phase 2: Run targeted external searches for a narrative's queries. SSE-streamed."""
         from db import get_narrative
 
         conn = get_connection(db_path)

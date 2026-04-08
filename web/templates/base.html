@@ -18421,28 +18421,158 @@ function openNarrativeDetail(narrativeId) {
 
                     <!-- Sub-claims / Threads -->
                     <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:6px">SUB-CLAIMS (${subClaims.length})</div>
+                    <div id="narrative-subclaims-${n.id}">
                     ${subClaims.map((sc, i) => {
                         const thread = threads[i];
                         const sigCount = thread ? thread.signal_count || 0 : 0;
-                        return `<div style="padding:8px 12px;background:var(--bg-tertiary);border-radius:8px;margin-bottom:6px;border-left:2px solid var(--purple)">
-                            <div style="font-size:11px;font-weight:600;color:var(--text-primary)">${escHtml(sc.claim)}</div>
-                            <div style="font-size:10px;color:var(--text-muted);margin-top:4px">${sigCount} signals ${thread ? `· <span style="color:var(--accent);cursor:pointer" onclick="openThreadDetail(${thread.id})">View thread →</span>` : ''}</div>
+                        const isGap = sigCount < 3;
+                        const gapColor = sigCount === 0 ? '#ef4444' : sigCount < 3 ? '#eab308' : '#22c55e';
+                        const gapLabel = sigCount === 0 ? 'No evidence' : sigCount < 3 ? 'Weak evidence' : `${sigCount} signals`;
+                        const scQueries = (sc.queries || []).slice(0, 3);
+                        return `<div id="subclaim-${n.id}-${i}" style="padding:10px 12px;background:var(--bg-tertiary);border-radius:8px;margin-bottom:6px;border-left:3px solid ${gapColor}">
+                            <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+                                <div style="flex:1;min-width:0">
+                                    <div style="font-size:11px;font-weight:600;color:var(--text-primary);line-height:1.3">${escHtml(sc.claim)}</div>
+                                    <div style="font-size:10px;color:${gapColor};margin-top:3px;font-weight:600">${gapLabel} ${thread ? `· <span style="color:var(--accent);cursor:pointer;font-weight:400" onclick="openThreadDetail(${thread.id})">view thread →</span>` : ''}</div>
+                                </div>
+                                ${isGap ? `<button onclick="_searchSubClaim(${n.id}, ${i}, this)" style="flex-shrink:0;padding:3px 8px;background:none;border:1px solid var(--accent);border-radius:5px;color:var(--accent);font-size:9px;font-weight:600;cursor:pointer;white-space:nowrap">📡 Find evidence</button>` : ''}
+                            </div>
+                            <div id="subclaim-results-${n.id}-${i}" style="display:none;margin-top:6px"></div>
                         </div>`;
                     }).join('')}
-
-                    <!-- Search queries -->
-                    <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-top:16px;margin-bottom:6px">SEARCH QUERIES (${queries.length})</div>
-                    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:16px">
-                        ${queries.map(q => `<span style="font-size:10px;padding:3px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-secondary)">${escHtml(q)}</span>`).join('')}
                     </div>
 
                     <!-- Actions -->
-                    <div style="display:flex;gap:8px;align-items:center">
-                        <button onclick="runNarrativeSearch(${n.id})" id="narrative-search-btn" style="padding:6px 14px;background:var(--bg-tertiary);border:1px solid var(--accent);border-radius:6px;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px">🔍 Run Search</button>
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
+                        <button onclick="_scanNarrativeInternal(${n.id})" id="narrative-scan-btn-${n.id}" style="padding:6px 14px;background:var(--bg-tertiary);border:1px solid var(--purple);border-radius:6px;color:var(--purple);font-size:11px;font-weight:600;cursor:pointer">🔍 Scan existing signals</button>
+                        <button onclick="runNarrativeSearch(${n.id})" id="narrative-search-btn" style="padding:6px 14px;background:var(--bg-tertiary);border:1px solid var(--accent);border-radius:6px;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer">📡 Search all external</button>
                         <button onclick="deleteNarrative(${n.id})" style="padding:6px 10px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer;margin-left:auto">Delete</button>
                     </div>
                     <div id="narrative-search-log" style="display:none;margin-top:12px;max-height:200px;overflow-y:auto;font-size:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:8px"></div>
                 </div>`;
+        });
+}
+
+function _scanNarrativeInternal(narrativeId) {
+    const btn = document.getElementById(`narrative-scan-btn-${narrativeId}`);
+    if (btn) { btn.textContent = '🔍 Scanning...'; btn.disabled = true; }
+
+    fetch(`/api/narratives/${narrativeId}/scan-internal`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (btn) { btn.disabled = false; btn.textContent = '🔍 Scan existing signals'; }
+            if (!data.ok) {
+                _showToast(data.error || 'Scan failed', 'error');
+                return;
+            }
+
+            _showToast(`Found ${data.total_linked} new evidence links across ${data.sub_claims.length} sub-claims`, 'success');
+
+            // Update sub-claim cards with results
+            (data.sub_claims || []).forEach((sc, i) => {
+                const el = document.getElementById(`subclaim-${narrativeId}-${i}`);
+                const resultsEl = document.getElementById(`subclaim-results-${narrativeId}-${i}`);
+                if (!resultsEl) return;
+
+                if (sc.matches && sc.matches.length) {
+                    resultsEl.style.display = 'block';
+                    resultsEl.innerHTML = `<div style="font-size:9px;font-weight:600;color:var(--text-muted);margin-bottom:4px">${sc.total} existing signals found${sc.linked > 0 ? ` · ${sc.linked} newly linked` : ''}</div>`
+                        + sc.matches.slice(0, 5).map(m =>
+                            `<div style="font-size:10px;color:var(--text-secondary);padding:2px 0;display:flex;gap:4px;align-items:start">
+                                <span style="color:${m.already_in_thread ? '#22c55e' : '#eab308'};flex-shrink:0">●</span>
+                                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(m.title.substring(0, 60))}</span>
+                            </div>`
+                        ).join('') + (sc.total > 5 ? `<div style="font-size:9px;color:var(--text-muted);padding-top:2px">+ ${sc.total - 5} more</div>` : '');
+
+                    // Update the gap indicator color
+                    if (el && sc.total >= 3) {
+                        el.style.borderLeftColor = '#22c55e';
+                    } else if (el && sc.total > 0) {
+                        el.style.borderLeftColor = '#eab308';
+                    }
+                } else {
+                    resultsEl.style.display = 'block';
+                    resultsEl.innerHTML = `<div style="font-size:9px;color:var(--text-muted)">No existing signals match this sub-claim</div>`;
+                }
+            });
+
+            // Refresh the narrative detail to update signal counts
+            setTimeout(() => loadSignals(), 500);
+        })
+        .catch(() => {
+            if (btn) { btn.disabled = false; btn.textContent = '🔍 Scan existing signals'; }
+            _showToast('Internal scan failed — restart server', 'error');
+        });
+}
+
+function _searchSubClaim(narrativeId, subClaimIndex, btn) {
+    btn.textContent = '📡 Searching...';
+    btn.disabled = true;
+
+    // Get the narrative to find this sub-claim's queries
+    fetch(`/api/narratives/${narrativeId}`)
+        .then(r => r.json())
+        .then(n => {
+            const sc = (n.sub_claims || [])[subClaimIndex];
+            if (!sc || !sc.queries || !sc.queries.length) {
+                btn.textContent = '📡 Find evidence';
+                btn.disabled = false;
+                _showToast('No search queries for this sub-claim', 'warn');
+                return;
+            }
+
+            // Run targeted search for this sub-claim's queries only
+            return fetch(`/api/narratives/${narrativeId}/search`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ queries: sc.queries })
+            });
+        })
+        .then(r => {
+            if (!r) return;
+            // SSE stream — read it
+            const reader = r.body.getReader();
+            const decoder = new TextDecoder();
+            const resultsEl = document.getElementById(`subclaim-results-${narrativeId}-${subClaimIndex}`);
+            if (resultsEl) { resultsEl.style.display = 'block'; resultsEl.innerHTML = '<div style="font-size:9px;color:var(--accent)">Searching external sources...</div>'; }
+
+            let signals = [];
+            function readChunk() {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        btn.textContent = `✓ ${signals.length} found`;
+                        btn.style.color = 'var(--green)';
+                        btn.style.borderColor = 'var(--green)';
+                        if (resultsEl && signals.length) {
+                            resultsEl.innerHTML = signals.map(s =>
+                                `<div style="font-size:10px;color:var(--text-secondary);padding:2px 0;display:flex;gap:4px;align-items:start">
+                                    <span style="color:var(--accent);flex-shrink:0">●</span>
+                                    <span>${escHtml(s.title)}</span>
+                                    <span style="font-size:9px;color:var(--text-muted);flex-shrink:0">${s.stance}</span>
+                                </div>`
+                            ).join('');
+                        } else if (resultsEl) {
+                            resultsEl.innerHTML = '<div style="font-size:9px;color:var(--text-muted)">No new signals found</div>';
+                        }
+                        return;
+                    }
+                    const text = decoder.decode(value, { stream: true });
+                    text.split('\n').forEach(line => {
+                        if (!line.startsWith('data: ')) return;
+                        try {
+                            const ev = JSON.parse(line.substring(6));
+                            if (ev.type === 'signal') signals.push(ev);
+                        } catch {}
+                    });
+                    readChunk();
+                });
+            }
+            readChunk();
+        })
+        .catch(() => {
+            btn.textContent = '📡 Find evidence';
+            btn.disabled = false;
+            _showToast('Search failed', 'error');
         });
 }
 
@@ -18493,7 +18623,12 @@ function createNarrative() {
                     _selectedThreadsForNarrative.clear();
                     window._pendingNarrativeThreadIds = null;
                     loadNarratives();
-                    setTimeout(() => { switchSignalTab('narratives'); openNarrativeDetail(data.narrative_id); }, 300);
+                    setTimeout(() => {
+                        switchSignalTab('narratives');
+                        openNarrativeDetail(data.narrative_id);
+                        // Phase 1: auto-scan existing signals
+                        setTimeout(() => _scanNarrativeInternal(data.narrative_id), 500);
+                    }, 300);
                 });
             } else {
                 // Mark hypothesis as promoted if this came from the bank
@@ -18507,7 +18642,11 @@ function createNarrative() {
                     window._pendingPromoteHypId = null;
                 }
                 loadNarratives();
-                setTimeout(() => openNarrativeDetail(data.narrative_id), 300);
+                setTimeout(() => {
+                    openNarrativeDetail(data.narrative_id);
+                    // Phase 1: auto-scan existing signals
+                    setTimeout(() => _scanNarrativeInternal(data.narrative_id), 500);
+                }, 300);
             }
             closeNarrativeModal();
         } else {
