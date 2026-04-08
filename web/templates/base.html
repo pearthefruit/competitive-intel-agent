@@ -14835,12 +14835,49 @@ function _renderRqList(sigId, query) {
     const q = (query || '').toLowerCase();
     const threads = [...(_threadsCache || [])].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
     const filtered = q ? threads.filter(t => (t.title || '').toLowerCase().includes(q)) : threads;
-    list.innerHTML = filtered.map(t =>
+
+    // "+ New thread" at top — uses search text as suggested title
+    const newTitle = q || '';
+    const newBtn = `<div onclick="_createThreadFromQueue(${sigId}, '${escHtml(newTitle.replace(/'/g, "\\'"))}')" style="padding:6px 10px;font-size:10px;color:var(--accent);cursor:pointer;border-bottom:1px solid var(--border);font-weight:600;transition:background 0.1s" onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background=''">+ New thread${newTitle ? `: "${escHtml(newTitle)}"` : ''}</div>`;
+
+    list.innerHTML = newBtn + filtered.map(t =>
         `<div onclick="_assignFromQueue(${sigId}, ${t.id}, this);document.getElementById('rq-dd-${sigId}').style.display='none'" style="padding:5px 10px;font-size:10px;color:var(--text-secondary);cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;transition:background 0.1s" onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background=''">
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title)}</span>
             <span style="flex-shrink:0;font-size:9px;color:var(--text-muted);margin-left:6px">${t.signal_count || 0}</span>
         </div>`
-    ).join('') || '<div style="padding:8px 10px;font-size:10px;color:var(--text-muted)">No matches</div>';
+    ).join('') || '';
+}
+
+function _createThreadFromQueue(sigId, suggestedTitle) {
+    const title = prompt('New thread title:', suggestedTitle || '');
+    if (!title || !title.trim()) return;
+
+    // Close dropdown
+    const dd = document.getElementById(`rq-dd-${sigId}`);
+    if (dd) dd.style.display = 'none';
+
+    fetch('/api/signals/patterns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title.trim(), signal_ids: [sigId] })
+    }).then(r => r.json()).then(data => {
+        if (data.ok || data.id) {
+            const item = document.getElementById(`rq-item-${sigId}`);
+            const originalHtml = item ? item.innerHTML : '';
+            if (item) {
+                item.style.opacity = '0.5';
+                item.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0">
+                    <span style="font-size:11px;color:var(--green)">✓ New thread: ${escHtml(title.trim())}</span>
+                    <button onclick="_undoAssign(${sigId}, ${data.id}, this)" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--text-muted);cursor:pointer">Undo</button>
+                </div>`;
+                item._originalHtml = originalHtml;
+            }
+            const countEl = document.getElementById('review-queue-count');
+            if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
+            // Refresh threads cache so new thread appears in dropdowns
+            loadSignals();
+        }
+    });
 }
 
 // Close dropdown when clicking outside
