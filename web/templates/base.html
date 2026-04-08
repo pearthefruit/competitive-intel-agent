@@ -16285,6 +16285,10 @@ function closeBrainstorm() {
     document.getElementById('brainstorm-overlay').classList.remove('visible');
     // Reload graph to show any new links
     if (_signalTab === 'graph') loadBoard();
+    // Refresh brainstorm list in sidebar
+    fetch('/api/signals/brainstorms').then(r => r.json()).then(data => {
+        _renderBrainstormList(data.brainstorms || []);
+    }).catch(() => {});
 }
 
 function _prefillResearchChat(companyName) {
