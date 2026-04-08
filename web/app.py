@@ -2717,6 +2717,68 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True})
 
+    @app.route("/api/signals/prune", methods=["POST"])
+    def signals_prune_api():
+        """Deduplicate signals by title similarity (>=85%). Keeps earliest, marks rest as noise.
+        Reassigns thread links from pruned signals to the primary."""
+        from difflib import SequenceMatcher
+
+        conn = get_connection(db_path)
+        signals = conn.execute(
+            "SELECT id, title, collected_at FROM signals WHERE signal_status != 'noise' ORDER BY collected_at ASC"
+        ).fetchall()
+        signals = [dict(s) for s in signals]
+
+        # Build dupe groups
+        seen = set()
+        groups = []
+        for i in range(len(signals)):
+            if signals[i]["id"] in seen:
+                continue
+            group = [signals[i]]
+            title_i = (signals[i]["title"] or "").lower()
+            for j in range(i + 1, len(signals)):
+                if signals[j]["id"] in seen:
+                    continue
+                title_j = (signals[j]["title"] or "").lower()
+                if SequenceMatcher(None, title_i, title_j).ratio() >= 0.85:
+                    group.append(signals[j])
+                    seen.add(signals[j]["id"])
+            if len(group) > 1:
+                seen.add(signals[i]["id"])
+                groups.append(group)
+
+        # Consolidate: keep first (earliest), mark rest as noise, transfer thread links
+        pruned = 0
+        for group in groups:
+            primary = group[0]  # earliest by collected_at
+            for dup in group[1:]:
+                # Transfer any thread assignments from dup to primary (if primary isn't already in that thread)
+                dup_threads = conn.execute(
+                    "SELECT cluster_id FROM signal_cluster_items WHERE signal_id = ?", (dup["id"],)
+                ).fetchall()
+                for row in dup_threads:
+                    existing = conn.execute(
+                        "SELECT 1 FROM signal_cluster_items WHERE signal_id = ? AND cluster_id = ?",
+                        (primary["id"], row["cluster_id"]),
+                    ).fetchone()
+                    if not existing:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO signal_cluster_items (signal_id, cluster_id) VALUES (?, ?)",
+                            (primary["id"], row["cluster_id"]),
+                        )
+                    conn.execute(
+                        "DELETE FROM signal_cluster_items WHERE signal_id = ? AND cluster_id = ?",
+                        (dup["id"], row["cluster_id"]),
+                    )
+                # Mark as noise
+                conn.execute("UPDATE signals SET signal_status = 'noise' WHERE id = ?", (dup["id"],))
+                pruned += 1
+
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "groups": len(groups), "pruned": pruned})
+
     @app.route("/api/signals/timeline", methods=["GET"])
     def signals_timeline_api():
         """Signal timeline data — all signals with dates, grouped by thread."""

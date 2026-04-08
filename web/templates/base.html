@@ -5522,6 +5522,9 @@
                 <button id="signals-resynth-btn" onclick="runResynthesize()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.3);border-radius:8px;color:var(--purple);font-size:11px;font-weight:600;cursor:pointer;margin-top:6px">
                     🧠 Re-detect Threads
                 </button>
+                <button id="signals-prune-btn" onclick="_pruneSignals()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:6px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:10px;font-weight:600;cursor:pointer;margin-top:4px">
+                    ✂️ Prune Duplicates
+                </button>
                 <div class="signals-freshness" id="signals-freshness">No scans yet</div>
             </div>
             <div class="signals-scan-history" id="signals-scan-history" style="display:none;padding:6px 12px;border-top:1px solid var(--border)">
@@ -14896,6 +14899,29 @@ document.addEventListener('click', (e) => {
         document.querySelectorAll('[id^="rq-dd-"]').forEach(dd => dd.style.display = 'none');
     }
 });
+
+function _pruneSignals() {
+    const btn = document.getElementById('signals-prune-btn');
+    if (btn) { btn.textContent = '✂️ Pruning...'; btn.disabled = true; }
+
+    fetch('/api/signals/prune', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (btn) { btn.disabled = false; btn.textContent = '✂️ Prune Duplicates'; }
+            if (data.ok) {
+                _showToast(`Pruned ${data.pruned} duplicates across ${data.groups} groups`, 'success', 5000);
+                loadSignals();
+                if (_signalTab === 'graph') loadBoard();
+                _loadReviewQueueCount();
+            } else {
+                _showToast(data.error || 'Prune failed', 'error');
+            }
+        })
+        .catch(() => {
+            if (btn) { btn.disabled = false; btn.textContent = '✂️ Prune Duplicates'; }
+            _showToast('Prune failed — restart server', 'error');
+        });
+}
 
 function _runCustomSearch() {
     const input = document.getElementById('custom-search-input');
