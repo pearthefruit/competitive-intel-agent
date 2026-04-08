@@ -14888,10 +14888,19 @@ function _boardKeywordSearch(query) {
         return;
     }
 
+    const sel = document.getElementById('sig-graph-selection');
+    if (sel) sel.innerHTML = `<span style="color:var(--accent)">Searching "${escHtml(query)}"...</span>`;
+
     fetch(`/api/signals/search?q=${encodeURIComponent(query)}`)
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) throw new Error(`${r.status}`);
+            return r.json();
+        })
         .then(data => {
-            if (data.error) return;
+            if (data.error) {
+                if (sel) sel.innerHTML = `<span style="color:var(--red)">${escHtml(data.error)}</span>`;
+                return;
+            }
             const threadIds = new Set((data.thread_matches || []).map(m => m.thread_id));
             _addBoardHighlight({
                 kind: 'keyword', label: query, icon: '🔍',
@@ -14900,6 +14909,9 @@ function _boardKeywordSearch(query) {
             // Clear the input for next keyword
             const input = document.getElementById('board-keyword-search');
             if (input) input.value = '';
+        })
+        .catch(err => {
+            if (sel) sel.innerHTML = `<span style="color:var(--red)">Search failed — restart server to enable keyword search</span>`;
         });
 }
 
