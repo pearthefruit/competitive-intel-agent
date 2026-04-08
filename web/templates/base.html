@@ -14849,34 +14849,37 @@ function _renderRqList(sigId, query) {
 }
 
 function _createThreadFromQueue(sigId, suggestedTitle) {
-    const title = prompt('New thread title:', suggestedTitle || '');
-    if (!title || !title.trim()) return;
-
     // Close dropdown
     const dd = document.getElementById(`rq-dd-${sigId}`);
     if (dd) dd.style.display = 'none';
 
-    fetch('/api/signals/patterns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim(), signal_ids: [sigId] })
-    }).then(r => r.json()).then(data => {
-        if (data.ok || data.id) {
-            const item = document.getElementById(`rq-item-${sigId}`);
-            const originalHtml = item ? item.innerHTML : '';
-            if (item) {
-                item.style.opacity = '0.5';
-                item.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0">
-                    <span style="font-size:11px;color:var(--green)">✓ New thread: ${escHtml(title.trim())}</span>
-                    <button onclick="_undoAssign(${sigId}, ${data.id}, this)" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--text-muted);cursor:pointer">Undo</button>
-                </div>`;
-                item._originalHtml = originalHtml;
+    // Use the "+ New thread" row position for inline input
+    const item = document.getElementById(`rq-item-${sigId}`);
+    const rect = item ? item.getBoundingClientRect() : { left: window.innerWidth / 2, top: window.innerHeight / 2 };
+
+    _showInlineInput(rect.left + 20, rect.top, 'Thread title...', suggestedTitle || '', (title) => {
+        if (!title || !title.trim()) return;
+
+        fetch('/api/signals/patterns', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title.trim(), signal_ids: [sigId] })
+        }).then(r => r.json()).then(data => {
+            if (data.ok || data.id) {
+                const originalHtml = item ? item.innerHTML : '';
+                if (item) {
+                    item.style.opacity = '0.5';
+                    item.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0">
+                        <span style="font-size:11px;color:var(--green)">✓ New thread: ${escHtml(title.trim())}</span>
+                        <button onclick="_undoAssign(${sigId}, ${data.id}, this)" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--text-muted);cursor:pointer">Undo</button>
+                    </div>`;
+                    item._originalHtml = originalHtml;
+                }
+                const countEl = document.getElementById('review-queue-count');
+                if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
+                loadSignals();
             }
-            const countEl = document.getElementById('review-queue-count');
-            if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
-            // Refresh threads cache so new thread appears in dropdowns
-            loadSignals();
-        }
+        });
     });
 }
 
