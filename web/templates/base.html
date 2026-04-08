@@ -15338,19 +15338,32 @@ function _toggleBoardPhysics() {
             _boardPhysicsSim = null;
         }
         // Save ALL node positions from the simulation (not just pinned)
-        if (_boardData && _boardData.nodes) {
-            const allPositions = _boardData.nodes
-                .filter(n => n.x != null && n.y != null)
-                .map(n => {
-                    if (n.type === 'narrative') return { node_type: 'narrative', node_id: n.node_id, x: n.x, y: n.y, pinned: true };
-                    return { node_type: 'thread', node_id: n.id, x: n.x, y: n.y, pinned: true };
+        // Read positions directly from DOM transforms (most reliable source)
+        const allPositions = [];
+        document.querySelectorAll('.graph-node').forEach(el => {
+            const nid = parseInt(el.dataset.nodeId);
+            const ntype = el.dataset.nodeType || 'thread';
+            const transform = el.getAttribute('transform');
+            if (!transform || !nid) return;
+            const m = transform.match(/translate\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/);
+            if (m) {
+                allPositions.push({
+                    node_type: ntype,
+                    node_id: nid,
+                    x: parseFloat(m[1]),
+                    y: parseFloat(m[2]),
+                    pinned: true,
                 });
+            }
+        });
+        if (allPositions.length) {
+            console.log(`[physics] Freezing ${allPositions.length} node positions`);
             fetch('/api/board/positions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ positions: allPositions })
             }).then(() => loadBoard());
-            return; // loadBoard called in .then()
+            return;
         }
         loadBoard();
     }
@@ -16890,7 +16903,8 @@ function renderBoard(data) {
 
     const node = zoomGroup.append('g').selectAll('g').data(nodes).join('g')
         .attr('class', 'graph-node')
-        .attr('data-node-id', d => d.type === 'narrative' ? '' : d.id)
+        .attr('data-node-id', d => d.type === 'narrative' ? d.node_id : d.id)
+        .attr('data-node-type', d => d.type === 'narrative' ? 'narrative' : 'thread')
         .attr('transform', d => `translate(${d.x},${d.y})`)
         .call(d3.drag()
             .on('start', function(event, d) {
