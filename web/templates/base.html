@@ -16994,12 +16994,16 @@ function _toggleSignalArticle(signalId, el) {
     fetch(`/api/signals/${signalId}/fetch-article`, { method: 'POST' })
         .then(r => r.json())
         .then(data => {
-            if (data.ok && data.body) {
-                let bodyHtml = escHtml(data.body).substring(0, 2000);
+            const bodyText = data.body || '';
+            if (bodyText.length > 20) {
+                let bodyHtml = escHtml(bodyText).substring(0, 2000);
                 // Apply search highlights if active
                 if (_threadSearchQuery) {
-                    const esc = _threadSearchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    bodyHtml = bodyHtml.replace(new RegExp(`(${esc})`, 'gi'), '<mark class="sig-search-hl" style="background:#a855f740;color:var(--text-primary);border-radius:2px;padding:0 1px">$1</mark>');
+                    const terms = _threadSearchQuery.split(/\s+/).filter(t => t.length >= 2);
+                    if (terms.length) {
+                        const esc = terms.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+                        bodyHtml = bodyHtml.replace(new RegExp(`(${esc})`, 'gi'), '<mark class="sig-search-hl" style="background:#a855f740;color:var(--text-primary);border-radius:2px;padding:0 1px">$1</mark>');
+                    }
                 }
                 articleDiv.innerHTML = `<div style="padding:8px 0;font-size:11px;color:var(--text-secondary);line-height:1.5;border-left:2px solid var(--border);padding-left:10px;margin-top:6px">${bodyHtml}</div>`;
             } else {
@@ -18312,7 +18316,8 @@ function _boardAutoLayout() {
             const copy = {...d};
             if (copy.x == null) copy.x = width / 2;
             if (copy.y == null) copy.y = height / 2;
-            if (copy.pinned) { copy.fx = copy.x; copy.fy = copy.y; }
+            // Auto-layout ignores pinning — rearranges everything
+            copy.fx = null; copy.fy = null;
             return copy;
         });
 
