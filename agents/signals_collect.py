@@ -22,18 +22,45 @@ def _content_hash(source, url, title):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
+def _classify_domain(title, body=""):
+    """Classify a signal's domain from its title/body using keyword matching."""
+    text = (title + " " + (body or "")).lower()
+    scores = {
+        "economics": 0, "finance": 0, "geopolitics": 0,
+        "tech_ai": 0, "labor": 0, "regulatory": 0,
+    }
+    kw = {
+        "economics": ["gdp", "recession", "inflation", "economic", "economy", "fed ", "interest rate", "monetary", "fiscal", "cpi", "consumer spending", "imf"],
+        "finance": ["stock", "earnings", "ipo", "spac", "merger", "acquisition", "investor", "sec filing", "13f", "revenue", "market cap", "shares", "dividend", "valuation"],
+        "geopolitics": ["tariff", "sanction", "trade war", "export control", "geopolit", "china", "iran", "strait of hormuz", "nato", "diplomacy", "embargo"],
+        "tech_ai": ["ai ", "artificial intelligence", "llm", "machine learning", "chip", "semiconductor", "software", "cloud", "startup", "tech", "robot", "autonomous", "data center", "low-code", "no-code", "saas"],
+        "labor": ["layoff", "hiring", "workforce", "employment", "job market", "remote work", "salary", "labor", "worker", "talent", "contractor"],
+        "regulatory": ["regulation", "compliance", "enforcement", "fda", "antitrust", "privacy", "gdpr", "sec enforce", "ban", "oversight"],
+    }
+    for domain, keywords in kw.items():
+        for k in keywords:
+            if k in text:
+                scores[domain] += 1
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 else "economics"
+
+
 def _normalize_signal(item, source, domain):
     """Convert a scraper result dict into a standardized signal dict."""
     title = (item.get("title") or "").strip()
     if not title:
         return None
     url = item.get("href") or item.get("url") or ""
+    body = (item.get("body") or "")[:2000]
+    # Auto-classify domain for targeted/narrative signals
+    if domain in ("targeted", "narrative"):
+        domain = _classify_domain(title, body)
     return {
         "source": source,
         "domain": domain,
         "title": title,
         "url": url,
-        "body": (item.get("body") or "")[:2000],
+        "body": body,
         "published_at": item.get("date") or "",
         "source_name": item.get("source") or source,
         "content_hash": _content_hash(source, url, title),
