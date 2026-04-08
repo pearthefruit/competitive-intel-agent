@@ -14294,7 +14294,7 @@ function openThreadDetail(threadId) {
             const narr = thread.narrative;
             const narrativeBreadcrumb = narr
                 ? `<div style="padding:8px 16px;border-bottom:1px solid var(--border);font-size:11px;display:flex;align-items:center;gap:4px">
-                    <span style="color:var(--accent);cursor:pointer" onclick="switchSignalTab('narratives');setTimeout(()=>openNarrativeDetail(${narr.id}),100)">📖 ${escHtml(narr.title)}</span>
+                    <span style="color:var(--accent);cursor:pointer" onclick="_showNarrativeInBoardPane(${narr.id})">📖 ${escHtml(narr.title)}</span>
                     <span style="color:var(--text-muted)">→</span>
                     <span style="color:var(--text-secondary)">${escHtml(thread.title).substring(0, 50)}</span>
                 </div>`
@@ -15151,7 +15151,10 @@ function _renderBrainstormResults(container, result, threadIds) {
                         <span class="hypothesis-confidence ${h.confidence || 'medium'}">${(h.confidence || 'medium').toUpperCase()}</span>
                     </div>
                     <p>${escHtml(h.reasoning)}</p>
-                    ${h.investigate ? `<div class="hypothesis-investigate" onclick="investigateHypothesis('${escHtml(h.investigate.replace(/'/g, "\\'"))}')">🔍 Investigate: ${escHtml(h.investigate)}</div>` : ''}
+                    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+                        ${h.investigate ? `<button onclick="investigateHypothesis('${escHtml(h.investigate.replace(/'/g, "\\'"))}')" style="padding:4px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--accent);font-size:10px;font-weight:600;cursor:pointer">🔍 Search signals</button>` : ''}
+                        <button onclick="_createNarrativeFromHypothesis('${escHtml(h.title.replace(/'/g, "\\'"))}', '${escHtml(h.reasoning.replace(/'/g, "\\'"))}')" style="padding:4px 10px;background:var(--bg-tertiary);border:1px solid var(--purple);border-radius:5px;color:var(--purple);font-size:10px;font-weight:600;cursor:pointer">📖 Create narrative</button>
+                    </div>
                 </div>
             `).join('')}
         </div>`;
@@ -16007,8 +16010,7 @@ function renderBoard(data) {
                 node.select('.board-select-ring').attr('opacity', dd => _boardSelectedIds.has(dd.id) ? 1 : 0);
                 _updateBoardSelectionBar(nodes);
             } else if (d.type === 'narrative') {
-                switchSignalTab('narratives');
-                setTimeout(() => openNarrativeDetail(d.node_id), 100);
+                _showNarrativeInBoardPane(d.node_id);
             } else {
                 openThreadDetail(d.id);
             }
@@ -16250,6 +16252,62 @@ function _deleteBoardNote(noteId) {
     fetch(`/api/board/notes/${noteId}`, { method: 'DELETE' }).then(() => loadBoard());
 }
 
+function _showNarrativeInBoardPane(narrativeId) {
+    _activeNarrativeId = narrativeId;
+    const detailBody = _showDetailPane();
+    detailBody.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading narrative...</div>';
+
+    fetch(`/api/narratives/${narrativeId}`)
+        .then(r => r.json())
+        .then(n => {
+            if (n.error) { detailBody.innerHTML = `<div style="color:var(--red);padding:20px">${n.error}</div>`; return; }
+            const ev = n.evidence || {};
+            const sup = ev.supporting || 0, con = ev.contradicting || 0, neu = ev.neutral || 0;
+            const total = sup + con + neu;
+            const subClaims = n.sub_claims || [];
+            const threads = n.threads || [];
+            const queries = n.search_queries || [];
+
+            detailBody.innerHTML = `
+                <div style="padding:20px">
+                    <h2 style="font-size:16px;font-weight:700;margin-bottom:8px">📖 ${escHtml(n.title)}</h2>
+                    <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:12px;padding:10px;background:var(--bg-tertiary);border-radius:8px;border-left:3px solid var(--purple)">${escHtml(n.thesis)}</div>
+                    ${n.reasoning ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px"><strong>Reasoning:</strong> ${escHtml(n.reasoning)}</div>` : ''}
+
+                    ${total > 0 ? `<div style="margin-bottom:16px">
+                        <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:4px">EVIDENCE</div>
+                        <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;background:var(--bg-tertiary);margin-bottom:4px">
+                            ${sup > 0 ? `<div style="width:${sup/total*100}%;background:#22c55e"></div>` : ''}
+                            ${neu > 0 ? `<div style="width:${neu/total*100}%;background:#6b7280"></div>` : ''}
+                            ${con > 0 ? `<div style="width:${con/total*100}%;background:#ef4444"></div>` : ''}
+                        </div>
+                        <div style="display:flex;gap:12px;font-size:10px">
+                            <span style="color:#22c55e">${sup} supporting</span>
+                            <span style="color:#6b7280">${neu} neutral</span>
+                            <span style="color:#ef4444">${con} contradicting</span>
+                        </div>
+                    </div>` : ''}
+
+                    <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:6px">SUB-CLAIMS (${subClaims.length})</div>
+                    ${subClaims.map((sc, i) => {
+                        const thread = threads[i];
+                        const sigCount = thread ? thread.signal_count || 0 : 0;
+                        return `<div style="padding:8px 12px;background:var(--bg-tertiary);border-radius:8px;margin-bottom:6px;border-left:2px solid var(--purple)">
+                            <div style="font-size:11px;font-weight:600;color:var(--text-primary)">${escHtml(sc.claim)}</div>
+                            <div style="font-size:10px;color:var(--text-muted);margin-top:4px">${sigCount} signals ${thread ? `· <span style="color:var(--accent);cursor:pointer" onclick="openThreadDetail(${thread.id})">View thread →</span>` : ''}</div>
+                        </div>`;
+                    }).join('')}
+
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:16px">
+                        <button onclick="runNarrativeSearch(${n.id})" id="narrative-search-btn" style="padding:6px 14px;background:var(--bg-tertiary);border:1px solid var(--accent);border-radius:6px;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px">🔍 Run Search</button>
+                        <button onclick="_expandedNarratives.add(${n.id});loadBoard()" style="padding:6px 14px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer">Expand on board</button>
+                        <button onclick="deleteNarrative(${n.id})" style="padding:6px 10px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer;margin-left:auto">Delete</button>
+                    </div>
+                    <div id="narrative-search-log" style="display:none;margin-top:12px;max-height:200px;overflow-y:auto;font-size:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:8px"></div>
+                </div>`;
+        });
+}
+
 function _boardAutoLayout() {
     if (!_boardData || !_boardData.nodes.length) return;
     const btn = document.getElementById('board-autolayout-btn');
@@ -16322,6 +16380,14 @@ function _updateBoardSelectionBar(nodes) {
         const ids = [..._boardSelectedIds];
         sel.innerHTML = `<span style="color:var(--accent);font-weight:600">${count} selected</span> <button onclick="_boardCreateNarrative()" style="margin-left:8px;padding:4px 12px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer">📖 Create Narrative</button> <span style="color:var(--text-muted);cursor:pointer;text-decoration:underline;margin-left:4px" onclick="_boardSelectedIds.clear();loadBoard()">clear</span>`;
     }
+}
+
+function _createNarrativeFromHypothesis(title, reasoning) {
+    closeBrainstorm();
+    document.getElementById('narrative-modal').style.display = 'flex';
+    document.getElementById('narrative-thesis').value = title;
+    document.getElementById('narrative-reasoning').value = reasoning;
+    document.getElementById('narrative-thesis').focus();
 }
 
 function _boardCreateNarrative() {
