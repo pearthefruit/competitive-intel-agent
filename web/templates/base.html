@@ -14677,36 +14677,45 @@ function _openReviewQueue(offset) {
 
             html += _reviewQueueData.map((sig, i) => {
                 const dateStr = sig.published_at ? sig.published_at.substring(0, 10) : '';
-                const confColor = sig.confidence === 'high' ? 'var(--green)' : sig.confidence === 'medium' ? '#eab308' : 'var(--text-muted)';
+                const confColor = sig.confidence === 'high' ? '#22c55e' : sig.confidence === 'medium' ? '#eab308' : '#6b7280';
+                const confDot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${confColor};margin-right:2px"></span>`;
 
-                // Thread suggestion buttons
-                const suggHtml = (sig.suggestions || []).map(s => {
+                // Thread suggestion pills — styled like entity chips
+                const suggHtml = (sig.suggestions || []).map((s, si) => {
                     const pct = Math.round(s.score * 100);
-                    return `<button onclick="_assignFromQueue(${sig.id}, ${s.thread_id}, this)" style="padding:3px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;font-size:10px;color:var(--text-secondary);cursor:pointer;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" title="${escHtml(s.thread_title)} (${pct}%)">${escHtml(s.thread_title.substring(0, 35))} <span style="color:var(--text-muted)">${pct}%</span></button>`;
+                    const barWidth = Math.max(pct, 8);
+                    const isTop = si === 0 && pct > 15;
+                    const borderColor = isTop ? 'var(--accent)' : 'var(--border)';
+                    const textColor = isTop ? 'var(--accent)' : 'var(--text-secondary)';
+                    return `<div onclick="_assignFromQueue(${sig.id}, ${s.thread_id}, this)" style="position:relative;padding:6px 10px;background:var(--bg-tertiary);border:1px solid ${borderColor};border-radius:6px;cursor:pointer;overflow:hidden;transition:all 0.15s" onmouseenter="this.style.borderColor='var(--accent)';this.style.background='rgba(59,130,246,0.08)'" onmouseleave="this.style.borderColor='${borderColor}';this.style.background='var(--bg-tertiary)'">
+                        <div style="position:absolute;left:0;top:0;bottom:0;width:${barWidth}%;background:rgba(59,130,246,0.06);pointer-events:none"></div>
+                        <div style="position:relative;display:flex;justify-content:space-between;align-items:center;gap:8px">
+                            <span style="font-size:11px;color:${textColor};font-weight:${isTop ? '600' : '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.thread_title)}</span>
+                            <span style="font-size:10px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
+                        </div>
+                    </div>`;
                 }).join('');
 
-                // Full thread dropdown for manual assignment
+                // Full thread dropdown
                 const optionsHtml = threads.map(t =>
-                    `<option value="${t.id}">${escHtml(t.title.substring(0, 40))} (${t.signal_count || 0})</option>`
+                    `<option value="${t.id}">${escHtml(t.title.substring(0, 45))} (${t.signal_count || 0})</option>`
                 ).join('');
 
-                return `<div id="rq-item-${sig.id}" style="padding:10px 16px;border-bottom:1px solid var(--border)">
-                    <div style="display:flex;align-items:start;justify-content:space-between;gap:8px">
+                return `<div id="rq-item-${sig.id}" style="padding:12px 16px;border-bottom:1px solid var(--border)">
+                    <div style="display:flex;align-items:start;justify-content:space-between;gap:8px;margin-bottom:8px">
                         <div style="flex:1;min-width:0">
-                            <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:3px">${escHtml(sig.title)}</div>
-                            <div style="font-size:10px;color:var(--text-muted);display:flex;gap:8px">
+                            <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:4px;line-height:1.3">${escHtml(sig.title)}</div>
+                            <div style="font-size:10px;color:var(--text-muted);display:flex;gap:8px;align-items:center">
+                                ${confDot}
                                 <span>${escHtml(sig.source_name)}</span>
                                 <span>${escHtml(dateStr)}</span>
-                                <span style="color:${confColor}">${sig.confidence}</span>
                             </div>
                         </div>
-                        <button onclick="_dismissFromQueue(${sig.id}, this)" style="flex-shrink:0;padding:2px 6px;background:none;border:1px solid var(--border);border-radius:4px;font-size:9px;color:var(--text-muted);cursor:pointer" title="Mark as noise">✕</button>
+                        <button onclick="_dismissFromQueue(${sig.id}, this)" style="flex-shrink:0;width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:none;border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--text-muted);cursor:pointer;transition:all 0.15s" onmouseenter="this.style.borderColor='#ef4444';this.style.color='#ef4444'" onmouseleave="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'" title="Dismiss as noise">✕</button>
                     </div>
-                    <div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">
-                        ${suggHtml || '<div style="font-size:10px;color:var(--text-muted)">No thread suggestions</div>'}
-                    </div>
-                    <div style="margin-top:4px;display:flex;gap:4px;align-items:center">
-                        <select onchange="if(this.value)_assignFromQueue(${sig.id},parseInt(this.value),this.parentElement)" style="flex:1;padding:3px 6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:9px">
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                        ${suggHtml || '<div style="font-size:10px;color:var(--text-muted);padding:4px 0">No thread suggestions</div>'}
+                        <select onchange="if(this.value){_assignFromQueue(${sig.id},parseInt(this.value),this.parentElement);this.value=''}" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer;appearance:auto">
                             <option value="">Other thread...</option>
                             ${optionsHtml}
                         </select>
