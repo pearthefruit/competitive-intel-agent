@@ -5603,11 +5603,20 @@
                                     <button onclick="_graphZoom(0.7)" style="width:26px;height:26px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom out">−</button>
                                     <button onclick="_graphReset()" style="width:26px;height:26px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Reset zoom">⟲</button>
                                     <button onclick="toggleGraphFullscreen()" style="width:26px;height:26px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Fullscreen">⛶</button>
+                                    <button onclick="_toggleTimeline()" id="board-timeline-btn" style="height:26px;padding:0 8px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted);font-size:9px;font-weight:600;cursor:pointer" title="Toggle timeline">📅</button>
                                 </div>
                                 <div id="sig-graph-selection" style="font-size:10px;color:var(--text-muted)"></div>
                                 <button id="sig-brainstorm-btn" onclick="openBrainstormMode()" style="display:none;padding:6px 14px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer">🧠 Brainstorm →</button>
                             </div>
                         </div>
+                    </div>
+                    <!-- Timeline strip -->
+                    <div id="board-timeline" style="display:none;border-top:1px solid var(--border);background:var(--bg-primary)">
+                        <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 12px;cursor:pointer" onclick="_toggleTimeline()">
+                            <span style="font-size:10px;font-weight:600;color:var(--text-muted)">📅 Timeline</span>
+                            <span id="timeline-toggle-icon" style="font-size:8px;color:var(--text-muted)">▲</span>
+                        </div>
+                        <div id="timeline-content" style="height:120px;overflow-x:auto;overflow-y:hidden;padding:0 12px 8px"></div>
                     </div>
                 </div>
                 <!-- Execution view -->
@@ -14251,7 +14260,7 @@ function openSignalDetail(signalId) {
     const card = document.querySelector(`.sig-card[data-id="${s.id}"]`);
     if (card) card.classList.add('active');
 
-    const detailBody = _showDetailPane();
+    const detailBody = _showDetailPane('Signal Detail');
 
     const sDoms = _parseDomains(s.domain);
     const domColor = _DOMAIN_COLORS[sDoms[0]] || '#6b7280';
@@ -14307,14 +14316,16 @@ function fetchArticleText(signalId, attempt) {
         });
 }
 
-function _showDetailPane() {
+function _showDetailPane(title) {
     const detailPane = document.getElementById('signals-detail');
     const detailBody = document.getElementById('signals-detail-body');
     const detailEmpty = document.getElementById('signals-detail-empty');
     const closeBtn = document.querySelector('.signals-detail-close');
+    const titleEl = document.querySelector('.signals-detail-title');
     if (detailPane) detailPane.style.display = '';
     if (detailEmpty) detailEmpty.style.display = 'none';
     if (closeBtn) closeBtn.style.display = 'block';
+    if (titleEl && title) titleEl.textContent = title;
     return detailBody;
 }
 
@@ -14327,7 +14338,7 @@ function openThreadDetail(threadId) {
     const card = document.querySelector(`.thread-card[data-id="${threadId}"]`);
     if (card) card.classList.add('active');
 
-    const detailBody = _showDetailPane();
+    const detailBody = _showDetailPane('Thread Detail');
     detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading thread...</div>`;
 
     fetch(`/api/signals/threads/${threadId}`)
@@ -14642,12 +14653,8 @@ function _loadReviewQueueCount() {
 
 function _openReviewQueue(offset) {
     offset = offset || 0;
-    const detailBody = _showDetailPane();
+    const detailBody = _showDetailPane('Review Queue');
     detailBody.innerHTML = '<div style="padding:20px;color:var(--text-muted);font-size:12px">Loading review queue...</div>';
-
-    // Update header title
-    const titleEl = document.querySelector('.signals-detail-title');
-    if (titleEl) titleEl.textContent = 'Review Queue';
 
     fetch(`/api/signals/review-queue?limit=20&offset=${offset}`)
         .then(r => r.json())
@@ -14714,7 +14721,8 @@ function _openReviewQueue(offset) {
                                 <span>Other thread...</span><span style="font-size:8px">▼</span>
                             </div>
                             <div id="rq-dd-${sig.id}" style="display:none;position:absolute;left:0;right:0;bottom:100%;z-index:20;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;margin-bottom:2px;box-shadow:0 -4px 12px rgba(0,0,0,0.4);overflow:hidden">
-                                <input type="text" placeholder="Search..." id="rq-search-${sig.id}" oninput="_filterRqDropdown(${sig.id}, this.value)" style="width:100%;padding:6px 10px;background:var(--bg-tertiary);border:none;border-bottom:1px solid var(--border);color:var(--text-primary);font-size:10px;outline:none;box-sizing:border-box" />
+                                <div style="padding:5px 10px;font-size:9px;color:var(--text-muted);border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Assign: <span style="color:var(--text-secondary);font-weight:600">${escHtml(sig.title.substring(0, 50))}</span></div>
+                                <input type="text" placeholder="Search threads..." id="rq-search-${sig.id}" oninput="_filterRqDropdown(${sig.id}, this.value)" style="width:100%;padding:6px 10px;background:var(--bg-tertiary);border:none;border-bottom:1px solid var(--border);color:var(--text-primary);font-size:10px;outline:none;box-sizing:border-box" />
                                 <div id="rq-list-${sig.id}" style="max-height:150px;overflow-y:auto"></div>
                             </div>
                         </div>
@@ -15812,7 +15820,7 @@ function _adjustGraphSpacing(val) {
 
 function _showSignalNodeDetail(s) {
     ++_detailRequestId;
-    const detailBody = _showDetailPane();
+    const detailBody = _showDetailPane('Signal Detail');
     const snDoms = _parseDomains(s.domain);
     const domColor = _DOMAIN_COLORS[snDoms[0]] || '#6b7280';
     const dateStr = s.published_at ? s.published_at.substring(0, 10) : '';
@@ -16014,6 +16022,135 @@ function toggleGraphFullscreen() {
     tab.classList.toggle('graph-fullscreen');
     // Re-render graph at new size after transition
     if (_graphData) setTimeout(() => renderGraph(_graphData), 50);
+}
+
+// ===================== TIMELINE STRIP =====================
+
+let _timelineVisible = false;
+let _timelineData = null;
+
+function _toggleTimeline() {
+    const panel = document.getElementById('board-timeline');
+    const btn = document.getElementById('board-timeline-btn');
+    const icon = document.getElementById('timeline-toggle-icon');
+    _timelineVisible = !_timelineVisible;
+    if (panel) panel.style.display = _timelineVisible ? '' : 'none';
+    if (btn) {
+        btn.style.background = _timelineVisible ? 'var(--accent)' : 'var(--bg-tertiary)';
+        btn.style.color = _timelineVisible ? '#fff' : 'var(--text-muted)';
+        btn.style.borderColor = _timelineVisible ? 'var(--accent)' : 'var(--border)';
+    }
+    if (icon) icon.textContent = _timelineVisible ? '▼' : '▲';
+    if (_timelineVisible && !_timelineData) _loadTimeline();
+}
+
+function _loadTimeline() {
+    fetch('/api/signals/timeline?days=60')
+        .then(r => r.json())
+        .then(data => {
+            _timelineData = data;
+            _renderTimeline(data);
+        })
+        .catch(() => {
+            const c = document.getElementById('timeline-content');
+            if (c) c.innerHTML = '<div style="padding:12px;font-size:10px;color:var(--red)">Failed to load timeline — restart server</div>';
+        });
+}
+
+function _renderTimeline(data) {
+    const container = document.getElementById('timeline-content');
+    if (!container) return;
+
+    const signals = data.signals || [];
+    const threadSpans = data.thread_spans || [];
+    if (!signals.length) {
+        container.innerHTML = '<div style="padding:12px;font-size:10px;color:var(--text-muted)">No signal data for timeline</div>';
+        return;
+    }
+
+    // Date range
+    const dates = signals.map(s => s.published_at?.substring(0, 10)).filter(Boolean).sort();
+    const minDate = new Date(dates[0]);
+    const maxDate = new Date(dates[dates.length - 1]);
+    const rangeDays = Math.max(1, (maxDate - minDate) / 86400000);
+
+    // Sort threads by first signal date, then by count
+    const sorted = [...threadSpans].sort((a, b) => a.first.localeCompare(b.first) || b.count - a.count);
+
+    // Layout: each thread gets a horizontal bar
+    const barHeight = 16;
+    const barGap = 3;
+    const leftPad = 140; // thread title label width
+    const totalWidth = Math.max(container.clientWidth - 24, 600);
+    const chartWidth = totalWidth - leftPad;
+    const totalHeight = Math.max(sorted.length * (barHeight + barGap) + 30, 80);
+
+    const dateToX = (dateStr) => {
+        const d = new Date(dateStr);
+        return leftPad + ((d - minDate) / 86400000 / rangeDays) * chartWidth;
+    };
+
+    let svg = `<svg width="${totalWidth}" height="${totalHeight}" style="font-family:inherit">`;
+
+    // Date axis at top
+    const axisDates = [];
+    const stepDays = Math.max(1, Math.round(rangeDays / 8));
+    for (let d = new Date(minDate); d <= maxDate; d.setDate(d.getDate() + stepDays)) {
+        axisDates.push(new Date(d));
+    }
+    axisDates.forEach(d => {
+        const x = dateToX(d.toISOString().substring(0, 10));
+        const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        svg += `<line x1="${x}" y1="14" x2="${x}" y2="${totalHeight}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="2 3"/>`;
+        svg += `<text x="${x}" y="10" text-anchor="middle" fill="var(--text-muted)" font-size="8">${label}</text>`;
+    });
+
+    // Thread bars
+    sorted.forEach((t, i) => {
+        const y = 20 + i * (barHeight + barGap);
+        const domColor = _DOMAIN_COLORS[_parseDomains(t.domain)[0]] || '#6b7280';
+
+        // Thread label (clickable)
+        const labelText = t.title.length > 22 ? t.title.substring(0, 20) + '…' : t.title;
+        svg += `<text x="${leftPad - 6}" y="${y + barHeight / 2 + 3}" text-anchor="end" fill="var(--text-secondary)" font-size="9" font-weight="600" style="cursor:pointer" onclick="openThreadDetail(${t.thread_id})">${escHtml(labelText)}</text>`;
+
+        // Background bar (thread span)
+        const x1 = dateToX(t.first);
+        const x2 = dateToX(t.last);
+        const barW = Math.max(x2 - x1, 4);
+        svg += `<rect x="${x1}" y="${y}" width="${barW}" height="${barHeight}" rx="3" fill="${domColor}" fill-opacity="0.15" stroke="${domColor}" stroke-opacity="0.3" stroke-width="0.5"/>`;
+
+        // Signal dots on the bar
+        const threadSigs = signals.filter(s => s.thread_id === t.thread_id);
+        // Group by date for coverage density
+        const byDate = {};
+        threadSigs.forEach(s => {
+            const d = (s.published_at || '').substring(0, 10);
+            if (!byDate[d]) byDate[d] = [];
+            byDate[d].push(s);
+        });
+        Object.entries(byDate).forEach(([date, sigs]) => {
+            const x = dateToX(date);
+            const r = Math.min(2 + sigs.length, 6); // bigger dot = more coverage
+            svg += `<circle cx="${x}" cy="${y + barHeight / 2}" r="${r}" fill="${domColor}" fill-opacity="0.8">
+                <title>${date}: ${sigs.length} signal${sigs.length > 1 ? 's' : ''}</title>
+            </circle>`;
+        });
+    });
+
+    // Unassigned signals as faded dots along the bottom
+    const unassigned = signals.filter(s => !s.thread_id);
+    if (unassigned.length) {
+        const uy = totalHeight - 8;
+        svg += `<text x="${leftPad - 6}" y="${uy + 3}" text-anchor="end" fill="var(--text-muted)" font-size="8" font-style="italic">unassigned</text>`;
+        unassigned.forEach(s => {
+            const x = dateToX((s.published_at || '').substring(0, 10));
+            svg += `<circle cx="${x}" cy="${uy}" r="2" fill="var(--text-muted)" fill-opacity="0.4"><title>${escHtml(s.title?.substring(0, 60) || '')}</title></circle>`;
+        });
+    }
+
+    svg += '</svg>';
+    container.innerHTML = svg;
 }
 
 // ===================== BRAINSTORM MODE =====================
@@ -17065,6 +17202,9 @@ function renderBoard(data) {
     controls.style.display = 'flex';
     const searchBar2 = document.getElementById('board-search-bar');
     if (searchBar2) searchBar2.style.display = 'flex';
+    // Show timeline if was visible
+    const tlPanel = document.getElementById('board-timeline');
+    if (tlPanel) tlPanel.style.display = _timelineVisible ? '' : 'none';
 
     // Sync physics button state
     const physBtn = document.getElementById('board-physics-btn');
@@ -17705,7 +17845,7 @@ function _setupBoardDropTargets(svg, zoomGroup, nodes) {
 
 function _showNarrativeInBoardPane(narrativeId) {
     _activeNarrativeId = narrativeId;
-    const detailBody = _showDetailPane();
+    const detailBody = _showDetailPane('Narrative Detail');
     detailBody.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading narrative...</div>';
 
     fetch(`/api/narratives/${narrativeId}`)

@@ -2717,6 +2717,47 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True})
 
+    @app.route("/api/signals/timeline", methods=["GET"])
+    def signals_timeline_api():
+        """Signal timeline data — all signals with dates, grouped by thread."""
+        days = int(request.args.get("days", 30))
+        conn = get_connection(db_path)
+        rows = conn.execute(
+            """SELECT s.id, s.title, s.domain, s.source, s.published_at,
+                      sci.cluster_id as thread_id, sc.title as thread_title
+               FROM signals s
+               LEFT JOIN signal_cluster_items sci ON sci.signal_id = s.id
+               LEFT JOIN signal_clusters sc ON sc.id = sci.cluster_id AND sc.domain != 'narrative'
+               WHERE s.published_at IS NOT NULL AND s.published_at != ''
+                 AND s.published_at >= date('now', ?)
+                 AND s.signal_status != 'noise'
+               ORDER BY s.published_at""",
+            (f"-{days} days",),
+        ).fetchall()
+        conn.close()
+
+        signals = [dict(r) for r in rows]
+        # Compute thread summary: first/last date, signal count
+        thread_spans = {}
+        for s in signals:
+            tid = s.get("thread_id")
+            if not tid:
+                continue
+            pub = s.get("published_at", "")[:10]
+            if tid not in thread_spans:
+                thread_spans[tid] = {"thread_id": tid, "title": s.get("thread_title", ""), "domain": s.get("domain", ""), "first": pub, "last": pub, "count": 0}
+            thread_spans[tid]["count"] += 1
+            if pub < thread_spans[tid]["first"]:
+                thread_spans[tid]["first"] = pub
+            if pub > thread_spans[tid]["last"]:
+                thread_spans[tid]["last"] = pub
+
+        return jsonify({
+            "signals": signals,
+            "thread_spans": list(thread_spans.values()),
+            "days": days,
+        })
+
     @app.route("/api/signals/scan-history", methods=["GET"])
     def signals_scan_history_api():
         """Fetch last 3 scan results."""
