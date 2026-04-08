@@ -15060,26 +15060,34 @@ function _applyBoardHighlights() {
         }
 
         if (unionIds.has(nid)) {
-            const matchCount = _boardHighlights.filter(h => h.threadIds.has(nid)).length;
+            const matchingHls = _boardHighlights.filter(h => h.threadIds.has(nid));
+            const matchCount = matchingHls.length;
             const total = _boardHighlights.length;
             const glowIntensity = matchCount >= total ? '1.5' : '1.2';
             const glowColor = matchCount >= 2 ? 'rgba(6,182,212,0.7)' : 'rgba(168,85,247,0.5)';
             n.style.filter = `brightness(${glowIntensity}) drop-shadow(0 0 12px ${glowColor})`;
 
-            if (total > 1) {
+            // Badge: show signal match count for single highlight, or N/M for multiple
+            const sigMatchCount = matchingHls.reduce((sum, h) => sum + ((h.matchCounts && h.matchCounts[nid]) || 0), 0);
+            const badgeText = total > 1 ? `${matchCount}/${total}` : (sigMatchCount > 0 ? `${sigMatchCount}` : null);
+            const badgeColor = total > 1
+                ? (matchCount >= total ? '#06b6d4' : matchCount >= 2 ? '#a855f7' : '#6b7280')
+                : '#a855f7';
+
+            if (badgeText) {
                 const badge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
                 badge.classList.add('board-match-badge');
                 const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
                 circle.setAttribute('cx', 18); circle.setAttribute('cy', -18);
                 circle.setAttribute('r', 9);
-                circle.setAttribute('fill', matchCount >= total ? '#06b6d4' : matchCount >= 2 ? '#a855f7' : '#6b7280');
+                circle.setAttribute('fill', badgeColor);
                 badge.appendChild(circle);
                 const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 text.setAttribute('x', 18); text.setAttribute('y', -14);
                 text.setAttribute('text-anchor', 'middle'); text.setAttribute('fill', '#fff');
                 text.setAttribute('font-size', '10'); text.setAttribute('font-weight', '700');
                 text.setAttribute('pointer-events', 'none');
-                text.textContent = matchCount + '/' + total;
+                text.textContent = badgeText;
                 badge.appendChild(text);
                 n.appendChild(badge);
             }
@@ -15332,9 +15340,11 @@ function _boardKeywordSearch(query) {
                 return;
             }
             const threadIds = new Set((data.thread_matches || []).map(m => m.thread_id));
+            const matchCounts = {};
+            (data.thread_matches || []).forEach(m => { matchCounts[m.thread_id] = m.match_count; });
             _addBoardHighlight({
                 kind: 'keyword', label: query, icon: '🔍',
-                threadIds, key
+                threadIds, matchCounts, key
             });
             // Clear the input for next keyword
             const input = document.getElementById('board-keyword-search');
