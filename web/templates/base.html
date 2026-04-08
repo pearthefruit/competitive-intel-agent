@@ -3921,11 +3921,29 @@
 
         /* Detail pane */
         .signals-detail {
-            flex: 1;
-            min-width: 350px;
+            width: var(--sig-detail-width, 380px);
+            min-width: 280px;
+            max-width: 700px;
+            flex-shrink: 0;
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            position: relative;
+        }
+        .signals-detail-resize {
+            position: absolute;
+            top: 0;
+            left: -3px;
+            width: 6px;
+            height: 100%;
+            cursor: col-resize;
+            z-index: 10;
+            background: transparent;
+            transition: background 0.15s;
+        }
+        .signals-detail-resize:hover,
+        .signals-detail-resize.active {
+            background: var(--accent);
         }
         .signals-detail-header {
             padding: 12px 16px;
@@ -5567,6 +5585,13 @@
                             <button onclick="_zoomOutToPatterns()" style="padding:6px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;backdrop-filter:blur(8px)">← Back to threads</button>
                         </div>
                         <div id="sig-graph-pattern-label" style="display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;font-size:13px;font-weight:700;color:var(--text-primary);background:var(--bg-primary);padding:4px 12px;border-radius:6px;border:1px solid var(--border)"></div>
+                        <div id="board-search-bar" style="display:none;position:absolute;top:12px;right:12px;z-index:5;gap:6px;align-items:center">
+                            <div style="position:relative;display:flex;align-items:center">
+                                <input id="board-keyword-search" type="text" placeholder="Search all signals..." onkeydown="if(event.key==='Enter')_boardKeywordSearch(this.value);if(event.key==='Escape'){this.value='';_clearBoardHighlight()}" style="width:220px;padding:6px 28px 6px 10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:11px;outline:none;backdrop-filter:blur(8px);transition:border-color 0.15s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+                                <span onclick="_boardKeywordSearch(document.getElementById('board-keyword-search').value)" style="position:absolute;right:8px;cursor:pointer;font-size:12px;color:var(--text-muted)" title="Search">🔍</span>
+                            </div>
+                            <span id="board-search-count" style="font-size:10px;color:var(--text-muted);white-space:nowrap"></span>
+                        </div>
                         <div id="sig-graph-controls" style="display:none;position:absolute;bottom:12px;left:12px;right:12px">
                             <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:space-between">
                                 <div style="display:flex;gap:3px;align-items:center">
@@ -5596,6 +5621,7 @@
 
         <!-- PANE 3: Signal Detail -->
         <div class="signals-detail" id="signals-detail">
+            <div class="signals-detail-resize" id="signals-detail-resize"></div>
             <div class="signals-detail-header">
                 <span class="signals-detail-title">Thread Detail</span>
                 <button class="signals-detail-close" onclick="closeSignalDetail()" style="display:none">&times;</button>
@@ -13889,6 +13915,40 @@ function _renderDomainBadges(raw, fontSize) {
     }).join(' ');
 }
 
+// ── Detail pane resize + persistence ──
+(function() {
+    const saved = localStorage.getItem('sig_detail_width');
+    if (saved) document.documentElement.style.setProperty('--sig-detail-width', saved + 'px');
+
+    let resizing = false;
+    const handle = document.getElementById('signals-detail-resize');
+    const pane = document.getElementById('signals-detail');
+    if (!handle || !pane) return;
+
+    handle.addEventListener('mousedown', e => {
+        e.preventDefault();
+        resizing = true;
+        handle.classList.add('active');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    });
+    document.addEventListener('mousemove', e => {
+        if (!resizing) return;
+        const parentRight = pane.parentElement.getBoundingClientRect().right;
+        const newWidth = Math.min(700, Math.max(280, parentRight - e.clientX));
+        pane.style.width = newWidth + 'px';
+    });
+    document.addEventListener('mouseup', () => {
+        if (!resizing) return;
+        resizing = false;
+        handle.classList.remove('active');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        const w = parseInt(pane.style.width);
+        if (w) localStorage.setItem('sig_detail_width', w);
+    });
+})();
+
 let _signalsCache = [];
 let _threadsCache = [];
 let _signalsDomainFilter = 'all';
@@ -14423,6 +14483,8 @@ function _filterThreadSignals(query) {
             el.style.opacity = '';
             el.style.order = '';
             _removeHighlights(el);
+            const hint = el.querySelector('.body-match-hint');
+            if (hint) hint.remove();
         });
         if (countEl) countEl.textContent = '';
         if (actionsEl) actionsEl.style.display = 'none';
@@ -14449,6 +14511,18 @@ function _filterThreadSignals(query) {
             _threadSearchMatchIds.add(sigId);
             matchCount++;
             _applyHighlights(el, _threadSearchQuery);
+            // Show "match in body" hint if only body matched (not title)
+            let hint = el.querySelector('.body-match-hint');
+            if (!titleMatch && bodyMatch) {
+                if (!hint) {
+                    hint = document.createElement('div');
+                    hint.className = 'body-match-hint';
+                    hint.style.cssText = 'font-size:9px;color:var(--purple);margin-top:2px;cursor:pointer';
+                    hint.textContent = '↳ match in article body — click to expand';
+                    hint.onclick = (e) => { e.stopPropagation(); _toggleSignalArticle(sigId, el); };
+                    el.querySelector('[style*="min-width:0"]')?.appendChild(hint);
+                }
+            } else if (hint) { hint.remove(); }
         } else {
             el.style.opacity = '0.2';
             el.style.order = '';
@@ -14629,10 +14703,93 @@ function _highlightEntityOnBoard(entityType, entityValue) {
 
 function _clearBoardHighlight() {
     _activeBoardHighlight = null;
-    document.querySelectorAll('.graph-node').forEach(n => n.style.filter = '');
+    _activeBoardKeyword = null;
+    document.querySelectorAll('.graph-node').forEach(n => {
+        n.style.filter = '';
+        // Remove match count badges
+        const badge = n.querySelector('.board-match-badge');
+        if (badge) badge.remove();
+    });
     document.querySelectorAll('.ent-chip-active').forEach(c => c.classList.remove('ent-chip-active'));
     const sel = document.getElementById('sig-graph-selection');
     if (sel) sel.innerHTML = '';
+    const countEl = document.getElementById('board-search-count');
+    if (countEl) countEl.textContent = '';
+}
+
+let _activeBoardKeyword = null;
+
+function _boardKeywordSearch(query) {
+    query = (query || '').trim();
+    if (!query || query.length < 2) {
+        _clearBoardHighlight();
+        return;
+    }
+
+    // Toggle off if same query
+    if (_activeBoardKeyword === query.toLowerCase()) {
+        _clearBoardHighlight();
+        const input = document.getElementById('board-keyword-search');
+        if (input) input.value = '';
+        return;
+    }
+
+    _activeBoardHighlight = null;
+    _activeBoardKeyword = query.toLowerCase();
+
+    const sel = document.getElementById('sig-graph-selection');
+    const countEl = document.getElementById('board-search-count');
+    if (sel) sel.innerHTML = `<span style="color:var(--accent)">Searching "${escHtml(query)}"...</span>`;
+
+    fetch(`/api/signals/search?q=${encodeURIComponent(query)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                if (sel) sel.innerHTML = `<span style="color:var(--red)">${escHtml(data.error)}</span>`;
+                return;
+            }
+
+            const matches = data.thread_matches || [];
+            const matchMap = {};
+            matches.forEach(m => { matchMap[m.thread_id] = m.match_count; });
+            const matchIds = new Set(Object.keys(matchMap).map(Number));
+
+            // Highlight matching nodes, dim others, add count badges
+            document.querySelectorAll('.graph-node').forEach(n => {
+                const nid = parseInt(n.dataset.nodeId);
+                // Remove old badges
+                const oldBadge = n.querySelector('.board-match-badge');
+                if (oldBadge) oldBadge.remove();
+
+                if (matchIds.has(nid)) {
+                    n.style.filter = 'brightness(1.5) drop-shadow(0 0 12px rgba(168,85,247,0.6))';
+                    // Add match count badge
+                    const badge = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                    badge.classList.add('board-match-badge');
+                    const r = 9;
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', 18); circle.setAttribute('cy', -18);
+                    circle.setAttribute('r', r); circle.setAttribute('fill', '#a855f7');
+                    badge.appendChild(circle);
+                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    text.setAttribute('x', 18); text.setAttribute('y', -14);
+                    text.setAttribute('text-anchor', 'middle'); text.setAttribute('fill', '#fff');
+                    text.setAttribute('font-size', '10'); text.setAttribute('font-weight', '700');
+                    text.setAttribute('pointer-events', 'none');
+                    text.textContent = matchMap[nid];
+                    badge.appendChild(text);
+                    n.appendChild(badge);
+                } else if (nid) {
+                    n.style.filter = 'brightness(0.3)';
+                }
+            });
+
+            if (countEl) countEl.textContent = `${data.total_signals} in ${data.total_threads} threads`;
+            if (sel) sel.innerHTML = `<span style="color:var(--accent)">🔍 "${escHtml(query)}" — ${data.total_signals} signals across ${data.total_threads} threads · <span style="cursor:pointer;text-decoration:underline" onclick="_clearBoardHighlight();document.getElementById('board-keyword-search').value=''">clear</span></span>`;
+        })
+        .catch(() => {
+            if (sel) sel.innerHTML = `<span style="color:var(--red)">Search failed</span>`;
+        });
 }
 
 function _proposeThreadSplit(threadId) {
@@ -14942,10 +15099,12 @@ function renderGraph(data) {
     const empty = document.getElementById('signals-graph-empty');
     const controls = document.getElementById('sig-graph-controls');
 
-    if (!data.nodes.length) { empty.style.display = 'flex'; return; }
+    const searchBar = document.getElementById('board-search-bar');
+    if (!data.nodes.length) { empty.style.display = 'flex'; if (searchBar) searchBar.style.display = 'none'; return; }
     empty.style.display = 'none';
     svg.style('display', 'block');
     controls.style.display = 'flex';
+    if (searchBar) searchBar.style.display = 'flex';
 
     // Show unassigned signal count
     const unassigned = data.unassigned_signals || 0;
@@ -15776,7 +15935,13 @@ function _toggleSignalArticle(signalId, el) {
         .then(r => r.json())
         .then(data => {
             if (data.ok && data.body) {
-                articleDiv.innerHTML = `<div style="padding:8px 0;font-size:11px;color:var(--text-secondary);line-height:1.5;border-left:2px solid var(--border);padding-left:10px;margin-top:6px">${escHtml(data.body).substring(0, 2000)}</div>`;
+                let bodyHtml = escHtml(data.body).substring(0, 2000);
+                // Apply search highlights if active
+                if (_threadSearchQuery) {
+                    const esc = _threadSearchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    bodyHtml = bodyHtml.replace(new RegExp(`(${esc})`, 'gi'), '<mark class="sig-search-hl" style="background:#a855f740;color:var(--text-primary);border-radius:2px;padding:0 1px">$1</mark>');
+                }
+                articleDiv.innerHTML = `<div style="padding:8px 0;font-size:11px;color:var(--text-secondary);line-height:1.5;border-left:2px solid var(--border);padding-left:10px;margin-top:6px">${bodyHtml}</div>`;
             } else {
                 articleDiv.innerHTML = `<div style="padding:8px;font-size:11px;color:var(--text-muted)">Could not load article text</div>`;
             }
@@ -16325,6 +16490,8 @@ function renderBoard(data) {
     empty.style.display = 'none';
     svg.style('display', 'block');
     controls.style.display = 'flex';
+    const searchBar2 = document.getElementById('board-search-bar');
+    if (searchBar2) searchBar2.style.display = 'flex';
 
     // Sync physics button state
     const physBtn = document.getElementById('board-physics-btn');

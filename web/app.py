@@ -2179,6 +2179,43 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True, "created": created})
 
+    @app.route("/api/signals/search", methods=["GET"])
+    def signals_keyword_search_api():
+        """Search signals by keyword across title + body, return thread matches with counts."""
+        q = request.args.get("q", "").strip()
+        if not q or len(q) < 2:
+            return jsonify({"error": "Query too short"}), 400
+
+        conn = get_connection(db_path)
+        like = f"%{q}%"
+        rows = conn.execute(
+            """SELECT s.id as signal_id, s.title, sci.cluster_id as thread_id
+               FROM signals s
+               JOIN signal_cluster_items sci ON sci.signal_id = s.id
+               JOIN signal_clusters sc ON sc.id = sci.cluster_id
+               WHERE sc.domain != 'narrative'
+                 AND (s.title LIKE ? COLLATE NOCASE OR s.body LIKE ? COLLATE NOCASE)
+               ORDER BY sci.cluster_id""",
+            (like, like),
+        ).fetchall()
+        conn.close()
+
+        # Group by thread
+        threads = {}
+        for r in rows:
+            tid = r["thread_id"]
+            if tid not in threads:
+                threads[tid] = {"thread_id": tid, "match_count": 0, "signals": []}
+            threads[tid]["match_count"] += 1
+            threads[tid]["signals"].append({"id": r["signal_id"], "title": r["title"]})
+
+        return jsonify({
+            "query": q,
+            "thread_matches": list(threads.values()),
+            "total_signals": len(rows),
+            "total_threads": len(threads),
+        })
+
     @app.route("/api/signals/entity-threads", methods=["GET"])
     def signals_entity_threads_api():
         """Find all thread IDs containing a specific entity."""
