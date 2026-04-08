@@ -14502,6 +14502,20 @@ function openThreadDetail(threadId) {
 let _threadSearchQuery = '';
 let _threadSearchMatchIds = new Set();
 
+// / key focuses the thread signal search input
+document.addEventListener('keydown', function(e) {
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Don't capture if user is typing in an input/textarea/select
+        const tag = document.activeElement?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        const searchInput = document.getElementById('thread-signal-search');
+        if (searchInput && searchInput.offsetParent !== null) {
+            e.preventDefault();
+            searchInput.focus();
+        }
+    }
+});
+
 function _filterThreadSignals(query) {
     _threadSearchQuery = (query || '').trim().toLowerCase();
     const container = document.getElementById('thread-signals-list');
@@ -15109,8 +15123,11 @@ function _clusterHighlightedNodes(unionIds) {
     const nodes = [];
     document.querySelectorAll('.graph-node').forEach(n => {
         const nid = parseInt(n.dataset.nodeId);
-        if (!nid || !unionIds.has(nid)) return;
-        const m = n.getAttribute('transform')?.match(/translate\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/);
+        if (!nid) return;
+        if (!unionIds.has(nid)) return;
+        const transform = n.getAttribute('transform');
+        if (!transform) return;
+        const m = transform.match(/translate\(\s*([-\d.e+]+)\s*[,\s]\s*([-\d.e+]+)\s*\)/);
         if (!m) return;
         const x = parseFloat(m[1]), y = parseFloat(m[2]);
         // Save original position if not already saved
