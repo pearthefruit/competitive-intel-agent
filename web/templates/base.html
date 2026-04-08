@@ -5543,57 +5543,19 @@
                             <button onclick="_zoomOutToPatterns()" style="padding:6px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;backdrop-filter:blur(8px)">← Back to threads</button>
                         </div>
                         <div id="sig-graph-pattern-label" style="display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;font-size:13px;font-weight:700;color:var(--text-primary);background:var(--bg-primary);padding:4px 12px;border-radius:6px;border:1px solid var(--border)"></div>
-                        <div id="sig-graph-controls" style="display:none;position:absolute;bottom:12px;left:12px;right:12px;display:flex;gap:8px;align-items:center;justify-content:space-between">
-                            <div style="display:flex;gap:4px;align-items:center">
-                                <button onclick="_boardAutoLayout()" id="board-autolayout-btn" style="height:28px;padding:0 10px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:10px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;margin-right:4px" title="Auto-arrange unpinned nodes">🔄 Auto-layout</button>
-                                <button onclick="_graphZoom(1.3)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom in">+</button>
-                                <button onclick="_graphZoom(0.7)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom out">−</button>
-                                <button onclick="_graphReset()" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Reset zoom">⟲</button>
-                                <button onclick="toggleGraphFullscreen()" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Fullscreen">⛶</button>
-                                <span style="font-size:9px;color:var(--text-muted);margin-left:4px">Spacing</span>
-                                <input type="range" id="graph-spacing" min="30" max="200" value="100" style="width:60px;height:14px;accent-color:var(--accent)" oninput="_adjustGraphSpacing(this.value)">
-                                <div style="position:relative;margin-left:6px">
-                                    <button onclick="_toggleGraphFilters()" id="sig-graph-filter-btn" style="height:28px;padding:0 10px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:10px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px" title="Filter graph">&#9881; Filters</button>
-                                    <div id="sig-graph-filter-popover" style="display:none;position:absolute;bottom:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:14px 16px;min-width:220px;z-index:20;box-shadow:0 8px 24px rgba(0,0,0,.5)">
-                                        <div style="font-size:11px;font-weight:700;color:var(--text-primary);margin-bottom:10px">Graph Filters</div>
-                                        <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-secondary);margin-bottom:8px">
-                                            <span style="min-width:70px">Min signals</span>
-                                            <input type="number" id="gf-min-signals" value="0" min="0" max="50" style="width:52px;padding:4px 6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--text-primary);font-size:11px">
-                                        </label>
-                                        <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-secondary);margin-bottom:8px">
-                                            <span style="min-width:70px">Max threads</span>
-                                            <input type="number" id="gf-limit" value="200" min="1" max="500" style="width:52px;padding:4px 6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--text-primary);font-size:11px">
-                                        </label>
-                                        <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-secondary);margin-bottom:8px">
-                                            <span style="min-width:70px">Domain</span>
-                                            <select id="gf-domain" style="flex:1;padding:4px 6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--text-primary);font-size:11px">
-                                                <option value="">All</option>
-                                                <option value="economics">Economics</option>
-                                                <option value="finance">Finance</option>
-                                                <option value="geopolitics">Geopolitics</option>
-                                                <option value="tech_ai">Tech / AI</option>
-                                                <option value="labor">Labor</option>
-                                                <option value="regulatory">Regulatory</option>
-                                            </select>
-                                        </label>
-                                        <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-secondary);margin-bottom:12px">
-                                            <span style="min-width:70px">Status</span>
-                                            <select id="gf-status" style="flex:1;padding:4px 6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--text-primary);font-size:11px">
-                                                <option value="all" selected>All</option>
-                                                <option value="active">Active only</option>
-                                                <option value="merged">Merged only</option>
-                                            </select>
-                                        </label>
-                                        <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-secondary);margin-bottom:12px;cursor:pointer">
-                                            <input type="checkbox" id="gf-physics" style="accent-color:var(--accent)">
-                                            <span>Live physics (force-directed)</span>
-                                        </label>
-                                        <button onclick="_applyGraphFilters()" style="width:100%;padding:6px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">Apply</button>
-                                    </div>
+                        <div id="sig-graph-controls" style="display:none;position:absolute;bottom:12px;left:12px;right:12px">
+                            <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:space-between">
+                                <div style="display:flex;gap:3px;align-items:center">
+                                    <button onclick="_boardAutoLayout()" id="board-autolayout-btn" style="height:26px;padding:0 8px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:9px;font-weight:600;cursor:pointer" title="Auto-arrange">🔄 Layout</button>
+                                    <button onclick="_toggleBoardPhysics()" id="board-physics-btn" style="height:26px;padding:0 8px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted);font-size:9px;font-weight:600;cursor:pointer" title="Toggle live physics">⚡ Physics</button>
+                                    <button onclick="_graphZoom(1.3)" style="width:26px;height:26px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom in">+</button>
+                                    <button onclick="_graphZoom(0.7)" style="width:26px;height:26px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom out">−</button>
+                                    <button onclick="_graphReset()" style="width:26px;height:26px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Reset zoom">⟲</button>
+                                    <button onclick="toggleGraphFullscreen()" style="width:26px;height:26px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Fullscreen">⛶</button>
                                 </div>
+                                <div id="sig-graph-selection" style="font-size:10px;color:var(--text-muted)"></div>
+                                <button id="sig-brainstorm-btn" onclick="openBrainstormMode()" style="display:none;padding:6px 14px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer">🧠 Brainstorm →</button>
                             </div>
-                            <div id="sig-graph-selection" style="font-size:11px;color:var(--text-muted)"></div>
-                            <button id="sig-brainstorm-btn" onclick="openBrainstormMode()" style="display:none;padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:8px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">🧠 Generate Insight →</button>
                         </div>
                     </div>
                 </div>
@@ -14604,30 +14566,27 @@ let _selectedThreadIds = new Set();
 let _graphMode = 'patterns'; // 'patterns' or 'signals'
 let _zoomedPatternId = null;
 
-function _toggleGraphFilters() {
-    const pop = document.getElementById('sig-graph-filter-popover');
-    if (pop.style.display === 'none') {
-        pop.style.display = 'block';
-        setTimeout(() => document.addEventListener('click', function _close(e) {
-            if (!pop.contains(e.target) && e.target.id !== 'sig-graph-filter-btn') {
-                pop.style.display = 'none';
-                document.removeEventListener('click', _close);
-            }
-        }), 0);
-    } else {
-        pop.style.display = 'none';
-    }
-}
+let _boardPhysicsOn = false;
+let _boardPhysicsSim = null;
 
-function _applyGraphFilters() {
-    document.getElementById('sig-graph-filter-popover').style.display = 'none';
-    // Update button to show active filter indicator
-    const minSig = parseInt(document.getElementById('gf-min-signals').value) || 0;
-    const domain = document.getElementById('gf-domain').value;
-    const btn = document.getElementById('sig-graph-filter-btn');
-    btn.style.borderColor = (minSig > 0 || domain) ? 'var(--accent)' : 'var(--border)';
-    btn.style.color = (minSig > 0 || domain) ? 'var(--accent)' : 'var(--text-secondary)';
-    loadGraph();
+function _toggleBoardPhysics() {
+    _boardPhysicsOn = !_boardPhysicsOn;
+    const btn = document.getElementById('board-physics-btn');
+    btn.style.background = _boardPhysicsOn ? 'var(--accent)' : 'var(--bg-tertiary)';
+    btn.style.color = _boardPhysicsOn ? '#fff' : 'var(--text-muted)';
+    btn.style.borderColor = _boardPhysicsOn ? 'var(--accent)' : 'var(--border)';
+
+    if (_boardPhysicsOn) {
+        loadBoard(); // re-render with physics enabled
+    } else {
+        // Stop simulation and save positions
+        if (_boardPhysicsSim) {
+            _boardPhysicsSim.stop();
+            _boardPhysicsSim = null;
+        }
+        if (_boardData) _saveBoardPositions(_boardData.nodes.filter(n => n.type !== 'narrative_thread' || true));
+        loadBoard(); // re-render static
+    }
 }
 
 function loadGraph() {
@@ -15999,6 +15958,14 @@ function renderBoard(data) {
     svg.style('display', 'block');
     controls.style.display = 'flex';
 
+    // Sync physics button state
+    const physBtn = document.getElementById('board-physics-btn');
+    if (physBtn) {
+        physBtn.style.background = _boardPhysicsOn ? 'var(--accent)' : 'var(--bg-tertiary)';
+        physBtn.style.color = _boardPhysicsOn ? '#fff' : 'var(--text-muted)';
+        physBtn.style.borderColor = _boardPhysicsOn ? 'var(--accent)' : 'var(--border)';
+    }
+
     svg.selectAll('*').remove();
     // Remove old notes
     container.querySelectorAll('.board-note').forEach(n => n.remove());
@@ -16292,21 +16259,26 @@ function renderBoard(data) {
             });
         });
 
-    // Physics mode — live force simulation
-    const physicsOn = document.getElementById('gf-physics')?.checked;
-    if (physicsOn) {
+    // Physics mode — live force simulation (toggle via button)
+    if (_boardPhysicsOn) {
+        // Stop any existing sim
+        if (_boardPhysicsSim) _boardPhysicsSim.stop();
         const threadNodes = nodes.filter(n => n.type !== 'narrative');
-        const sim = d3.forceSimulation(threadNodes)
+        _boardPhysicsSim = d3.forceSimulation(threadNodes)
             .force('link', d3.forceLink(edgeData).id(d => d.id).distance(100))
             .force('charge', d3.forceManyBody().strength(-120))
             .force('center', d3.forceCenter(width / 2, height / 2))
             .force('collision', d3.forceCollide().radius(d => nodeR(d) + 10));
-        sim.on('tick', () => {
+        _boardPhysicsSim.on('tick', () => {
             node.attr('transform', d => `translate(${d.x},${d.y})`);
             _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
+            // Update sibling lines too
+            zoomGroup.selectAll('line[stroke="#8b5cf6"]')
+                .attr('x1', function() { const d = d3.select(this).datum(); return d?.source?.x || 0; })
+                .attr('y1', function() { const d = d3.select(this).datum(); return d?.source?.y || 0; });
         });
-        // Store ref so drag can interact with it
-        svg.node().__boardSim = sim;
+    } else {
+        if (_boardPhysicsSim) { _boardPhysicsSim.stop(); _boardPhysicsSim = null; }
     }
 
     // Render sticky notes as HTML overlays (positioned in zoom-transformed space)
