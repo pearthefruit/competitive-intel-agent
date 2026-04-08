@@ -6143,24 +6143,24 @@ async function deleteCompany(nameEscaped, event) {
     d.innerHTML = nameEscaped;
     const name = d.textContent;
 
-    if (!confirm(`Delete "${name}" and all its analyses, lens scores, and events? This cannot be undone.`)) return;
-
+    _showConfirm(`Delete "${name}" and all its analyses, lens scores, and events? This cannot be undone.`, async () => {
     try {
         const resp = await fetch(`/api/dossiers/${encodeURIComponent(name)}/delete`, { method: 'POST' });
         const data = await resp.json();
         if (!resp.ok) {
-            alert(data.error || 'Delete failed');
+            _showToast(data.error || 'Delete failed', 'error');
             return;
         }
         openCompanies.delete(name);
         if (activeDossierName === name) activeDossierName = null;
         loadCompanies();
-        // Clear right pane if it was showing this company
         const rightContent = document.getElementById('right-content');
         if (rightContent && activeDossierName === null) rightContent.innerHTML = '';
+        _showToast(`Deleted "${name}"`, 'success');
     } catch (e) {
-        alert('Delete failed: ' + e.message);
+        _showToast('Delete failed: ' + e.message, 'error');
     }
+    }, { danger: true, confirmText: 'Delete' });
 }
 
 async function renameCompany(oldNameEscaped, event) {
@@ -6184,10 +6184,9 @@ async function renameCompany(oldNameEscaped, event) {
         try { data = JSON.parse(text); } catch (e) { data = { error: 'Server returned non-JSON response: ' + text.slice(0, 100) }; }
 
         if (!resp.ok) {
-            alert(data.error || 'Rename failed');
+            _showToast(data.error || 'Rename failed', 'error');
             return;
         }
-        // Update local state and refresh
         if (openCompanies.has(oldName)) {
             openCompanies.delete(oldName);
             openCompanies.add(newName);
@@ -6199,7 +6198,7 @@ async function renameCompany(oldNameEscaped, event) {
         }
     } catch (e) {
         console.error('Rename error:', e);
-        alert('An error occurred during rename: ' + e.message);
+        _showToast('Rename failed: ' + e.message, 'error');
     }
 }
 
@@ -6284,24 +6283,19 @@ async function renameReport(oldFilenameEscaped, event) {
         try { data = JSON.parse(text); } catch (e) { data = { error: 'Server returned non-JSON: ' + text.slice(0, 100) }; }
 
         if (!resp.ok) {
-            alert(data.error || 'Rename failed');
+            _showToast(data.error || 'Rename failed', 'error');
             return;
         }
-        
-        // Update local state
         if (currentReportFilename === oldFilename) {
             currentReportFilename = data.new_filename;
         }
-        
-        // Refresh UI
         loadCompanies();
-        // If the report was open, re-render it to update breadcrumbs etc
         if (currentReportFilename === data.new_filename) {
             openReport(data.new_filename);
         }
     } catch (e) {
         console.error('Rename report error:', e);
-        alert('An error occurred during report rename: ' + e.message);
+        _showToast('Rename failed: ' + e.message, 'error');
     }
 }
 
@@ -9139,9 +9133,9 @@ function toggleOverflowMenu(e) {
 function confirmDeleteReport() {
     document.getElementById('overflow-menu').classList.remove('open');
     const name = currentReportFilename || activeDossierName || 'this item';
-    if (confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) {
+    _showConfirm(`Delete "${name}"? This cannot be undone.`, () => {
         deleteCurrentReport();
-    }
+    }, { danger: true, confirmText: 'Delete' });
 }
 
 // Close overflow menu when clicking elsewhere
@@ -9238,12 +9232,14 @@ function _downloadBlob(blob, filename) {
 }
 
 async function deleteCurrentReport() {
-    if (!currentReportFilename || !confirm('Delete this report?')) return;
-    try {
-        await fetch(`/api/reports/${currentReportFilename}`, { method: 'DELETE' });
-        closeRightPane();
-        refreshSidebar();
-    } catch {}
+    if (!currentReportFilename) return;
+    _showConfirm('Delete this report?', async () => {
+        try {
+            await fetch(`/api/reports/${currentReportFilename}`, { method: 'DELETE' });
+            closeRightPane();
+            refreshSidebar();
+        } catch {}
+    }, { danger: true, confirmText: 'Delete' });
 }
 
 // ===================== UTILS =====================
@@ -9857,30 +9853,34 @@ function selectCampaign(campaignId) {
     focusPane('pane-execution');
 }
 
-async function renameCampaign(campaignId) {
+function renameCampaign(campaignId, event) {
     const c = allCampaigns.find(x => x.id === campaignId);
-    const newName = prompt('Rename campaign:', c?.name || c?.niche || '');
-    if (!newName || !newName.trim()) return;
-    try {
-        await fetch(`/api/campaigns/${campaignId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: newName.trim() }),
-        });
-        await loadCampaigns();
-    } catch (e) { console.error('Rename failed:', e); }
+    const el = event?.target || document.body;
+    const rect = el.getBoundingClientRect();
+    _showInlineInput(rect.left, rect.bottom + 4, 'Campaign name', c?.name || c?.niche || '', async (newName) => {
+        if (!newName || !newName.trim()) return;
+        try {
+            await fetch(`/api/campaigns/${campaignId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName.trim() }),
+            });
+            await loadCampaigns();
+        } catch (e) { console.error('Rename failed:', e); }
+    });
 }
 
 async function deleteCampaign(campaignId) {
-    if (!confirm('Delete this campaign? Prospect data will be kept.')) return;
-    try {
-        await fetch(`/api/campaigns/${campaignId}`, { method: 'DELETE' });
-        if (activeCampaignId === campaignId) {
-            activeCampaignId = null;
-            _resetAllPanes();
-        }
-        await loadCampaigns();
-    } catch (e) { console.error('Delete failed:', e); }
+    _showConfirm('Delete this campaign? Prospect data will be kept.', async () => {
+        try {
+            await fetch(`/api/campaigns/${campaignId}`, { method: 'DELETE' });
+            if (activeCampaignId === campaignId) {
+                activeCampaignId = null;
+                _resetAllPanes();
+            }
+            await loadCampaigns();
+        } catch (e) { console.error('Delete failed:', e); }
+    }, { danger: true, confirmText: 'Delete' });
 }
 
 // --- Pane helpers ---
@@ -12753,10 +12753,9 @@ async function _sendToResearch(lensSelectId) {
         });
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
-            alert(err.error || 'Failed to send');
+            _showToast(err.error || 'Failed to send', 'error');
             return;
         }
-        // Switch to Research module and pre-fill chat with scoring query
         switchModule('research');
         refreshSidebar();
         switchLeftTab('chats');
@@ -12795,7 +12794,7 @@ async function _sendToResearch(lensSelectId) {
         _selectedForResearch.clear();
     } catch (e) {
         console.error('Send to research failed:', e);
-        alert('Failed: ' + e.message);
+        _showToast('Failed: ' + e.message, 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Send to Research'; }
     }
@@ -13737,8 +13736,8 @@ function _gatherSurveyAnswers() {
 
 async function icpWizardGenerate() {
     const answers = _gatherSurveyAnswers();
-    if (!answers.customer_type) { alert('Please select who you sell to (B2B, B2C, or Both).'); _icpWizardStep = 0; _updateWizardStepUI(); return; }
-    if (!answers.product) { alert('Please describe what your company does.'); _icpWizardStep = 1; _updateWizardStepUI(); return; }
+    if (!answers.customer_type) { _showToast('Please select who you sell to (B2B, B2C, or Both)', 'warn'); _icpWizardStep = 0; _updateWizardStepUI(); return; }
+    if (!answers.product) { _showToast('Please describe what your company does', 'warn'); _icpWizardStep = 1; _updateWizardStepUI(); return; }
 
     const genBtn = document.getElementById('icp-generate-btn');
     const reviewContent = document.getElementById('icp-review-content');
@@ -13777,7 +13776,7 @@ async function icpWizardSave() {
 
     // Read user edits from the review step
     const name = (document.getElementById('icp-review-name')?.value || '').trim();
-    if (!name) { alert('Please enter a profile name.'); return; }
+    if (!name) { _showToast('Please enter a profile name', 'warn'); return; }
 
     const config = JSON.parse(JSON.stringify(_icpGeneratedConfig)); // deep copy
     config.icp_definition = document.getElementById('icp-review-definition')?.value || config.icp_definition;
@@ -13833,7 +13832,7 @@ async function icpWizardSave() {
     } catch (e) {
         console.error('ICP save failed:', e);
         if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save & Activate'; }
-        alert('Failed to save ICP profile. Please try again.');
+        _showToast('Failed to save ICP profile. Please try again.', 'error');
     }
 }
 
@@ -15268,14 +15267,15 @@ function _executeThreadSplit(threadId) {
 }
 
 function _deleteThread(threadId) {
-    if (!confirm('Delete this thread? Signals will be unlinked but not deleted.')) return;
-    fetch('/api/signals/threads/' + threadId, { method: 'DELETE' })
-        .then(r => r.json())
-        .then(() => {
-            closeSignalDetail();
-            loadSignals();
-            if (_signalTab === 'graph') loadBoard();
-        });
+    _showConfirm('Delete this thread? Signals will be unlinked but not deleted.', () => {
+        fetch('/api/signals/threads/' + threadId, { method: 'DELETE' })
+            .then(r => r.json())
+            .then(() => {
+                closeSignalDetail();
+                loadSignals();
+                if (_signalTab === 'graph') loadBoard();
+            });
+    }, { danger: true, confirmText: 'Delete' });
 }
 
 function _threadActionResearch(companyName) {
@@ -16422,22 +16422,22 @@ function _createPatternFromSelection() {
         return s ? s.title : '';
     }).filter(Boolean);
 
-    const title = prompt('Name this thread:', titles[0] ? titles[0].substring(0, 50) : 'New Thread');
-    if (!title) return;
-
-    fetch('/api/signals/patterns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, signal_ids: ids })
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.ok) {
-            _rawSelectedSignals.clear();
-            loadSignals();
-            // Switch to patterns tab to see the new pattern
-            setTimeout(() => switchSignalTab('threads'), 500);
-        }
+    const defaultTitle = titles[0] ? titles[0].substring(0, 50) : 'New Thread';
+    _showInlineInput(window.innerWidth / 2 - 100, window.innerHeight / 2, 'Thread title...', defaultTitle, (title) => {
+        if (!title) return;
+        fetch('/api/signals/patterns', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, signal_ids: ids })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                _rawSelectedSignals.clear();
+                loadSignals();
+                setTimeout(() => switchSignalTab('threads'), 500);
+            }
+        });
     });
 }
 
@@ -16524,7 +16524,7 @@ function runSignalScan() {
 
     // Get selected domains from checkboxes
     const selectedDomains = [...document.querySelectorAll('.scan-domain-cb:checked')].map(cb => cb.value);
-    if (!selectedDomains.length) { alert('Select at least one domain'); return; }
+    if (!selectedDomains.length) { _showToast('Select at least one domain', 'warn'); return; }
 
     // Reset execution data
     _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'collecting', startedAt: new Date().toISOString(), narrativeSearch: null };
@@ -16966,6 +16966,47 @@ function _finishResynth() {
 }
 
 // ===================== BOARD =====================
+
+// ── Native UI helpers (R8: no browser dialogs) ──
+
+/** Toast notification — replaces alert(). Auto-dismisses after duration. */
+function _showToast(message, type, duration) {
+    type = type || 'info';
+    duration = duration || 4000;
+    const colors = { error: '#ef4444', success: '#22c55e', info: 'var(--accent)', warn: '#eab308' };
+    const icons = { error: '✕', success: '✓', info: 'ℹ', warn: '⚠' };
+    const toast = document.createElement('div');
+    toast.style.cssText = `position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9999;padding:10px 20px;background:var(--bg-secondary);border:1px solid ${colors[type]};border-radius:8px;color:${colors[type]};font-size:12px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,.4);display:flex;align-items:center;gap:8px;opacity:0;transition:opacity 0.2s`;
+    toast.innerHTML = `<span style="font-size:14px">${icons[type]}</span><span style="color:var(--text-primary);font-weight:400">${escHtml(message)}</span>`;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.style.opacity = '1');
+    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 200); }, duration);
+}
+
+/** Confirm dialog — replaces confirm(). Calls onConfirm if user clicks Yes. */
+function _showConfirm(message, onConfirm, opts) {
+    opts = opts || {};
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:20px 24px;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,.5)';
+    const dangerColor = opts.danger ? '#ef4444' : 'var(--accent)';
+    box.innerHTML = `
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:12px">${escHtml(message)}</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="cf-cancel" style="padding:6px 14px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer">${opts.cancelText || 'Cancel'}</button>
+            <button class="cf-ok" style="padding:6px 14px;background:${dangerColor};border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">${opts.confirmText || 'Confirm'}</button>
+        </div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    const dismiss = () => overlay.remove();
+    box.querySelector('.cf-cancel').onclick = dismiss;
+    box.querySelector('.cf-ok').onclick = () => { dismiss(); onConfirm(); };
+    overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
+    document.addEventListener('keydown', function _esc(e) {
+        if (e.key === 'Escape') { dismiss(); document.removeEventListener('keydown', _esc); }
+    });
+}
 
 // Inline input popup — replaces browser prompt()
 function _showInlineInput(x, y, placeholder, defaultVal, onSubmit) {
@@ -18172,14 +18213,15 @@ function _finishNarrativeSearch(narrativeId, btn) {
 }
 
 function deleteNarrative(narrativeId) {
-    if (!confirm('Delete this narrative? Threads will be unlinked but not deleted.')) return;
-    fetch(`/api/narratives/${narrativeId}`, { method: 'DELETE' })
-        .then(r => r.json())
-        .then(() => {
-            _activeNarrativeId = null;
-            loadNarratives();
-            closeSignalDetail();
-        });
+    _showConfirm('Delete this narrative? Threads will be unlinked but not deleted.', () => {
+        fetch(`/api/narratives/${narrativeId}`, { method: 'DELETE' })
+            .then(r => r.json())
+            .then(() => {
+                _activeNarrativeId = null;
+                loadNarratives();
+                closeSignalDetail();
+            });
+    }, { danger: true, confirmText: 'Delete' });
 }
 
 </script>
