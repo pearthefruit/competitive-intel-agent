@@ -16391,42 +16391,119 @@ function _renderBrainstormLinks(text) {
     return html;
 }
 
+let _bsDrawerHistory = [];
+
 function _brainstormConceptClick(concept) {
-    // Add as a board highlight pill (stacked) — don't close brainstorm
-    if (typeof _boardKeywordSearch === 'function') {
-        // Queue the highlight — it will show when user switches to Board tab
-        fetch(`/api/signals/search?q=${encodeURIComponent(concept)}`)
-            .then(r => r.ok ? r.json() : null)
-            .then(data => {
-                if (!data || data.error) return;
-                const key = _hlKey('keyword', concept);
-                const existing = _boardHighlights.findIndex(h => h.key === key);
-                if (existing === -1) {
-                    const threadIds = new Set((data.thread_matches || []).map(m => m.thread_id));
-                    _boardHighlights.push({ kind: 'keyword', label: concept, icon: '🔍', threadIds, key });
-                    _applyBoardHighlights();
-                    _renderHighlightPills();
-                }
-            });
+    // Add as a board highlight pill (stacked)
+    fetch(`/api/signals/search?q=${encodeURIComponent(concept)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (!data || data.error) return;
+            // Add to board highlights
+            const key = _hlKey('keyword', concept);
+            if (_boardHighlights.findIndex(h => h.key === key) === -1) {
+                const threadIds = new Set((data.thread_matches || []).map(m => m.thread_id));
+                _boardHighlights.push({ kind: 'keyword', label: concept, icon: '🔍', threadIds, key });
+                _applyBoardHighlights();
+                _renderHighlightPills();
+            }
+            // Open drawer with results
+            _openBsDrawer(concept, data);
+        });
+}
+
+function _openBsDrawer(concept, data) {
+    const drawer = document.getElementById('bs-drawer');
+    const title = document.getElementById('bs-drawer-title');
+    const content = document.getElementById('bs-drawer-content');
+    if (!drawer) return;
+
+    // Push to history (but avoid duplicates at the end)
+    if (!_bsDrawerHistory.length || _bsDrawerHistory[_bsDrawerHistory.length - 1] !== concept) {
+        _bsDrawerHistory.push(concept);
     }
-    // Also show inline results in the brainstorm modal
-    const resultsArea = document.getElementById('bs-concept-results');
-    if (resultsArea) {
-        resultsArea.style.display = 'block';
-        resultsArea.innerHTML = `<div style="font-size:10px;color:var(--accent);padding:4px 0">Searching "${escHtml(concept)}"...</div>`;
-        fetch(`/api/signals/search?q=${encodeURIComponent(concept)}`)
-            .then(r => r.ok ? r.json() : null)
-            .then(data => {
-                if (!data) { resultsArea.innerHTML = ''; resultsArea.style.display = 'none'; return; }
-                const matches = data.thread_matches || [];
-                if (!matches.length) {
-                    resultsArea.innerHTML = `<div style="font-size:10px;color:var(--text-muted);padding:4px 0">No threads match "${escHtml(concept)}"</div>`;
-                    return;
-                }
-                resultsArea.innerHTML = `<div style="font-size:10px;font-weight:600;color:var(--accent);margin-bottom:4px">🔍 "${escHtml(concept)}" — ${data.total_signals} signals in ${matches.length} threads</div>`
-                    + matches.slice(0, 5).map(m => `<div style="font-size:10px;color:var(--text-secondary);padding:2px 0;cursor:pointer" onclick="closeBrainstorm();openThreadDetail(${m.thread_id})">${escHtml(m.signals[0]?.title || 'Thread ' + m.thread_id)} <span style="color:var(--text-muted)">(${m.match_count})</span></div>`).join('');
-            });
+
+    drawer.style.display = '';
+
+    // Header: back button if history > 1
+    const backBtn = _bsDrawerHistory.length > 1
+        ? `<span onclick="_bsDrawerBack()" style="cursor:pointer;color:var(--text-muted);font-size:11px;margin-right:6px">←</span>`
+        : '';
+    title.innerHTML = `${backBtn}<span style="color:var(--accent)">${escHtml(concept)}</span>`;
+
+    const matches = (data && data.thread_matches) || [];
+    if (!matches.length) {
+        content.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:8px 0">No threads match this concept</div>`;
+        return;
     }
+
+    // Thread results — each with domain color, signal count, and entities
+    let html = `<div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">${data.total_signals} signals in ${matches.length} threads</div>`;
+
+    html += matches.slice(0, 10).map(m => {
+        // Find thread data for domain color
+        const thread = (_threadsCache || []).find(t => t.id === m.thread_id);
+        const domColor = thread ? (_DOMAIN_COLORS[_parseDomains(thread.domain)[0]] || '#6b7280') : '#6b7280';
+        const threadTitle = thread ? thread.title : (m.signals[0]?.title || 'Thread ' + m.thread_id);
+        const sigCount = thread ? (thread.signal_count || 0) : m.match_count;
+
+        return `<div style="padding:8px;margin-bottom:6px;background:var(--bg-secondary);border:1px solid var(--border);border-left:3px solid ${domColor};border-radius:6px">
+            <div onclick="closeBrainstorm();openThreadDetail(${m.thread_id})" style="font-size:11px;font-weight:600;color:var(--text-primary);cursor:pointer;margin-bottom:4px;line-height:1.3">${escHtml(threadTitle)}</div>
+            <div style="font-size:9px;color:var(--text-muted);margin-bottom:4px">${m.match_count} match${m.match_count > 1 ? 'es' : ''} · ${sigCount} signals</div>
+            <div style="display:flex;flex-wrap:wrap;gap:3px">
+                ${(m.signals || []).slice(0, 3).map(s =>
+                    `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${escHtml(s.title.substring(0, 40))}</span>`
+                ).join('')}
+            </div>
+        </div>`;
+    }).join('');
+
+    // Related concepts from matching threads' entities
+    const relatedEntities = new Set();
+    matches.forEach(m => {
+        const thread = (_threadsCache || []).find(t => t.id === m.thread_id);
+        // We don't have entities in cache, but signal titles give keyword clues
+        (m.signals || []).forEach(s => {
+            // Extract bracketed concepts from title if any (won't have many but future-proofs)
+            const title = s.title || '';
+            title.replace(/\[\[([^\]]+)\]\]/g, (_, c) => { if (c.toLowerCase() !== concept.toLowerCase()) relatedEntities.add(c); });
+        });
+    });
+
+    // Add "explore related" section if we have entities
+    if (relatedEntities.size) {
+        html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+            <div style="font-size:9px;font-weight:600;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Related</div>
+            <div style="display:flex;flex-wrap:wrap;gap:3px">
+                ${[...relatedEntities].slice(0, 8).map(e =>
+                    `<span onclick="_brainstormConceptClick('${escHtml(e.replace(/'/g, "\\'"))}')" style="font-size:9px;color:var(--accent);background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);padding:2px 6px;border-radius:10px;cursor:pointer">${escHtml(e)}</span>`
+                ).join('')}
+            </div>
+        </div>`;
+    }
+
+    content.innerHTML = html;
+}
+
+function _bsDrawerBack() {
+    if (_bsDrawerHistory.length <= 1) return;
+    _bsDrawerHistory.pop(); // remove current
+    const prev = _bsDrawerHistory[_bsDrawerHistory.length - 1];
+    // Re-fetch for previous concept
+    fetch(`/api/signals/search?q=${encodeURIComponent(prev)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (data) {
+                _bsDrawerHistory.pop(); // _openBsDrawer will re-push
+                _openBsDrawer(prev, data);
+            }
+        });
+}
+
+function _closeBsDrawer() {
+    const drawer = document.getElementById('bs-drawer');
+    if (drawer) drawer.style.display = 'none';
+    _bsDrawerHistory = [];
 }
 
 function _investigateInline(btn, query) {
@@ -16547,6 +16624,7 @@ function openPastBrainstorm(brainstormId) {
 
 function closeBrainstorm() {
     document.getElementById('brainstorm-overlay').classList.remove('visible');
+    _closeBsDrawer();
     // Reload graph to show any new links
     if (_signalTab === 'graph') loadBoard();
     // Refresh brainstorm list in sidebar
@@ -18424,10 +18502,18 @@ function deleteNarrative(narrativeId) {
             </div>
             <button class="exec-overlay-close" onclick="closeBrainstorm()">&times;</button>
         </div>
-        <div id="brainstorm-content" style="padding:24px 0">
-            <div style="text-align:center;color:var(--text-muted);padding:40px">Generating hypotheses...</div>
+        <div style="display:flex;flex:1;overflow:hidden">
+            <div id="brainstorm-content" style="flex:1;padding:24px 0;overflow-y:auto">
+                <div style="text-align:center;color:var(--text-muted);padding:40px">Generating hypotheses...</div>
+            </div>
+            <div id="bs-drawer" style="display:none;width:300px;flex-shrink:0;border-left:1px solid var(--border);background:var(--bg-primary);overflow-y:auto">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--bg-primary);z-index:1">
+                    <span id="bs-drawer-title" style="font-size:11px;font-weight:700;color:var(--text-secondary)">Explore</span>
+                    <button onclick="_closeBsDrawer()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:0 2px">✕</button>
+                </div>
+                <div id="bs-drawer-content" style="padding:10px 14px"></div>
+            </div>
         </div>
-        <div id="bs-concept-results" style="display:none;position:sticky;bottom:0;padding:8px 16px;background:var(--bg-primary);border-top:1px solid var(--border);max-height:120px;overflow-y:auto"></div>
     </div>
 </div>
 
