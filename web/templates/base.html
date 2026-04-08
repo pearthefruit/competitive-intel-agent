@@ -14696,12 +14696,6 @@ function _openReviewQueue(offset) {
                     </div>`;
                 }).join('');
 
-                // Thread dropdown — sorted alphabetically
-                const sortedThreads = [...threads].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-                const optionsHtml = sortedThreads.map(t =>
-                    `<option value="${t.id}">${escHtml(t.title.substring(0, 45))} (${t.signal_count || 0})</option>`
-                ).join('');
-
                 return `<div id="rq-item-${sig.id}" style="padding:12px 16px;border-bottom:1px solid var(--border)">
                     <div style="display:flex;align-items:start;justify-content:space-between;gap:8px;margin-bottom:8px">
                         <div style="flex:1;min-width:0">
@@ -14717,11 +14711,13 @@ function _openReviewQueue(offset) {
                     <div style="display:flex;flex-direction:column;gap:4px">
                         ${suggHtml || '<div style="font-size:10px;color:var(--text-muted);padding:4px 0">No thread suggestions</div>'}
                         <div style="position:relative">
-                            <input type="text" placeholder="Search threads..." id="rq-search-${sig.id}" oninput="_filterRqDropdown(${sig.id}, this.value)" style="width:100%;padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:10px;outline:none;box-sizing:border-box" />
-                            <select id="rq-select-${sig.id}" onchange="if(this.value){_assignFromQueue(${sig.id},parseInt(this.value),this.parentElement);this.value=''}" style="width:100%;padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer;appearance:auto;margin-top:2px">
-                                <option value="">All threads (${sortedThreads.length})</option>
-                                ${optionsHtml}
-                            </select>
+                            <div onclick="_toggleRqDropdown(${sig.id})" style="padding:5px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                                <span>Other thread...</span><span style="font-size:8px">▼</span>
+                            </div>
+                            <div id="rq-dd-${sig.id}" style="display:none;position:absolute;left:0;right:0;bottom:100%;z-index:20;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;margin-bottom:2px;box-shadow:0 -4px 12px rgba(0,0,0,0.4);overflow:hidden">
+                                <input type="text" placeholder="Search..." id="rq-search-${sig.id}" oninput="_filterRqDropdown(${sig.id}, this.value)" style="width:100%;padding:6px 10px;background:var(--bg-tertiary);border:none;border-bottom:1px solid var(--border);color:var(--text-primary);font-size:10px;outline:none;box-sizing:border-box" />
+                                <div id="rq-list-${sig.id}" style="max-height:150px;overflow-y:auto"></div>
+                            </div>
                         </div>
                     </div>
                 </div>`;
@@ -14813,15 +14809,46 @@ function _undoDismiss(signalId, btn) {
     });
 }
 
+function _toggleRqDropdown(sigId) {
+    // Close any other open dropdowns
+    document.querySelectorAll('[id^="rq-dd-"]').forEach(dd => {
+        if (dd.id !== `rq-dd-${sigId}`) dd.style.display = 'none';
+    });
+    const dd = document.getElementById(`rq-dd-${sigId}`);
+    if (!dd) return;
+    const isOpen = dd.style.display !== 'none';
+    dd.style.display = isOpen ? 'none' : '';
+    if (!isOpen) {
+        _renderRqList(sigId, '');
+        const input = document.getElementById(`rq-search-${sigId}`);
+        if (input) { input.value = ''; setTimeout(() => input.focus(), 50); }
+    }
+}
+
 function _filterRqDropdown(sigId, query) {
-    const select = document.getElementById(`rq-select-${sigId}`);
-    if (!select) return;
+    _renderRqList(sigId, query);
+}
+
+function _renderRqList(sigId, query) {
+    const list = document.getElementById(`rq-list-${sigId}`);
+    if (!list) return;
     const q = (query || '').toLowerCase();
     const threads = [...(_threadsCache || [])].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
     const filtered = q ? threads.filter(t => (t.title || '').toLowerCase().includes(q)) : threads;
-    select.innerHTML = `<option value="">${q ? `${filtered.length} matching` : `All threads (${threads.length})`}</option>`
-        + filtered.map(t => `<option value="${t.id}">${escHtml(t.title.substring(0, 45))} (${t.signal_count || 0})</option>`).join('');
+    list.innerHTML = filtered.map(t =>
+        `<div onclick="_assignFromQueue(${sigId}, ${t.id}, this);document.getElementById('rq-dd-${sigId}').style.display='none'" style="padding:5px 10px;font-size:10px;color:var(--text-secondary);cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;transition:background 0.1s" onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background=''">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title)}</span>
+            <span style="flex-shrink:0;font-size:9px;color:var(--text-muted);margin-left:6px">${t.signal_count || 0}</span>
+        </div>`
+    ).join('') || '<div style="padding:8px 10px;font-size:10px;color:var(--text-muted)">No matches</div>';
 }
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('[id^="rq-dd-"]') && !e.target.closest('[onclick*="_toggleRqDropdown"]')) {
+        document.querySelectorAll('[id^="rq-dd-"]').forEach(dd => dd.style.display = 'none');
+    }
+});
 
 function _runCustomSearch() {
     const input = document.getElementById('custom-search-input');
