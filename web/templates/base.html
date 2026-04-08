@@ -17039,6 +17039,10 @@ function renderBoard(data) {
             node.select('.board-select-ring').attr('opacity', 0);
             _updateBoardSelectionBar(nodes);
         }
+        // Dismiss detail pane on empty board click
+        if (_activeThreadId || _activeSignalId) {
+            closeSignalDetail();
+        }
     });
 
     // Set up drag-to-reassign drop targets
