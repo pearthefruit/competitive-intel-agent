@@ -2511,13 +2511,14 @@ def create_app(db_path="intel.db"):
         """Re-run pattern detection on unassigned signals. SSE-streamed."""
         def generate():
             from agents.signals_synthesize import synthesize_into_threads, enrich_thread_signals, extract_entities
+            from agents.signals_classify import keyword_assign
 
             conn = get_connection(db_path)
             # Get signals NOT yet assigned to any pattern
             unassigned = conn.execute(
                 """SELECT * FROM signals
                    WHERE id NOT IN (SELECT signal_id FROM signal_cluster_items)
-                   ORDER BY collected_at DESC LIMIT 200"""
+                   ORDER BY collected_at DESC LIMIT 500"""
             ).fetchall()
             unassigned = [dict(r) for r in unassigned]
 
@@ -2537,25 +2538,47 @@ def create_app(db_path="intel.db"):
 
             def _run():
                 try:
-                    # Process unassigned signals in batches of 25 (small for Groq/Cerebras context)
+                    # ── Tier 1: TF-IDF keyword assignment (instant, no LLM) ──
+                    _cb("status", {"text": f"Tier 1: keyword matching {len(unassigned)} signals..."})
+                    kw_result = keyword_assign(conn, unassigned, progress_cb=_cb)
+                    kw_assigned = len(kw_result["assigned"])
+                    needs_llm = kw_result["needs_llm"]
+                    needs_review = kw_result["needs_review"]
+                    _cb("status", {"text": f"Tier 1 done: {kw_assigned} auto-assigned, {len(needs_llm)} for LLM, {len(needs_review)} for review"})
+
+                    # ── Tier 2: LLM assignment for medium-confidence signals (batches of 10) ──
                     total_new = 0
-                    total_assigned = 0
-                    for i in range(0, len(unassigned), 25):
-                        batch = unassigned[i:i+25]
-                        _cb("status", {"text": f"Batch {i//25 + 1}: analyzing {len(batch)} signals..."})
-                        result = synthesize_into_threads(conn, batch, progress_cb=_cb)
-                        total_new += result.get("new_thread_count", 0)
-                        total_assigned += result.get("assigned_count", 0)
-                    result_box[0] = {"new_thread_count": total_new, "assigned_count": total_assigned}
+                    total_llm_assigned = 0
+                    if needs_llm:
+                        _cb("status", {"text": f"Tier 2: LLM analyzing {len(needs_llm)} signals..."})
+                        for i in range(0, len(needs_llm), 10):
+                            batch = needs_llm[i:i+10]
+                            batch_num = i // 10 + 1
+                            total_batches = (len(needs_llm) + 9) // 10
+                            _cb("status", {"text": f"Tier 2 batch {batch_num}/{total_batches}: {len(batch)} signals..."})
+                            result = synthesize_into_threads(conn, batch, progress_cb=_cb)
+                            total_new += result.get("new_thread_count", 0)
+                            total_llm_assigned += result.get("assigned_count", 0)
+
+                    total_assigned = kw_assigned + total_llm_assigned
+                    result_box[0] = {
+                        "new_thread_count": total_new,
+                        "assigned_count": total_assigned,
+                        "keyword_assigned": kw_assigned,
+                        "llm_assigned": total_llm_assigned,
+                        "needs_review": len(needs_review),
+                    }
+
                     _cb("status", {"text": "Enriching articles..."})
                     enrich_thread_signals(conn, progress_cb=_cb)
                     _cb("status", {"text": "Extracting entities..."})
-                    # Extract entities from newly assigned signals
                     newly_assigned = conn.execute(
                         """SELECT * FROM signals WHERE id IN (SELECT signal_id FROM signal_cluster_items) ORDER BY collected_at DESC LIMIT 200"""
                     ).fetchall()
                     extract_entities(conn, [dict(r) for r in newly_assigned], progress_cb=_cb)
                 except Exception as exc:
+                    import traceback
+                    traceback.print_exc()
                     synth_q.put(("error", {"text": str(exc)}))
                 finally:
                     synth_q.put(("_done", {}))
@@ -2573,14 +2596,94 @@ def create_app(db_path="intel.db"):
                     break
                 yield f"data: {json.dumps({'type': ev_type, **ev_data})}\n\n"
 
-            t.join(timeout=120)
+            t.join(timeout=300)
             sr = result_box[0] or {}
-            yield f"data: {json.dumps({'type': 'resynth_complete', 'new_patterns': sr.get('new_thread_count', 0), 'assigned': sr.get('assigned_count', 0)})}\n\n"
+            yield f"data: {json.dumps({'type': 'resynth_complete', 'new_patterns': sr.get('new_thread_count', 0), 'assigned': sr.get('assigned_count', 0), 'keyword_assigned': sr.get('keyword_assigned', 0), 'llm_assigned': sr.get('llm_assigned', 0), 'needs_review': sr.get('needs_review', 0)})}\n\n"
 
             conn.close()
 
         return Response(generate(), mimetype="text/event-stream",
                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.route("/api/signals/review-queue", methods=["GET"])
+    def signals_review_queue_api():
+        """Get unassigned signals with TF-IDF thread suggestions for user review."""
+        from agents.signals_classify import score_signals, build_thread_profiles
+
+        limit = int(request.args.get("limit", 50))
+        offset = int(request.args.get("offset", 0))
+
+        conn = get_connection(db_path)
+        unassigned = conn.execute(
+            """SELECT * FROM signals
+               WHERE id NOT IN (SELECT signal_id FROM signal_cluster_items)
+               ORDER BY collected_at DESC LIMIT ? OFFSET ?""",
+            (limit, offset),
+        ).fetchall()
+        unassigned = [dict(r) for r in unassigned]
+
+        total_unassigned = conn.execute(
+            "SELECT COUNT(*) as c FROM signals WHERE id NOT IN (SELECT signal_id FROM signal_cluster_items)"
+        ).fetchone()["c"]
+
+        if not unassigned:
+            conn.close()
+            return jsonify({"signals": [], "total": total_unassigned})
+
+        profile = build_thread_profiles(conn)
+        scored = score_signals(conn, unassigned, profile)
+        conn.close()
+
+        # Return signals with their top 3 thread suggestions
+        items = []
+        for sc in scored:
+            sig = next((s for s in unassigned if s["id"] == sc["signal_id"]), {})
+            items.append({
+                "id": sc["signal_id"],
+                "title": sc["signal_title"],
+                "source_name": sig.get("source_name", sig.get("source", "")),
+                "published_at": sig.get("published_at", ""),
+                "domain": sig.get("domain", ""),
+                "confidence": sc["confidence"],
+                "suggestions": sc["scores"][:3],
+            })
+
+        return jsonify({"signals": items, "total": total_unassigned, "offset": offset, "limit": limit})
+
+    @app.route("/api/signals/review-queue/assign", methods=["POST"])
+    def signals_review_assign_api():
+        """Assign a signal to a thread from the review queue."""
+        from db import link_signal_to_cluster
+
+        data = request.json or {}
+        signal_id = data.get("signal_id")
+        thread_id = data.get("thread_id")
+        if not signal_id or not thread_id:
+            return jsonify({"error": "signal_id and thread_id required"}), 400
+
+        conn = get_connection(db_path)
+        link_signal_to_cluster(conn, thread_id, signal_id)
+        conn.execute(
+            "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (thread_id,),
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/signals/review-queue/dismiss", methods=["POST"])
+    def signals_review_dismiss_api():
+        """Mark a signal as noise (dismiss from review queue)."""
+        data = request.json or {}
+        signal_id = data.get("signal_id")
+        if not signal_id:
+            return jsonify({"error": "signal_id required"}), 400
+
+        conn = get_connection(db_path)
+        conn.execute("UPDATE signals SET signal_status = 'noise' WHERE id = ?", (signal_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
 
     @app.route("/api/signals/scan-history", methods=["GET"])
     def signals_scan_history_api():

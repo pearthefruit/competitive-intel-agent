@@ -14008,6 +14008,7 @@ function loadSignals() {
         renderSignalFeed();
         renderThreadFeed();
         _renderBrainstormList(brainstormData.brainstorms || []);
+        _loadReviewQueueCount();
     }).catch(e => console.error('[signals] load error:', e));
 }
 
@@ -14188,7 +14189,15 @@ function renderThreadFeed() {
         return;
     }
 
-    const html = filtered.map(t => {
+    // Review queue badge — show count of unassigned signals
+    const reviewBadge = `<div id="review-queue-badge" style="padding:8px 12px;border-bottom:1px solid var(--border);display:none">
+        <button onclick="_openReviewQueue()" style="width:100%;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--purple);border-radius:8px;color:var(--purple);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:space-between">
+            <span>📋 Review Queue</span>
+            <span id="review-queue-count" style="background:var(--purple);color:#fff;padding:1px 7px;border-radius:10px;font-size:10px"></span>
+        </button>
+    </div>`;
+
+    const html = reviewBadge + filtered.map(t => {
         const m = t.momentum || {};
         const mDir = m.direction || 'stable';
         const mLabel = {accelerating: '↑ Accelerating', stable: '→ Stable', fading: '↓ Decelerating'}[mDir] || '→ Stable';
@@ -14611,6 +14620,139 @@ function _buildThreadActions(thread, entities) {
     actions.push(`<button onclick="_deleteThread(${thread.id})" style="${btnStyle}background:none;border:1px solid var(--border);color:var(--text-muted);font-size:10px">🗑 Delete thread</button>`);
 
     return actions.join('');
+}
+
+// ── Review Queue ──
+let _reviewQueueData = [];
+
+function _loadReviewQueueCount() {
+    fetch('/api/signals/review-queue?limit=1')
+        .then(r => r.json())
+        .then(data => {
+            const badge = document.getElementById('review-queue-badge');
+            const count = document.getElementById('review-queue-count');
+            if (badge && data.total > 0) {
+                badge.style.display = '';
+                if (count) count.textContent = data.total;
+            } else if (badge) {
+                badge.style.display = 'none';
+            }
+        })
+        .catch(() => {});
+}
+
+function _openReviewQueue(offset) {
+    offset = offset || 0;
+    const detailBody = _showDetailPane();
+    detailBody.innerHTML = '<div style="padding:20px;color:var(--text-muted);font-size:12px">Loading review queue...</div>';
+
+    // Update header title
+    const titleEl = document.querySelector('.signals-detail-title');
+    if (titleEl) titleEl.textContent = 'Review Queue';
+
+    fetch(`/api/signals/review-queue?limit=20&offset=${offset}`)
+        .then(r => r.json())
+        .then(data => {
+            _reviewQueueData = data.signals || [];
+            const total = data.total || 0;
+
+            if (!_reviewQueueData.length) {
+                detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted)">
+                    <div style="font-size:32px;margin-bottom:12px">✓</div>
+                    <div>No signals to review</div>
+                </div>`;
+                return;
+            }
+
+            // Get thread list for the "assign to" dropdowns
+            const threads = _threadsCache || [];
+
+            let html = `<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+                <div style="font-size:11px;color:var(--text-muted)">${offset + 1}–${Math.min(offset + _reviewQueueData.length, total)} of ${total} unassigned</div>
+                <div style="display:flex;gap:4px">
+                    ${offset > 0 ? `<button onclick="_openReviewQueue(${offset - 20})" style="padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:10px;cursor:pointer">← Prev</button>` : ''}
+                    ${offset + 20 < total ? `<button onclick="_openReviewQueue(${offset + 20})" style="padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:10px;cursor:pointer">Next →</button>` : ''}
+                </div>
+            </div>`;
+
+            html += _reviewQueueData.map((sig, i) => {
+                const dateStr = sig.published_at ? sig.published_at.substring(0, 10) : '';
+                const confColor = sig.confidence === 'high' ? 'var(--green)' : sig.confidence === 'medium' ? '#eab308' : 'var(--text-muted)';
+
+                // Thread suggestion buttons
+                const suggHtml = (sig.suggestions || []).map(s => {
+                    const pct = Math.round(s.score * 100);
+                    return `<button onclick="_assignFromQueue(${sig.id}, ${s.thread_id}, this)" style="padding:3px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;font-size:10px;color:var(--text-secondary);cursor:pointer;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" title="${escHtml(s.thread_title)} (${pct}%)">${escHtml(s.thread_title.substring(0, 35))} <span style="color:var(--text-muted)">${pct}%</span></button>`;
+                }).join('');
+
+                // Full thread dropdown for manual assignment
+                const optionsHtml = threads.map(t =>
+                    `<option value="${t.id}">${escHtml(t.title.substring(0, 40))} (${t.signal_count || 0})</option>`
+                ).join('');
+
+                return `<div id="rq-item-${sig.id}" style="padding:10px 16px;border-bottom:1px solid var(--border)">
+                    <div style="display:flex;align-items:start;justify-content:space-between;gap:8px">
+                        <div style="flex:1;min-width:0">
+                            <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:3px">${escHtml(sig.title)}</div>
+                            <div style="font-size:10px;color:var(--text-muted);display:flex;gap:8px">
+                                <span>${escHtml(sig.source_name)}</span>
+                                <span>${escHtml(dateStr)}</span>
+                                <span style="color:${confColor}">${sig.confidence}</span>
+                            </div>
+                        </div>
+                        <button onclick="_dismissFromQueue(${sig.id}, this)" style="flex-shrink:0;padding:2px 6px;background:none;border:1px solid var(--border);border-radius:4px;font-size:9px;color:var(--text-muted);cursor:pointer" title="Mark as noise">✕</button>
+                    </div>
+                    <div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">
+                        ${suggHtml || '<div style="font-size:10px;color:var(--text-muted)">No thread suggestions</div>'}
+                    </div>
+                    <div style="margin-top:4px;display:flex;gap:4px;align-items:center">
+                        <select onchange="if(this.value)_assignFromQueue(${sig.id},parseInt(this.value),this.parentElement)" style="flex:1;padding:3px 6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:9px">
+                            <option value="">Other thread...</option>
+                            ${optionsHtml}
+                        </select>
+                    </div>
+                </div>`;
+            }).join('');
+
+            detailBody.innerHTML = html;
+        });
+}
+
+function _assignFromQueue(signalId, threadId, el) {
+    fetch('/api/signals/review-queue/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signal_id: signalId, thread_id: threadId })
+    }).then(r => r.json()).then(data => {
+        if (data.ok) {
+            const item = document.getElementById(`rq-item-${signalId}`);
+            if (item) {
+                item.style.opacity = '0.3';
+                item.innerHTML = `<div style="font-size:11px;color:var(--green);padding:4px 0">✓ Assigned</div>`;
+            }
+            // Update count badge
+            const countEl = document.getElementById('review-queue-count');
+            if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
+        }
+    });
+}
+
+function _dismissFromQueue(signalId, el) {
+    fetch('/api/signals/review-queue/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signal_id: signalId })
+    }).then(r => r.json()).then(data => {
+        if (data.ok) {
+            const item = document.getElementById(`rq-item-${signalId}`);
+            if (item) {
+                item.style.opacity = '0.3';
+                item.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:4px 0">✕ Dismissed</div>`;
+            }
+            const countEl = document.getElementById('review-queue-count');
+            if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
+        }
+    });
 }
 
 function _runCustomSearch() {
