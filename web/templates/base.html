@@ -14696,8 +14696,9 @@ function _openReviewQueue(offset) {
                     </div>`;
                 }).join('');
 
-                // Full thread dropdown
-                const optionsHtml = threads.map(t =>
+                // Thread dropdown — sorted alphabetically
+                const sortedThreads = [...threads].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+                const optionsHtml = sortedThreads.map(t =>
                     `<option value="${t.id}">${escHtml(t.title.substring(0, 45))} (${t.signal_count || 0})</option>`
                 ).join('');
 
@@ -14715,10 +14716,13 @@ function _openReviewQueue(offset) {
                     </div>
                     <div style="display:flex;flex-direction:column;gap:4px">
                         ${suggHtml || '<div style="font-size:10px;color:var(--text-muted);padding:4px 0">No thread suggestions</div>'}
-                        <select onchange="if(this.value){_assignFromQueue(${sig.id},parseInt(this.value),this.parentElement);this.value=''}" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer;appearance:auto">
-                            <option value="">Other thread...</option>
-                            ${optionsHtml}
-                        </select>
+                        <div style="position:relative">
+                            <input type="text" placeholder="Search threads..." id="rq-search-${sig.id}" oninput="_filterRqDropdown(${sig.id}, this.value)" style="width:100%;padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:10px;outline:none;box-sizing:border-box" />
+                            <select id="rq-select-${sig.id}" onchange="if(this.value){_assignFromQueue(${sig.id},parseInt(this.value),this.parentElement);this.value=''}" style="width:100%;padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer;appearance:auto;margin-top:2px">
+                                <option value="">All threads (${sortedThreads.length})</option>
+                                ${optionsHtml}
+                            </select>
+                        </div>
                     </div>
                 </div>`;
             }).join('');
@@ -14807,6 +14811,16 @@ function _undoDismiss(signalId, btn) {
             if (countEl) countEl.textContent = parseInt(countEl.textContent || '0') + 1;
         }
     });
+}
+
+function _filterRqDropdown(sigId, query) {
+    const select = document.getElementById(`rq-select-${sigId}`);
+    if (!select) return;
+    const q = (query || '').toLowerCase();
+    const threads = [...(_threadsCache || [])].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    const filtered = q ? threads.filter(t => (t.title || '').toLowerCase().includes(q)) : threads;
+    select.innerHTML = `<option value="">${q ? `${filtered.length} matching` : `All threads (${threads.length})`}</option>`
+        + filtered.map(t => `<option value="${t.id}">${escHtml(t.title.substring(0, 45))} (${t.signal_count || 0})</option>`).join('');
 }
 
 function _runCustomSearch() {
