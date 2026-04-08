@@ -15332,13 +15332,27 @@ function _toggleBoardPhysics() {
     if (_boardPhysicsOn) {
         loadBoard(); // re-render with physics enabled
     } else {
-        // Stop simulation and save positions
+        // Stop simulation and freeze current positions
         if (_boardPhysicsSim) {
             _boardPhysicsSim.stop();
             _boardPhysicsSim = null;
         }
-        if (_boardData) _saveBoardPositions(_boardData.nodes.filter(n => n.type !== 'narrative_thread' || true));
-        loadBoard(); // re-render static
+        // Save ALL node positions from the simulation (not just pinned)
+        if (_boardData && _boardData.nodes) {
+            const allPositions = _boardData.nodes
+                .filter(n => n.x != null && n.y != null)
+                .map(n => {
+                    if (n.type === 'narrative') return { node_type: 'narrative', node_id: n.node_id, x: n.x, y: n.y, pinned: true };
+                    return { node_type: 'thread', node_id: n.id, x: n.x, y: n.y, pinned: true };
+                });
+            fetch('/api/board/positions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ positions: allPositions })
+            }).then(() => loadBoard());
+            return; // loadBoard called in .then()
+        }
+        loadBoard();
     }
 }
 
