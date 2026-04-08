@@ -15401,8 +15401,9 @@ function closeSignalDetail() {
 }
 
 // Structured execution data (persists for "View Last Execution" button)
-let _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'idle' };
+let _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'idle', narrativeSearch: null };
 let _execExpandedDomains = new Set(); // track which domain cards the user has expanded
+let _narrativeSearchReader = null; // persisted SSE reader for narrative search
 const _SIG_SOURCE_ICONS = { fred: '📈', google_news: '📰', reddit: '💬', hackernews: '🟧' };
 const _SIG_SOURCE_LABELS = { fred: 'FRED API', google_news: 'Google News', reddit: 'Reddit', hackernews: 'Hacker News' };
 
@@ -15709,6 +15710,47 @@ function _renderExecutionDetailInner(container) {
             <div style="font-size:11px;color:var(--text-secondary)">FAST_CHAIN extracts named entities (companies, sectors, geographies, people, regulations) from full article text. Company entities are fuzzy-matched against existing dossiers for cross-module linking.</div>
         </div>
     </div>`;
+
+    // Narrative search execution (if running or completed)
+    const ns = d.narrativeSearch;
+    if (ns) {
+        const nsPhase = ns.phase === 'complete' ? 'done' : 'running';
+        const stanceColors = { supporting: '#22c55e', contradicting: '#ef4444', neutral: '#6b7280' };
+        html += `<div style="margin-top:24px;padding-top:16px;border-top:2px solid var(--purple)">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                <span style="font-size:16px;font-weight:800;color:var(--text-primary)">📖 Narrative Search</span>
+                <span class="exec-step-badge ${nsPhase}">${ns.phase === 'complete' ? 'Complete' : 'Searching...'}</span>
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:12px">${ns.startedAt ? new Date(ns.startedAt).toLocaleString() : ''}</div>`;
+
+        // Render each query as a collapsible step
+        for (const q of (ns.queries || [])) {
+            const qStatus = q.found > 0 ? 'done' : (ns.phase === 'complete' ? 'done' : 'running');
+            html += `<div class="exec-step" style="margin-bottom:6px">
+                <div class="exec-step-header" onclick="this.parentElement.classList.toggle('open')" style="padding:8px 12px;cursor:pointer">
+                    <div class="exec-step-icon" style="background:rgba(168,85,247,0.15)">🔍</div>
+                    <div class="exec-step-info">
+                        <div class="exec-step-title" style="font-size:11px">${escHtml(q.query)}</div>
+                    </div>
+                    <span style="font-size:10px;color:var(--text-muted);font-weight:600">${q.found} results</span>
+                    <span class="exec-step-badge ${qStatus}" style="font-size:9px">${qStatus === 'done' ? '✓' : '...'}</span>
+                </div>
+                <div class="exec-step-body" style="padding:6px 12px">
+                    ${q.signals.map(s => {
+                        const c = stanceColors[s.stance] || '#6b7280';
+                        return `<div style="padding:2px 0;font-size:10px;color:var(--text-muted)"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${c};margin-right:4px"></span>${escHtml(s.title)} <span style="color:${c};font-size:9px">${s.stance}</span></div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        }
+
+        if (ns.phase === 'complete') {
+            html += `<div style="padding:10px 12px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:8px;font-size:11px;color:var(--green);font-weight:600;margin-top:8px">
+                ✓ ${ns.totalFound} signals found · ${ns.totalClassified} classified
+            </div>`;
+        }
+        html += `</div>`;
+    }
 
     container.innerHTML = `<div style="padding:12px">${html}</div>`;
 }
@@ -16524,10 +16566,21 @@ function runNarrativeSearch(narrativeId) {
     const log = document.getElementById('narrative-search-log');
     btn.disabled = true;
     btn.textContent = '🔍 Searching...';
-    log.style.display = 'block';
-    log.innerHTML = '<div style="color:var(--text-muted)">Starting targeted search...</div>';
+    if (log) { log.style.display = 'block'; log.innerHTML = '<div style="color:var(--text-muted)">Starting targeted search...</div>'; }
 
     const stanceColors = { supporting: '#22c55e', contradicting: '#ef4444', neutral: '#6b7280' };
+
+    // Initialize execution state for the Execution tab
+    _execData.narrativeSearch = {
+        narrativeId,
+        phase: 'searching',
+        startedAt: new Date().toISOString(),
+        queries: [],
+        signals: [],
+        totalFound: 0,
+        totalClassified: 0,
+    };
+    _renderExecutionDetail();
 
     fetch(`/api/narratives/${narrativeId}/search`, {
         method: 'POST',
@@ -16535,13 +16588,13 @@ function runNarrativeSearch(narrativeId) {
         body: JSON.stringify({})
     })
     .then(response => {
-        const reader = response.body.getReader();
+        _narrativeSearchReader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
 
         function read() {
-            reader.read().then(({ done, value }) => {
-                if (done) { _finishNarrativeSearch(narrativeId, btn); return; }
+            _narrativeSearchReader.read().then(({ done, value }) => {
+                if (done) { _narrativeSearchReader = null; _finishNarrativeSearch(narrativeId, btn); return; }
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
                 buffer = lines.pop();
@@ -16549,37 +16602,46 @@ function runNarrativeSearch(narrativeId) {
                     if (!line.startsWith('data: ')) continue;
                     try {
                         const ev = JSON.parse(line.substring(6));
+                        const ns = _execData.narrativeSearch;
+
                         if (ev.type === 'query_start') {
-                            log.innerHTML += `<div style="margin-top:6px;font-weight:600;color:var(--text-secondary)">Query ${ev.index}/${ev.total}: <span style="color:var(--accent)">${escHtml(ev.query)}</span></div>`;
+                            ns.queries.push({ query: ev.query, index: ev.index, total: ev.total, signals: [], found: 0 });
+                            if (log) log.innerHTML += `<div style="margin-top:6px;font-weight:600;color:var(--text-secondary)">Query ${ev.index}/${ev.total}: <span style="color:var(--accent)">${escHtml(ev.query)}</span></div>`;
                             btn.textContent = `🔍 Query ${ev.index}/${ev.total}...`;
                         } else if (ev.type === 'signal') {
                             const c = stanceColors[ev.stance] || '#6b7280';
-                            log.innerHTML += `<div style="padding:2px 0;color:var(--text-muted)"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${c};margin-right:4px"></span>${escHtml(ev.title)}</div>`;
-                            log.scrollTop = log.scrollHeight;
+                            ns.signals.push(ev);
+                            if (ns.queries.length) ns.queries[ns.queries.length - 1].signals.push(ev);
+                            if (log) { log.innerHTML += `<div style="padding:2px 0;color:var(--text-muted)"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${c};margin-right:4px"></span>${escHtml(ev.title)}</div>`; log.scrollTop = log.scrollHeight; }
                         } else if (ev.type === 'query_done') {
-                            log.innerHTML += `<div style="color:var(--text-muted);font-size:9px;padding-left:10px">${ev.found} results</div>`;
+                            if (ns.queries.length) ns.queries[ns.queries.length - 1].found = ev.found;
+                            if (log) log.innerHTML += `<div style="color:var(--text-muted);font-size:9px;padding-left:10px">${ev.found} results</div>`;
                         } else if (ev.type === 'complete') {
-                            log.innerHTML += `<div style="margin-top:8px;font-weight:600;color:var(--green)">Done — ${ev.total_found} signals found, ${ev.total_classified} classified</div>`;
+                            ns.phase = 'complete';
+                            ns.totalFound = ev.total_found;
+                            ns.totalClassified = ev.total_classified;
+                            if (log) log.innerHTML += `<div style="margin-top:8px;font-weight:600;color:var(--green)">Done — ${ev.total_found} signals found, ${ev.total_classified} classified</div>`;
                         }
+                        _renderExecutionDetail();
                     } catch (e) {}
                 }
                 read();
-            }).catch(() => _finishNarrativeSearch(narrativeId, btn));
+            }).catch(() => { _narrativeSearchReader = null; _finishNarrativeSearch(narrativeId, btn); });
         }
         read();
     })
     .catch(() => {
         btn.disabled = false;
         btn.textContent = '🔍 Run Search';
-        log.innerHTML += '<div style="color:var(--red)">Network error</div>';
+        if (log) log.innerHTML += '<div style="color:var(--red)">Network error</div>';
     });
 }
 
 function _finishNarrativeSearch(narrativeId, btn) {
-    btn.disabled = false;
-    btn.textContent = '🔍 Run Search';
+    if (btn) { btn.disabled = false; btn.textContent = '🔍 Run Search'; }
     loadNarratives();
-    setTimeout(() => openNarrativeDetail(narrativeId), 500);
+    // Only refresh detail if we're still on that narrative
+    if (_activeNarrativeId === narrativeId) setTimeout(() => openNarrativeDetail(narrativeId), 500);
 }
 
 function deleteNarrative(narrativeId) {
