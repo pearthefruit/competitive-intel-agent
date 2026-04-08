@@ -3781,7 +3781,7 @@
         .sig-feed-tab.active { background: var(--accent-dim); color: var(--accent); }
         .sig-tab-content { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow-y: auto; padding: 8px; }
         .sig-tab-content.active { display: block; }
-        #sig-tab-graph.active { display: flex; }
+        #sig-tab-graph.active { display: flex !important; flex-direction: column; }
 
         /* Thread cards */
         .thread-card {
@@ -5573,7 +5573,7 @@
                     </div>
                 </div>
                 <!-- Graph view -->
-                <div class="sig-tab-content" id="sig-tab-graph" style="padding:0;display:flex;flex-direction:column">
+                <div class="sig-tab-content" id="sig-tab-graph" style="padding:0">
                     <div id="sig-graph-container" style="width:100%;flex:1;position:relative;min-height:0">
                         <div class="signals-empty" id="signals-graph-empty">
                             <div style="font-size:32px;margin-bottom:12px">&#128476;</div>
@@ -15072,6 +15072,7 @@ function _clearBoardHighlight() {
 
 let _hlOriginalPositions = {}; // {nodeId: {x, y}} — saved before clustering
 let _hlClusterAnim = null;
+let _hlOriginalZoom = null; // saved zoom transform before auto-fit
 
 function _applyBoardHighlights() {
     // Compute union of all highlighted thread IDs
@@ -15157,18 +15158,53 @@ function _clusterHighlightedNodes(unionIds) {
         const x = parseFloat(m[1]), y = parseFloat(m[2]);
         // Save original position if not already saved
         if (!_hlOriginalPositions[nid]) _hlOriginalPositions[nid] = { x, y };
-        nodes.push({ el: n, nid, x, y });
+        // Compute match relevance for ring assignment
+        const matchCount = _boardHighlights.filter(h => h.threadIds.has(nid)).length;
+        const d = n.__data__;
+        const sigCount = d ? (d.signal_count || 1) : 1;
+        const diameter = d ? ((d.type === 'narrative' ? 30 : Math.sqrt(sigCount) * 6 + 10) * 2) : 30;
+        nodes.push({ el: n, nid, x, y, matchCount, sigCount, diameter });
     });
 
     console.log(`[cluster] ${nodes.length} highlighted nodes from ${allNids.length} total. unionIds:`, [...unionIds], 'matched nids:', nodes.map(n => n.nid));
     if (nodes.length < 2) return;
 
+    // Sort by relevance: most highlight matches first, then by signal count
+    nodes.sort((a, b) => b.matchCount - a.matchCount || b.sigCount - a.sigCount);
+
+    // Assign nodes to concentric rings
+    const rings = _assignRings(nodes);
+
     // Compute centroid of highlighted nodes
     const cx = nodes.reduce((s, n) => s + n.x, 0) / nodes.length;
     const cy = nodes.reduce((s, n) => s + n.y, 0) / nodes.length;
 
-    // Animate nodes toward centroid with spacing
-    const targetSpread = Math.max(80, nodes.length * 30); // spread out a bit around centroid
+    // Compute ring radii from actual node sizes
+    const padding = 18; // px between node edges
+    let cumulativeRadius = 0;
+    const ringGap = 40; // gap between concentric rings
+    const ringTargets = rings.map((ringNodes, ri) => {
+        const avgDiam = ringNodes.reduce((s, n) => s + n.diameter, 0) / ringNodes.length;
+        const circumference = ringNodes.length * (avgDiam + padding);
+        const radius = Math.max(ri === 0 ? 50 : 70, circumference / (2 * Math.PI));
+        const r = ri === 0 ? radius : Math.max(radius, cumulativeRadius + ringGap + avgDiam / 2);
+        cumulativeRadius = r;
+        return { nodes: ringNodes, radius: r };
+    });
+
+    // Build target positions
+    const targets = new Map(); // nid -> {tx, ty}
+    ringTargets.forEach(ring => {
+        ring.nodes.forEach((n, i) => {
+            const angle = (i / ring.nodes.length) * Math.PI * 2 - Math.PI / 2; // start from top
+            targets.set(n.nid, {
+                tx: cx + Math.cos(angle) * ring.radius,
+                ty: cy + Math.sin(angle) * ring.radius
+            });
+        });
+    });
+
+    // Animate
     let frame = 0;
     const totalFrames = 30;
 
@@ -15177,22 +15213,73 @@ function _clusterHighlightedNodes(unionIds) {
         const t = Math.min(frame / totalFrames, 1);
         const ease = t * (2 - t); // ease-out
 
-        nodes.forEach((n, i) => {
-            // Target: arranged in a circle around centroid
-            const angle = (i / nodes.length) * Math.PI * 2;
-            const tx = cx + Math.cos(angle) * targetSpread;
-            const ty = cy + Math.sin(angle) * targetSpread;
-
-            const nx = n.x + (tx - n.x) * ease;
-            const ny = n.y + (ty - n.y) * ease;
+        nodes.forEach(n => {
+            const tgt = targets.get(n.nid);
+            if (!tgt) return;
+            const nx = n.x + (tgt.tx - n.x) * ease;
+            const ny = n.y + (tgt.ty - n.y) * ease;
             n.el.setAttribute('transform', `translate(${nx},${ny})`);
+            // Sync D3 data so drag, click, and connections use the visual position
+            const d = n.el.__data__;
+            if (d) { d.x = nx; d.y = ny; }
         });
 
         if (frame < totalFrames) {
             _hlClusterAnim = requestAnimationFrame(animate);
+        } else {
+            // Auto-zoom to fit the cluster
+            _zoomToCluster(cx, cy, cumulativeRadius, nodes);
         }
     }
     _hlClusterAnim = requestAnimationFrame(animate);
+}
+
+// Split nodes into 1-3 concentric rings based on count
+function _assignRings(sortedNodes) {
+    const n = sortedNodes.length;
+    if (n <= 8) return [sortedNodes];
+    if (n <= 18) {
+        const inner = Math.ceil(n * 0.4);
+        return [sortedNodes.slice(0, inner), sortedNodes.slice(inner)];
+    }
+    // 3 rings: ~30% / ~35% / ~35%
+    const r1 = Math.ceil(n * 0.3);
+    const r2 = Math.ceil(n * 0.35);
+    return [sortedNodes.slice(0, r1), sortedNodes.slice(r1, r1 + r2), sortedNodes.slice(r1 + r2)];
+}
+
+// Smooth zoom/pan to frame the cluster in the viewport
+function _zoomToCluster(cx, cy, outerRadius, nodes) {
+    const svgEl = document.querySelector('#sig-graph-container svg');
+    if (!svgEl) return;
+    const zb = svgEl.__zoomBehavior;
+    if (!zb) return;
+
+    // Save original zoom so we can restore on unhighlight
+    if (!_hlOriginalZoom) {
+        _hlOriginalZoom = d3.zoomTransform(svgEl);
+    }
+
+    const svgRect = svgEl.getBoundingClientRect();
+    const viewW = svgRect.width;
+    const viewH = svgRect.height;
+    if (!viewW || !viewH) return;
+
+    // Largest node diameter for margin
+    const maxDiam = nodes.reduce((m, n) => Math.max(m, n.diameter), 0);
+    const clusterSpan = (outerRadius + maxDiam) * 2;
+
+    // Target scale: cluster fills ~70% of viewport
+    const targetScale = Math.min(viewW * 0.7 / clusterSpan, viewH * 0.7 / clusterSpan);
+    // Clamp to zoom extent
+    const scale = Math.max(0.3, Math.min(targetScale, 3));
+
+    const tx = viewW / 2 - cx * scale;
+    const ty = viewH / 2 - cy * scale;
+
+    const svg = d3.select(svgEl);
+    const transform = d3.zoomIdentity.translate(tx, ty).scale(scale);
+    svg.transition().duration(400).call(zb.transform, transform);
 }
 
 function _restoreHighlightPositions() {
@@ -15200,6 +15287,16 @@ function _restoreHighlightPositions() {
 
     const entries = Object.entries(_hlOriginalPositions);
     if (!entries.length) return;
+
+    // Restore zoom transform
+    if (_hlOriginalZoom) {
+        const svgEl = document.querySelector('#sig-graph-container svg');
+        if (svgEl && svgEl.__zoomBehavior) {
+            d3.select(svgEl).transition().duration(300)
+                .call(svgEl.__zoomBehavior.transform, _hlOriginalZoom);
+        }
+        _hlOriginalZoom = null;
+    }
 
     let frame = 0;
     const totalFrames = 20;
@@ -15224,6 +15321,9 @@ function _restoreHighlightPositions() {
             const nx = c.x + (orig.x - c.x) * ease;
             const ny = c.y + (orig.y - c.y) * ease;
             c.el.setAttribute('transform', `translate(${nx},${ny})`);
+            // Sync D3 data back to original position
+            const d = c.el.__data__;
+            if (d) { d.x = nx; d.y = ny; }
         });
 
         if (frame < totalFrames) {
