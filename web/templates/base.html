@@ -4096,8 +4096,9 @@
             font-size: 12px; flex-shrink: 0;
         }
         /* Graph node styling */
-        .graph-node { cursor: pointer; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); transition: filter 0.15s; }
+        .graph-node { cursor: pointer; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); transition: filter 0.2s; }
         .graph-node:hover { filter: drop-shadow(0 0 12px rgba(255,255,255,0.3)) brightness(1.4); }
+        .graph-node.board-dimmed:hover { filter: brightness(0.9) drop-shadow(0 0 8px rgba(255,255,255,0.2)); }
         .graph-node circle.node-circle { transition: all 0.15s; }
         .graph-node .select-ring { opacity: 0; transition: opacity 0.2s; }
         .graph-node.selected .select-ring { opacity: 1; animation: pulse-ring 2s ease-in-out infinite; }
@@ -15006,6 +15007,7 @@ function _clearBoardHighlight() {
     _boardHighlights = [];
     document.querySelectorAll('.graph-node').forEach(n => {
         n.style.filter = '';
+        n.classList.remove('board-dimmed');
         const badge = n.querySelector('.board-match-badge');
         if (badge) badge.remove();
     });
@@ -15026,6 +15028,7 @@ function _applyBoardHighlights() {
         const oldBadge = n.querySelector('.board-match-badge');
         if (oldBadge) oldBadge.remove();
 
+        n.classList.remove('board-dimmed');
         if (!_boardHighlights.length) {
             n.style.filter = '';
             return;
@@ -15059,7 +15062,8 @@ function _applyBoardHighlights() {
                 n.appendChild(badge);
             }
         } else if (nid) {
-            n.style.filter = 'brightness(0.3)';
+            n.style.filter = 'brightness(0.5)';
+            n.classList.add('board-dimmed');
         }
     });
 }
