@@ -15718,6 +15718,8 @@ function _zoomIntoPattern(patternId) {
         .catch(e => console.error('[graph] zoom-in error:', e));
 }
 
+let _zoomedFromBoard = false;
+
 function _zoomOutToPatterns() {
     _graphMode = 'patterns';
     _zoomedPatternId = null;
@@ -15725,7 +15727,12 @@ function _zoomOutToPatterns() {
     document.getElementById('sig-graph-pattern-label').style.display = 'none';
     document.getElementById('sig-graph-container').style.boxShadow = '';
     document.getElementById('sig-graph-container').style.borderRadius = '';
-    if (_graphData) renderGraph(_graphData);
+    if (_zoomedFromBoard && _boardData) {
+        _zoomedFromBoard = false;
+        renderBoard(_boardData);
+    } else if (_graphData) {
+        renderGraph(_graphData);
+    }
 }
 
 function _renderSignalSubGraph(data) {
@@ -16935,6 +16942,16 @@ function renderBoard(data) {
             } else if (d.type === 'narrative_thread') {
                 _expandedNarratives.delete(d.narrative_id);
                 loadBoard();
+            } else {
+                // Regular thread node — zoom into signal sub-graph
+                _zoomedFromBoard = true;
+                // Ensure _graphData has this node so _zoomIntoPattern can find the title
+                if (!_graphData) _graphData = { nodes: [] };
+                if (!_graphData.nodes.find(n => n.id === d.id)) {
+                    _graphData.nodes.push({ id: d.id, title: d.title, domain: d.domain, signal_count: d.signal_count });
+                }
+                _zoomIntoPattern(d.id);
+                openThreadDetail(d.id);
             }
         })
         .on('contextmenu', (event, d) => {
