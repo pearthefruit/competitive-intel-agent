@@ -14374,6 +14374,11 @@ function _buildThreadActions(thread, entities) {
     // Always offer to search for more signals
     actions.push(`<button onclick="_threadActionSearchMore('${escHtml(thread.title.replace(/'/g, "\\'"))}', ${thread.id})" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted)">📡 Search for more signals</button>`);
 
+    // Split thread (only for threads with 3+ signals)
+    if ((thread.signals || []).length >= 3) {
+        actions.push(`<button onclick="_proposeThreadSplit(${thread.id})" id="split-thread-btn" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--purple);color:var(--purple)">✂️ Split thread</button>`);
+    }
+
     // Delete thread
     actions.push(`<button onclick="_deleteThread(${thread.id})" style="${btnStyle}background:none;border:1px solid var(--border);color:var(--text-muted);font-size:10px">🗑 Delete thread</button>`);
 
@@ -14404,6 +14409,81 @@ function _runCustomSearch() {
     })
     .catch(() => {
         status.innerHTML = '<span style="color:var(--red)">Search failed</span>';
+    });
+}
+
+function _proposeThreadSplit(threadId) {
+    const btn = document.getElementById('split-thread-btn');
+    if (btn) { btn.textContent = '✂️ Analyzing...'; btn.disabled = true; }
+
+    fetch(`/api/signals/threads/${threadId}/propose-split`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (btn) { btn.textContent = '✂️ Split thread'; btn.disabled = false; }
+            if (data.error) { if (btn) btn.textContent = data.error; return; }
+
+            const splits = data.proposed_splits || [];
+            const remaining = data.remaining;
+
+            // Render split preview below the actions
+            const actionsDiv = btn ? btn.parentElement : null;
+            if (!actionsDiv) return;
+
+            let previewHtml = `<div id="split-preview" style="margin-top:12px;padding:12px;background:var(--bg-primary);border:1px solid var(--purple);border-radius:10px">
+                <div style="font-size:11px;font-weight:700;color:var(--purple);margin-bottom:10px">Proposed Split (${splits.length} sub-threads)</div>`;
+
+            splits.forEach((s, i) => {
+                previewHtml += `<div style="padding:8px 10px;background:var(--bg-tertiary);border-radius:6px;margin-bottom:6px;border-left:3px solid var(--purple)">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(s.title)}</div>
+                        <span style="font-size:9px;color:var(--text-muted)">${s.signal_ids.length} signals</span>
+                    </div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${escHtml(s.rationale || '')}</div>
+                </div>`;
+            });
+
+            if (remaining && remaining.signal_ids && remaining.signal_ids.length) {
+                previewHtml += `<div style="padding:8px 10px;background:var(--bg-tertiary);border-radius:6px;margin-bottom:6px;border-left:3px solid var(--border)">
+                    <div style="font-size:12px;font-weight:600;color:var(--text-muted)">${escHtml(remaining.title || 'Remaining')}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${remaining.signal_ids.length} signals stay in original thread</div>
+                </div>`;
+            }
+
+            previewHtml += `<div style="display:flex;gap:6px;margin-top:10px">
+                <button onclick="_executeThreadSplit(${threadId})" style="padding:6px 14px;background:var(--purple);border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">✂️ Execute Split</button>
+                <button onclick="document.getElementById('split-preview').remove()" style="padding:6px 10px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer">Cancel</button>
+            </div></div>`;
+
+            // Store splits data for execution
+            window._pendingSplits = splits;
+
+            const existing = document.getElementById('split-preview');
+            if (existing) existing.remove();
+            actionsDiv.insertAdjacentHTML('afterend', previewHtml);
+        })
+        .catch(() => { if (btn) { btn.textContent = '✂️ Split thread'; btn.disabled = false; } });
+}
+
+function _executeThreadSplit(threadId) {
+    const splits = window._pendingSplits || [];
+    if (!splits.length) return;
+
+    const execBtn = document.querySelector('#split-preview button');
+    if (execBtn) { execBtn.textContent = '✂️ Splitting...'; execBtn.disabled = true; }
+
+    fetch(`/api/signals/threads/${threadId}/execute-split`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ splits })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            window._pendingSplits = null;
+            openThreadDetail(threadId);
+            loadBoard();
+            loadSignals();
+        }
     });
 }
 

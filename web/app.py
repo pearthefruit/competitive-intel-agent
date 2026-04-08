@@ -2099,6 +2099,71 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True})
 
+    @app.route("/api/signals/threads/<int:thread_id>/propose-split", methods=["POST"])
+    def signals_thread_propose_split_api(thread_id):
+        """LLM proposes how to split a large thread into specific sub-threads."""
+        from db import get_cluster_detail
+        from agents.llm import generate_json, FAST_CHAIN
+        from prompts.signals import build_thread_split_prompt
+        from agents.signals_synthesize import _format_signals_for_prompt
+
+        conn = get_connection(db_path)
+        detail = get_cluster_detail(conn, thread_id)
+        conn.close()
+        if not detail:
+            return jsonify({"error": "Thread not found"}), 404
+
+        signals = detail.get("signals", [])
+        if len(signals) < 3:
+            return jsonify({"error": "Thread needs at least 3 signals to split"}), 400
+
+        signals_text = "\n".join(
+            f"[{s['id']}] {s['title']}" for s in signals
+        )
+
+        prompt = build_thread_split_prompt(detail["title"], signals_text)
+        try:
+            result = generate_json(prompt, timeout=30, chain=FAST_CHAIN)
+        except Exception as e:
+            return jsonify({"error": f"LLM error: {e}"}), 500
+
+        if not result:
+            return jsonify({"error": "LLM returned no result"}), 500
+
+        return jsonify({"ok": True, "thread_id": thread_id, "thread_title": detail["title"], **result})
+
+    @app.route("/api/signals/threads/<int:thread_id>/execute-split", methods=["POST"])
+    def signals_thread_execute_split_api(thread_id):
+        """Execute a proposed thread split — create new threads and reassign signals."""
+        from db import insert_signal_cluster, link_signal_to_cluster
+
+        data = request.json or {}
+        splits = data.get("splits", [])
+        if not splits:
+            return jsonify({"error": "No splits provided"}), 400
+
+        conn = get_connection(db_path)
+        created = []
+        for split in splits:
+            title = split.get("title", "").strip()
+            sig_ids = split.get("signal_ids", [])
+            domain = split.get("domain", "economics")
+            if not title or not sig_ids:
+                continue
+
+            new_id = insert_signal_cluster(conn, {"domain": domain, "title": title, "synthesis": split.get("rationale", "")})
+            conn.execute("UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP WHERE id = ?", (new_id,))
+            for sid in sig_ids:
+                # Remove from old thread
+                conn.execute("DELETE FROM signal_cluster_items WHERE cluster_id = ? AND signal_id = ?", (thread_id, sid))
+                link_signal_to_cluster(conn, new_id, sid)
+            created.append({"id": new_id, "title": title, "signal_count": len(sig_ids)})
+
+        conn.execute("UPDATE signal_clusters SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (thread_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "created": created})
+
     @app.route("/api/signals/reassign", methods=["POST"])
     def signals_reassign_api():
         """Move signals from one thread to another."""

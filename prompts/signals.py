@@ -156,3 +156,40 @@ Rules:
 - You are generating HYPOTHESES for investigation, not making assertions
 - link_labels: one entry per thread PAIR. Label must be a specific relationship mechanism, NOT generic words like "related to" or "connected" or "drives". Name the actual causal link (e.g. "amplifies inflation risk", "supply chain dependency").
 - Return ONLY the JSON object"""
+
+
+def build_thread_split_prompt(thread_title, signals_text):
+    """Prompt for proposing how to split a large thread into specific sub-threads."""
+    return f"""You are a senior analyst reviewing a signal thread that has grown too broad. Your job is to propose breaking it into more specific, actionable sub-threads.
+
+CURRENT THREAD: "{thread_title}"
+
+SIGNALS IN THIS THREAD:
+{signals_text}
+
+Analyze these signals and propose 2-5 specific sub-threads that would be more meaningful than the current broad grouping. Each sub-thread should represent a distinct, specific trend or pattern.
+
+Return JSON:
+{{
+  "proposed_splits": [
+    {{
+      "title": "Specific thread name (e.g. 'AI-Driven Tech Layoffs at FAANG' not 'Tech Layoffs')",
+      "rationale": "One sentence: why these signals belong together and why this is a distinct pattern",
+      "signal_ids": [1, 2, 3],
+      "domain": "economics|finance|geopolitics|tech_ai|labor|regulatory"
+    }}
+  ],
+  "remaining": {{
+    "title": "Suggested name for signals that don't fit any sub-thread (or null if all assigned)",
+    "signal_ids": [4, 5]
+  }}
+}}
+
+Rules:
+- Sub-thread titles must be SPECIFIC — name companies, technologies, policies, not vague categories
+- BAD: "Technology Trends", "Market Changes", "Labor Issues"
+- GOOD: "FAANG AI Infrastructure Hiring Freeze", "Semiconductor Supply Chain Reshoring", "Remote Work Adoption in Creative Industries"
+- Every signal must appear in exactly one group (either a proposed split or remaining)
+- Don't create a sub-thread with only 1 signal unless it's truly distinct
+- The remaining group catches signals that are genuinely miscellaneous — rename it to something specific if possible
+- Return ONLY the JSON object"""
