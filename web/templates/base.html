@@ -15207,8 +15207,8 @@ function _clusterHighlightedNodes(unionIds) {
         });
     });
 
-    // Collect dimmed nodes to push outward
-    const outerRadius = cumulativeRadius + 100;
+    // Push dimmed nodes out of the cluster area — only if they're inside it
+    const outerRadius = cumulativeRadius + 80;
     const dimmedNodes = [];
     document.querySelectorAll('.graph-node.board-dimmed').forEach(n => {
         const nid = parseInt(n.dataset.nodeId);
@@ -15218,12 +15218,14 @@ function _clusterHighlightedNodes(unionIds) {
         const m = transform.match(/translate\(\s*([-\d.e+]+)[,\s]+([-\d.e+]+)\s*\)/);
         if (!m) return;
         const x = parseFloat(m[1]), y = parseFloat(m[2]);
-        if (!_hlOriginalPositions[nid]) _hlOriginalPositions[nid] = { x, y };
-        // Push outward from centroid
         const dx = x - cx, dy = y - cy;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const pushDist = Math.max(outerRadius + 50, dist * 1.3);
-        dimmedNodes.push({ el: n, nid, x, y, tx: cx + (dx / dist) * pushDist, ty: cy + (dy / dist) * pushDist });
+        // Only push if inside the cluster radius — leave distant nodes alone
+        if (dist < outerRadius) {
+            if (!_hlOriginalPositions[nid]) _hlOriginalPositions[nid] = { x, y };
+            const pushDist = outerRadius + 30;
+            dimmedNodes.push({ el: n, nid, x, y, tx: cx + (dx / dist) * pushDist, ty: cy + (dy / dist) * pushDist });
+        }
     });
 
     // Animate
