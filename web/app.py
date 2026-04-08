@@ -2539,9 +2539,36 @@ def create_app(db_path="intel.db"):
                 conn.close()
                 return jsonify({"error": "LLM returned no result"}), 500
             # Persist brainstorm
-            from db import save_brainstorm
+            from db import save_brainstorm, insert_hypothesis
             brainstorm_id = save_brainstorm(conn, thread_ids, result)
             result["brainstorm_id"] = brainstorm_id
+
+            # Auto-save hypotheses to the bank
+            # Gather source entities from the threads
+            placeholders = ",".join("?" * len(thread_ids))
+            entities = conn.execute(
+                f"""SELECT DISTINCT COALESCE(normalized_value, entity_value) as name
+                    FROM signal_entities
+                    WHERE cluster_id IN ({placeholders}) OR signal_id IN
+                      (SELECT signal_id FROM signal_cluster_items WHERE cluster_id IN ({placeholders}))""",
+                (*thread_ids, *thread_ids),
+            ).fetchall()
+            source_entities = [e["name"] for e in entities]
+
+            saved_hyp_ids = []
+            for h in result.get("hypotheses", []):
+                hid = insert_hypothesis(conn, {
+                    "title": h.get("title", ""),
+                    "reasoning": h.get("reasoning", ""),
+                    "confidence": h.get("confidence", "medium"),
+                    "investigate_query": h.get("investigate", ""),
+                    "source_thread_ids": thread_ids,
+                    "source_entities": source_entities,
+                    "brainstorm_id": brainstorm_id,
+                })
+                saved_hyp_ids.append(hid)
+            result["saved_hypothesis_ids"] = saved_hyp_ids
+
             conn.close()
             return jsonify(result)
         except Exception as e:
@@ -2957,6 +2984,64 @@ Return JSON:
         delete_thread_link(conn, link_id)
         conn.close()
         return jsonify({"ok": True})
+
+    # ===================== HYPOTHESIS BANK =====================
+
+    @app.route("/api/hypotheses", methods=["GET"])
+    def hypotheses_list_api():
+        """List hypotheses from the bank."""
+        from db import get_hypotheses
+        conn = get_connection(db_path)
+        status = request.args.get("status", "all")
+        hyps = get_hypotheses(conn, status=status)
+        conn.close()
+        return jsonify({"hypotheses": hyps})
+
+    @app.route("/api/hypotheses", methods=["POST"])
+    def hypotheses_create_api():
+        """Save one or more hypotheses to the bank."""
+        from db import insert_hypothesis
+        data = request.json or {}
+        hypotheses = data.get("hypotheses", [data] if data.get("title") else [])
+        conn = get_connection(db_path)
+        ids = []
+        for h in hypotheses:
+            hid = insert_hypothesis(conn, h)
+            ids.append(hid)
+        conn.close()
+        return jsonify({"ok": True, "ids": ids})
+
+    @app.route("/api/hypotheses/<int:hyp_id>/promote", methods=["POST"])
+    def hypotheses_promote_api(hyp_id):
+        """Promote a hypothesis to a narrative."""
+        from db import update_hypothesis_status
+        # The frontend will handle creating the narrative and passing back the ID
+        data = request.json or {}
+        narrative_id = data.get("narrative_id")
+        conn = get_connection(db_path)
+        update_hypothesis_status(conn, hyp_id, "promoted", narrative_id=narrative_id)
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/hypotheses/<int:hyp_id>", methods=["DELETE"])
+    def hypotheses_delete_api(hyp_id):
+        """Dismiss/delete a hypothesis."""
+        from db import update_hypothesis_status
+        conn = get_connection(db_path)
+        update_hypothesis_status(conn, hyp_id, "dismissed")
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/hypotheses/related", methods=["POST"])
+    def hypotheses_related_api():
+        """Find hypotheses related to given thread IDs via entity + keyword overlap."""
+        from db import find_related_hypotheses
+        data = request.json or {}
+        thread_ids = data.get("thread_ids", [])
+        conn = get_connection(db_path)
+        related = find_related_hypotheses(conn, thread_ids)
+        conn.close()
+        return jsonify({"hypotheses": related})
 
     @app.route("/api/narratives/<int:narrative_id>/link-thread", methods=["POST"])
     def narratives_link_thread_api(narrative_id):

@@ -15107,6 +15107,15 @@ function openBrainstormMode() {
         </div>
     `;
 
+    // Fetch related hypotheses in parallel with brainstorm
+    fetch('/api/hypotheses/related', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thread_ids: ids })
+    }).then(r => r.json()).then(data => {
+        window._brainstormRelatedHyps = data.hypotheses || [];
+    }).catch(() => { window._brainstormRelatedHyps = []; });
+
     // Call brainstorm API
     fetch('/api/signals/brainstorm', {
         method: 'POST',
@@ -15195,6 +15204,28 @@ function _renderBrainstormResults(container, result, threadIds) {
 
     // Store link labels from brainstorm for use when linking
     window._brainstormLinkLabels = result.link_labels || [];
+
+    // Related past hypotheses (serendipity engine)
+    const relatedHyps = window._brainstormRelatedHyps || [];
+    if (relatedHyps.length) {
+        html += `<div class="brainstorm-section">
+            <div class="brainstorm-section-title">🔮 Related Past Hypotheses</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">From previous brainstorm sessions — may reveal unexpected connections</div>
+            ${relatedHyps.map(h => `
+                <div style="padding:10px 12px;margin-bottom:6px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);border-left:3px solid ${h.relevance_score >= 3 ? 'var(--accent)' : 'var(--border)'}">
+                    <div style="display:flex;justify-content:space-between;align-items:start">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(h.title)}</div>
+                        <span style="font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(6,182,212,0.15);color:var(--accent);white-space:nowrap">${h.relevance_score >= 3 ? 'strong' : 'weak'}</span>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${escHtml(h.reasoning || '')}</div>
+                    <div style="font-size:9px;color:var(--text-muted);margin-top:6px">Match: ${escHtml(h.match_reason || '')}</div>
+                    <div style="display:flex;gap:6px;margin-top:6px">
+                        <button onclick="_createNarrativeFromHypothesis('${escHtml(h.title.replace(/'/g, "\\'"))}', '${escHtml((h.reasoning || '').replace(/'/g, "\\'"))}')" style="padding:3px 8px;background:var(--bg-tertiary);border:1px solid var(--purple);border-radius:4px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">📖 Narrative</button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>`;
+    }
 
     // Actions bar
     const tids = JSON.stringify(threadIds);
@@ -16003,6 +16034,15 @@ function renderBoard(data) {
             event.stopPropagation();
             if (_boardDragged) return;
             if (_connectingFrom != null && _connectingFrom !== d.id) {
+                // Block narrative-to-narrative connections
+                const fromNode = nodes.find(n => n.id === _connectingFrom);
+                if (fromNode && fromNode.type === 'narrative' && d.type === 'narrative') {
+                    _cancelConnect();
+                    const sel = document.getElementById('sig-graph-selection');
+                    if (sel) sel.innerHTML = '<span style="color:var(--red)">Narratives connect through shared threads, not directly</span>';
+                    setTimeout(() => _cancelConnect(), 3000);
+                    return;
+                }
                 const fromId = _connectingFrom;
                 _cancelConnect();
                 _showInlineInput(event.clientX, event.clientY, 'Label (optional — AI will suggest)', '', (label) => {
@@ -16467,19 +16507,24 @@ function _createNarrativeFromThreads() {
 }
 
 
+let _hypothesesCache = [];
+
 function loadNarratives() {
-    fetch('/api/narratives')
-        .then(r => r.json())
-        .then(data => {
-            _narrativesCache = data.narratives || [];
-            renderNarrativesList();
-        });
+    Promise.all([
+        fetch('/api/narratives').then(r => r.json()),
+        fetch('/api/hypotheses?status=captured').then(r => r.json()),
+    ]).then(([narrData, hypData]) => {
+        _narrativesCache = narrData.narratives || [];
+        _hypothesesCache = hypData.hypotheses || [];
+        renderNarrativesList();
+    });
 }
 
 function renderNarrativesList() {
     const container = document.getElementById('narratives-list');
     if (!container) return;
-    if (!_narrativesCache.length) {
+    let narrativesHtml = '';
+    if (!_narrativesCache.length && !_hypothesesCache.length) {
         container.innerHTML = `<div class="signals-empty" style="display:flex">
             <div style="font-size:32px;margin-bottom:12px">📖</div>
             <div>No narratives yet</div>
@@ -16487,7 +16532,7 @@ function renderNarrativesList() {
         </div>`;
         return;
     }
-    container.innerHTML = _narrativesCache.map(n => {
+    narrativesHtml = _narrativesCache.map(n => {
         const ev = n.evidence || {};
         const sup = ev.supporting || 0;
         const con = ev.contradicting || 0;
@@ -16510,6 +16555,42 @@ function renderNarrativesList() {
             </div>
         </div>`;
     }).join('');
+
+    // Hypothesis bank section
+    if (_hypothesesCache.length) {
+        const confColors = { high: 'var(--green)', medium: 'var(--accent)', low: 'var(--text-muted)' };
+        narrativesHtml += `<div style="padding:12px;border-top:1px solid var(--border)">
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Hypothesis Bank (${_hypothesesCache.length})</div>
+            ${_hypothesesCache.map(h => `
+                <div style="padding:8px 12px;margin-bottom:4px;background:var(--bg-tertiary);border-radius:6px;border-left:2px solid ${confColors[h.confidence] || 'var(--border)'}">
+                    <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+                        <div style="font-size:11px;font-weight:600;color:var(--text-primary);flex:1">${escHtml(h.title)}</div>
+                        <span style="font-size:8px;padding:1px 5px;border-radius:3px;background:var(--bg-secondary);color:var(--text-muted);white-space:nowrap">${h.confidence}</span>
+                    </div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(h.reasoning || '')}</div>
+                    <div style="display:flex;gap:4px;margin-top:6px">
+                        <button onclick="_promoteHypothesis(${h.id}, '${escHtml(h.title.replace(/'/g, "\\'"))}', '${escHtml((h.reasoning || '').replace(/'/g, "\\'"))}')" style="padding:2px 8px;background:none;border:1px solid var(--purple);border-radius:4px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">📖 Promote</button>
+                        <button onclick="_dismissHypothesis(${h.id})" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:9px;cursor:pointer">Dismiss</button>
+                    </div>
+                </div>
+            `).join('')}
+        </div>`;
+    }
+
+    container.innerHTML = narrativesHtml;
+}
+
+function _promoteHypothesis(hypId, title, reasoning) {
+    document.getElementById('narrative-modal').style.display = 'flex';
+    document.getElementById('narrative-thesis').value = title;
+    document.getElementById('narrative-reasoning').value = reasoning;
+    document.getElementById('narrative-thesis').focus();
+    window._pendingPromoteHypId = hypId;
+}
+
+function _dismissHypothesis(hypId) {
+    fetch(`/api/hypotheses/${hypId}`, { method: 'DELETE' })
+        .then(() => loadNarratives());
 }
 
 function openNarrativeDetail(narrativeId) {
@@ -16631,6 +16712,16 @@ function createNarrative() {
                     setTimeout(() => { switchSignalTab('narratives'); openNarrativeDetail(data.narrative_id); }, 300);
                 });
             } else {
+                // Mark hypothesis as promoted if this came from the bank
+                const promoteId = window._pendingPromoteHypId;
+                if (promoteId) {
+                    fetch(`/api/hypotheses/${promoteId}/promote`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ narrative_id: data.narrative_id })
+                    });
+                    window._pendingPromoteHypId = null;
+                }
                 loadNarratives();
                 setTimeout(() => openNarrativeDetail(data.narrative_id), 300);
             }

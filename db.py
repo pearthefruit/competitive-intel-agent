@@ -205,6 +205,21 @@ CREATE TABLE IF NOT EXISTS narratives (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Hypothesis bank: lightweight investigation leads from brainstorm
+CREATE TABLE IF NOT EXISTS hypotheses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    reasoning TEXT,
+    confidence TEXT DEFAULT 'medium',
+    investigate_query TEXT,
+    source_thread_ids TEXT,
+    source_entities_json TEXT,
+    status TEXT DEFAULT 'captured',
+    narrative_id INTEGER REFERENCES narratives(id),
+    brainstorm_id INTEGER REFERENCES brainstorms(id),
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Signal clusters: LLM-synthesized groupings of related signals
 CREATE TABLE IF NOT EXISTS signal_clusters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2505,6 +2520,134 @@ def unlink_thread_from_narrative(conn, thread_id):
     """Remove a thread from its narrative."""
     conn.execute("UPDATE signal_clusters SET narrative_id = NULL WHERE id = ?", (thread_id,))
     conn.commit()
+
+
+# ===================== HYPOTHESIS BANK =====================
+
+def insert_hypothesis(conn, data):
+    """Save a hypothesis to the bank."""
+    cur = conn.execute(
+        """INSERT INTO hypotheses (title, reasoning, confidence, investigate_query,
+           source_thread_ids, source_entities_json, status, brainstorm_id)
+           VALUES (?, ?, ?, ?, ?, ?, 'captured', ?)""",
+        (data["title"], data.get("reasoning", ""), data.get("confidence", "medium"),
+         data.get("investigate_query", ""), json.dumps(data.get("source_thread_ids", [])),
+         json.dumps(data.get("source_entities", [])), data.get("brainstorm_id")),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_hypotheses(conn, status=None, limit=50):
+    """Fetch hypotheses, optionally filtered by status."""
+    if status and status != "all":
+        rows = conn.execute(
+            "SELECT * FROM hypotheses WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM hypotheses ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["source_thread_ids"] = json.loads(d["source_thread_ids"]) if d.get("source_thread_ids") else []
+        d["source_entities"] = json.loads(d["source_entities_json"]) if d.get("source_entities_json") else []
+        result.append(d)
+    return result
+
+
+def update_hypothesis_status(conn, hypothesis_id, status, narrative_id=None):
+    """Update hypothesis status (captured, promoted, dismissed)."""
+    if narrative_id:
+        conn.execute(
+            "UPDATE hypotheses SET status = ?, narrative_id = ? WHERE id = ?",
+            (status, narrative_id, hypothesis_id),
+        )
+    else:
+        conn.execute("UPDATE hypotheses SET status = ? WHERE id = ?", (status, hypothesis_id))
+    conn.commit()
+
+
+def delete_hypothesis(conn, hypothesis_id):
+    """Delete a hypothesis."""
+    conn.execute("DELETE FROM hypotheses WHERE id = ?", (hypothesis_id,))
+    conn.commit()
+
+
+def find_related_hypotheses(conn, thread_ids, limit=10):
+    """Find hypotheses related to given threads via entity overlap + keyword matching."""
+    if not thread_ids:
+        return []
+
+    # Get entities from the given threads
+    placeholders = ",".join("?" * len(thread_ids))
+    entities = conn.execute(
+        f"""SELECT DISTINCT COALESCE(normalized_value, entity_value) as name
+            FROM signal_entities
+            WHERE cluster_id IN ({placeholders}) OR signal_id IN
+              (SELECT signal_id FROM signal_cluster_items WHERE cluster_id IN ({placeholders}))""",
+        (*thread_ids, *thread_ids),
+    ).fetchall()
+    entity_names = {e["name"].lower() for e in entities}
+
+    # Get thread titles for keyword matching
+    threads = conn.execute(
+        f"SELECT title FROM signal_clusters WHERE id IN ({placeholders})", thread_ids
+    ).fetchall()
+    # Extract significant words (>3 chars, not stopwords)
+    stopwords = {"the", "and", "for", "are", "but", "not", "you", "all", "can", "had", "her",
+                  "was", "one", "our", "out", "has", "have", "been", "will", "with", "this",
+                  "that", "from", "they", "were", "what", "when", "make", "like", "than",
+                  "each", "which", "their", "more", "about", "into", "could", "other"}
+    keywords = set()
+    for t in threads:
+        for word in t["title"].lower().split():
+            clean = word.strip(".,;:!?\"'()-")
+            if len(clean) > 3 and clean not in stopwords:
+                keywords.add(clean)
+
+    # Get all captured hypotheses
+    all_hyps = conn.execute(
+        "SELECT * FROM hypotheses WHERE status != 'dismissed' ORDER BY created_at DESC LIMIT ?",
+        (limit * 3,),
+    ).fetchall()
+
+    scored = []
+    for h in all_hyps:
+        d = dict(h)
+        d["source_thread_ids"] = json.loads(d["source_thread_ids"]) if d.get("source_thread_ids") else []
+        d["source_entities"] = json.loads(d["source_entities_json"]) if d.get("source_entities_json") else []
+
+        # Skip if this hypothesis was generated from the exact same threads
+        if set(d["source_thread_ids"]) == set(thread_ids):
+            continue
+
+        score = 0
+        match_type = []
+
+        # Entity overlap (strong signal)
+        hyp_entities = {e.lower() for e in d["source_entities"]}
+        entity_overlap = entity_names & hyp_entities
+        if entity_overlap:
+            score += len(entity_overlap) * 3
+            match_type.append(f"entities: {', '.join(list(entity_overlap)[:3])}")
+
+        # Keyword overlap in title/reasoning (weak signal)
+        hyp_text = (d["title"] + " " + (d.get("reasoning") or "")).lower()
+        kw_matches = {kw for kw in keywords if kw in hyp_text}
+        if kw_matches:
+            score += len(kw_matches)
+            match_type.append(f"keywords: {', '.join(list(kw_matches)[:3])}")
+
+        if score > 0:
+            d["relevance_score"] = score
+            d["match_reason"] = "; ".join(match_type)
+            scored.append(d)
+
+    scored.sort(key=lambda x: x["relevance_score"], reverse=True)
+    return scored[:limit]
 
 
 # ===================== BOARD =====================
