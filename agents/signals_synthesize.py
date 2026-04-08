@@ -134,8 +134,9 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
         if len(sig_ids) < 2:
             continue
 
+        from db import sanitize_domain
         cluster_id = insert_signal_cluster(conn, {
-            "domain": td.get("domain", "economics"),
+            "domain": sanitize_domain(td.get("domain", "")),
             "title": title,
             "synthesis": td.get("summary", ""),
         })

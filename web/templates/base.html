@@ -4292,6 +4292,12 @@
             border-color: var(--accent);
             color: var(--accent);
         }
+        .ent-chip-active {
+            background: var(--accent-dim);
+            border-color: var(--accent);
+            color: var(--accent);
+            box-shadow: 0 0 6px rgba(6,182,212,0.3);
+        }
 
         /* Entity popover */
         .ent-popover {
@@ -14281,9 +14287,8 @@ function openThreadDetail(threadId) {
             });
 
             const _entIcon = {company:'🏢',sector:'📊',geography:'📍',country:'📍',city:'📍',person:'👤',regulation:'⚖️',concept:'💡','economic concept':'💡',event:'📅',index:'📈',exchange:'📈',university:'🎓'};
-            const _entClickable = null; // ALL types are clickable
-            // Reorder: concepts first (most valuable for connections)
             const typeOrder = ['concept', 'economic concept', 'event', 'company', 'sector', 'geography', 'country', 'city', 'person', 'regulation', 'index', 'exchange'];
+            const _entClickable = typeOrder; // ALL types are clickable
             const sortedEntTypes = Object.entries(entsByType).sort((a, b) => (typeOrder.indexOf(a[0]) === -1 ? 99 : typeOrder.indexOf(a[0])) - (typeOrder.indexOf(b[0]) === -1 ? 99 : typeOrder.indexOf(b[0])));
             const entHtml = sortedEntTypes.map(([type, vals]) => {
                 const icon = _entIcon[type] || '🔹';
@@ -14581,13 +14586,28 @@ function _loadRelatedThreads(threadId) {
 }
 const _entIcon = {company: '🏢', sector: '📊', geography: '📍', person: '👤', regulation: '⚖️', concept: '💡', event: '📅'};
 
+let _activeBoardHighlight = null; // {type, value} of currently highlighted entity
+
 function _highlightEntityOnBoard(entityType, entityValue) {
+    // Toggle off if same entity clicked again
+    if (_activeBoardHighlight && _activeBoardHighlight.type === entityType && _activeBoardHighlight.value === entityValue) {
+        _clearBoardHighlight();
+        return;
+    }
+
     // Switch to board tab and highlight nodes containing this entity
     if (_signalTab !== 'graph') switchSignalTab('graph');
     // Find threads with this entity via the board data
     if (!_boardData) return;
     const sel = document.getElementById('sig-graph-selection');
     if (sel) sel.innerHTML = `<span style="color:var(--accent)">Highlighting threads with ${_entIcon[entityType] || '🔹'} "${escHtml(entityValue)}"...</span>`;
+
+    _activeBoardHighlight = {type: entityType, value: entityValue};
+    // Update chip active state
+    document.querySelectorAll('.ent-chip').forEach(c => c.classList.remove('ent-chip-active'));
+    document.querySelectorAll(`.ent-chip[data-type="${entityType}"]`).forEach(c => {
+        if (c.textContent.includes(entityValue)) c.classList.add('ent-chip-active');
+    });
 
     // Fetch entity matches from API
     fetch(`/api/signals/entity-threads?type=${encodeURIComponent(entityType)}&value=${encodeURIComponent(entityValue)}`)
@@ -14608,7 +14628,9 @@ function _highlightEntityOnBoard(entityType, entityValue) {
 }
 
 function _clearBoardHighlight() {
+    _activeBoardHighlight = null;
     document.querySelectorAll('.graph-node').forEach(n => n.style.filter = '');
+    document.querySelectorAll('.ent-chip-active').forEach(c => c.classList.remove('ent-chip-active'));
     const sel = document.getElementById('sig-graph-selection');
     if (sel) sel.innerHTML = '';
 }

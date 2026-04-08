@@ -8,6 +8,30 @@ from datetime import datetime, timezone
 # Default lens slug — used as fallback when no lens_id specified for briefing
 DT_LENS_SLUG = "digital-transformation"
 
+_VALID_DOMAINS = {"economics", "finance", "geopolitics", "tech_ai", "labor", "regulatory"}
+_DOMAIN_ALIASES = {
+    "software_development": "tech_ai", "technology": "tech_ai", "artificial_intelligence": "tech_ai",
+    "tech": "tech_ai", "ai": "tech_ai", "software": "tech_ai", "automation": "tech_ai",
+    "hiring": "labor", "employment": "labor", "workforce": "labor", "jobs": "labor",
+    "financial": "finance", "markets": "finance", "banking": "finance",
+    "political": "geopolitics", "trade": "geopolitics", "policy": "geopolitics",
+    "regulation": "regulatory", "compliance": "regulatory", "legal": "regulatory",
+    "economic": "economics", "macro": "economics",
+}
+
+
+def sanitize_domain(raw):
+    """Normalize a domain string (possibly pipe-separated) to a single valid domain."""
+    if not raw:
+        return "economics"
+    parts = [p.strip().lower() for p in raw.split("|")]
+    for p in parts:
+        if p in _VALID_DOMAINS:
+            return p
+        if p in _DOMAIN_ALIASES:
+            return _DOMAIN_ALIASES[p]
+    return "economics"
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS companies (

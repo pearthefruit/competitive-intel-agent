@@ -2150,7 +2150,7 @@ def create_app(db_path="intel.db"):
     @app.route("/api/signals/threads/<int:thread_id>/execute-split", methods=["POST"])
     def signals_thread_execute_split_api(thread_id):
         """Execute a proposed thread split — create new threads and reassign signals."""
-        from db import insert_signal_cluster, link_signal_to_cluster
+        from db import insert_signal_cluster, link_signal_to_cluster, sanitize_domain
 
         data = request.json or {}
         splits = data.get("splits", [])
@@ -2162,7 +2162,7 @@ def create_app(db_path="intel.db"):
         for split in splits:
             title = split.get("title", "").strip()
             sig_ids = split.get("signal_ids", [])
-            domain = split.get("domain", "economics")
+            domain = sanitize_domain(split.get("domain", ""))
             if not title or not sig_ids:
                 continue
 
