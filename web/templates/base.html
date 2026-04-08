@@ -14765,14 +14765,88 @@ function _renderHighlightPills() {
         return;
     }
     tray.style.display = 'flex';
-    tray.innerHTML = _boardHighlights.map((h, i) => {
+
+    // Compute union of highlighted thread IDs
+    const unionIds = new Set();
+    _boardHighlights.forEach(h => h.threadIds.forEach(id => unionIds.add(id)));
+
+    // Pills
+    let html = _boardHighlights.map((h, i) => {
         const color = h.kind === 'keyword' ? '#a855f7' : '#06b6d4';
         return `<span class="board-hl-pill" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:${color}18;border:1px solid ${color}44;border-radius:12px;font-size:10px;color:${color};font-weight:600;white-space:nowrap">
             ${h.icon} ${escHtml(h.label)} <span style="font-weight:400;color:var(--text-muted)">${h.threadIds.size}</span>
             <span onclick="_removeBoardHighlight(${i})" style="cursor:pointer;margin-left:2px;font-size:12px;color:var(--text-muted);line-height:1" title="Remove">&times;</span>
         </span>`;
-    }).join('') + `<span onclick="_clearBoardHighlight();document.getElementById('board-keyword-search').value=''" style="font-size:9px;color:var(--text-muted);cursor:pointer;text-decoration:underline;padding:3px 4px;white-space:nowrap">clear all</span>`;
-    if (sel) sel.innerHTML = `<span style="color:var(--text-muted)">${_boardHighlights.length} filter${_boardHighlights.length > 1 ? 's' : ''} active</span>`;
+    }).join('');
+
+    // Action buttons when 2+ threads highlighted
+    if (unionIds.size >= 2) {
+        const btnBase = 'padding:3px 8px;border-radius:12px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;border:none;';
+        html += `<span onclick="_linkHighlighted()" style="${btnBase}background:linear-gradient(135deg,#06b6d4,#a855f7);color:#fff" title="Create connections between highlighted threads">🔗 Link ${unionIds.size}</span>`;
+        html += `<span onclick="_brainstormHighlighted()" style="${btnBase}background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff" title="Brainstorm connections between highlighted threads">🧠 Brainstorm ${unionIds.size}</span>`;
+    }
+
+    html += `<span onclick="_clearBoardHighlight();document.getElementById('board-keyword-search').value=''" style="font-size:9px;color:var(--text-muted);cursor:pointer;text-decoration:underline;padding:3px 4px;white-space:nowrap">clear all</span>`;
+    tray.innerHTML = html;
+    if (sel) sel.innerHTML = `<span style="color:var(--text-muted)">${_boardHighlights.length} filter${_boardHighlights.length > 1 ? 's' : ''} · ${unionIds.size} threads</span>`;
+}
+
+function _getHighlightedThreadIds() {
+    const ids = new Set();
+    _boardHighlights.forEach(h => h.threadIds.forEach(id => ids.add(id)));
+    return ids;
+}
+
+function _getHighlightContext() {
+    return _boardHighlights.map(h => h.label).join(', ');
+}
+
+function _linkHighlighted() {
+    const ids = [..._getHighlightedThreadIds()];
+    if (ids.length < 2) return;
+    const context = _getHighlightContext();
+
+    // Show progress in status bar
+    const sel = document.getElementById('sig-graph-selection');
+    const pairs = [];
+    for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+            pairs.push([ids[i], ids[j]]);
+        }
+    }
+    if (sel) sel.innerHTML = `<span style="color:var(--accent)">🔗 Linking ${pairs.length} pair${pairs.length > 1 ? 's' : ''}...</span>`;
+
+    // Create connections with highlight labels as context for LLM
+    Promise.all(pairs.map(([a, b]) =>
+        fetch('/api/board/connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source: a, target: b, label: context })
+        }).then(r => r.json())
+    )).then(results => {
+        const labels = results.filter(r => r.label).map(r => r.label);
+        if (sel) sel.innerHTML = `<span style="color:var(--green)">✓ ${pairs.length} connection${pairs.length > 1 ? 's' : ''} created</span>`;
+        // Reload board to show new links
+        loadBoard();
+        setTimeout(() => { if (sel) sel.innerHTML = ''; }, 3000);
+    });
+}
+
+function _brainstormHighlighted() {
+    const ids = _getHighlightedThreadIds();
+    if (ids.size < 2) return;
+
+    // Set board selected IDs to highlighted threads and open brainstorm
+    _selectedThreadIds.clear();
+    ids.forEach(id => _selectedThreadIds.add(id));
+
+    // Update visual selection on graph nodes
+    d3.selectAll('.graph-node').classed('selected', d => _selectedThreadIds.has(d.id));
+
+    // Show brainstorm button and open
+    const btn = document.getElementById('sig-brainstorm-btn');
+    if (btn) btn.style.display = '';
+    openBrainstormMode();
 }
 
 function _highlightEntityOnBoard(entityType, entityValue) {
