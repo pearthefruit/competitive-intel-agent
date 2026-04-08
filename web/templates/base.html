@@ -15120,14 +15120,20 @@ function _applyBoardHighlights() {
 function _clusterHighlightedNodes(unionIds) {
     if (_hlClusterAnim) cancelAnimationFrame(_hlClusterAnim);
 
+    // Only cluster if board tab is visible
+    const graphTab = document.getElementById('sig-tab-graph');
+    if (!graphTab || !graphTab.classList.contains('active')) return;
+
     const nodes = [];
+    const allNids = [];
     document.querySelectorAll('.graph-node').forEach(n => {
         const nid = parseInt(n.dataset.nodeId);
-        if (!nid) return;
+        if (!nid || isNaN(nid)) return;
+        allNids.push(nid);
         if (!unionIds.has(nid)) return;
         const transform = n.getAttribute('transform');
         if (!transform) return;
-        const m = transform.match(/translate\(\s*([-\d.e+]+)\s*[,\s]\s*([-\d.e+]+)\s*\)/);
+        const m = transform.match(/translate\(\s*([-\d.e+]+)[,\s]+([-\d.e+]+)\s*\)/);
         if (!m) return;
         const x = parseFloat(m[1]), y = parseFloat(m[2]);
         // Save original position if not already saved
@@ -15135,6 +15141,7 @@ function _clusterHighlightedNodes(unionIds) {
         nodes.push({ el: n, nid, x, y });
     });
 
+    console.log(`[cluster] ${nodes.length} highlighted nodes from ${allNids.length} total. unionIds:`, [...unionIds], 'matched nids:', nodes.map(n => n.nid));
     if (nodes.length < 2) return;
 
     // Compute centroid of highlighted nodes
@@ -15259,9 +15266,14 @@ function _getHighlightContext() {
 function _linkHighlighted() {
     const ids = [..._getHighlightedThreadIds()];
     if (ids.length < 2) return;
-    const context = _getHighlightContext();
 
-    // Show progress in status bar
+    // Safety limit — linking N nodes creates N*(N-1)/2 pairs
+    if (ids.length > 5) {
+        _showToast(`Too many threads (${ids.length}) — select 5 or fewer to link. Use brainstorm for larger groups.`, 'warn', 5000);
+        return;
+    }
+
+    const context = _getHighlightContext();
     const sel = document.getElementById('sig-graph-selection');
     const pairs = [];
     for (let i = 0; i < ids.length; i++) {
@@ -15269,7 +15281,9 @@ function _linkHighlighted() {
             pairs.push([ids[i], ids[j]]);
         }
     }
-    if (sel) sel.innerHTML = `<span style="color:var(--accent)">🔗 Linking ${pairs.length} pair${pairs.length > 1 ? 's' : ''}...</span>`;
+
+    _showConfirm(`Create ${pairs.length} connections between ${ids.length} threads?`, () => {
+        if (sel) sel.innerHTML = `<span style="color:var(--accent)">🔗 Linking ${pairs.length} pair${pairs.length > 1 ? 's' : ''}...</span>`;
 
     // Create connections with highlight labels as context for LLM
     Promise.all(pairs.map(([a, b]) =>
@@ -15285,6 +15299,7 @@ function _linkHighlighted() {
         loadBoard();
         setTimeout(() => { if (sel) sel.innerHTML = ''; }, 3000);
     });
+    }); // end _showConfirm
 }
 
 function _brainstormHighlighted() {
