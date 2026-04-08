@@ -15132,11 +15132,17 @@ function _renderBrainstormResults(container, result, threadIds) {
 
     let html = threadCards;
 
-    // Connection summary
+    // Connection summary + link label badges
     if (result.connection_summary) {
+        const linkLabels = result.link_labels || [];
         html += `<div class="brainstorm-section">
             <div class="brainstorm-section-title">🔗 Connection</div>
-            <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;padding:12px 16px;background:var(--bg-secondary);border-radius:10px;border:1px solid var(--border)">${escHtml(result.connection_summary)}</div>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;padding:12px 16px;background:var(--bg-secondary);border-radius:10px;border:1px solid var(--border)">
+                ${escHtml(result.connection_summary)}
+                ${linkLabels.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:10px">${linkLabels.map(ll =>
+                    `<span style="padding:3px 10px;background:rgba(168,85,247,0.15);border:1px solid rgba(168,85,247,0.3);border-radius:12px;font-size:10px;font-weight:600;color:var(--purple)">${escHtml(ll.label)}</span>`
+                ).join('')}</div>` : ''}
+            </div>
         </div>`;
     }
 
@@ -15178,9 +15184,10 @@ function _renderBrainstormResults(container, result, threadIds) {
     if (result.questions_to_investigate && result.questions_to_investigate.length) {
         html += `<div class="brainstorm-section">
             <div class="brainstorm-section-title">❓ Questions to Investigate</div>
-            ${result.questions_to_investigate.map(q => `
-                <div style="padding:8px 12px;margin-bottom:6px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);font-size:12px;color:var(--text-secondary);cursor:pointer" onclick="investigateHypothesis('${escHtml(q.replace(/'/g, "\\'"))}')">
-                    🔍 ${escHtml(q)}
+            ${result.questions_to_investigate.map((q, qi) => `
+                <div id="investigate-q-${qi}" style="padding:8px 12px;margin-bottom:6px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);font-size:12px;color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;gap:8px" onclick="_investigateWithFeedback(this, '${escHtml(q.replace(/'/g, "\\'"))}')">
+                    <span style="flex:1">🔍 ${escHtml(q)}</span>
+                    <span class="investigate-status" style="font-size:10px;color:var(--text-muted)"></span>
                 </div>
             `).join('')}
         </div>`;
@@ -15230,9 +15237,17 @@ function _linkFromBrainstorm(threadIds) {
 
 function investigateHypothesis(query) {
     closeBrainstorm();
-    // Run targeted signal search for this question
-    const sel = document.getElementById('sig-graph-selection');
-    if (sel) sel.innerHTML = `<span style="color:var(--accent)">🔍 Searching: "${escHtml(query.substring(0,50))}"...</span>`;
+    _runInvestigateSearch(null, query);
+}
+
+function _investigateWithFeedback(el, query) {
+    _runInvestigateSearch(el, query);
+}
+
+function _runInvestigateSearch(el, query) {
+    const status = el ? el.querySelector('.investigate-status') : null;
+    if (el) { el.style.borderColor = 'var(--accent)'; if (status) status.textContent = 'searching...'; }
+
     fetch('/api/signals/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -15242,9 +15257,15 @@ function investigateHypothesis(query) {
     .then(data => {
         loadSignals();
         if (_signalTab === 'graph') loadBoard();
-        switchSignalTab('raw');
-        if (sel) sel.innerHTML = `<span style="color:var(--green)">✓ Found ${data.total_found || 0} signals for "${escHtml(query.substring(0,40))}"</span>`;
-        setTimeout(() => { if (sel) sel.innerHTML = ''; }, 5000);
+        if (el) {
+            el.style.borderColor = 'var(--green)';
+            if (status) status.innerHTML = `<span style="color:var(--green)">✓ ${data.total_found || 0} found, ${data.new_inserted || 0} new</span>`;
+        } else {
+            switchSignalTab('raw');
+        }
+    })
+    .catch(() => {
+        if (el && status) status.innerHTML = `<span style="color:var(--red)">failed</span>`;
     });
 }
 
