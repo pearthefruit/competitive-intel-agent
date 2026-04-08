@@ -15381,11 +15381,22 @@ function closeSignalDetail() {
     _activeSignalId = null;
     _activeThreadId = null;
     ++_detailRequestId;
-    document.querySelectorAll('.sig-card, .thread-card').forEach(c => c.classList.remove('active'));
-    // Collapse the detail pane
+    document.querySelectorAll('.sig-card, .thread-card, .narrative-card').forEach(c => c.classList.remove('active'));
     const detailPane = document.getElementById('signals-detail');
-    if (detailPane) detailPane.style.display = 'none';
+    const detailBody = document.getElementById('signals-detail-body');
     const closeBtn = document.querySelector('.signals-detail-close');
+    if (_signalTab === 'graph') {
+        // Board view: collapse pane entirely to give board full width
+        if (detailPane) detailPane.style.display = 'none';
+    } else {
+        // Feed views: reset to empty state (keep pane visible)
+        if (detailBody) detailBody.innerHTML = `
+            <div class="signals-empty" id="signals-detail-empty" style="display:flex">
+                <div style="font-size:32px;margin-bottom:12px">&#128270;</div>
+                <div>Select a thread to view details</div>
+                <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click any thread in the feed or graph.</div>
+            </div>`;
+    }
     if (closeBtn) closeBtn.style.display = 'none';
 }
 
@@ -16131,15 +16142,18 @@ function renderBoard(data) {
 
     // Cancel connection on escape or click on empty space
     function _cancelConnect() {
-        if (_connectingFrom == null) return;
         _connectingFrom = null;
         connectLine.style('display', 'none');
         svg.on('mousemove.connect', null);
         const sel = document.getElementById('sig-graph-selection');
         if (sel) sel.innerHTML = `<span style="color:var(--text-muted)">${nodes.length} threads · ${(data.notes||[]).length} notes · right-click to connect · double-click to add note</span>`;
     }
+    // Cancel connection: Escape, left-click empty space, or right-click empty space
     document.addEventListener('keydown', function _escConn(e) {
-        if (e.key === 'Escape') _cancelConnect();
+        if (e.key === 'Escape') { _cancelConnect(); const inp = document.getElementById('board-inline-input'); if (inp) inp.remove(); }
+    });
+    svg.on('contextmenu.cancel', (event) => {
+        if (!event.target.closest('.graph-node') && _connectingFrom != null) { event.preventDefault(); _cancelConnect(); }
     });
     svg.on('click.cancel', (event) => {
         if (event.target.closest('.graph-node')) return;
