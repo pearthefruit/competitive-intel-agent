@@ -414,3 +414,150 @@ def collect_all_domains(max_per_source=8, progress_cb=None):
 
     _cb("scan_complete", {"total": len(all_signals), "domains": len(ALL_DOMAINS)})
     return all_signals
+
+
+def targeted_search(query, days_back=30, progress_cb=None):
+    """Search for signals across ALL sources for a specific query.
+
+    Unlike domain collectors (which use hardcoded queries), this takes an
+    arbitrary user query and fans it out to every available source.
+
+    Returns list of signal dicts + audit breakdown per source.
+    """
+    from scraper.google_news import search_google_news
+    from scraper.hackernews import search_stories
+    from scraper.reddit_rss import search_reddit_rss
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    _cb = progress_cb or (lambda *a: None)
+    results = []
+    seen_hashes = set()
+    audit = []
+
+    def _add(sig):
+        if not sig:
+            return False
+        h = sig["content_hash"]
+        if h in seen_hashes:
+            return False
+        seen_hashes.add(h)
+        results.append(sig)
+        return True
+
+    # 1. Google News — primary news source
+    _cb("source_start", {"source": "google_news", "query": query})
+    try:
+        news = search_google_news(query, max_results=12, days_back=days_back)
+        count = sum(1 for item in news if _add(_normalize_signal(item, "google_news", "targeted")))
+        audit.append({"source": "Google News", "raw": len(news), "new": count})
+    except Exception as e:
+        print(f"[targeted_search] Google News error: {e}")
+        audit.append({"source": "Google News", "raw": 0, "new": 0, "error": str(e)})
+    _cb("source_done", {"source": "google_news", "count": count if 'count' in dir() else 0})
+
+    # 2. DuckDuckGo News — different index, catches what Google News misses
+    _cb("source_start", {"source": "ddg_news", "query": query})
+    try:
+        from scraper.web_search import search_news as ddg_search_news
+        ddg_news = ddg_search_news(query, max_results=10)
+        count = 0
+        for item in ddg_news:
+            sig = _normalize_signal({
+                "title": item.get("title", ""),
+                "href": item.get("url") or item.get("href", ""),
+                "body": item.get("body", ""),
+                "date": item.get("date", ""),
+                "source": item.get("source", ""),
+            }, "ddg_news", "targeted")
+            if _add(sig):
+                count += 1
+        audit.append({"source": "DuckDuckGo News", "raw": len(ddg_news), "new": count})
+    except Exception as e:
+        print(f"[targeted_search] DDG News error: {e}")
+        audit.append({"source": "DuckDuckGo News", "raw": 0, "new": 0, "error": str(e)})
+    _cb("source_done", {"source": "ddg_news", "count": count if 'count' in dir() else 0})
+
+    # 3. HackerNews — tech/startup community
+    _cb("source_start", {"source": "hackernews", "query": query})
+    try:
+        hn = search_stories(query, max_results=8, sort="date")
+        count = sum(1 for item in hn if _add(_normalize_signal(item, "hackernews", "targeted")))
+        audit.append({"source": "Hacker News", "raw": len(hn), "new": count})
+    except Exception as e:
+        print(f"[targeted_search] HN error: {e}")
+        audit.append({"source": "Hacker News", "raw": 0, "new": 0, "error": str(e)})
+    _cb("source_done", {"source": "hackernews", "count": count if 'count' in dir() else 0})
+
+    # 4. Reddit — social sentiment
+    _cb("source_start", {"source": "reddit", "query": query})
+    try:
+        reddit = search_reddit_rss(query, max_results=8, subreddits=None, fetch_comments_top_n=0)
+        count = sum(1 for item in reddit if _add(_normalize_signal(item, "reddit", "targeted")))
+        audit.append({"source": "Reddit", "raw": len(reddit), "new": count})
+    except Exception as e:
+        print(f"[targeted_search] Reddit error: {e}")
+        audit.append({"source": "Reddit", "raw": 0, "new": 0, "error": str(e)})
+    _cb("source_done", {"source": "reddit", "count": count if 'count' in dir() else 0})
+
+    # 5. Government RSS — keyword-filter across all 10 feeds
+    _cb("source_start", {"source": "gov_rss", "query": query})
+    try:
+        from scraper.gov_rss import GOV_FEEDS, fetch_gov_feed
+        query_lower = query.lower()
+        gov_count = 0
+        for key in GOV_FEEDS:
+            items = fetch_gov_feed(key, max_results=15, days_back=days_back)
+            for item in items:
+                title = (item.get("title") or "").lower()
+                body = (item.get("body") or "").lower()
+                if query_lower in title or query_lower in body:
+                    sig = _normalize_signal(item, "gov_rss", GOV_FEEDS[key]["domain"])
+                    if sig:
+                        sig["source_type"] = "government"
+                        sig["source_name"] = GOV_FEEDS[key]["source_name"]
+                        if _add(sig):
+                            gov_count += 1
+        audit.append({"source": "Gov RSS (10 feeds)", "new": gov_count})
+    except Exception as e:
+        print(f"[targeted_search] Gov RSS error: {e}")
+        audit.append({"source": "Gov RSS", "raw": 0, "new": 0, "error": str(e)})
+    _cb("source_done", {"source": "gov_rss", "count": gov_count if 'gov_count' in dir() else 0})
+
+    # 6. FRED — search for relevant economic indicators
+    _cb("source_start", {"source": "fred", "query": query})
+    try:
+        from scraper.fred_api import search_series, fetch_series
+        series_matches = search_series(query, limit=5)
+        fred_count = 0
+        for s in series_matches:
+            obs = fetch_series(s["series_id"], limit=2)
+            if not obs:
+                continue
+            latest = obs[-1]
+            prior = obs[-2] if len(obs) > 1 else None
+            val = latest.get("value", "N/A")
+            title = f"{s['title']}: {val} ({latest.get('date', '')})"
+            body = f"{s['title']}. Latest: {val} on {latest.get('date', '')}."
+            if prior:
+                body += f" Previous: {prior.get('value', 'N/A')} on {prior.get('date', '')}."
+            sig = {
+                "source": "fred",
+                "domain": _classify_domain(s["title"], ""),
+                "title": title,
+                "url": f"https://fred.stlouisfed.org/series/{s['series_id']}",
+                "body": body,
+                "published_at": latest.get("date", ""),
+                "source_name": "FRED",
+                "source_type": "data_point",
+                "content_hash": _content_hash("fred", s["series_id"], f"{latest.get('date', '')}:{val}"),
+            }
+            if _add(sig):
+                fred_count += 1
+        audit.append({"source": "FRED", "raw": len(series_matches), "new": fred_count})
+    except Exception as e:
+        print(f"[targeted_search] FRED error: {e}")
+        audit.append({"source": "FRED", "raw": 0, "new": 0, "error": str(e)})
+    _cb("source_done", {"source": "fred", "count": fred_count if 'fred_count' in dir() else 0})
+
+    _cb("search_complete", {"total": len(results), "sources": len(audit)})
+    return results, audit
