@@ -2939,6 +2939,16 @@ Return JSON:
             result["assessment"] = llm_assessment
         return jsonify(result)
 
+    @app.route("/api/board/connect/<int:link_id>/label", methods=["PATCH"])
+    def board_edit_label_api(link_id):
+        """Edit a connection label."""
+        data = request.json or {}
+        conn = get_connection(db_path)
+        conn.execute("UPDATE thread_links SET label = ? WHERE id = ?", (data.get("label", ""), link_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+
     @app.route("/api/board/connect/<int:link_id>", methods=["DELETE"])
     def board_disconnect_api(link_id):
         """Remove a connection."""

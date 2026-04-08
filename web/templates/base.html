@@ -5565,6 +5565,10 @@
                                                 <option value="merged">Merged only</option>
                                             </select>
                                         </label>
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-secondary);margin-bottom:12px;cursor:pointer">
+                                            <input type="checkbox" id="gf-physics" style="accent-color:var(--accent)">
+                                            <span>Live physics (force-directed)</span>
+                                        </label>
                                         <button onclick="_applyGraphFilters()" style="width:100%;padding:6px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">Apply</button>
                                     </div>
                                 </div>
@@ -14826,10 +14830,10 @@ function linkSelectedThreads() {
     for (let i = 0; i < ids.length; i++) {
         for (let j = i + 1; j < ids.length; j++) {
             promises.push(
-                fetch('/api/signals/thread-links', {
+                fetch('/api/board/connect', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ thread_a_id: ids[i], thread_b_id: ids[j], label: 'manual' })
+                    body: JSON.stringify({ source: ids[i], target: ids[j], label: '' })
                 })
             );
         }
@@ -15188,22 +15192,23 @@ function _renderBrainstormResults(container, result, threadIds) {
 }
 
 function _linkFromBrainstorm(threadIds) {
+    const btn = event.target.closest('button');
+    if (btn) { btn.textContent = '🔗 Linking + AI labeling...'; btn.disabled = true; }
     const promises = [];
     for (let i = 0; i < threadIds.length; i++) {
         for (let j = i + 1; j < threadIds.length; j++) {
             promises.push(
-                fetch('/api/signals/thread-links', {
+                fetch('/api/board/connect', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ thread_a_id: threadIds[i], thread_b_id: threadIds[j], label: 'brainstorm' })
-                })
+                    body: JSON.stringify({ source: threadIds[i], target: threadIds[j], label: '' })
+                }).then(r => r.json())
             );
         }
     }
-    Promise.all(promises).then(() => {
-        // Visual feedback
-        const btn = event.target.closest('button');
-        if (btn) { btn.textContent = '✓ Linked'; btn.style.color = 'var(--green)'; btn.disabled = true; }
+    Promise.all(promises).then(results => {
+        const labels = results.filter(r => r.label).map(r => r.label);
+        if (btn) { btn.textContent = `✓ Linked (${labels.join(', ') || 'connected'})`; btn.style.color = 'var(--green)'; }
     });
 }
 
@@ -15752,6 +15757,7 @@ function _showInlineInput(x, y, placeholder, defaultVal, onSubmit) {
 }
 
 let _boardData = null;
+let _boardZoomTransform = null; // persist zoom across reloads
 let _connectingFrom = null; // thread id when drawing a connection
 let _boardSelectedIds = new Set(); // shift-click multi-select for narrative creation
 let _expandedNarratives = new Set(); // narrative IDs that are expanded to show child threads
@@ -15793,6 +15799,7 @@ function renderBoard(data) {
             return !event.button;
         })
         .on('zoom', (event) => {
+            _boardZoomTransform = event.transform;
             zoomGroup.attr('transform', event.transform);
             // Move HTML notes with the zoom
             container.querySelectorAll('.board-note').forEach(n => {
@@ -15807,6 +15814,10 @@ function renderBoard(data) {
     svg.call(zoomBehavior);
     svg.on('dblclick.zoom', null);
     svg.node().__zoomBehavior = zoomBehavior;
+    // Restore previous zoom transform if available (prevents flash on reload)
+    if (_boardZoomTransform) {
+        svg.call(zoomBehavior.transform, _boardZoomTransform);
+    }
 
     // Double-click on empty space → create note (use event coordinates to avoid zoom interference)
     svg.on('dblclick', (event) => {
@@ -16009,6 +16020,36 @@ function renderBoard(data) {
     });
 
     _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
+
+    // Make edge labels clickable to edit
+    linkLabel.style('cursor', 'pointer')
+        .on('click', (event, d) => {
+            event.stopPropagation();
+            _showInlineInput(event.clientX, event.clientY, 'Edit label', d.label || '', (newLabel) => {
+                fetch(`/api/board/connect/${d.id}/label`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ label: newLabel })
+                }).then(() => loadBoard());
+            });
+        });
+
+    // Physics mode — live force simulation
+    const physicsOn = document.getElementById('gf-physics')?.checked;
+    if (physicsOn) {
+        const threadNodes = nodes.filter(n => n.type !== 'narrative');
+        const sim = d3.forceSimulation(threadNodes)
+            .force('link', d3.forceLink(edgeData).id(d => d.id).distance(100))
+            .force('charge', d3.forceManyBody().strength(-120))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            .force('collision', d3.forceCollide().radius(d => nodeR(d) + 10));
+        sim.on('tick', () => {
+            node.attr('transform', d => `translate(${d.x},${d.y})`);
+            _updateBoardEdges(link, linkLabel, edgeData, nodeMap);
+        });
+        // Store ref so drag can interact with it
+        svg.node().__boardSim = sim;
+    }
 
     // Render sticky notes as HTML overlays (positioned in zoom-transformed space)
     const initTransform = d3.zoomTransform(svg.node());
