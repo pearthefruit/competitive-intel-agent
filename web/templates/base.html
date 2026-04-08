@@ -5480,7 +5480,7 @@
                     <button class="sig-feed-tab active" data-tab="raw" onclick="switchSignalTab('raw')">Signals</button>
                     <button class="sig-feed-tab" data-tab="threads" onclick="switchSignalTab('threads')">Threads</button>
                     <button class="sig-feed-tab" data-tab="narratives" onclick="switchSignalTab('narratives')">Narratives</button>
-                    <button class="sig-feed-tab" data-tab="graph" onclick="switchSignalTab('graph')">Graph</button>
+                    <button class="sig-feed-tab" data-tab="graph" onclick="switchSignalTab('graph')">Board</button>
                     <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
                 </div>
                 <div class="signals-feed-controls">
@@ -5526,10 +5526,7 @@
                         <div id="sig-graph-pattern-label" style="display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;font-size:13px;font-weight:700;color:var(--text-primary);background:var(--bg-primary);padding:4px 12px;border-radius:6px;border:1px solid var(--border)"></div>
                         <div id="sig-graph-controls" style="display:none;position:absolute;bottom:12px;left:12px;right:12px;display:flex;gap:8px;align-items:center;justify-content:space-between">
                             <div style="display:flex;gap:4px;align-items:center">
-                                <div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-right:4px">
-                                    <button onclick="_switchBoardMode('graph')" id="mode-graph-btn" style="padding:4px 10px;background:var(--accent);border:none;color:#fff;font-size:10px;font-weight:600;cursor:pointer">Graph</button>
-                                    <button onclick="_switchBoardMode('board')" id="mode-board-btn" style="padding:4px 10px;background:var(--bg-tertiary);border:none;color:var(--text-muted);font-size:10px;font-weight:600;cursor:pointer">Board</button>
-                                </div>
+                                <button onclick="_boardAutoLayout()" id="board-autolayout-btn" style="height:28px;padding:0 10px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:10px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:4px;margin-right:4px" title="Auto-arrange unpinned nodes">🔄 Auto-layout</button>
                                 <button onclick="_graphZoom(1.3)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom in">+</button>
                                 <button onclick="_graphZoom(0.7)" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Zoom out">−</button>
                                 <button onclick="_graphReset()" style="width:28px;height:28px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center" title="Reset zoom">⟲</button>
@@ -13870,7 +13867,7 @@ function switchSignalTab(tab) {
     document.querySelector(`.sig-feed-tab[data-tab="${tab}"]`).classList.add('active');
     document.querySelectorAll('.sig-tab-content').forEach(c => c.classList.remove('active'));
     document.getElementById(`sig-tab-${tab}`).classList.add('active');
-    if (tab === 'graph') loadGraph();
+    if (tab === 'graph') loadBoard();
     if (tab === 'narratives') loadNarratives();
     // Show/hide filter input (only useful for threads and raw tabs)
     const searchInput = document.getElementById('signals-search');
@@ -14411,7 +14408,7 @@ function _threadActionSearchMore(query, patternId) {
         }
         // Reload feed and refresh this pattern's detail
         loadSignals();
-        if (_boardMode === 'board') loadBoard();
+        if (_signalTab === 'graph') loadBoard();
         if (patternId) setTimeout(() => openThreadDetail(patternId), 500);
     })
     .catch(() => {
@@ -14610,16 +14607,16 @@ function renderGraph(data) {
     svg.attr('viewBox', [0, 0, width, height]);
 
     const zoomGroup = svg.append('g').attr('class', 'graph-zoom-group');
-    let _graphDragActive = false;
     const zoomBehavior = d3.zoom()
         .scaleExtent([0.3, 4])
         .filter(event => {
             if (event.type === 'wheel') return true;
-            if (_graphDragActive) return false;
-            // Check if event started on a node element
-            const el = event.target;
-            if (el && el.closest && el.closest('.graph-node')) return false;
-            if (el && el.parentNode && el.parentNode.classList && el.parentNode.classList.contains('graph-node')) return false;
+            // Check all ancestors for graph-node class
+            let el = event.target;
+            while (el && el !== svg.node()) {
+                if (el.classList && el.classList.contains('graph-node')) return false;
+                el = el.parentNode;
+            }
             return !event.button;
         })
         .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
@@ -14661,12 +14658,12 @@ function renderGraph(data) {
         .join('g')
         .attr('class', 'graph-node')
         .call(d3.drag()
-            .on('start', (event, d) => { _graphDragActive = true; d.fx = d.x; d.fy = d.y; d._dragMoved = false; })
+            .on('start', (event, d) => { d.fx = d.x; d.fy = d.y; d._dragMoved = false; })
             .on('drag', (event, d) => {
                 if (!d._dragMoved) { d._dragMoved = true; if (!event.active) _graphSimulation.alphaTarget(0.3).restart(); }
                 d.fx = event.x; d.fy = event.y;
             })
-            .on('end', (event, d) => { _graphDragActive = false; if (!event.active) _graphSimulation.alphaTarget(0); d.fx = null; d.fy = null; })
+            .on('end', (event, d) => { if (!event.active) _graphSimulation.alphaTarget(0); d.fx = null; d.fy = null; })
         )
         .on('click', (event, d) => {
             event.stopPropagation();
@@ -15257,7 +15254,7 @@ function openPastBrainstorm(brainstormId) {
 function closeBrainstorm() {
     document.getElementById('brainstorm-overlay').classList.remove('visible');
     // Reload graph to show any new links
-    if (_signalTab === 'graph') loadGraph();
+    if (_signalTab === 'graph') loadBoard();
 }
 
 function _prefillResearchChat(companyName) {
@@ -15754,23 +15751,10 @@ function _showInlineInput(x, y, placeholder, defaultVal, onSubmit) {
     requestAnimationFrame(() => input.focus());
 }
 
-let _boardMode = 'graph'; // 'graph' or 'board'
 let _boardData = null;
-let _boardDirty = false;
 let _connectingFrom = null; // thread id when drawing a connection
 let _boardSelectedIds = new Set(); // shift-click multi-select for narrative creation
 let _expandedNarratives = new Set(); // narrative IDs that are expanded to show child threads
-
-function _switchBoardMode(mode) {
-    _boardMode = mode;
-    document.getElementById('mode-graph-btn').style.background = mode === 'graph' ? 'var(--accent)' : 'var(--bg-tertiary)';
-    document.getElementById('mode-graph-btn').style.color = mode === 'graph' ? '#fff' : 'var(--text-muted)';
-    document.getElementById('mode-board-btn').style.background = mode === 'board' ? 'var(--accent)' : 'var(--bg-tertiary)';
-    document.getElementById('mode-board-btn').style.color = mode === 'board' ? '#fff' : 'var(--text-muted)';
-
-    if (mode === 'board') loadBoard();
-    else loadGraph();
-}
 
 function loadBoard() {
     fetch('/api/board')
@@ -16132,6 +16116,66 @@ function _saveBoardPositions(nodes) {
 
 function _deleteBoardNote(noteId) {
     fetch(`/api/board/notes/${noteId}`, { method: 'DELETE' }).then(() => loadBoard());
+}
+
+function _boardAutoLayout() {
+    if (!_boardData || !_boardData.nodes.length) return;
+    const btn = document.getElementById('board-autolayout-btn');
+    btn.textContent = '🔄 Arranging...';
+    btn.disabled = true;
+
+    const container = document.getElementById('sig-graph-container');
+    const width = container.clientWidth;
+    const height = container.clientHeight - 40;
+
+    // Only auto-layout unpinned nodes; pinned nodes stay fixed
+    const nodes = _boardData.nodes.filter(n => n.type !== 'narrative_thread' || _expandedNarratives.has(n.narrative_id))
+        .filter(n => n.type !== 'narrative' || !_expandedNarratives.has(n.node_id))
+        .map(d => {
+            const copy = {...d};
+            if (copy.x == null) copy.x = width / 2;
+            if (copy.y == null) copy.y = height / 2;
+            if (copy.pinned) { copy.fx = copy.x; copy.fy = copy.y; }
+            return copy;
+        });
+
+    const edges = (_boardData.edges || []).filter(e => {
+        const ids = new Set(nodes.map(n => typeof n.id === 'string' ? n.id : n.id));
+        return ids.has(e.source) && ids.has(e.target);
+    });
+
+    const sim = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(edges).id(d => d.id).distance(100))
+        .force('charge', d3.forceManyBody().strength(-120))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(40))
+        .stop();
+
+    // Run simulation synchronously
+    for (let i = 0; i < 200; i++) sim.tick();
+
+    // Save all positions and mark as pinned
+    const positions = nodes.map(n => ({
+        node_type: n.type === 'narrative' ? 'narrative' : 'thread',
+        node_id: n.type === 'narrative' ? n.node_id : n.id,
+        x: n.x, y: n.y, pinned: true
+    }));
+
+    // Update board data in memory so renderBoard picks it up
+    for (const n of nodes) {
+        const orig = _boardData.nodes.find(o => o.id === n.id);
+        if (orig) { orig.x = n.x; orig.y = n.y; orig.pinned = true; }
+    }
+
+    fetch('/api/board/positions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ positions })
+    }).then(() => {
+        btn.textContent = '🔄 Auto-layout';
+        btn.disabled = false;
+        loadBoard();
+    });
 }
 
 function _updateBoardSelectionBar(nodes) {
