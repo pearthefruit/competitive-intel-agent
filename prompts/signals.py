@@ -141,6 +141,9 @@ Generate insight by analyzing what these connections mean together. Return JSON:
   ],
   "questions_to_investigate": [
     "Specific question that would deepen understanding of this pattern"
+  ],
+  "link_labels": [
+    {{"source_thread": "Thread A title", "target_thread": "Thread B title", "label": "concise 2-4 word relationship (e.g. 'amplifies inflation risk', 'supply chain dependency', 'regulatory spillover')"}}
   ]
 }}
 
@@ -151,4 +154,5 @@ Rules:
 - Confidence: high = strong evidence chain, medium = plausible but needs validation, low = speculative but worth exploring
 - Be specific — name companies, sectors, dollar amounts when possible
 - You are generating HYPOTHESES for investigation, not making assertions
+- link_labels: one entry per thread PAIR. Label must be a specific relationship mechanism, NOT generic words like "related to" or "connected" or "drives". Name the actual causal link (e.g. "amplifies inflation risk", "supply chain dependency").
 - Return ONLY the JSON object"""

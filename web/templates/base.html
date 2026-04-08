@@ -14194,9 +14194,11 @@ function fetchArticleText(signalId, attempt) {
 }
 
 function _showDetailPane() {
+    const detailPane = document.getElementById('signals-detail');
     const detailBody = document.getElementById('signals-detail-body');
     const detailEmpty = document.getElementById('signals-detail-empty');
     const closeBtn = document.querySelector('.signals-detail-close');
+    if (detailPane) detailPane.style.display = '';
     if (detailEmpty) detailEmpty.style.display = 'none';
     if (closeBtn) closeBtn.style.display = 'block';
     return detailBody;
@@ -15181,6 +15183,9 @@ function _renderBrainstormResults(container, result, threadIds) {
         </div>`;
     }
 
+    // Store link labels from brainstorm for use when linking
+    window._brainstormLinkLabels = result.link_labels || [];
+
     // Actions bar
     const tids = JSON.stringify(threadIds);
     html += `<div style="display:flex;gap:10px;margin-top:24px;padding-top:16px;border-top:1px solid var(--border)">
@@ -15193,22 +15198,30 @@ function _renderBrainstormResults(container, result, threadIds) {
 
 function _linkFromBrainstorm(threadIds) {
     const btn = event.target.closest('button');
-    if (btn) { btn.textContent = '🔗 Linking + AI labeling...'; btn.disabled = true; }
+    if (btn) { btn.textContent = '🔗 Linking...'; btn.disabled = true; }
+
+    // Use pre-generated labels from brainstorm (no extra LLM call)
+    const brainstormLabels = window._brainstormLinkLabels || [];
+    let labelIdx = 0;
+
     const promises = [];
     for (let i = 0; i < threadIds.length; i++) {
         for (let j = i + 1; j < threadIds.length; j++) {
+            const label = brainstormLabels[labelIdx]?.label || '';
+            labelIdx++;
             promises.push(
-                fetch('/api/board/connect', {
+                fetch('/api/signals/thread-links', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ source: threadIds[i], target: threadIds[j], label: '' })
-                }).then(r => r.json())
+                    body: JSON.stringify({ thread_a_id: threadIds[i], thread_b_id: threadIds[j], label })
+                }).then(r => r.json()).then(() => label)
             );
         }
     }
-    Promise.all(promises).then(results => {
-        const labels = results.filter(r => r.label).map(r => r.label);
-        if (btn) { btn.textContent = `✓ Linked (${labels.join(', ') || 'connected'})`; btn.style.color = 'var(--green)'; }
+    Promise.all(promises).then(labels => {
+        const used = labels.filter(Boolean);
+        if (btn) { btn.textContent = `✓ Linked${used.length ? ' (' + used.join(', ') + ')' : ''}`; btn.style.color = 'var(--green)'; }
+        if (_signalTab === 'graph') loadBoard();
     });
 }
 
@@ -15369,15 +15382,10 @@ function closeSignalDetail() {
     _activeThreadId = null;
     ++_detailRequestId;
     document.querySelectorAll('.sig-card, .thread-card').forEach(c => c.classList.remove('active'));
-    const detailBody = document.getElementById('signals-detail-body');
+    // Collapse the detail pane
+    const detailPane = document.getElementById('signals-detail');
+    if (detailPane) detailPane.style.display = 'none';
     const closeBtn = document.querySelector('.signals-detail-close');
-    // Reset to empty state — recreate since innerHTML destroys it
-    detailBody.innerHTML = `
-        <div class="signals-empty" id="signals-detail-empty" style="display:flex">
-            <div style="font-size:32px;margin-bottom:12px">&#128270;</div>
-            <div>Select a thread to view details</div>
-            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click any thread in the feed or graph.</div>
-        </div>`;
     if (closeBtn) closeBtn.style.display = 'none';
 }
 
