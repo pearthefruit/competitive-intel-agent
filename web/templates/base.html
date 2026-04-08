@@ -17580,6 +17580,10 @@ function loadBoard() {
         .then(data => {
             _boardData = data;
             renderBoard(data);
+            // Re-apply any active highlights after board re-render
+            if (_boardHighlights.length) {
+                setTimeout(() => { _applyBoardHighlights(); _renderHighlightPills(); }, 50);
+            }
         });
 }
 
