@@ -13848,11 +13848,13 @@ let savedRightWidth = null;
 
 const _DOMAIN_LABELS = {
     economics: 'Economics', finance: 'Finance', geopolitics: 'Geopolitics',
-    tech_ai: 'Tech / AI', labor: 'Labor', regulatory: 'Regulatory'
+    tech_ai: 'Tech / AI', labor: 'Labor', regulatory: 'Regulatory',
+    targeted: '🎯 Targeted', narrative: '📖 Narrative'
 };
 const _DOMAIN_COLORS = {
     economics: '#3b82f6', finance: '#22c55e', geopolitics: '#ef4444',
-    tech_ai: '#a855f7', labor: '#eab308', regulatory: '#f97316'
+    tech_ai: '#a855f7', labor: '#eab308', regulatory: '#f97316',
+    targeted: '#06b6d4', narrative: '#8b5cf6'
 };
 
 let _signalsCache = [];
@@ -14613,7 +14615,11 @@ function renderGraph(data) {
     const zoomGroup = svg.append('g').attr('class', 'graph-zoom-group');
     const zoomBehavior = d3.zoom()
         .scaleExtent([0.3, 4])
-        .filter(event => event.type === 'wheel')
+        .filter(event => {
+            if (event.type === 'wheel') return true;
+            if (event.target.closest && event.target.closest('.graph-node')) return false;
+            return !event.button; // left-click on empty space = pan
+        })
         .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
     svg.call(zoomBehavior);
     svg.on('dblclick.zoom', null);
@@ -14653,8 +14659,11 @@ function renderGraph(data) {
         .join('g')
         .attr('class', 'graph-node')
         .call(d3.drag()
-            .on('start', (event, d) => { if (!event.active) _graphSimulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-            .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+            .on('start', (event, d) => { d.fx = d.x; d.fy = d.y; d._dragMoved = false; })
+            .on('drag', (event, d) => {
+                if (!d._dragMoved) { d._dragMoved = true; if (!event.active) _graphSimulation.alphaTarget(0.3).restart(); }
+                d.fx = event.x; d.fy = event.y;
+            })
             .on('end', (event, d) => { if (!event.active) _graphSimulation.alphaTarget(0); d.fx = null; d.fy = null; })
         )
         .on('click', (event, d) => {
@@ -14916,8 +14925,10 @@ function _zoomIntoPattern(patternId) {
     document.getElementById('sig-graph-back').style.display = 'block';
     const label = document.getElementById('sig-graph-pattern-label');
     const patternNode = _graphData?.nodes.find(n => n.id === patternId);
-    label.textContent = patternNode ? patternNode.title : `Thread ${patternId}`;
+    label.textContent = (patternNode ? patternNode.title : `Thread ${patternId}`) + ' — Signals';
     label.style.display = 'block';
+    document.getElementById('sig-graph-container').style.boxShadow = 'inset 0 0 0 2px var(--accent)';
+    document.getElementById('sig-graph-container').style.borderRadius = '8px';
 
     // Fetch signals for this pattern and render sub-graph
     fetch(`/api/signals/patterns/${patternId}/signals`)
@@ -14931,6 +14942,8 @@ function _zoomOutToPatterns() {
     _zoomedPatternId = null;
     document.getElementById('sig-graph-back').style.display = 'none';
     document.getElementById('sig-graph-pattern-label').style.display = 'none';
+    document.getElementById('sig-graph-container').style.boxShadow = '';
+    document.getElementById('sig-graph-container').style.borderRadius = '';
     if (_graphData) renderGraph(_graphData);
 }
 
@@ -14954,7 +14967,11 @@ function _renderSignalSubGraph(data) {
     const zoomGroup = svg.append('g');
     const zoomBehavior = d3.zoom()
         .scaleExtent([0.3, 4])
-        .filter(event => event.type === 'wheel')
+        .filter(event => {
+            if (event.type === 'wheel') return true;
+            if (event.target.closest && event.target.closest('.signal-node')) return false;
+            return !event.button;
+        })
         .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
     svg.call(zoomBehavior);
     svg.on('dblclick.zoom', null);
@@ -14997,8 +15014,11 @@ function _renderSignalSubGraph(data) {
         .join('g')
         .attr('class', d => 'signal-node' + (d.signal_status === 'noise' ? ' noise' : ''))
         .call(d3.drag()
-            .on('start', (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-            .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+            .on('start', (event, d) => { d.fx = d.x; d.fy = d.y; d._dragMoved = false; })
+            .on('drag', (event, d) => {
+                if (!d._dragMoved) { d._dragMoved = true; if (!event.active) sim.alphaTarget(0.3).restart(); }
+                d.fx = event.x; d.fy = event.y;
+            })
             .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
         )
         .on('click', (event, d) => {

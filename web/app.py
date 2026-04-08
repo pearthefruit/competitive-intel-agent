@@ -2802,7 +2802,7 @@ def create_app(db_path="intel.db"):
                 "x": pos["x"] if pos else None, "y": pos["y"] if pos else None,
                 "pinned": bool(pos["pinned"]) if pos else False,
                 # Child thread IDs for expand mode
-                "child_thread_ids": [t["id"] for t in threads if t.get("narrative_id") == n["id"]],
+                "child_thread_ids": [],  # populated after narrative_child_threads fetch
             })
 
         # Orphan thread nodes (not in a narrative)
@@ -2820,9 +2820,10 @@ def create_app(db_path="intel.db"):
                 "pinned": bool(pos["pinned"]) if pos else False,
             })
 
-        # Also include narrative child threads (for expand mode) — hidden by default
-        narrative_threads = [t for t in threads if t.get("narrative_id")]
-        for t in narrative_threads:
+        # Narrative child threads (domain='narrative') — fetched separately since excluded above
+        # Also backfill child_thread_ids on narrative nodes
+        narrative_child_threads = get_signal_clusters(conn, status="all", limit=200, domain="narrative")
+        for t in narrative_child_threads:
             sn = get_pattern_signal_noise_counts(conn, t["id"])
             key = f"thread:{t['id']}"
             pos = board["positions"].get(key)
@@ -2833,6 +2834,11 @@ def create_app(db_path="intel.db"):
                 "x": pos["x"] if pos else None, "y": pos["y"] if pos else None,
                 "pinned": bool(pos["pinned"]) if pos else False,
             })
+
+        # Backfill child_thread_ids on narrative super-nodes
+        for nd in nodes:
+            if nd.get("type") == "narrative":
+                nd["child_thread_ids"] = [t["id"] for t in narrative_child_threads if t.get("narrative_id") == nd["node_id"]]
 
         conn.close()
         return jsonify({
