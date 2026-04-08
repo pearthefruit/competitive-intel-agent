@@ -14364,9 +14364,20 @@ function openThreadDetail(threadId) {
                         <div id="related-threads-list-${thread.id}" style="color:var(--text-muted);font-size:11px">Loading...</div>
                     </div>
                     <div style="padding:12px 20px;border-top:1px solid var(--border)">
-                        <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">Signals (${sigSignals.length})${sigNoise.length ? ` · <span style="color:var(--text-muted)">${sigNoise.length} noise</span>` : ''}</div>
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                            <div style="font-size:11px;font-weight:700;color:var(--text-secondary)">Signals (${sigSignals.length})${sigNoise.length ? ` · <span style="color:var(--text-muted)">${sigNoise.length} noise</span>` : ''}</div>
+                        </div>
+                        <div style="margin-bottom:10px;display:flex;gap:6px;align-items:center">
+                            <input id="thread-signal-search" type="text" placeholder="Search signals...  (/ to focus)" oninput="_filterThreadSignals(this.value)" onkeydown="if(event.key==='Escape'){this.value='';_filterThreadSignals('');this.blur()}" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" style="flex:1;padding:5px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:11px;outline:none;transition:border-color 0.15s" />
+                            <span id="thread-search-count" style="font-size:10px;color:var(--text-muted);white-space:nowrap"></span>
+                        </div>
+                        <div id="thread-search-actions" style="margin-bottom:8px;gap:6px;display:none">
+                            <button onclick="_selectMatchedSignals()" style="padding:4px 10px;background:var(--bg-tertiary);border:1px solid var(--accent);border-radius:5px;color:var(--accent);font-size:10px;font-weight:600;cursor:pointer" id="thread-select-matched-btn">Select matched</button>
+                        </div>
+                        <div id="thread-signals-list" style="display:flex;flex-direction:column">
                         ${signalListHtml || '<div style="color:var(--text-muted);font-size:12px">No signals</div>'}
                         ${noiseListHtml}
+                        </div>
                     </div>
                     <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px">
                         <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:2px">Actions</div>
@@ -14374,6 +14385,9 @@ function openThreadDetail(threadId) {
                     </div>
                 </div>
             `;
+            // Store signals for search/filter
+            window._threadDetailSignals = signals;
+            window._threadDetailId = thread.id;
             // Load related threads asynchronously
             setTimeout(() => _loadRelatedThreads(thread.id), 100);
         })
@@ -14382,6 +14396,102 @@ function openThreadDetail(threadId) {
             console.error('[signals] thread detail error:', e);
             detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--red)">Failed to load thread</div>`;
         });
+}
+
+let _threadSearchQuery = '';
+let _threadSearchMatchIds = new Set();
+
+function _filterThreadSignals(query) {
+    _threadSearchQuery = (query || '').trim().toLowerCase();
+    const container = document.getElementById('thread-signals-list');
+    const countEl = document.getElementById('thread-search-count');
+    const actionsEl = document.getElementById('thread-search-actions');
+    const selectBtn = document.getElementById('thread-select-matched-btn');
+    if (!container) return;
+
+    const items = container.querySelectorAll('.sig-draggable');
+    _threadSearchMatchIds.clear();
+
+    if (!_threadSearchQuery) {
+        // Reset: show all, remove highlights
+        items.forEach(el => {
+            el.style.opacity = '';
+            el.style.order = '';
+            _removeHighlights(el);
+        });
+        if (countEl) countEl.textContent = '';
+        if (actionsEl) actionsEl.style.display = 'none';
+        return;
+    }
+
+    const signals = window._threadDetailSignals || [];
+    const sigMap = {};
+    signals.forEach(s => { sigMap[s.id] = s; });
+
+    let matchCount = 0;
+    items.forEach(el => {
+        const sigId = parseInt(el.dataset.sigId);
+        const sig = sigMap[sigId];
+        if (!sig) { el.style.opacity = '0.2'; return; }
+
+        const titleMatch = (sig.title || '').toLowerCase().includes(_threadSearchQuery);
+        const bodyMatch = (sig.body || '').toLowerCase().includes(_threadSearchQuery);
+        const sourceMatch = (sig.source_name || sig.source || '').toLowerCase().includes(_threadSearchQuery);
+
+        if (titleMatch || bodyMatch || sourceMatch) {
+            el.style.opacity = '';
+            el.style.order = '-1';
+            _threadSearchMatchIds.add(sigId);
+            matchCount++;
+            _applyHighlights(el, _threadSearchQuery);
+        } else {
+            el.style.opacity = '0.2';
+            el.style.order = '';
+            _removeHighlights(el);
+        }
+    });
+
+    if (countEl) countEl.textContent = `${matchCount}/${items.length}`;
+    if (actionsEl && selectBtn) {
+        if (matchCount > 0 && matchCount < items.length) {
+            actionsEl.style.display = 'flex';
+            selectBtn.style.display = '';
+            selectBtn.textContent = `Select ${matchCount} matched`;
+        } else {
+            actionsEl.style.display = 'none';
+        }
+    }
+}
+
+function _applyHighlights(el, query) {
+    _removeHighlights(el);
+    const titleEl = el.querySelector('[style*="font-weight:600"]');
+    if (titleEl) titleEl.innerHTML = _highlightText(titleEl.textContent, query);
+}
+
+function _removeHighlights(el) {
+    el.querySelectorAll('mark.sig-search-hl').forEach(m => {
+        m.replaceWith(document.createTextNode(m.textContent));
+    });
+    // Normalize merged text nodes
+    const titleEl = el.querySelector('[style*="font-weight:600"]');
+    if (titleEl) titleEl.normalize();
+}
+
+function _highlightText(text, query) {
+    if (!query) return escHtml(text);
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(${escaped})`, 'gi');
+    return escHtml(text).replace(re, '<mark class="sig-search-hl" style="background:#a855f740;color:var(--text-primary);border-radius:2px;padding:0 1px">$1</mark>');
+}
+
+function _selectMatchedSignals() {
+    _threadSearchMatchIds.forEach(id => {
+        const selectEl = document.querySelector(`[data-drag-select="${id}"]`);
+        if (selectEl && !selectEl.classList.contains('checked')) {
+            _toggleDragSelect(id);
+        }
+    });
 }
 
 function _buildThreadActions(thread, entities) {
@@ -15992,6 +16102,38 @@ function _renderExecutionDetailInner(container) {
         </div>
     </div>`;
 
+    // Re-detect execution (if running or completed)
+    const rd = d.redetect;
+    if (rd) {
+        const rdPhase = rd.phase === 'complete' ? 'done' : 'running';
+        html += `<div style="margin-top:24px;padding-top:16px;border-top:2px solid var(--accent)">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                <span style="font-size:16px;font-weight:800;color:var(--text-primary)">🧠 Re-detect Threads</span>
+                <span class="exec-step-badge ${rdPhase}">${rd.phase === 'complete' ? 'Complete' : 'Detecting...'}</span>
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:12px">${rd.startedAt ? new Date(rd.startedAt).toLocaleString() : ''}</div>`;
+
+        // Show batches
+        for (const msg of (rd.batches || [])) {
+            html += `<div style="padding:3px 0;font-size:10px;color:var(--text-muted)">${escHtml(msg)}</div>`;
+        }
+
+        // New threads found
+        if (rd.newThreads && rd.newThreads.length) {
+            html += `<div style="font-size:10px;font-weight:700;color:var(--green);margin-top:8px;margin-bottom:4px">NEW THREADS</div>`;
+            for (const t of rd.newThreads) {
+                html += `<div style="padding:4px 0;font-size:11px;border-bottom:1px solid var(--border)"><strong>${escHtml(t.title)}</strong> <span style="color:var(--text-muted)">(${t.signal_count} signals)</span></div>`;
+            }
+        }
+
+        if (rd.phase === 'complete') {
+            html += `<div style="padding:10px 12px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:8px;font-size:11px;color:var(--green);font-weight:600;margin-top:8px">
+                ✓ ${rd.newPatterns || 0} new threads · ${rd.assigned || 0} signals assigned
+            </div>`;
+        }
+        html += `</div>`;
+    }
+
     // Narrative search execution (if running or completed)
     const ns = d.narrativeSearch;
     if (ns) {
@@ -16056,8 +16198,11 @@ function runResynthesize() {
     btn.style.borderColor = 'var(--accent)';
     statusEl.style.display = 'block';
     statusText.textContent = 'Re-detecting threads...';
-    // Switch to execution tab for visibility
+
+    // Initialize redetect execution state
+    _execData.redetect = { phase: 'running', startedAt: new Date().toISOString(), batches: [], newThreads: [], assigned: 0 };
     switchSignalTab('execution');
+    _renderExecutionDetail();
 
     fetch('/api/signals/resynthesize', { method: 'POST' })
         .then(response => {
@@ -16075,9 +16220,11 @@ function runResynthesize() {
                         if (!line.startsWith('data: ')) continue;
                         try {
                             const ev = JSON.parse(line.substring(6));
-                            if (ev.type === 'status') statusText.textContent = ev.text;
-                            else if (ev.type === 'new_thread') { statusText.textContent = `New thread: ${ev.title}`; statusText.style.color = 'var(--green)'; }
-                            else if (ev.type === 'resynth_complete') { statusText.textContent = `✓ ${ev.new_patterns} new threads, ${ev.assigned} signals assigned`; statusText.style.color = 'var(--green)'; }
+                            const rd = _execData.redetect;
+                            if (ev.type === 'status') { statusText.textContent = ev.text; rd.batches.push(ev.text); }
+                            else if (ev.type === 'new_thread') { statusText.textContent = `New thread: ${ev.title}`; statusText.style.color = 'var(--green)'; rd.newThreads.push(ev); }
+                            else if (ev.type === 'resynth_complete') { statusText.textContent = `✓ ${ev.new_patterns} new threads, ${ev.assigned} signals assigned`; statusText.style.color = 'var(--green)'; rd.phase = 'complete'; rd.assigned = ev.assigned; rd.newPatterns = ev.new_patterns; }
+                            _renderExecutionDetail();
                         } catch (e) {}
                     }
                     read();
