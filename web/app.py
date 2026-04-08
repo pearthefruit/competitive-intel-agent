@@ -2086,6 +2086,19 @@ def create_app(db_path="intel.db"):
             return jsonify({"error": "Cluster not found"}), 404
         return jsonify(detail)
 
+    @app.route("/api/signals/threads/<int:thread_id>", methods=["DELETE"])
+    def signals_thread_delete_api(thread_id):
+        """Delete a thread and unlink its signals."""
+        conn = get_connection(db_path)
+        conn.execute("DELETE FROM signal_cluster_items WHERE cluster_id = ?", (thread_id,))
+        conn.execute("DELETE FROM signal_entities WHERE cluster_id = ?", (thread_id,))
+        conn.execute("DELETE FROM board_positions WHERE node_type = 'thread' AND node_id = ?", (thread_id,))
+        conn.execute("DELETE FROM thread_links WHERE thread_a_id = ? OR thread_b_id = ?", (thread_id, thread_id))
+        conn.execute("DELETE FROM signal_clusters WHERE id = ?", (thread_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+
     @app.route("/api/signals/<int:signal_id>/status", methods=["POST"])
     def signals_set_status_api(signal_id):
         """Set a signal's status (signal or noise)."""

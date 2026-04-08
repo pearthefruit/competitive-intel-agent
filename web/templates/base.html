@@ -5450,10 +5450,15 @@
                 </button>
             </div>
             <div class="signals-brainstorm-list" id="signals-brainstorm-list" style="display:none;padding:8px 12px;border-top:1px solid var(--border)">
-                <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Insights</div>
+                <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Brainstorms</div>
                 <div id="brainstorm-list-items"></div>
             </div>
             <div class="signals-actions">
+                <div style="display:flex;gap:4px;margin-bottom:6px">
+                    <input type="text" id="custom-search-input" placeholder="Search for signals..." style="flex:1;padding:7px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:11px;outline:none" onkeydown="if(event.key==='Enter')_runCustomSearch()">
+                    <button onclick="_runCustomSearch()" style="padding:7px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">🔍</button>
+                </div>
+                <div id="custom-search-status" style="display:none;font-size:10px;color:var(--text-muted);margin-bottom:6px;padding:0 4px"></div>
                 <button class="signals-scan-btn" id="signals-scan-btn" onclick="runSignalScan()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                     Scan Now
@@ -14363,7 +14368,48 @@ function _buildThreadActions(thread, entities) {
     // Always offer to search for more signals
     actions.push(`<button onclick="_threadActionSearchMore('${escHtml(thread.title.replace(/'/g, "\\'"))}', ${thread.id})" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted)">📡 Search for more signals</button>`);
 
+    // Delete thread
+    actions.push(`<button onclick="_deleteThread(${thread.id})" style="${btnStyle}background:none;border:1px solid var(--border);color:var(--text-muted);font-size:10px">🗑 Delete thread</button>`);
+
     return actions.join('');
+}
+
+function _runCustomSearch() {
+    const input = document.getElementById('custom-search-input');
+    const status = document.getElementById('custom-search-status');
+    const query = input.value.trim();
+    if (!query) return;
+
+    status.style.display = 'block';
+    status.innerHTML = `<span style="color:var(--accent)">Searching "${escHtml(query.substring(0,30))}"...</span>`;
+
+    fetch('/api/signals/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+    })
+    .then(r => r.json())
+    .then(data => {
+        status.innerHTML = `<span style="color:var(--green)">✓ ${data.total_found || 0} found, ${data.new_inserted || 0} new</span>`;
+        loadSignals();
+        if (_signalTab === 'graph') loadBoard();
+        if (_signalTab !== 'raw') switchSignalTab('raw');
+        setTimeout(() => { status.style.display = 'none'; }, 5000);
+    })
+    .catch(() => {
+        status.innerHTML = '<span style="color:var(--red)">Search failed</span>';
+    });
+}
+
+function _deleteThread(threadId) {
+    if (!confirm('Delete this thread? Signals will be unlinked but not deleted.')) return;
+    fetch('/api/signals/threads/' + threadId, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(() => {
+            closeSignalDetail();
+            loadSignals();
+            if (_signalTab === 'graph') loadBoard();
+        });
 }
 
 function _threadActionResearch(companyName) {
