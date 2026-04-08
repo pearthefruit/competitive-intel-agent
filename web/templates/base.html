@@ -13854,6 +13854,34 @@ const _DOMAIN_COLORS = {
     economics: '#3b82f6', finance: '#22c55e', geopolitics: '#ef4444',
     tech_ai: '#a855f7', labor: '#eab308', regulatory: '#f97316'
 };
+const _DOMAIN_ALIASES = {
+    software_development: 'tech_ai', technology: 'tech_ai', artificial_intelligence: 'tech_ai',
+    tech: 'tech_ai', ai: 'tech_ai', software: 'tech_ai', automation: 'tech_ai',
+    hiring: 'labor', employment: 'labor', workforce: 'labor', jobs: 'labor',
+    financial: 'finance', markets: 'finance', banking: 'finance',
+    political: 'geopolitics', trade: 'geopolitics', policy: 'geopolitics',
+    regulation: 'regulatory', compliance: 'regulatory', legal: 'regulatory',
+    economic: 'economics', macro: 'economics',
+};
+/** Parse a raw domain string (possibly pipe-separated, possibly invalid) into array of valid domains. */
+function _parseDomains(raw) {
+    if (!raw) return ['economics'];
+    const parts = raw.split('|').map(d => d.trim().toLowerCase());
+    const valid = [];
+    for (const p of parts) {
+        if (_DOMAIN_COLORS[p]) { if (!valid.includes(p)) valid.push(p); }
+        else if (_DOMAIN_ALIASES[p]) { const mapped = _DOMAIN_ALIASES[p]; if (!valid.includes(mapped)) valid.push(mapped); }
+    }
+    return valid.length ? valid : ['economics'];
+}
+/** Render one or more colored domain badges from a raw domain string. */
+function _renderDomainBadges(raw, fontSize) {
+    const sz = fontSize || '9px';
+    return _parseDomains(raw).map(d => {
+        const c = _DOMAIN_COLORS[d]; const l = _DOMAIN_LABELS[d] || d;
+        return `<span class="sig-card-domain" style="background:${c}22;color:${c};padding:2px 6px;border-radius:4px;font-size:${sz};font-weight:700">${escHtml(l)}</span>`;
+    }).join(' ');
+}
 
 let _signalsCache = [];
 let _threadsCache = [];
@@ -14021,16 +14049,16 @@ function renderSignalFeed() {
     }
 
     const html = filtered.map(s => {
-        const domLabel = _DOMAIN_LABELS[s.domain] || s.domain;
+        const sPrimaryDom = _parseDomains(s.domain)[0];
         const dateStr = s.published_at ? s.published_at.substring(0, 10) : '';
         const checked = _rawSelectedSignals.has(s.id) ? ' checked' : '';
-        return `<div class="sig-card sig-domain-${escHtml(s.domain)} ${s.id === _activeSignalId ? 'active' : ''}"
+        return `<div class="sig-card sig-domain-${escHtml(sPrimaryDom)} ${s.id === _activeSignalId ? 'active' : ''}"
                      data-id="${s.id}">
             <div style="display:flex;gap:8px;align-items:start">
                 <div class="sig-card-select${checked}" data-sig-id="${s.id}" onclick="event.stopPropagation();_toggleRawSelect(${s.id})">✓</div>
                 <div style="flex:1;min-width:0">
                     <div class="sig-card-header">
-                        <span class="sig-card-domain">${escHtml(domLabel)}</span>
+                        ${_renderDomainBadges(s.domain)}
                         <span class="sig-card-source">${escHtml(s.source_name || s.source)}</span>
                         <span class="sig-card-date">${escHtml(dateStr)}</span>
                     </div>
@@ -14097,8 +14125,8 @@ function renderThreadFeed() {
         const mDir = m.direction || 'stable';
         const mLabel = {accelerating: '↑ Accelerating', stable: '→ Stable', fading: '↓ Decelerating'}[mDir] || '→ Stable';
         const lifecycle = m.lifecycle || 'active';
-        const domLabel = _DOMAIN_LABELS[t.domain] || t.domain;
-        const domColor = _DOMAIN_COLORS[t.domain] || '#6b7280';
+        const domains = _parseDomains(t.domain);
+        const domColor = _DOMAIN_COLORS[domains[0]] || '#6b7280';
         const age = t.last_signal_at ? _timeAgo(t.last_signal_at) : _timeAgo(t.created_at);
         const dormantStyle = lifecycle === 'dormant' ? 'opacity:0.45;' : lifecycle === 'cooling' ? 'opacity:0.7;' : '';
         const lifecycleLabel = lifecycle === 'dormant' ? `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px">dormant · ${m.days_since_last || 0}d</span>` :
@@ -14112,7 +14140,7 @@ function renderThreadFeed() {
                     <div class="thread-card-title">${escHtml(t.title)}</div>
                     ${t.synthesis ? `<div class="thread-card-summary">${escHtml(t.synthesis)}</div>` : ''}
                     <div class="thread-card-meta">
-                        <span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700">${escHtml(domLabel)}</span>
+                        ${_renderDomainBadges(t.domain)}
                         <span class="thread-card-stat">${t.signal_count || 0} signals</span>
                         <span class="thread-card-stat">${escHtml(age)}</span>
                         <span class="thread-momentum ${escHtml(mDir)}">${mLabel}</span>
@@ -14149,8 +14177,8 @@ function openSignalDetail(signalId) {
 
     const detailBody = _showDetailPane();
 
-    const domLabel = _DOMAIN_LABELS[s.domain] || s.domain;
-    const domColor = _DOMAIN_COLORS[s.domain] || '#6b7280';
+    const sDoms = _parseDomains(s.domain);
+    const domColor = _DOMAIN_COLORS[sDoms[0]] || '#6b7280';
     const dateStr = s.published_at ? s.published_at.substring(0, 10) : 'Unknown date';
 
     detailBody.innerHTML = `
@@ -14158,7 +14186,7 @@ function openSignalDetail(signalId) {
             <div class="sig-detail-hero" style="border-left: 4px solid ${domColor}">
                 <h2>${escHtml(s.title)}</h2>
                 <div class="sig-detail-meta">
-                    <span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700">${escHtml(domLabel)}</span>
+                    ${_renderDomainBadges(s.domain, '10px')}
                     <span style="font-size:11px;color:var(--text-muted)">${escHtml(s.source_name || s.source)}</span>
                     <span style="font-size:11px;color:var(--text-muted)">${escHtml(dateStr)}</span>
                 </div>
@@ -14235,8 +14263,8 @@ function openThreadDetail(threadId) {
                 detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--red)">Thread not found</div>`;
                 return;
             }
-            const domLabel = _DOMAIN_LABELS[thread.domain] || thread.domain;
-            const domColor = _DOMAIN_COLORS[thread.domain] || '#6b7280';
+            const domains = _parseDomains(thread.domain);
+            const domColor = _DOMAIN_COLORS[domains[0]] || '#6b7280';
             const m = thread.momentum || {};
             const mDir = m.direction || 'stable';
             const mLabel = {accelerating: '↑ Accelerating', stable: '→ Stable', fading: '↓ Decelerating'}[mDir];
@@ -14252,10 +14280,10 @@ function openThreadDetail(threadId) {
                 if (!entsByType[type].find(x => x.toLowerCase() === val.toLowerCase())) entsByType[type].push(val);
             });
 
-            const _entIcon = {company: '🏢', sector: '📊', geography: '📍', person: '👤', regulation: '⚖️', concept: '💡', event: '📅'};
-            const _entClickable = ['company', 'sector', 'geography', 'concept', 'event'];
+            const _entIcon = {company:'🏢',sector:'📊',geography:'📍',country:'📍',city:'📍',person:'👤',regulation:'⚖️',concept:'💡','economic concept':'💡',event:'📅',index:'📈',exchange:'📈',university:'🎓'};
+            const _entClickable = null; // ALL types are clickable
             // Reorder: concepts first (most valuable for connections)
-            const typeOrder = ['concept', 'event', 'company', 'sector', 'geography', 'person', 'regulation'];
+            const typeOrder = ['concept', 'economic concept', 'event', 'company', 'sector', 'geography', 'country', 'city', 'person', 'regulation', 'index', 'exchange'];
             const sortedEntTypes = Object.entries(entsByType).sort((a, b) => (typeOrder.indexOf(a[0]) === -1 ? 99 : typeOrder.indexOf(a[0])) - (typeOrder.indexOf(b[0]) === -1 ? 99 : typeOrder.indexOf(b[0])));
             const entHtml = sortedEntTypes.map(([type, vals]) => {
                 const icon = _entIcon[type] || '🔹';
@@ -14320,7 +14348,7 @@ function openThreadDetail(threadId) {
                     <div class="sig-detail-hero" style="border-left: 4px solid ${domColor}">
                         <h2>${escHtml(thread.title)}</h2>
                         <div class="sig-detail-meta">
-                            <span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700">${escHtml(domLabel)}</span>
+                            ${_renderDomainBadges(thread.domain, '10px')}
                             <span class="thread-momentum ${escHtml(mDir)}">${mLabel}</span>
                             <span style="font-size:11px;color:var(--text-muted)">${signals.length} signals</span>
                             <span style="font-size:11px;color:var(--text-muted)">${m.this_period || 0} this week / ${m.last_period || 0} last week</span>
@@ -14383,8 +14411,8 @@ function _buildThreadActions(thread, entities) {
     // Always offer to search for more signals
     actions.push(`<button onclick="_threadActionSearchMore('${escHtml(thread.title.replace(/'/g, "\\'"))}', ${thread.id})" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted)">📡 Search for more signals</button>`);
 
-    // Split thread (only for threads with 3+ signals)
-    if ((thread.signals || []).length >= 3) {
+    // Split thread (only for threads with 6+ signals)
+    if ((thread.signals || []).length >= 6) {
         actions.push(`<button onclick="_proposeThreadSplit(${thread.id})" id="split-thread-btn" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--purple);color:var(--purple)">✂️ Split thread</button>`);
     }
 
@@ -14906,7 +14934,7 @@ function renderGraph(data) {
     node.each(function(d) {
         const g = d3.select(this);
         const r = nodeR(d);
-        const color = _DOMAIN_COLORS[d.domain] || '#6b7280';
+        const color = _DOMAIN_COLORS[_parseDomains(d.domain)[0]] || '#6b7280';
         const op = nodeOpacity(d);
         const total = d.total_count || d.signal_count || 1;
         const noise = d.noise_count || 0;
@@ -15067,8 +15095,8 @@ function _adjustGraphSpacing(val) {
 function _showSignalNodeDetail(s) {
     ++_detailRequestId;
     const detailBody = _showDetailPane();
-    const domLabel = _DOMAIN_LABELS[s.domain] || s.domain;
-    const domColor = _DOMAIN_COLORS[s.domain] || '#6b7280';
+    const snDoms = _parseDomains(s.domain);
+    const domColor = _DOMAIN_COLORS[snDoms[0]] || '#6b7280';
     const dateStr = s.published_at ? s.published_at.substring(0, 10) : '';
     const isNoise = s.signal_status === 'noise';
     const patternId = _zoomedPatternId;
@@ -15085,7 +15113,7 @@ function _showSignalNodeDetail(s) {
             <div class="sig-detail-hero" style="border-left: 4px solid ${domColor}">
                 <h2>${escHtml(s.title)}</h2>
                 <div class="sig-detail-meta">
-                    <span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700">${escHtml(domLabel)}</span>
+                    ${_renderDomainBadges(s.domain, '10px')}
                     <span style="font-size:11px;color:var(--text-muted)">${escHtml(s.source_name || s.source)}</span>
                     <span style="font-size:11px;color:var(--text-muted)">${escHtml(dateStr)}</span>
                     ${isNoise ? '<span style="font-size:10px;color:var(--red);font-weight:600">NOISE</span>' : ''}
@@ -15285,11 +15313,12 @@ function openBrainstormMode() {
             ${ids.map(id => {
                 const n = _graphData?.nodes.find(n => n.id === id);
                 if (!n) return '';
-                const domColor = _DOMAIN_COLORS[n.domain] || '#6b7280';
+                const bDoms = _parseDomains(n.domain);
+                const domColor = _DOMAIN_COLORS[bDoms[0]] || '#6b7280';
                 return `<div class="brainstorm-thread-card" style="border-left:3px solid ${domColor}">
                     <h3>${escHtml(n.title)}</h3>
                     <p>${escHtml(n.synthesis || 'No summary')}</p>
-                    <div style="margin-top:6px"><span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700">${escHtml(_DOMAIN_LABELS[n.domain] || n.domain)}</span> <span style="font-size:10px;color:var(--text-muted)">${n.signal_count} signals</span></div>
+                    <div style="margin-top:6px">${_renderDomainBadges(n.domain)} <span style="font-size:10px;color:var(--text-muted)">${n.signal_count} signals</span></div>
                 </div>`;
             }).join('')}
         </div>
@@ -15516,7 +15545,8 @@ function openPastBrainstorm(brainstormId) {
             // Build thread cards HTML first
             content.innerHTML = `<div class="brainstorm-threads">
                 ${threads.map(t => {
-                    const domColor = _DOMAIN_COLORS[t.domain] || '#6b7280';
+                    const bDoms2 = _parseDomains(t.domain);
+                    const domColor = _DOMAIN_COLORS[bDoms2[0]] || '#6b7280';
                     return `<div class="brainstorm-thread-card" style="border-left:3px solid ${domColor}">
                         <h3>${escHtml(t.title)}</h3>
                         <p>${escHtml(t.synthesis || 'No summary')}</p>
@@ -16022,8 +16052,12 @@ function runResynthesize() {
     const statusText = document.getElementById('scan-status-text');
     btn.disabled = true;
     btn.textContent = '🧠 Detecting...';
+    btn.style.color = 'var(--accent)';
+    btn.style.borderColor = 'var(--accent)';
     statusEl.style.display = 'block';
     statusText.textContent = 'Re-detecting threads...';
+    // Switch to execution tab for visibility
+    switchSignalTab('execution');
 
     fetch('/api/signals/resynthesize', { method: 'POST' })
         .then(response => {
@@ -16058,8 +16092,11 @@ function _finishResynth() {
     const btn = document.getElementById('signals-resynth-btn');
     btn.disabled = false;
     btn.textContent = '🧠 Re-detect Threads';
+    btn.style.color = '';
+    btn.style.borderColor = '';
     loadSignals();
     loadSignalFreshness();
+    if (_signalTab === 'graph') loadBoard();
 }
 
 // ===================== BOARD =====================
@@ -16354,15 +16391,26 @@ function renderBoard(data) {
             // Thread node (regular or narrative_thread): circle
             const r = nodeR(d);
             const isNarrThread = d.type === 'narrative_thread';
-            const color = isNarrThread ? '#8b5cf6' : (_DOMAIN_COLORS[d.domain] || '#6b7280');
+            const doms = _parseDomains(d.domain);
+            const primaryColor = isNarrThread ? '#8b5cf6' : (_DOMAIN_COLORS[doms[0]] || '#6b7280');
             // Selection ring
             g.append('circle').attr('class', 'board-select-ring')
                 .attr('r', r + 5).attr('fill', 'none')
                 .attr('stroke', 'var(--accent)').attr('stroke-width', 2.5)
                 .attr('opacity', _boardSelectedIds.has(d.id) ? 1 : 0);
-            // Main circle
-            g.append('circle').attr('r', r).attr('fill', color).attr('fill-opacity', isNarrThread ? 0.6 : 0.8)
-                .attr('stroke', isNarrThread ? '#8b5cf6' : 'none').attr('stroke-width', isNarrThread ? 1.5 : 0);
+            // Main circle — split colors for multi-domain
+            if (!isNarrThread && doms.length > 1) {
+                // Half-and-half circle for dual domains
+                for (let di = 0; di < doms.length && di < 2; di++) {
+                    const startAngle = di === 0 ? -Math.PI / 2 : Math.PI / 2;
+                    const endAngle = di === 0 ? Math.PI / 2 : Math.PI * 1.5;
+                    const arc = d3.arc().innerRadius(0).outerRadius(r).startAngle(startAngle).endAngle(endAngle);
+                    g.append('path').attr('d', arc()).attr('fill', _DOMAIN_COLORS[doms[di]] || '#6b7280').attr('fill-opacity', 0.8);
+                }
+            } else {
+                g.append('circle').attr('r', r).attr('fill', primaryColor).attr('fill-opacity', isNarrThread ? 0.6 : 0.8)
+                    .attr('stroke', isNarrThread ? '#8b5cf6' : 'none').attr('stroke-width', isNarrThread ? 1.5 : 0);
+            }
             // Signal count inside
             if (d.signal_count > 0) {
                 g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
@@ -16373,10 +16421,10 @@ function renderBoard(data) {
             g.append('text').attr('y', r + 14).attr('text-anchor', 'middle')
                 .attr('fill', 'var(--text-secondary)').attr('font-size', 11).attr('font-weight', 600)
                 .text(d.title.length > 30 ? d.title.substring(0, 28) + '…' : d.title);
-            // Domain or collapse hint
-            const domLabel = isNarrThread ? 'dbl-click to collapse' : (_DOMAIN_LABELS[d.domain] || d.domain);
+            // Domain labels or collapse hint
+            const domLabel = isNarrThread ? 'dbl-click to collapse' : doms.map(dm => _DOMAIN_LABELS[dm] || dm).join(' · ');
             g.append('text').attr('y', r + 26).attr('text-anchor', 'middle')
-                .attr('fill', isNarrThread ? 'var(--purple)' : color).attr('font-size', 9).attr('font-weight', 600)
+                .attr('fill', isNarrThread ? 'var(--purple)' : primaryColor).attr('font-size', 9).attr('font-weight', 600)
                 .text(domLabel);
         }
     });
