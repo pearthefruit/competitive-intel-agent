@@ -161,6 +161,7 @@ Rules:
 - Be specific — name companies, sectors, dollar amounts when possible
 - You are generating HYPOTHESES for investigation, not making assertions
 - link_labels: one entry per thread PAIR. Label must be a specific relationship mechanism, NOT generic words like "related to" or "connected" or "drives". Name the actual causal link (e.g. "amplifies inflation risk", "supply chain dependency").
+- IMPORTANT: In connection_summary, hypothesis titles, hypothesis reasoning, and effect descriptions, wrap key concepts, companies, sectors, and policies in [[double brackets]]. Example: "[[Federal Reserve]] rate decisions amplify [[inflation]] risk in [[emerging markets]]". This makes them interactive in the UI.
 - Return ONLY the JSON object"""
 
 

@@ -16090,7 +16090,7 @@ function _renderBrainstormResults(container, result, threadIds) {
         html += `<div class="brainstorm-section">
             <div class="brainstorm-section-title">🔗 Connection</div>
             <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;padding:12px 16px;background:var(--bg-secondary);border-radius:10px;border:1px solid var(--border)">
-                ${escHtml(result.connection_summary)}
+                ${_renderBrainstormLinks(result.connection_summary)}
                 ${linkLabels.length ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:10px">${linkLabels.map(ll =>
                     `<span style="padding:3px 10px;background:rgba(168,85,247,0.15);border:1px solid rgba(168,85,247,0.3);border-radius:12px;font-size:10px;font-weight:600;color:var(--purple)">${escHtml(ll.label)}</span>`
                 ).join('')}</div>` : ''}
@@ -16102,17 +16102,18 @@ function _renderBrainstormResults(container, result, threadIds) {
     if (result.hypotheses && result.hypotheses.length) {
         html += `<div class="brainstorm-section">
             <div class="brainstorm-section-title">💡 Hypotheses</div>
-            ${result.hypotheses.map(h => `
-                <div class="hypothesis-card">
+            ${result.hypotheses.map((h, hi) => `
+                <div class="hypothesis-card" id="hyp-card-${hi}">
                     <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
-                        <h4>${escHtml(h.title)}</h4>
+                        <h4>${_renderBrainstormLinks(h.title)}</h4>
                         <span class="hypothesis-confidence ${h.confidence || 'medium'}">${(h.confidence || 'medium').toUpperCase()}</span>
                     </div>
-                    <p>${escHtml(h.reasoning)}</p>
+                    <p>${_renderBrainstormLinks(h.reasoning)}</p>
                     <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-                        ${h.investigate ? `<button onclick="investigateHypothesis('${escHtml(h.investigate.replace(/'/g, "\\'"))}')" style="padding:4px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--accent);font-size:10px;font-weight:600;cursor:pointer">🔍 Search signals</button>` : ''}
+                        ${h.investigate ? `<button onclick="_investigateInline(this, '${escHtml(h.investigate.replace(/'/g, "\\'"))}')" style="padding:4px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--accent);font-size:10px;font-weight:600;cursor:pointer">🔍 Search signals</button>` : ''}
                         <button onclick="_createNarrativeFromHypothesis('${escHtml(h.title.replace(/'/g, "\\'"))}', '${escHtml(h.reasoning.replace(/'/g, "\\'"))}')" style="padding:4px 10px;background:var(--bg-tertiary);border:1px solid var(--purple);border-radius:5px;color:var(--purple);font-size:10px;font-weight:600;cursor:pointer">📖 Create narrative</button>
                     </div>
+                    <div class="hyp-search-results" style="display:none;margin-top:8px"></div>
                 </div>
             `).join('')}
         </div>`;
@@ -16124,9 +16125,9 @@ function _renderBrainstormResults(container, result, threadIds) {
             <div class="brainstorm-section-title">🌊 Second-Order Effects</div>
             ${result.second_order_effects.map(e => `
                 <div class="second-order-card">
-                    <p><strong>${escHtml(e.effect)}</strong></p>
-                    ${e.affected_sectors?.length ? `<div style="font-size:10px;color:var(--text-muted)">Sectors: ${e.affected_sectors.map(s => escHtml(s)).join(', ')}</div>` : ''}
-                    ${e.affected_companies?.length ? `<div style="font-size:10px;color:var(--text-muted)">Companies: ${e.affected_companies.map(c => escHtml(c)).join(', ')}</div>` : ''}
+                    <p><strong>${_renderBrainstormLinks(e.effect)}</strong></p>
+                    ${e.affected_sectors?.length ? `<div style="font-size:10px;color:var(--text-muted)">Sectors: ${e.affected_sectors.map(s => `<span class="bs-link" onclick="_brainstormConceptClick('${escHtml(s.replace(/'/g, "\\'"))}')" style="color:var(--accent);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">${escHtml(s)}</span>`).join(', ')}</div>` : ''}
+                    ${e.affected_companies?.length ? `<div style="font-size:10px;color:var(--text-muted)">Companies: ${e.affected_companies.map(c => `<span class="bs-link" onclick="_brainstormConceptClick('${escHtml(c.replace(/'/g, "\\'"))}')" style="color:var(--accent);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px">${escHtml(c)}</span>`).join(', ')}</div>` : ''}
                 </div>
             `).join('')}
         </div>`;
@@ -16206,6 +16207,99 @@ function _linkFromBrainstorm(threadIds) {
         const used = labels.filter(Boolean);
         if (btn) { btn.textContent = `✓ Linked${used.length ? ' (' + used.join(', ') + ')' : ''}`; btn.style.color = 'var(--green)'; }
         if (_signalTab === 'graph') loadBoard();
+    });
+}
+
+/** Render brainstorm text with [[concept]] links clickable. Also auto-links known patterns. */
+function _renderBrainstormLinks(text) {
+    if (!text) return '';
+    let html = escHtml(text);
+    // Replace [[concept]] with clickable links
+    html = html.replace(/\[\[([^\]]+)\]\]/g, (_, concept) =>
+        `<span class="bs-link" onclick="_brainstormConceptClick('${concept.replace(/'/g, "\\'")}')" style="color:var(--accent);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;font-weight:600">${concept}</span>`
+    );
+    return html;
+}
+
+function _brainstormConceptClick(concept) {
+    // Add as a board highlight pill (stacked) — don't close brainstorm
+    if (typeof _boardKeywordSearch === 'function') {
+        // Queue the highlight — it will show when user switches to Board tab
+        fetch(`/api/signals/search?q=${encodeURIComponent(concept)}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!data || data.error) return;
+                const key = _hlKey('keyword', concept);
+                const existing = _boardHighlights.findIndex(h => h.key === key);
+                if (existing === -1) {
+                    const threadIds = new Set((data.thread_matches || []).map(m => m.thread_id));
+                    _boardHighlights.push({ kind: 'keyword', label: concept, icon: '🔍', threadIds, key });
+                    _applyBoardHighlights();
+                    _renderHighlightPills();
+                }
+            });
+    }
+    // Also show inline results in the brainstorm modal
+    const resultsArea = document.getElementById('bs-concept-results');
+    if (resultsArea) {
+        resultsArea.style.display = 'block';
+        resultsArea.innerHTML = `<div style="font-size:10px;color:var(--accent);padding:4px 0">Searching "${escHtml(concept)}"...</div>`;
+        fetch(`/api/signals/search?q=${encodeURIComponent(concept)}`)
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!data) { resultsArea.innerHTML = ''; resultsArea.style.display = 'none'; return; }
+                const matches = data.thread_matches || [];
+                if (!matches.length) {
+                    resultsArea.innerHTML = `<div style="font-size:10px;color:var(--text-muted);padding:4px 0">No threads match "${escHtml(concept)}"</div>`;
+                    return;
+                }
+                resultsArea.innerHTML = `<div style="font-size:10px;font-weight:600;color:var(--accent);margin-bottom:4px">🔍 "${escHtml(concept)}" — ${data.total_signals} signals in ${matches.length} threads</div>`
+                    + matches.slice(0, 5).map(m => `<div style="font-size:10px;color:var(--text-secondary);padding:2px 0;cursor:pointer" onclick="closeBrainstorm();openThreadDetail(${m.thread_id})">${escHtml(m.signals[0]?.title || 'Thread ' + m.thread_id)} <span style="color:var(--text-muted)">(${m.match_count})</span></div>`).join('');
+            });
+    }
+}
+
+function _investigateInline(btn, query) {
+    const card = btn.closest('.hypothesis-card');
+    const resultsDiv = card ? card.querySelector('.hyp-search-results') : null;
+
+    btn.textContent = '🔍 Searching...';
+    btn.disabled = true;
+    btn.style.borderColor = 'var(--accent)';
+
+    fetch('/api/signals/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        const found = data.total_found || 0;
+        const newCount = data.new_inserted || 0;
+        btn.textContent = `✓ ${found} found, ${newCount} new`;
+        btn.style.color = 'var(--green)';
+        btn.style.borderColor = 'var(--green)';
+
+        // Show results inline under the hypothesis
+        if (resultsDiv && found > 0) {
+            resultsDiv.style.display = 'block';
+            const auditHtml = (data.audit || []).map(a =>
+                `<span style="color:var(--text-muted)">${escHtml(a.source)}: ${a.new || 0} new</span>`
+            ).join(' · ');
+            resultsDiv.innerHTML = `<div style="font-size:10px;color:var(--green);padding:4px 8px;background:rgba(34,197,94,0.08);border-radius:6px;border:1px solid rgba(34,197,94,0.2)">
+                ${auditHtml}
+            </div>`;
+        }
+
+        // Reload signals in background
+        loadSignals();
+        if (_signalTab === 'graph') loadBoard();
+    })
+    .catch(() => {
+        btn.disabled = false;
+        btn.textContent = '🔍 Search signals';
+        btn.style.color = 'var(--red)';
     });
 }
 
@@ -18119,6 +18213,7 @@ function deleteNarrative(narrativeId) {
         <div id="brainstorm-content" style="padding:24px 0">
             <div style="text-align:center;color:var(--text-muted);padding:40px">Generating hypotheses...</div>
         </div>
+        <div id="bs-concept-results" style="display:none;position:sticky;bottom:0;padding:8px 16px;background:var(--bg-primary);border-top:1px solid var(--border);max-height:120px;overflow-y:auto"></div>
     </div>
 </div>
 
