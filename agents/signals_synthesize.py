@@ -9,7 +9,7 @@ entity extraction and thread summaries.
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from agents.llm import generate_json, generate_text, FAST_CHAIN
+from agents.llm import generate_json, generate_text, FAST_CHAIN, CHEAP_CHAIN
 from prompts.signals import (
     build_thread_assignment_prompt,
     build_entity_extraction_prompt,
@@ -241,7 +241,7 @@ def _update_thread_summary(conn, thread, new_signals):
     )
     prompt = build_thread_update_prompt(thread["title"], thread.get("synthesis", ""), signals_text)
     try:
-        updated_summary, _ = generate_text(prompt, timeout=15, chain=FAST_CHAIN)
+        updated_summary, _ = generate_text(prompt, timeout=15, chain=CHEAP_CHAIN)
         if updated_summary and len(updated_summary) > 20:
             conn.execute(
                 "UPDATE signal_clusters SET synthesis = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -274,7 +274,7 @@ def extract_entities(conn, signals, progress_cb=None):
     prompt = build_entity_extraction_prompt(signals_text)
 
     try:
-        result = generate_json(prompt, timeout=30, chain=FAST_CHAIN)
+        result = generate_json(prompt, timeout=30, chain=CHEAP_CHAIN)
     except Exception as e:
         print(f"[entities] LLM error: {e}")
         _cb("entities_error", {"error": str(e)})

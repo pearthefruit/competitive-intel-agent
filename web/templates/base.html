@@ -15214,9 +15214,22 @@ function _linkFromBrainstorm(threadIds) {
 
 function investigateHypothesis(query) {
     closeBrainstorm();
-    switchModule('prospecting');
-    const input = document.getElementById('prospect-niche-input');
-    if (input) input.value = query;
+    // Run targeted signal search for this question
+    const sel = document.getElementById('sig-graph-selection');
+    if (sel) sel.innerHTML = `<span style="color:var(--accent)">🔍 Searching: "${escHtml(query.substring(0,50))}"...</span>`;
+    fetch('/api/signals/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+    })
+    .then(r => r.json())
+    .then(data => {
+        loadSignals();
+        if (_signalTab === 'graph') loadBoard();
+        switchSignalTab('raw');
+        if (sel) sel.innerHTML = `<span style="color:var(--green)">✓ Found ${data.total_found || 0} signals for "${escHtml(query.substring(0,40))}"</span>`;
+        setTimeout(() => { if (sel) sel.innerHTML = ''; }, 5000);
+    });
 }
 
 function openPastBrainstorm(brainstormId) {

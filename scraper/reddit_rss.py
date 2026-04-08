@@ -158,14 +158,14 @@ def search_reddit_rss(query, max_results=10, subreddits=None, fetch_comments_top
     if subreddits is None:
         try:
             # Use an ultra-fast LLM call to guess the company's sector from the query and pick tailored subreddits
-            from agents.llm import generate_text, FAST_CHAIN
+            from agents.llm import generate_text, CHEAP_CHAIN
             prompt = (
                 f"You are a routing agent for a competitive intelligence system. "
                 f"What are the 4 best Reddit subreddits to search for data on: '{query}'?\n"
                 f"Deduce the industry (e.g., 'SaaS', 'FMCG', 'consulting', 'banking', 'retail', 'tech').\n"
                 f"Reply ONLY with a comma separated list of 4 relevant subreddit names without the 'r/' prefix (e.g. 'business, SaaS, startups, investing'). Do not include any other text."
             )
-            sub_text, _ = generate_text(prompt, timeout=4, chain=FAST_CHAIN)
+            sub_text, _ = generate_text(prompt, timeout=4, chain=CHEAP_CHAIN)
             picked = [s.strip().replace("r/", "") for s in sub_text.split(",") if s.strip()]
             if picked and len(picked) <= 8:
                 subreddits = picked[:4]

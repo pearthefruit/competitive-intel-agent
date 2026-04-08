@@ -147,7 +147,7 @@ def lightweight_financial_scan(company_name, description=None, progress_cb=None)
 def _research_private_company(company_name, description=None):
     """Search the web for financial data, then have LLM extract from results."""
     from scraper.web_search import search_web
-    from agents.llm import generate_json, FAST_CHAIN
+    from agents.llm import generate_json, CHEAP_CHAIN
     from prompts.niche_eval import build_private_company_prompt
 
     # Web search for actual financial data
@@ -168,7 +168,7 @@ def _research_private_company(company_name, description=None):
         company_name, description,
         search_context="\n".join(search_snippets),
     )
-    result = generate_json(prompt, timeout=15, chain=FAST_CHAIN)
+    result = generate_json(prompt, timeout=15, chain=CHEAP_CHAIN)
     if result:
         result["_had_search_data"] = True
     return result

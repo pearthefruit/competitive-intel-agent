@@ -2901,7 +2901,7 @@ def create_app(db_path="intel.db"):
         # LLM validation — assess the connection and suggest a label
         llm_assessment = None
         try:
-            from agents.llm import generate_json, FAST_CHAIN
+            from agents.llm import generate_json, CHEAP_CHAIN
             thread_a = get_cluster_detail(conn, a)
             thread_b = get_cluster_detail(conn, b)
             if thread_a and thread_b:
@@ -2923,7 +2923,7 @@ Return JSON:
   "suggested_label": "short relationship label (e.g. 'drives', 'contradicts', 'caused by', 'amplifies')",
   "reasoning": "one sentence explaining the connection"
 }}"""
-                llm_assessment = generate_json(prompt, timeout=15, chain=FAST_CHAIN)
+                llm_assessment = generate_json(prompt, timeout=15, chain=CHEAP_CHAIN)
         except Exception:
             pass
 
@@ -2992,7 +2992,7 @@ Return JSON:
             from scraper.google_news import search_google_news
             from scraper.hackernews import search_stories
             from agents.signals_collect import _normalize_signal
-            from agents.llm import generate_json, FAST_CHAIN
+            from agents.llm import generate_json, CHEAP_CHAIN
             from prompts.narratives import build_evidence_classification_prompt
             from datetime import datetime, timedelta
 
@@ -3052,7 +3052,7 @@ Return JSON:
                         cls_prompt = build_evidence_classification_prompt(
                             narr["thesis"], sig.get("title", ""), sig.get("body", "")
                         )
-                        cls_result = generate_json(cls_prompt, timeout=15, chain=FAST_CHAIN)
+                        cls_result = generate_json(cls_prompt, timeout=15, chain=CHEAP_CHAIN)
                         if cls_result:
                             stance = cls_result.get("stance", "neutral")
                             total_classified += 1

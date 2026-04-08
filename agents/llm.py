@@ -195,6 +195,20 @@ FAST_CHAIN = {
     },
 }
 
+# CHEAP_CHAIN: no Gemini — for low-value calls (labels, classification, summaries)
+CHEAP_CHAIN = {
+    "order": ["groq", "cerebras", "mistral", "openrouter"],
+    "models": {
+        "groq": ["llama-3.1-8b-instant"],
+        "cerebras": ["llama3.1-8b"],
+        "mistral": ["ministral-8b-latest"],
+        "openrouter": [
+            "nvidia/nemotron-nano-9b-v2:free",
+            "google/gemma-3-12b-it:free",
+        ],
+    },
+}
+
 
 def _expand_chain(chain):
     """Expand a chain into a flat provider list with per-provider key exhaustion.
@@ -866,7 +880,7 @@ def extract_key_facts(company, report_text, analysis_type=None):
 
     prompt_template = _TYPE_KEY_FACTS_PROMPTS.get(analysis_type, _KEY_FACTS_PROMPT)
     prompt = prompt_template.format(company=company, report_text=report_text)
-    facts = generate_json(prompt, timeout=30, chain=FAST_CHAIN)
+    facts = generate_json(prompt, timeout=30, chain=CHEAP_CHAIN)
 
     if isinstance(facts, dict):
         # Clean out null values
