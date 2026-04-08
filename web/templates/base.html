@@ -14728,38 +14728,83 @@ function _openReviewQueue(offset) {
 }
 
 function _assignFromQueue(signalId, threadId, el) {
+    const item = document.getElementById(`rq-item-${signalId}`);
+    const originalHtml = item ? item.innerHTML : '';
+
     fetch('/api/signals/review-queue/assign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signal_id: signalId, thread_id: threadId })
     }).then(r => r.json()).then(data => {
-        if (data.ok) {
-            const item = document.getElementById(`rq-item-${signalId}`);
-            if (item) {
-                item.style.opacity = '0.3';
-                item.innerHTML = `<div style="font-size:11px;color:var(--green);padding:4px 0">✓ Assigned</div>`;
-            }
-            // Update count badge
+        if (data.ok && item) {
+            item.style.opacity = '0.5';
+            item.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0">
+                <span style="font-size:11px;color:var(--green)">✓ Assigned</span>
+                <button onclick="_undoAssign(${signalId}, ${threadId}, this)" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--text-muted);cursor:pointer">Undo</button>
+            </div>`;
+            item._originalHtml = originalHtml;
             const countEl = document.getElementById('review-queue-count');
             if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
         }
     });
 }
 
+function _undoAssign(signalId, threadId, btn) {
+    fetch('/api/signals/review-queue/unassign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signal_id: signalId, thread_id: threadId })
+    }).then(r => r.json()).then(data => {
+        if (data.ok) {
+            const item = document.getElementById(`rq-item-${signalId}`);
+            if (item && item._originalHtml) {
+                item.innerHTML = item._originalHtml;
+                item.style.opacity = '';
+                delete item._originalHtml;
+            }
+            const countEl = document.getElementById('review-queue-count');
+            if (countEl) countEl.textContent = parseInt(countEl.textContent || '0') + 1;
+        }
+    });
+}
+
 function _dismissFromQueue(signalId, el) {
+    const item = document.getElementById(`rq-item-${signalId}`);
+    const originalHtml = item ? item.innerHTML : '';
+
     fetch('/api/signals/review-queue/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signal_id: signalId })
+    }).then(r => r.json()).then(data => {
+        if (data.ok && item) {
+            item.style.opacity = '0.5';
+            item.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0">
+                <span style="font-size:11px;color:var(--text-muted)">✕ Dismissed</span>
+                <button onclick="_undoDismiss(${signalId}, this)" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--text-muted);cursor:pointer">Undo</button>
+            </div>`;
+            item._originalHtml = originalHtml;
+            const countEl = document.getElementById('review-queue-count');
+            if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
+        }
+    });
+}
+
+function _undoDismiss(signalId, btn) {
+    fetch('/api/signals/review-queue/undismiss', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signal_id: signalId })
     }).then(r => r.json()).then(data => {
         if (data.ok) {
             const item = document.getElementById(`rq-item-${signalId}`);
-            if (item) {
-                item.style.opacity = '0.3';
-                item.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:4px 0">✕ Dismissed</div>`;
+            if (item && item._originalHtml) {
+                item.innerHTML = item._originalHtml;
+                item.style.opacity = '';
+                delete item._originalHtml;
             }
             const countEl = document.getElementById('review-queue-count');
-            if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
+            if (countEl) countEl.textContent = parseInt(countEl.textContent || '0') + 1;
         }
     });
 }

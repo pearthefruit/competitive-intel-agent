@@ -2685,6 +2685,38 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True})
 
+    @app.route("/api/signals/review-queue/unassign", methods=["POST"])
+    def signals_review_unassign_api():
+        """Remove a signal from a thread (undo assignment)."""
+        data = request.json or {}
+        signal_id = data.get("signal_id")
+        thread_id = data.get("thread_id")
+        if not signal_id:
+            return jsonify({"error": "signal_id required"}), 400
+
+        conn = get_connection(db_path)
+        if thread_id:
+            conn.execute("DELETE FROM signal_cluster_items WHERE signal_id = ? AND cluster_id = ?", (signal_id, thread_id))
+        else:
+            conn.execute("DELETE FROM signal_cluster_items WHERE signal_id = ?", (signal_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/signals/review-queue/undismiss", methods=["POST"])
+    def signals_review_undismiss_api():
+        """Restore a dismissed signal (undo noise mark)."""
+        data = request.json or {}
+        signal_id = data.get("signal_id")
+        if not signal_id:
+            return jsonify({"error": "signal_id required"}), 400
+
+        conn = get_connection(db_path)
+        conn.execute("UPDATE signals SET signal_status = 'signal' WHERE id = ?", (signal_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+
     @app.route("/api/signals/scan-history", methods=["GET"])
     def signals_scan_history_api():
         """Fetch last 3 scan results."""
