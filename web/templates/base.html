@@ -14361,6 +14361,63 @@ function _bulkDeleteThreads(threadIds) {
     });
 }
 
+// ── Text selection → Find threads tooltip ──
+(function() {
+    let _selTooltip = null;
+
+    function _removeSelTooltip() {
+        if (_selTooltip) { _selTooltip.remove(); _selTooltip = null; }
+    }
+
+    document.addEventListener('mouseup', (e) => {
+        // Small delay so selection is finalized
+        setTimeout(() => {
+            _removeSelTooltip();
+            const sel = window.getSelection();
+            const text = (sel.toString() || '').trim();
+            if (!text || text.length < 3 || text.length > 80) return;
+            // Only trigger inside relevant areas (detail pane, brainstorm, narratives, feed)
+            const target = e.target.closest('#signals-detail, #brainstorm-overlay, .sig-tab-content, .signals-feed-body');
+            if (!target) return;
+            // Don't trigger if clicking inside an input/textarea
+            if (e.target.closest('input, textarea')) return;
+
+            const range = sel.getRangeAt(0);
+            const rect = range.getBoundingClientRect();
+
+            _selTooltip = document.createElement('div');
+            _selTooltip.style.cssText = `position:fixed;z-index:9999;left:${rect.left + rect.width / 2}px;top:${rect.top - 32}px;transform:translateX(-50%);display:flex;gap:4px;padding:4px 8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.4);font-size:10px;white-space:nowrap;pointer-events:auto`;
+            _selTooltip.innerHTML = `<span onclick="_searchSelectionThreads('${text.replace(/'/g, "\\'").replace(/"/g, '\\"')}')" style="color:var(--accent);cursor:pointer;font-weight:600;display:flex;align-items:center;gap:3px">&#128269; Find threads</span><span onclick="_searchSelectionSignals('${text.replace(/'/g, "\\'").replace(/"/g, '\\"')}')" style="color:var(--purple);cursor:pointer;font-weight:600;display:flex;align-items:center;gap:3px">&#128302; Highlight board</span>`;
+            document.body.appendChild(_selTooltip);
+
+            // Clamp to viewport
+            const tr = _selTooltip.getBoundingClientRect();
+            if (tr.top < 4) _selTooltip.style.top = (rect.bottom + 6) + 'px';
+            if (tr.right > window.innerWidth) _selTooltip.style.left = (window.innerWidth - tr.width - 8) + 'px';
+        }, 10);
+    });
+
+    // Remove on click elsewhere or scroll
+    document.addEventListener('mousedown', (e) => {
+        if (_selTooltip && !_selTooltip.contains(e.target)) _removeSelTooltip();
+    });
+    document.addEventListener('scroll', _removeSelTooltip, true);
+})();
+
+function _searchSelectionThreads(text) {
+    // Search threads tab with this text
+    const searchInput = document.getElementById('signals-search');
+    if (searchInput) { searchInput.value = text; }
+    switchSignalTab('threads');
+    renderThreadFeed();
+    _showToast(`Filtering threads for "${text}"`, 'info', 2000);
+}
+
+function _searchSelectionSignals(text) {
+    // Use the brainstorm concept click flow — searches signals + highlights on board
+    _brainstormConceptClick(text);
+}
+
 function renderThreadFeed() {
     const container = document.getElementById('sig-tab-threads');
     const search = (document.getElementById('signals-search').value || '').toLowerCase();
