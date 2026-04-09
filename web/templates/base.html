@@ -14272,13 +14272,103 @@ function renderSignalFeed() {
 // Single event delegation on the feed body — handles both tabs
 document.addEventListener('DOMContentLoaded', () => {
     const feedBody = document.getElementById('signals-feed-body');
-    if (feedBody) feedBody.addEventListener('click', function(e) {
-        const sigCard = e.target.closest('.sig-card');
-        if (sigCard) { openSignalDetail(parseInt(sigCard.dataset.id)); return; }
-        const threadCard = e.target.closest('.thread-card');
-        if (threadCard) { openThreadDetail(parseInt(threadCard.dataset.id)); return; }
-    });
+    if (feedBody) {
+        feedBody.addEventListener('click', function(e) {
+            const sigCard = e.target.closest('.sig-card');
+            if (sigCard) { openSignalDetail(parseInt(sigCard.dataset.id)); return; }
+            const threadCard = e.target.closest('.thread-card');
+            if (threadCard) { openThreadDetail(parseInt(threadCard.dataset.id)); return; }
+        });
+        feedBody.addEventListener('contextmenu', function(e) {
+            const threadCard = e.target.closest('.thread-card');
+            if (threadCard) {
+                e.preventDefault();
+                _showThreadContextMenu(parseInt(threadCard.dataset.id), e.clientX, e.clientY);
+            }
+        });
+    }
 });
+
+function _showThreadContextMenu(threadId, x, y) {
+    // Remove any existing context menu
+    document.querySelectorAll('.thread-ctx-menu').forEach(m => m.remove());
+    const thread = (_threadsCache || []).find(t => t.id === threadId);
+    if (!thread) return;
+
+    const menu = document.createElement('div');
+    menu.className = 'thread-ctx-menu';
+    menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:9999;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.5);min-width:160px;padding:4px 0;font-size:11px`;
+
+    menu.innerHTML = `
+        <div style="padding:4px 12px;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);margin-bottom:2px">${escHtml(thread.title.substring(0, 30))}${thread.title.length > 30 ? '...' : ''}</div>
+        <div class="ctx-item" onclick="_renameThread(${threadId})" style="padding:6px 12px;cursor:pointer;color:var(--text-secondary);transition:background 0.1s" onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background=''">✏️ Rename</div>
+        <div class="ctx-item" onclick="_deleteThread(${threadId})" style="padding:6px 12px;cursor:pointer;color:#ef4444;transition:background 0.1s" onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background=''">🗑️ Delete</div>
+    `;
+
+    document.body.appendChild(menu);
+
+    // Clamp to viewport
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+    if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+
+    // Close on any click
+    setTimeout(() => {
+        const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', close); } };
+        document.addEventListener('click', close);
+    }, 0);
+}
+
+function _renameThread(threadId) {
+    document.querySelectorAll('.thread-ctx-menu').forEach(m => m.remove());
+    const thread = (_threadsCache || []).find(t => t.id === threadId);
+    _showInlineInput(window.innerWidth / 2, window.innerHeight / 3, 'New title...', thread ? thread.title : '', (title) => {
+        if (!title || !title.trim()) return;
+        fetch(`/api/signals/threads/${threadId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title.trim() })
+        }).then(r => r.json()).then(data => {
+            if (data.ok) {
+                _showToast('Thread renamed', 'success');
+                loadSignals();
+                if (_signalTab === 'graph') loadBoard();
+            }
+        });
+    });
+}
+
+function _deleteThread(threadId) {
+    document.querySelectorAll('.thread-ctx-menu').forEach(m => m.remove());
+    const thread = (_threadsCache || []).find(t => t.id === threadId);
+    _showConfirm(`Delete "${thread ? thread.title.substring(0, 40) : 'thread'}"? Signals will become unassigned.`, () => {
+        fetch(`/api/signals/threads/${threadId}`, { method: 'DELETE' })
+            .then(r => r.json()).then(data => {
+                if (data.ok) {
+                    _showToast('Thread deleted', 'success');
+                    loadSignals();
+                    if (_signalTab === 'graph') loadBoard();
+                }
+            });
+    });
+}
+
+function _bulkDeleteThreads(threadIds) {
+    _showConfirm(`Delete ${threadIds.length} threads? Signals will become unassigned.`, () => {
+        fetch('/api/signals/threads/bulk-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ thread_ids: threadIds })
+        }).then(r => r.json()).then(data => {
+            if (data.ok) {
+                _showToast(`${data.deleted} threads deleted`, 'success');
+                _selectedThreadsForNarrative.clear();
+                loadSignals();
+                if (_signalTab === 'graph') loadBoard();
+            }
+        });
+    });
+}
 
 function renderThreadFeed() {
     const container = document.getElementById('sig-tab-threads');
@@ -14350,6 +14440,7 @@ function renderThreadFeed() {
         ? `<div style="position:sticky;bottom:0;padding:8px 12px;background:var(--bg-secondary);border-top:1px solid var(--border);display:flex;align-items:center;gap:8px">
             <span style="font-size:11px;color:var(--text-secondary);font-weight:600">${selCount} selected</span>
             ${selCount >= 2 ? `<button onclick="_createNarrativeFromThreads()" style="padding:5px 12px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer;margin-left:auto">📖 Create Narrative</button>` : `<span style="font-size:10px;color:var(--text-muted);margin-left:auto">Select 1 more to create narrative</span>`}
+            <button onclick="_bulkDeleteThreads([..._selectedThreadsForNarrative])" style="padding:5px 8px;background:none;border:1px solid #ef4444;border-radius:6px;color:#ef4444;font-size:10px;cursor:pointer">🗑️ Delete</button>
             <button onclick="_selectedThreadsForNarrative.clear();renderThreadFeed()" style="padding:5px 8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer">Clear</button>
         </div>`
         : '';

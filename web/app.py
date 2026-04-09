@@ -2800,6 +2800,53 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True, **result})
 
+    @app.route("/api/signals/threads/<int:thread_id>", methods=["DELETE"])
+    def signals_delete_thread_api(thread_id):
+        """Delete a thread — unlinks signals (they become unassigned), removes links."""
+        conn = get_connection(db_path)
+        # Unlink signals (they go back to unassigned pool)
+        conn.execute("DELETE FROM signal_cluster_items WHERE cluster_id = ?", (thread_id,))
+        # Remove thread links
+        conn.execute("DELETE FROM thread_links WHERE thread_a_id = ? OR thread_b_id = ?", (thread_id, thread_id))
+        conn.execute("DELETE FROM causal_links WHERE cause_thread_id = ? OR effect_thread_id = ?", (thread_id, thread_id))
+        conn.execute("DELETE FROM board_positions WHERE node_type = 'thread' AND node_id = ?", (thread_id,))
+        # Mark as deleted
+        conn.execute("UPDATE signal_clusters SET status = 'deleted' WHERE id = ?", (thread_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/signals/threads/<int:thread_id>", methods=["PATCH"])
+    def signals_rename_thread_api(thread_id):
+        """Rename a thread."""
+        data = request.json or {}
+        title = data.get("title", "").strip()
+        if not title:
+            return jsonify({"error": "title required"}), 400
+        conn = get_connection(db_path)
+        conn.execute("UPDATE signal_clusters SET title = ? WHERE id = ?", (title, thread_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/signals/threads/bulk-delete", methods=["POST"])
+    def signals_bulk_delete_threads_api():
+        """Delete multiple threads at once."""
+        data = request.json or {}
+        thread_ids = data.get("thread_ids", [])
+        if not thread_ids:
+            return jsonify({"error": "thread_ids required"}), 400
+        conn = get_connection(db_path)
+        for tid in thread_ids:
+            conn.execute("DELETE FROM signal_cluster_items WHERE cluster_id = ?", (tid,))
+            conn.execute("DELETE FROM thread_links WHERE thread_a_id = ? OR thread_b_id = ?", (tid, tid))
+            conn.execute("DELETE FROM causal_links WHERE cause_thread_id = ? OR effect_thread_id = ?", (tid, tid))
+            conn.execute("DELETE FROM board_positions WHERE node_type = 'thread' AND node_id = ?", (tid,))
+            conn.execute("UPDATE signal_clusters SET status = 'deleted' WHERE id = ?", (tid,))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "deleted": len(thread_ids)})
+
     @app.route("/api/signals/retitle-threads", methods=["POST"])
     def signals_retitle_threads_api():
         """Re-title all active threads using LLM to generate directional, specific titles."""
