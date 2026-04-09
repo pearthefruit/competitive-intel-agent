@@ -2809,7 +2809,8 @@ def get_causal_suggestions(conn, limit=20):
 
     brainstorm_links = []  # (cause_tid, effect_tid, effect_text)
     for bs in brainstorms:
-        bs_thread_ids = json.loads(bs["thread_ids"]) if bs["thread_ids"] else []
+        bs = dict(bs)
+        bs_thread_ids = json.loads(bs["thread_ids"]) if bs.get("thread_ids") else []
         effects = json.loads(bs["second_order_json"]) if bs.get("second_order_json") else []
         for eff in effects:
             effect_text = (eff.get("effect") or "").lower()
@@ -2831,7 +2832,15 @@ def get_causal_suggestions(conn, limit=20):
     scored = {}
     for i, tid_a in enumerate(thread_ids):
         for tid_b in thread_ids[i+1:]:
+            if tid_a == tid_b:
+                continue
             if (tid_a, tid_b) in existing:
+                continue
+            # Skip pairs with near-identical titles (duplicate threads)
+            from difflib import SequenceMatcher
+            title_a = thread_map.get(tid_a, {}).get("title", "").lower()
+            title_b = thread_map.get(tid_b, {}).get("title", "").lower()
+            if title_a and title_b and SequenceMatcher(None, title_a, title_b).ratio() >= 0.7:
                 continue
 
             reasons = []
@@ -2843,11 +2852,11 @@ def get_causal_suggestions(conn, limit=20):
             cause, effect = tid_a, tid_b
             if ta and tb and ta["median_jd"] and tb["median_jd"]:
                 lag_days = tb["median_jd"] - ta["median_jd"]
-                if abs(lag_days) >= 2:
+                if abs(lag_days) >= 2 and abs(lag_days) <= 30:  # 2-30 day window
                     if lag_days < 0:
                         cause, effect = tid_b, tid_a
                         lag_days = -lag_days
-                    temporal_score = min(int(lag_days), 10)  # cap at 10
+                    temporal_score = min(int(lag_days), 10)  # cap score at 10
                     score += temporal_score
                     reasons.append({"type": "temporal", "detail": f"Leads by {int(lag_days)} days"})
 
