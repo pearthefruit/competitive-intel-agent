@@ -2570,9 +2570,18 @@ def create_app(db_path="intel.db"):
                         "needs_review": len(needs_review),
                     }
 
+                    # Commit and release between phases so other connections can write
+                    conn.commit()
+                    conn.close()
+
                     _cb("status", {"text": "Enriching articles..."})
+                    conn = get_connection(db_path)
                     enrich_thread_signals(conn, progress_cb=_cb)
+                    conn.commit()
+                    conn.close()
+
                     _cb("status", {"text": "Extracting entities..."})
+                    conn = get_connection(db_path)
                     newly_assigned = conn.execute(
                         """SELECT * FROM signals WHERE id IN (SELECT signal_id FROM signal_cluster_items) ORDER BY collected_at DESC LIMIT 200"""
                     ).fetchall()
@@ -2582,7 +2591,10 @@ def create_app(db_path="intel.db"):
                     traceback.print_exc()
                     synth_q.put(("error", {"text": str(exc)}))
                 finally:
-                    conn.close()
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
                     synth_q.put(("_done", {}))
 
             t = threading.Thread(target=_run, daemon=True)
@@ -3518,48 +3530,103 @@ Return JSON:
             # Build search terms: claim text + queries
             search_terms = [claim] + sc.get("queries", [])
             search_text = " ".join(search_terms).lower()
-            # Extract key words (3+ chars, skip stopwords)
-            stopwords = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been', 'will', 'with', 'that', 'this', 'from', 'they', 'were', 'said', 'each', 'which', 'their', 'what', 'about', 'would', 'there', 'could', 'other', 'into', 'more', 'some', 'than', 'them', 'very', 'when', 'come', 'made', 'after', 'back', 'only', 'also'}
-            keywords = [w for w in search_text.split() if len(w) >= 3 and w not in stopwords][:10]
+            # Extract key words (4+ chars, skip stopwords)
+            stopwords = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been', 'will', 'with', 'that', 'this', 'from', 'they', 'were', 'said', 'each', 'which', 'their', 'what', 'about', 'would', 'there', 'could', 'other', 'into', 'more', 'some', 'than', 'them', 'very', 'when', 'come', 'made', 'after', 'back', 'only', 'also',
+                         'does', 'over', 'such', 'like', 'just', 'most', 'much', 'between', 'during', 'before',
+                         'lead', 'leads', 'including', 'particularly', 'increased', 'higher', 'overall',
+                         'experiences', 'major', 'periods', 'amplifies'}
+            keywords = list(dict.fromkeys(w for w in search_text.split() if len(w) >= 4 and w not in stopwords))[:10]
 
             if not keywords:
                 results.append({"claim": claim, "matches": [], "linked": 0})
                 continue
 
-            # Search existing signals by keyword match in title or body
+            # Fetch candidate signals matching ANY keyword, then score by overlap count
             like_clauses = " OR ".join(["(s.title LIKE ? COLLATE NOCASE OR s.body LIKE ? COLLATE NOCASE)"] * min(len(keywords), 5))
             params = []
             for kw in keywords[:5]:
                 params.extend([f"%{kw}%", f"%{kw}%"])
 
-            matches = conn.execute(
-                f"""SELECT DISTINCT s.id, s.title, s.source_name, s.published_at,
-                           sci.cluster_id as thread_id
+            candidates = conn.execute(
+                f"""SELECT s.id, s.title, s.body, s.source_name, s.published_at
                     FROM signals s
-                    LEFT JOIN signal_cluster_items sci ON sci.signal_id = s.id
                     WHERE s.signal_status != 'noise' AND ({like_clauses})
-                    ORDER BY s.published_at DESC LIMIT 20""",
+                    ORDER BY s.published_at DESC LIMIT 100""",
                 params,
             ).fetchall()
 
-            # Link matches to the sub-claim's thread
+            # Score each candidate by how many keywords it matches (title weighted 2x)
+            min_hits = max(2, len(keywords) // 3)  # require at least 2 keyword hits
+            scored = []
+            seen_ids = set()
+            for c in candidates:
+                if c["id"] in seen_ids:
+                    continue
+                seen_ids.add(c["id"])
+                title_lower = (c["title"] or "").lower()
+                body_lower = (c["body"] or "").lower()
+                hits = sum(1 for kw in keywords if kw in title_lower) * 2 + \
+                       sum(1 for kw in keywords if kw in body_lower)
+                if hits >= min_hits:
+                    scored.append((hits, c))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            top_matches = [c for _, c in scored[:20]]
+
+            # Classify evidence stance for top matches in a single LLM batch
+            stances = {}
+            if top_matches and thesis:
+                try:
+                    from agents.llm import generate_json
+                    from agents.llm import CHEAP_CHAIN
+                    signals_block = "\n".join(
+                        f"[{m['id']}] {(m['title'] or '')[:100]}"
+                        for m in top_matches[:15]
+                    )
+                    cls_prompt = f"""Given this hypothesis:
+"{thesis}"
+
+And this specific sub-claim:
+"{claim}"
+
+Classify each signal as supporting, contradicting, or neutral:
+{signals_block}
+
+Return JSON: {{"classifications": [{{"id": signal_id, "stance": "supporting"|"contradicting"|"neutral"}}]}}
+Be honest — if a signal contradicts the claim, say so. Neutral means related but unclear."""
+                    cls_result = generate_json(cls_prompt, timeout=20, chain=CHEAP_CHAIN)
+                    if cls_result and cls_result.get("classifications"):
+                        for c in cls_result["classifications"]:
+                            stances[c.get("id")] = c.get("stance", "neutral")
+                except Exception as e:
+                    print(f"[narrative_scan] Evidence classification failed: {e}")
+
+            # Look up thread assignment for top matches
             thread_id = threads[i]["id"] if i < len(threads) else None
             linked = 0
             match_list = []
-            for m in matches:
+            for m in top_matches:
+                sig_thread = conn.execute(
+                    "SELECT cluster_id FROM signal_cluster_items WHERE signal_id = ? LIMIT 1",
+                    (m["id"],)
+                ).fetchone()
+                sig_thread_id = sig_thread["cluster_id"] if sig_thread else None
+                stance = stances.get(m["id"], "neutral")
+
                 match_list.append({
                     "id": m["id"], "title": m["title"],
                     "source_name": m["source_name"] or "",
                     "published_at": (m["published_at"] or "")[:10],
-                    "already_in_thread": m["thread_id"] == thread_id if thread_id else False,
+                    "already_in_thread": sig_thread_id == thread_id if thread_id else False,
+                    "stance": stance,
                 })
-                # Auto-link if not already in this thread
-                if thread_id and m["thread_id"] != thread_id:
+                # Auto-link only high-relevance matches (top 5)
+                if thread_id and sig_thread_id != thread_id and linked < 5:
                     try:
                         link_signal_to_cluster(conn, thread_id, m["id"])
                         conn.execute(
-                            "UPDATE signal_cluster_items SET evidence_stance = 'neutral' WHERE cluster_id = ? AND signal_id = ?",
-                            (thread_id, m["id"]),
+                            "UPDATE signal_cluster_items SET evidence_stance = ? WHERE cluster_id = ? AND signal_id = ?",
+                            (stance, thread_id, m["id"]),
                         )
                         linked += 1
                     except Exception:

@@ -21,16 +21,35 @@ _DOMAIN_ALIASES = {
 
 
 def sanitize_domain(raw):
-    """Normalize a domain string (possibly pipe-separated) to a single valid domain."""
+    """Normalize a domain string (possibly pipe-separated) to valid domain(s).
+    Preserves multiple domains as pipe-separated string."""
     if not raw:
         return "economics"
     parts = [p.strip().lower() for p in raw.split("|")]
+    valid = []
     for p in parts:
         if p in _VALID_DOMAINS:
-            return p
-        if p in _DOMAIN_ALIASES:
-            return _DOMAIN_ALIASES[p]
-    return "economics"
+            if p not in valid:
+                valid.append(p)
+        elif p in _DOMAIN_ALIASES:
+            mapped = _DOMAIN_ALIASES[p]
+            if mapped not in valid:
+                valid.append(mapped)
+    return "|".join(valid) if valid else "economics"
+
+
+def merge_domains(existing_domain, new_domain):
+    """Combine two domain strings into a pipe-separated multi-domain string."""
+    parts = set()
+    for raw in (existing_domain, new_domain):
+        if raw:
+            for p in raw.split("|"):
+                p = p.strip().lower()
+                if p in _VALID_DOMAINS:
+                    parts.add(p)
+                elif p in _DOMAIN_ALIASES:
+                    parts.add(_DOMAIN_ALIASES[p])
+    return "|".join(sorted(parts)) if parts else "economics"
 
 
 SCHEMA = """
@@ -342,7 +361,7 @@ def get_connection(db_path="intel.db"):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA busy_timeout=10000")
     return conn
 
 

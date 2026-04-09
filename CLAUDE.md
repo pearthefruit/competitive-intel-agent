@@ -12,6 +12,7 @@ A competitive intelligence platform that scrapes, classifies, and analyzes compa
 - **Frontend:** Single-page app in vanilla JS (no framework), Jinja2 template (`web/templates/base.html`)
 - **AI:** Multi-provider rotation (Groq, Cerebras, Mistral, Gemini, OpenRouter) with automatic fallback. Three chains: `REPORT_CHAIN` (capable models), `BRIEFING_CHAIN` (Gemini-first for structured JSON), `FAST_CHAIN` (8B-14B models for classification/extraction/query generation).
 - **Scraping:** httpx + BeautifulSoup + trafilatura, SEC EDGAR, USPTO patents, Reddit RSS, HackerNews, YouTube transcripts, Google News RSS, Blind, TikTok (yt-dlp), 1Point3Acres
+- **ML:** scikit-learn TF-IDF for signal classification (no external API)
 - **CLI:** Click-based (`main.py`), also serves web UI via `python main.py web --port 5001`
 
 ## Commands
@@ -44,6 +45,15 @@ All analysis commands: `collect`, `classify`, `analyze`, `financial`, `competito
 - **Execution log auditability:** Discovery events include per-result metadata (title, URL, source, date) and full company details. Frontend renders as clickable links in pipeline tree mini-cards via `_richDetail` flag.
 - **Lens system** (`agents/lens.py`): Configurable evaluation frameworks with custom dimensions, weights, rubrics. Replaces hardcoded CTV scoring. Default "CTV Ad Sales" lens preserved. Prospecting module uses lens scores when available (via `_getScore()` accessor), falls back to UA fit for legacy campaigns. `scoring_lens_id` on campaigns tracks which lens was used; auto-set when companies are scored via lens endpoint.
 - **Niche evaluation** (`agents/niche_eval.py`): Bottom-up market sizing from discovered companies. Lightweight financial scan (Yahoo Finance + SEC EDGAR + LLM fallback for private companies) runs in parallel via ThreadPoolExecutor(5). Aggregates into revenue distribution, company size breakdown, growth signals, geography, and sector charts. Stored as `niche_eval_json` on campaigns. Per-company snapshots cached as `financial_snapshot_json` on dossiers for reuse in full research.
+- **Three-tier signal assignment**: (1) TF-IDF keyword classifier (`agents/signals_classify.py`) — scikit-learn bigrams, thread titles weighted 3x, auto-assigns high-confidence matches, learns organically from user assignments. (2) LLM batches of 10 for remaining unassigned. (3) Review queue with suggestions, undo, searchable thread dropdown, "+ New thread".
+- **Signal pruning** (`POST /api/signals/prune`): SequenceMatcher >=85% title similarity deduplication. Keeps earliest signal, marks dupes as noise (recoverable), transfers thread links to survivor.
+- **Unified targeted search** (`POST /api/signals/search`): Hits 6 sources — Google News, DuckDuckGo News, HackerNews, Reddit, Gov RSS keyword-filtered, FRED keyword search.
+- **Stacked board highlights**: Multiple entity/keyword highlights layer additively via `_boardHighlights` array with pill tray. "Link N" and "Brainstorm N" action buttons on multi-select.
+- **Interactive brainstorm**: `[[double bracket]]` clickable concepts in brainstorm output — inline search feedback, cross-reference board highlights.
+- **Timeline strip** (Level 1): `GET /api/signals/timeline` — horizontal SVG below board, thread bars with signal density dots, domain-colored. Levels 2-3 planned.
+- **Multi-domain rendering**: `_parseDomains()` + `_renderDomainBadges()` handles pipe-separated domains, split-color board nodes, alias mapping (SOFTWARE_DEVELOPMENT->tech_ai). `sanitize_domain()` in db.py normalizes LLM-produced domains.
+- **Native UI helpers**: `_showToast()`, `_showConfirm()`, `_showInlineInput()` — zero browser dialogs remaining (R8).
+- **Resizable detail pane**: Drag handle, width persisted to localStorage, default 380px. Dynamic titles per context (Signal/Thread/Narrative/Review Queue).
 
 ### Two Modules
 
@@ -83,8 +93,34 @@ USPTO_API_KEY       # Falls back to PATENTSVIEW_API_KEY
 - CLI commands still use `ua-discover`, `ua-fit`, `ua-pipeline` names
 - ICP Wizard system (`icp_profiles` table, 5-step survey modal) dormant but preserved
 
+## Signals Module
+
+Five-tab intelligence monitoring workspace: Signals -> Threads -> Narratives -> Board -> Execution.
+
+### Key API Routes (Signals)
+- `GET /api/signals/search` — filter existing signals by keyword
+- `POST /api/signals/search` — unified targeted search (6 sources: Google News, DuckDuckGo News, HackerNews, Reddit, Gov RSS, FRED)
+- `GET /api/signals/timeline?days=60` — signal density data for timeline strip
+- `POST /api/signals/prune` — deduplicate signals (>=85% title similarity)
+- `GET/POST /api/signals/review-queue/*` — three-tier assignment review queue
+
+### Thread Splitting
+- Minimum 6 signals required (raised from 3)
+- Post-LLM validation drops sub-threads with <2 signals
+
+### Board Interactions
+- Double-click zoom from board view
+- Physics freeze saves node positions
+- Click empty space dismisses detail pane (including narratives)
+- Entity toggle: click entity chip again to unhighlight board nodes
+- Global keyword search bar with pills in board view
+
+### SQLite Threading
+- DB connections created inside worker threads for resynthesize (avoids cross-thread errors)
+
 ## Planned Improvements
 
 - **Temporal analysis smarts**: Skip same-day comparisons, compare against oldest analysis for long-term trends, minimum 24h gap before flagging changes
 - **Multi-source job collection**: Multiple ATS boards per company
 - **Briefing diff view**: Side-by-side comparison between analysis runs
+- **Timeline Levels 2-3**: Thread lifecycle bars with range selector (L2), causal timeline with predictions (L3) — see `knowledge/signals-module/timeline-plan.md`

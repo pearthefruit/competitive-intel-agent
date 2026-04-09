@@ -5468,25 +5468,19 @@
                 <div class="signals-sidebar-title">Signals</div>
             </div>
 
-            <!-- Domain bar — proportional segments, click to filter -->
+            <!-- Custom search — primary action, top of sidebar -->
+            <div style="padding:8px 12px 0">
+                <div style="position:relative">
+                    <input type="text" id="custom-search-input" placeholder="Search for signals..." style="width:100%;padding:7px 10px 7px 28px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:10px;outline:none;box-sizing:border-box" onkeydown="if(event.key==='Enter')_runCustomSearch()">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                </div>
+                <div id="custom-search-status" style="display:none;font-size:10px;color:var(--text-muted);margin-top:3px;padding:0 2px"></div>
+            </div>
+
+            <!-- Domain chips — unified global toggle -->
             <div style="padding:8px 12px">
-                <div id="sig-domain-bar" style="display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--bg-tertiary);margin-bottom:6px;cursor:pointer"></div>
-                <div id="sig-domain-pills" style="display:flex;flex-wrap:wrap;gap:3px">
-                    <span class="sig-domain-pill active" data-domain="all" onclick="filterSignalDomain('all')" style="padding:2px 6px;border-radius:4px;font-size:9px;font-weight:600;color:var(--text-muted);cursor:pointer;background:var(--bg-tertiary)">All</span>
-                    <span class="sig-domain-pill" data-domain="economics" onclick="filterSignalDomain('economics')" style="padding:2px 6px;border-radius:4px;font-size:9px;cursor:pointer;color:#3b82f6"><span id="sig-count-economics">—</span> Econ</span>
-                    <span class="sig-domain-pill" data-domain="finance" onclick="filterSignalDomain('finance')" style="padding:2px 6px;border-radius:4px;font-size:9px;cursor:pointer;color:#22c55e"><span id="sig-count-finance">—</span> Fin</span>
-                    <span class="sig-domain-pill" data-domain="geopolitics" onclick="filterSignalDomain('geopolitics')" style="padding:2px 6px;border-radius:4px;font-size:9px;cursor:pointer;color:#ef4444"><span id="sig-count-geopolitics">—</span> Geo</span>
-                    <span class="sig-domain-pill" data-domain="tech_ai" onclick="filterSignalDomain('tech_ai')" style="padding:2px 6px;border-radius:4px;font-size:9px;cursor:pointer;color:#a855f7"><span id="sig-count-tech_ai">—</span> Tech</span>
-                    <span class="sig-domain-pill" data-domain="labor" onclick="filterSignalDomain('labor')" style="padding:2px 6px;border-radius:4px;font-size:9px;cursor:pointer;color:#eab308"><span id="sig-count-labor">—</span> Lab</span>
-                    <span class="sig-domain-pill" data-domain="regulatory" onclick="filterSignalDomain('regulatory')" style="padding:2px 6px;border-radius:4px;font-size:9px;cursor:pointer;color:#f97316"><span id="sig-count-regulatory">—</span> Reg</span>
-                </div>
-                <!-- Source type filters — compact row -->
-                <div style="display:flex;gap:3px;margin-top:4px">
-                    <button class="sig-domain-btn active" data-srctype="all" onclick="_filterSourceType('all')" style="padding:1px 6px;font-size:8px;border-radius:3px">All</button>
-                    <button class="sig-domain-btn" data-srctype="government" onclick="_filterSourceType('government')" style="padding:1px 6px;font-size:8px;border-radius:3px">🏛</button>
-                    <button class="sig-domain-btn" data-srctype="news" onclick="_filterSourceType('news')" style="padding:1px 6px;font-size:8px;border-radius:3px">📰</button>
-                    <button class="sig-domain-btn" data-srctype="social" onclick="_filterSourceType('social')" style="padding:1px 6px;font-size:8px;border-radius:3px">💬</button>
-                </div>
+                <div id="sig-domain-bar" style="display:flex;height:4px;border-radius:2px;overflow:hidden;background:var(--bg-tertiary);margin-bottom:6px;cursor:pointer"></div>
+                <div id="sig-domain-chips" style="display:flex;flex-wrap:wrap;gap:4px"></div>
             </div>
 
             <!-- Brainstorm history -->
@@ -5495,32 +5489,15 @@
                 <div id="brainstorm-list-items"></div>
             </div>
 
-            <!-- Actions — compact -->
+            <!-- Actions — bottom of sidebar -->
             <div class="signals-actions">
-                <!-- Scan Now — primary action -->
                 <button class="signals-scan-btn" id="signals-scan-btn" onclick="runSignalScan()">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
                     Scan Now
                 </button>
-                <!-- Domain checkboxes — hidden, shown inline when scan is clicked -->
-                <div id="scan-domain-toggles" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">
-                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="economics" checked style="accent-color:#3b82f6;width:11px;height:11px"> Econ</label>
-                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="finance" checked style="accent-color:#22c55e;width:11px;height:11px"> Finance</label>
-                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="geopolitics" checked style="accent-color:#ef4444;width:11px;height:11px"> Geo</label>
-                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="tech_ai" checked style="accent-color:#a855f7;width:11px;height:11px"> Tech</label>
-                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="labor" checked style="accent-color:#eab308;width:11px;height:11px"> Labor</label>
-                    <label style="display:flex;align-items:center;gap:3px;font-size:9px;color:var(--text-muted);cursor:pointer"><input type="checkbox" class="scan-domain-cb" value="regulatory" checked style="accent-color:#f97316;width:11px;height:11px"> Reg</label>
-                </div>
-                <div id="custom-search-status" style="display:none;font-size:10px;color:var(--text-muted);margin-top:4px;padding:0 4px"></div>
-                <!-- More actions — collapsed -->
                 <div style="display:flex;gap:4px;margin-top:6px">
                     <button id="signals-resynth-btn" onclick="runResynthesize()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.2);border-radius:6px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">🧠 Re-detect</button>
                     <button id="signals-prune-btn" onclick="_pruneSignals()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:9px;font-weight:600;cursor:pointer">✂️ Prune</button>
-                </div>
-                <div style="display:flex;gap:4px;margin-top:4px">
-                    <div style="flex:1;position:relative">
-                        <input type="text" id="custom-search-input" placeholder="📡 Add signals..." style="width:100%;padding:5px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:9px;outline:none;box-sizing:border-box" onkeydown="if(event.key==='Enter')_runCustomSearch()">
-                    </div>
                 </div>
                 <div class="signals-freshness" id="signals-freshness" style="font-size:9px;color:var(--text-muted);margin-top:4px;text-align:center">No scans yet</div>
             </div>
@@ -13961,13 +13938,58 @@ function _renderDomainBadges(raw, fontSize) {
 
 let _signalsCache = [];
 let _threadsCache = [];
-let _signalsDomainFilter = 'all';
+let _signalsDomainFilter = 'all'; // kept for backward compat — derived from _activeDomains
 let _signalsSourceTypeFilter = 'all';
+
+// Unified domain toggle — all domains active by default
+const _ALL_DOMAINS = ['economics', 'finance', 'geopolitics', 'tech_ai', 'labor', 'regulatory'];
+let _activeDomains = new Set(_ALL_DOMAINS);
+
+function _toggleDomain(domain) {
+    if (_activeDomains.has(domain)) {
+        if (_activeDomains.size === 1) return; // can't deactivate last one
+        _activeDomains.delete(domain);
+    } else {
+        _activeDomains.add(domain);
+    }
+    // Sync legacy filter
+    _signalsDomainFilter = _activeDomains.size === _ALL_DOMAINS.length ? 'all' : [..._activeDomains][0];
+    _renderDomainChips();
+    _applyGlobalDomainFilter();
+}
+
+function _setAllDomains() {
+    _ALL_DOMAINS.forEach(d => _activeDomains.add(d));
+    _signalsDomainFilter = 'all';
+    _renderDomainChips();
+    _applyGlobalDomainFilter();
+}
+
+function _applyGlobalDomainFilter() {
+    renderActiveSignalTab();
+    if (_signalTab === 'graph') loadBoard();
+    if (_signalTab === 'narratives') loadNarratives();
+}
+
+function _renderDomainChips() {
+    const container = document.getElementById('sig-domain-chips');
+    if (!container) return;
+    const allActive = _activeDomains.size === _ALL_DOMAINS.length;
+    let html = `<span onclick="_setAllDomains()" style="padding:3px 8px;border-radius:6px;font-size:9px;font-weight:600;cursor:pointer;transition:all 0.15s;${allActive ? 'background:var(--bg-tertiary);color:var(--text-primary)' : 'background:transparent;color:var(--text-muted)'}">All</span>`;
+    _ALL_DOMAINS.forEach(dom => {
+        const color = _DOMAIN_COLORS[dom] || '#6b7280';
+        const label = _DOMAIN_LABELS[dom] || dom;
+        const count = _domainCounts[dom] || 0;
+        const active = _activeDomains.has(dom);
+        html += `<span onclick="_toggleDomain('${dom}')" style="padding:3px 8px;border-radius:6px;font-size:9px;font-weight:600;cursor:pointer;transition:all 0.15s;${active ? `background:${color}22;color:${color};border:1px solid ${color}44` : `background:transparent;color:var(--text-muted);border:1px solid var(--border);opacity:0.4`}">${count} ${label}</span>`;
+    });
+    container.innerHTML = html;
+}
+
+let _domainCounts = {};
 
 function _filterSourceType(srcType) {
     _signalsSourceTypeFilter = srcType;
-    document.querySelectorAll('.sig-domain-btn[data-srctype]').forEach(b => b.classList.remove('active'));
-    document.querySelector(`.sig-domain-btn[data-srctype="${srcType}"]`).classList.add('active');
     renderActiveSignalTab();
 }
 let _activeSignalId = null;
@@ -13997,23 +14019,16 @@ function renderActiveSignalTab() {
 }
 
 function filterSignalDomain(domain) {
-    _signalsDomainFilter = domain;
-    // Update pill active states
-    document.querySelectorAll('.sig-domain-pill').forEach(p => {
-        p.classList.toggle('active', p.dataset.domain === domain);
-        if (p.dataset.domain === domain) {
-            p.style.background = domain === 'all' ? 'var(--bg-tertiary)' : (_DOMAIN_COLORS[domain] || '#6b7280') + '22';
-            p.style.fontWeight = '700';
-        } else {
-            p.style.background = '';
-            p.style.fontWeight = '';
-        }
-    });
-    // Also update old-style domain buttons if they still exist
-    document.querySelectorAll('.sig-domain-btn[data-domain]').forEach(b => b.classList.remove('active'));
-    const oldBtn = document.querySelector(`.sig-domain-btn[data-domain="${domain}"]`);
-    if (oldBtn) oldBtn.classList.add('active');
-    renderActiveSignalTab();
+    if (domain === 'all') {
+        _setAllDomains();
+    } else {
+        // Solo-select: only this domain active
+        _activeDomains.clear();
+        _activeDomains.add(domain);
+        _signalsDomainFilter = domain;
+        _renderDomainChips();
+        _applyGlobalDomainFilter();
+    }
 }
 
 function loadSignals() {
@@ -14101,23 +14116,21 @@ function _timeAgo(isoStr) {
 }
 
 function _updateDomainCounts() {
-    const domCounts = {};
-    _signalsCache.forEach(s => { domCounts[s.domain] = (domCounts[s.domain] || 0) + 1; });
+    _domainCounts = {};
+    _signalsCache.forEach(s => { _domainCounts[s.domain] = (_domainCounts[s.domain] || 0) + 1; });
     const total = _signalsCache.length || 1;
-    for (const dom of Object.keys(_DOMAIN_LABELS)) {
-        const el = document.getElementById(`sig-count-${dom}`);
-        if (el) el.textContent = domCounts[dom] || 0;
-    }
     // Render proportional domain bar
     const bar = document.getElementById('sig-domain-bar');
     if (bar) {
-        bar.innerHTML = Object.keys(_DOMAIN_LABELS).map(dom => {
-            const count = domCounts[dom] || 0;
+        bar.innerHTML = _ALL_DOMAINS.map(dom => {
+            const count = _domainCounts[dom] || 0;
             const pct = (count / total * 100).toFixed(1);
             const color = _DOMAIN_COLORS[dom];
-            return count > 0 ? `<div onclick="filterSignalDomain('${dom}')" style="width:${pct}%;background:${color};transition:width 0.3s" title="${_DOMAIN_LABELS[dom]}: ${count}"></div>` : '';
+            const opacity = _activeDomains.has(dom) ? 1 : 0.2;
+            return count > 0 ? `<div onclick="_toggleDomain('${dom}')" style="width:${pct}%;background:${color};opacity:${opacity};transition:all 0.3s" title="${_DOMAIN_LABELS[dom]}: ${count}"></div>` : '';
         }).join('');
     }
+    _renderDomainChips();
 }
 
 function renderSignalFeed() {
@@ -14125,8 +14138,8 @@ function renderSignalFeed() {
     const search = (document.getElementById('signals-search').value || '').toLowerCase();
 
     let filtered = _signalsCache;
-    if (_signalsDomainFilter !== 'all') {
-        filtered = filtered.filter(s => s.domain === _signalsDomainFilter);
+    if (_activeDomains.size < _ALL_DOMAINS.length) {
+        filtered = filtered.filter(s => _activeDomains.has(s.domain));
     }
     if (_signalsSourceTypeFilter !== 'all') {
         filtered = filtered.filter(s => (s.source_type || 'news') === _signalsSourceTypeFilter);
@@ -14200,8 +14213,8 @@ function renderThreadFeed() {
     const search = (document.getElementById('signals-search').value || '').toLowerCase();
 
     let filtered = _threadsCache;
-    if (_signalsDomainFilter !== 'all') {
-        filtered = filtered.filter(t => t.domain === _signalsDomainFilter);
+    if (_activeDomains.size < _ALL_DOMAINS.length) {
+        filtered = filtered.filter(t => _activeDomains.has(t.domain));
     }
     if (search) {
         filtered = filtered.filter(t =>
@@ -14778,7 +14791,7 @@ function _openReviewQueue(offset) {
                             </div>
                             <div id="rq-dd-${sig.id}" style="display:none;position:absolute;left:0;right:0;bottom:100%;z-index:20;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;margin-bottom:2px;box-shadow:0 -4px 12px rgba(0,0,0,0.4);overflow:hidden">
                                 <div style="padding:5px 10px;font-size:9px;color:var(--text-muted);border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Assign: <span style="color:var(--text-secondary);font-weight:600">${escHtml(sig.title.substring(0, 50))}</span></div>
-                                <input type="text" placeholder="Search threads..." id="rq-search-${sig.id}" oninput="_filterRqDropdown(${sig.id}, this.value)" style="width:100%;padding:6px 10px;background:var(--bg-tertiary);border:none;border-bottom:1px solid var(--border);color:var(--text-primary);font-size:10px;outline:none;box-sizing:border-box" />
+                                <input type="text" placeholder="Search or create thread..." id="rq-search-${sig.id}" oninput="_filterRqDropdown(${sig.id}, this.value)" onkeydown="if(event.key==='Enter'){const v=this.value.trim();if(v&&!_threadsCache.some(t=>t.title.toLowerCase()===v.toLowerCase()))_createThreadFromQueue(${sig.id},v);}" style="width:100%;padding:6px 10px;background:var(--bg-tertiary);border:none;border-bottom:1px solid var(--border);color:var(--text-primary);font-size:10px;outline:none;box-sizing:border-box" />
                                 <div id="rq-list-${sig.id}" style="max-height:150px;overflow-y:auto"></div>
                             </div>
                         </div>
@@ -14911,38 +14924,59 @@ function _renderRqList(sigId, query) {
     ).join('') || '';
 }
 
-function _createThreadFromQueue(sigId, suggestedTitle) {
+function _createThreadFromQueue(sigId, title) {
+    if (!title || !title.trim()) return;
+    title = title.trim();
+
     // Close dropdown
     const dd = document.getElementById(`rq-dd-${sigId}`);
     if (dd) dd.style.display = 'none';
 
-    // Use the "+ New thread" row position for inline input
     const item = document.getElementById(`rq-item-${sigId}`);
-    const rect = item ? item.getBoundingClientRect() : { left: window.innerWidth / 2, top: window.innerHeight / 2 };
 
-    _showInlineInput(rect.left + 20, rect.top, 'Thread title...', suggestedTitle || '', (title) => {
-        if (!title || !title.trim()) return;
-
-        fetch('/api/signals/patterns', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: title.trim(), signal_ids: [sigId] })
-        }).then(r => r.json()).then(data => {
-            if (data.ok || data.id) {
-                const originalHtml = item ? item.innerHTML : '';
-                if (item) {
-                    item.style.opacity = '0.5';
-                    item.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0">
-                        <span style="font-size:11px;color:var(--green)">✓ New thread: ${escHtml(title.trim())}</span>
-                        <button onclick="_undoAssign(${sigId}, ${data.id}, this)" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--text-muted);cursor:pointer">Undo</button>
-                    </div>`;
-                    item._originalHtml = originalHtml;
-                }
-                const countEl = document.getElementById('review-queue-count');
-                if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
-                loadSignals();
+    fetch('/api/signals/patterns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, signal_ids: [sigId] })
+    }).then(r => r.json()).then(data => {
+        if (data.ok || data.id) {
+            const threadId = data.id;
+            const originalHtml = item ? item.innerHTML : '';
+            if (item) {
+                item.style.opacity = '0.5';
+                item.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0">
+                    <span style="font-size:11px;color:var(--green)">✓ New thread: ${escHtml(title)}</span>
+                    <button onclick="_undoAssign(${sigId}, ${threadId}, this)" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--text-muted);cursor:pointer">Undo</button>
+                </div>`;
+                item._originalHtml = originalHtml;
             }
-        });
+            const countEl = document.getElementById('review-queue-count');
+            if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
+
+            // Inject new thread as a "recent" suggestion pill on remaining review items
+            document.querySelectorAll('[id^="rq-item-"]').forEach(el => {
+                const elId = parseInt(el.id.replace('rq-item-', ''));
+                if (elId === sigId || el.style.opacity === '0.5') return; // skip assigned items
+                const suggsContainer = el.querySelector('[style*="flex-direction:column"]');
+                if (!suggsContainer) return;
+                const pill = document.createElement('div');
+                pill.onclick = () => { _assignFromQueue(elId, threadId, pill); };
+                pill.style.cssText = 'position:relative;padding:6px 10px;background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.3);border-radius:6px;cursor:pointer;overflow:hidden;transition:all 0.15s';
+                pill.onmouseenter = () => { pill.style.borderColor = '#22c55e'; pill.style.background = 'rgba(34,197,94,0.1)'; };
+                pill.onmouseleave = () => { pill.style.borderColor = 'rgba(34,197,94,0.3)'; pill.style.background = 'rgba(34,197,94,0.05)'; };
+                pill.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+                    <span style="font-size:11px;color:#22c55e;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(title)}</span>
+                    <span style="font-size:9px;color:rgba(34,197,94,0.6);font-weight:600;flex-shrink:0">new</span>
+                </div>`;
+                suggsContainer.insertBefore(pill, suggsContainer.firstChild);
+            });
+
+            // Refresh threads cache for dropdown lists
+            fetch('/api/signals/threads').then(r => r.json()).then(td => {
+                _threadsCache = td.threads || td || [];
+            });
+            loadSignals();
+        }
     });
 }
 
@@ -14985,6 +15019,12 @@ function _runCustomSearch() {
     status.style.display = 'block';
     status.innerHTML = `<span style="color:var(--accent)">Searching "${escHtml(query.substring(0,30))}"...</span>`;
 
+    // Log to execution data
+    const entry = { query, status: 'running', startedAt: new Date().toISOString() };
+    if (!_execData.customSearches) _execData.customSearches = [];
+    _execData.customSearches.push(entry);
+    _renderExecutionDetail();
+
     fetch('/api/signals/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -14993,13 +15033,19 @@ function _runCustomSearch() {
     .then(r => r.json())
     .then(data => {
         status.innerHTML = `<span style="color:var(--green)">✓ ${data.total_found || 0} found, ${data.new_inserted || 0} new</span>`;
+        entry.status = 'done';
+        entry.total_found = data.total_found || 0;
+        entry.new_inserted = data.new_inserted || 0;
+        entry.audit = data.audit || [];
+        _renderExecutionDetail();
         loadSignals();
         if (_signalTab === 'graph') loadBoard();
-        if (_signalTab !== 'raw') switchSignalTab('raw');
         setTimeout(() => { status.style.display = 'none'; }, 5000);
     })
     .catch(() => {
         status.innerHTML = '<span style="color:var(--red)">Search failed</span>';
+        entry.status = 'error';
+        _renderExecutionDetail();
     });
 }
 
@@ -15133,6 +15179,16 @@ function _applyBoardHighlights() {
             n.classList.add('board-dimmed');
         }
     });
+
+    // Raise highlighted nodes above dimmed ones (SVG z-order = DOM order)
+    if (_boardHighlights.length) {
+        allNodes.forEach(n => {
+            const nid = parseInt(n.dataset.nodeId);
+            if (unionIds.has(nid) && n.parentNode) {
+                n.parentNode.appendChild(n); // re-append moves to end = top
+            }
+        });
+    }
 
     // Cluster highlighted nodes toward their centroid + push dimmed nodes outward
     if (unionIds.size >= 2 && _boardHighlights.length) {
@@ -15395,7 +15451,29 @@ function _renderHighlightPills() {
         if (unionIds.size <= 6) {
             html += `<span onclick="_linkHighlighted()" style="${btnBase}background:linear-gradient(135deg,#06b6d4,#a855f7);color:#fff" title="Create connections between highlighted threads">🔗 Link ${unionIds.size}</span>`;
         }
-        html += `<span onclick="_brainstormHighlighted()" style="${btnBase}background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff" title="Brainstorm connections between highlighted threads">🧠 Brainstorm ${unionIds.size}</span>`;
+        const total = _boardHighlights.length;
+        if (total >= 2) {
+            // Compute match tiers — group threads by how many highlights they match
+            const tierCounts = {};
+            unionIds.forEach(nid => {
+                const mc = _boardHighlights.filter(h => h.threadIds.has(nid)).length;
+                tierCounts[mc] = (tierCounts[mc] || 0) + 1;
+            });
+            // Show tiered brainstorm buttons (highest tier first)
+            const tiers = Object.keys(tierCounts).map(Number).sort((a, b) => b - a);
+            tiers.forEach(tier => {
+                const count = tierCounts[tier];
+                if (count < 2) return; // need at least 2 to brainstorm
+                const intensity = tier / total; // 0..1
+                const bg = intensity >= 1 ? 'background:linear-gradient(135deg,#06b6d4,#a855f7)'
+                    : intensity >= 0.5 ? 'background:linear-gradient(135deg,var(--accent),var(--purple))'
+                    : 'background:var(--bg-tertiary);border:1px solid var(--border)';
+                const color = intensity >= 0.5 ? 'color:#fff' : 'color:var(--text-muted)';
+                html += `<span onclick="_brainstormHighlighted(${tier})" style="${btnBase}${bg};${color}" title="Brainstorm threads matching ${tier}/${total} highlights">🧠 ${tier}/${total} (${count})</span>`;
+            });
+        } else {
+            html += `<span onclick="_brainstormHighlighted()" style="${btnBase}background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff" title="Brainstorm connections between highlighted threads">🧠 Brainstorm ${unionIds.size}</span>`;
+        }
     }
 
     html += `<span onclick="_clearBoardHighlight();document.getElementById('board-keyword-search').value=''" style="display:inline-flex;align-items:center;gap:3px;padding:3px 8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:12px;font-size:10px;color:#ef4444;font-weight:600;cursor:pointer;white-space:nowrap" title="Clear all highlights">✕ Clear</span>`;
@@ -15452,8 +15530,19 @@ function _linkHighlighted() {
     }); // end _showConfirm
 }
 
-function _brainstormHighlighted() {
-    const ids = _getHighlightedThreadIds();
+function _brainstormHighlighted(matchFilter) {
+    let ids;
+    if (matchFilter != null && _boardHighlights.length >= 2) {
+        // Filter to threads matching exactly matchFilter highlights
+        ids = new Set();
+        const allIds = _getHighlightedThreadIds();
+        allIds.forEach(nid => {
+            const mc = _boardHighlights.filter(h => h.threadIds.has(nid)).length;
+            if (mc === matchFilter) ids.add(nid);
+        });
+    } else {
+        ids = _getHighlightedThreadIds();
+    }
     if (ids.size < 2) return;
 
     // Set board selected IDs to highlighted threads and open brainstorm
@@ -17072,7 +17161,7 @@ function closeSignalDetail() {
 }
 
 // Structured execution data (persists for "View Last Execution" button)
-let _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'idle', narrativeSearch: null };
+let _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'idle', narrativeSearch: null, customSearches: [] };
 let _execExpandedDomains = new Set(); // track which domain cards the user has expanded
 let _narrativeSearchReader = null; // persisted SSE reader for narrative search
 const _SIG_SOURCE_ICONS = { fred: '📈', google_news: '📰', reddit: '💬', hackernews: '🟧' };
@@ -17087,8 +17176,8 @@ function runSignalScan() {
     statusEl.style.display = 'block';
     statusText.textContent = 'Starting scan...';
 
-    // Get selected domains from checkboxes
-    const selectedDomains = [...document.querySelectorAll('.scan-domain-cb:checked')].map(cb => cb.value);
+    // Use active domains from unified domain chips
+    const selectedDomains = [..._activeDomains];
     if (!selectedDomains.length) { _showToast('Select at least one domain', 'warn'); return; }
 
     // Reset execution data
@@ -17459,6 +17548,44 @@ function _renderExecutionDetailInner(container) {
         html += `</div>`;
     }
 
+    // Custom Searches section
+    const cs = d.customSearches || [];
+    if (cs.length) {
+        html += `<div style="margin-top:24px;padding-top:16px;border-top:2px solid #06b6d4">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                <span style="font-size:16px;font-weight:800;color:var(--text-primary)">📡 Custom Searches</span>
+                <span style="font-size:10px;color:var(--text-muted)">${cs.length} quer${cs.length === 1 ? 'y' : 'ies'}</span>
+            </div>`;
+        for (const s of cs.slice().reverse()) {
+            const isDone = s.status === 'done';
+            const isErr = s.status === 'error';
+            const badge = isDone ? 'done' : isErr ? '' : 'running';
+            const badgeText = isDone ? `${s.total_found} found · ${s.new_inserted} new` : isErr ? 'Error' : 'Searching...';
+            const badgeColor = isErr ? 'background:rgba(239,68,68,0.15);color:#ef4444' : '';
+            html += `<div class="exec-step" style="margin-bottom:6px">
+                <div class="exec-step-header" onclick="this.parentElement.classList.toggle('open')" style="padding:8px 12px;cursor:pointer">
+                    <div class="exec-step-icon" style="background:rgba(6,182,212,0.15)">🔍</div>
+                    <div class="exec-step-info">
+                        <div class="exec-step-title" style="font-size:11px">${escHtml(s.query)}</div>
+                        <div style="font-size:9px;color:var(--text-muted)">${_timeAgo(s.startedAt)}</div>
+                    </div>
+                    <span class="exec-step-badge ${badge}" style="${badgeColor}">${badgeText}</span>
+                </div>
+                <div class="exec-step-body" style="padding-top:6px">`;
+            if (isDone && s.audit && s.audit.length) {
+                for (const a of s.audit) {
+                    const srcIcon = a.source.includes('Google') ? '📰' : a.source.includes('DDG') ? '📰' : a.source.includes('Hacker') ? '🟧' : a.source.includes('Reddit') ? '💬' : a.source.includes('Gov') ? '🏛️' : a.source.includes('FRED') ? '📈' : '🔍';
+                    html += `<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:10px;color:var(--text-secondary)">
+                        <span>${srcIcon} ${escHtml(a.source)}</span>
+                        <span style="color:var(--text-muted)">${a.new || 0} new${a.error ? ' <span style="color:#ef4444">⚠</span>' : ''}</span>
+                    </div>`;
+                }
+            }
+            html += `</div></div>`;
+        }
+        html += `</div>`;
+    }
+
     container.innerHTML = `<div style="padding:12px">${html}</div>`;
 }
 
@@ -17615,7 +17742,19 @@ function loadBoard() {
         .then(r => r.json())
         .then(data => {
             _boardData = data;
-            renderBoard(data);
+            // Apply global domain filter to board nodes
+            const allActive = _activeDomains.size === _ALL_DOMAINS.length;
+            const filtered = allActive ? data : {
+                ...data,
+                nodes: data.nodes.filter(n => {
+                    if (n.type === 'narrative') return true; // narratives always shown
+                    // Multi-domain threads: check if any domain matches
+                    const domains = (n.domain || '').split('|').map(d => d.trim());
+                    return domains.some(d => _activeDomains.has(d));
+                }),
+                edges: data.edges // edges filtered by renderBoard's visibleThreadIds
+            };
+            renderBoard(filtered);
             // Re-apply any active highlights after board re-render
             if (_boardHighlights.length) {
                 setTimeout(() => { _applyBoardHighlights(); _renderHighlightPills(); }, 50);
@@ -17892,10 +18031,10 @@ function renderBoard(data) {
                 .attr('opacity', _boardSelectedIds.has(d.id) ? 1 : 0);
             // Main circle — split colors for multi-domain
             if (!isNarrThread && doms.length > 1) {
-                // Half-and-half circle for dual domains
-                for (let di = 0; di < doms.length && di < 2; di++) {
-                    const startAngle = di === 0 ? -Math.PI / 2 : Math.PI / 2;
-                    const endAngle = di === 0 ? Math.PI / 2 : Math.PI * 1.5;
+                const sliceAngle = (Math.PI * 2) / doms.length;
+                for (let di = 0; di < doms.length; di++) {
+                    const startAngle = -Math.PI / 2 + di * sliceAngle;
+                    const endAngle = startAngle + sliceAngle;
                     const arc = d3.arc().innerRadius(0).outerRadius(r).startAngle(startAngle).endAngle(endAngle);
                     g.append('path').attr('d', arc()).attr('fill', _DOMAIN_COLORS[doms[di]] || '#6b7280').attr('fill-opacity', 0.8);
                 }
@@ -17915,8 +18054,9 @@ function renderBoard(data) {
                 .text(d.title.length > 30 ? d.title.substring(0, 28) + '…' : d.title);
             // Domain labels or collapse hint
             const domLabel = isNarrThread ? 'dbl-click to collapse' : doms.map(dm => _DOMAIN_LABELS[dm] || dm).join(' · ');
+            const labelColor = isNarrThread ? 'var(--purple)' : (doms.length > 1 ? 'var(--text-muted)' : primaryColor);
             g.append('text').attr('y', r + 26).attr('text-anchor', 'middle')
-                .attr('fill', isNarrThread ? 'var(--purple)' : primaryColor).attr('font-size', 9).attr('font-weight', 600)
+                .attr('fill', labelColor).attr('font-size', 9).attr('font-weight', 600)
                 .text(domLabel);
         }
     });
@@ -18419,7 +18559,7 @@ function _updateBoardSelectionBar(nodes) {
         sel.innerHTML = `<span style="color:var(--accent);font-weight:600">1 selected</span> <span style="color:var(--text-muted)">— shift-click more to create narrative</span> <span style="color:var(--text-muted);cursor:pointer;text-decoration:underline" onclick="_boardSelectedIds.clear();loadBoard()">clear</span>`;
     } else {
         const ids = [..._boardSelectedIds];
-        sel.innerHTML = `<span style="color:var(--accent);font-weight:600">${count} selected</span> <button onclick="_boardCreateNarrative()" style="margin-left:8px;padding:4px 12px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer">📖 Create Narrative</button> <span style="color:var(--text-muted);cursor:pointer;text-decoration:underline;margin-left:4px" onclick="_boardSelectedIds.clear();loadBoard()">clear</span>`;
+        sel.innerHTML = `<span style="color:var(--accent);font-weight:600">${count} selected</span> <button onclick="_boardBrainstorm()" style="margin-left:8px;padding:4px 12px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer">🧠 Brainstorm</button> <button onclick="_boardCreateNarrative()" style="margin-left:4px;padding:4px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer">📖 Create Narrative</button> <span style="color:var(--text-muted);cursor:pointer;text-decoration:underline;margin-left:4px" onclick="_boardSelectedIds.clear();loadBoard()">clear</span>`;
     }
 }
 
@@ -18429,6 +18569,17 @@ function _createNarrativeFromHypothesis(title, reasoning) {
     document.getElementById('narrative-thesis').value = title;
     document.getElementById('narrative-reasoning').value = reasoning;
     document.getElementById('narrative-thesis').focus();
+}
+
+function _boardBrainstorm() {
+    const ids = [..._boardSelectedIds];
+    if (ids.length < 2) return;
+    _selectedThreadIds.clear();
+    ids.forEach(id => _selectedThreadIds.add(id));
+    d3.selectAll('.graph-node').classed('selected', d => _selectedThreadIds.has(d.id));
+    const btn = document.getElementById('sig-brainstorm-btn');
+    if (btn) btn.style.display = '';
+    openBrainstormMode();
 }
 
 function _boardCreateNarrative() {
@@ -18544,10 +18695,10 @@ function renderNarrativesList() {
             ${_hypothesesCache.map(h => `
                 <div style="padding:8px 12px;margin-bottom:4px;background:var(--bg-tertiary);border-radius:6px;border-left:2px solid ${confColors[h.confidence] || 'var(--border)'}">
                     <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
-                        <div style="font-size:11px;font-weight:600;color:var(--text-primary);flex:1">${escHtml(h.title)}</div>
+                        <div style="font-size:11px;font-weight:600;color:var(--text-primary);flex:1">${_renderBrainstormLinks(h.title)}</div>
                         <span style="font-size:8px;padding:1px 5px;border-radius:3px;background:var(--bg-secondary);color:var(--text-muted);white-space:nowrap">${h.confidence}</span>
                     </div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(h.reasoning || '')}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${_renderBrainstormLinks(h.reasoning || '')}</div>
                     <div style="display:flex;gap:4px;margin-top:6px">
                         <button onclick="_promoteHypothesis(${h.id}, '${escHtml(h.title.replace(/'/g, "\\'"))}', '${escHtml((h.reasoning || '').replace(/'/g, "\\'"))}')" style="padding:2px 8px;background:none;border:1px solid var(--purple);border-radius:4px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">📖 Promote</button>
                         <button onclick="_dismissHypothesis(${h.id})" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:9px;cursor:pointer">Dismiss</button>
@@ -18669,20 +18820,29 @@ function _scanNarrativeInternal(narrativeId) {
                 if (!resultsEl) return;
 
                 if (sc.matches && sc.matches.length) {
+                    const supCount = sc.matches.filter(m => m.stance === 'supporting').length;
+                    const conCount = sc.matches.filter(m => m.stance === 'contradicting').length;
+                    const stanceSummary = [
+                        supCount ? `<span style="color:#22c55e">${supCount} supporting</span>` : '',
+                        conCount ? `<span style="color:#ef4444">${conCount} contradicting</span>` : '',
+                    ].filter(Boolean).join(' · ');
                     resultsEl.style.display = 'block';
-                    resultsEl.innerHTML = `<div style="font-size:9px;font-weight:600;color:var(--text-muted);margin-bottom:4px">${sc.total} existing signals found${sc.linked > 0 ? ` · ${sc.linked} newly linked` : ''}</div>`
-                        + sc.matches.slice(0, 5).map(m =>
-                            `<div style="font-size:10px;color:var(--text-secondary);padding:2px 0;display:flex;gap:4px;align-items:start">
-                                <span style="color:${m.already_in_thread ? '#22c55e' : '#eab308'};flex-shrink:0">●</span>
+                    resultsEl.innerHTML = `<div style="font-size:9px;font-weight:600;color:var(--text-muted);margin-bottom:4px">${sc.total} signals found${sc.linked > 0 ? ` · ${sc.linked} linked` : ''}${stanceSummary ? ` · ${stanceSummary}` : ''}</div>`
+                        + sc.matches.slice(0, 5).map(m => {
+                            const stanceColor = m.stance === 'supporting' ? '#22c55e' : m.stance === 'contradicting' ? '#ef4444' : '#6b7280';
+                            const stanceIcon = m.stance === 'supporting' ? '▲' : m.stance === 'contradicting' ? '▼' : '●';
+                            return `<div style="font-size:10px;color:var(--text-secondary);padding:2px 0;display:flex;gap:4px;align-items:start">
+                                <span style="color:${stanceColor};flex-shrink:0;font-size:8px;margin-top:2px">${stanceIcon}</span>
                                 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(m.title.substring(0, 60))}</span>
-                            </div>`
-                        ).join('') + (sc.total > 5 ? `<div style="font-size:9px;color:var(--text-muted);padding-top:2px">+ ${sc.total - 5} more</div>` : '');
+                            </div>`;
+                        }).join('') + (sc.total > 5 ? `<div style="font-size:9px;color:var(--text-muted);padding-top:2px">+ ${sc.total - 5} more</div>` : '');
 
-                    // Update the gap indicator color
-                    if (el && sc.total >= 3) {
-                        el.style.borderLeftColor = '#22c55e';
-                    } else if (el && sc.total > 0) {
-                        el.style.borderLeftColor = '#eab308';
+                    // Update the gap indicator color based on evidence balance
+                    if (el) {
+                        if (supCount > 0 && conCount === 0) el.style.borderLeftColor = '#22c55e';
+                        else if (conCount > 0 && supCount === 0) el.style.borderLeftColor = '#ef4444';
+                        else if (supCount > 0 && conCount > 0) el.style.borderLeftColor = '#eab308';
+                        else if (sc.total > 0) el.style.borderLeftColor = '#6b7280';
                     }
                 } else {
                     resultsEl.style.display = 'block';
@@ -18690,8 +18850,11 @@ function _scanNarrativeInternal(narrativeId) {
                 }
             });
 
-            // Refresh the narrative detail to update signal counts
-            setTimeout(() => loadSignals(), 500);
+            // Refresh the narrative detail to update evidence bar + signal counts
+            setTimeout(() => {
+                openNarrativeDetail(narrativeId);
+                loadSignals();
+            }, 500);
         })
         .catch(() => {
             if (btn) { btn.disabled = false; btn.textContent = '🔍 Scan existing signals'; }

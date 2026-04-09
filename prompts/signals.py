@@ -52,7 +52,9 @@ CRITICAL RULES:
 - Summaries should identify what's developing and which sectors/companies are affected
 - A new thread needs at least 2 signals
 - Signals that are truly isolated (no pattern) should have thread_id: null
-- domain must be one of: economics, finance, geopolitics, tech_ai, labor, regulatory
+- NEVER create a new thread that covers the same topic as an existing thread but with a different domain. If "Global Economic Uncertainty" exists as economics, assign geopolitics signals about economic uncertainty TO THAT THREAD — don't create a duplicate
+- Prefer assigning to existing threads over creating new ones. Only create a new thread if no existing thread covers the pattern
+- domain can be ONE or MULTIPLE pipe-separated values: economics, finance, geopolitics, tech_ai, labor, regulatory. Use "economics|geopolitics" for threads spanning domains. Multi-domain threads are preferred over duplicates
 - Return ONLY the JSON object"""
 
 

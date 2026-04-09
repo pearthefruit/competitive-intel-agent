@@ -124,14 +124,42 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
 
     _cb("assignments_done", {"assigned": assigned_count, "threads_updated": len(updated_thread_ids)})
 
-    # Create new threads
+    # Create new threads (with fuzzy dedup against existing)
+    from difflib import SequenceMatcher
+    from db import merge_domains
     new_thread_count = 0
+    existing_titles = {t["id"]: (t.get("title") or "").lower() for t in existing_threads}
+    existing_domains = {t["id"]: t.get("domain", "") for t in existing_threads}
+
     for td in new_thread_defs:
         title = td.get("title", "").strip()
         if not title:
             continue
         sig_ids = td.get("signal_ids", [])
         if len(sig_ids) < 2:
+            continue
+
+        # Fuzzy dedup: if new thread title is >=85% similar to existing, merge signals + domains
+        title_lower = title.lower()
+        merged = False
+        for eid, etitle in existing_titles.items():
+            if SequenceMatcher(None, title_lower, etitle).ratio() >= 0.85:
+                print(f"[synthesize] Merging near-duplicate thread '{title}' into existing #{eid} '{etitle}'")
+                for sid in sig_ids:
+                    if isinstance(sid, int):
+                        link_signal_to_cluster(conn, eid, sid)
+                # Merge domains (e.g. economics + geopolitics → economics|geopolitics)
+                new_domain = td.get("domain", "")
+                merged_domain = merge_domains(existing_domains.get(eid, ""), new_domain)
+                conn.execute(
+                    "UPDATE signal_clusters SET domain = ?, last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (merged_domain, eid),
+                )
+                existing_domains[eid] = merged_domain
+                assigned_count += len([s for s in sig_ids if isinstance(s, int)])
+                merged = True
+                break
+        if merged:
             continue
 
         from db import sanitize_domain
@@ -151,6 +179,8 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
             if isinstance(sid, int):
                 link_signal_to_cluster(conn, cluster_id, sid)
 
+        # Add to existing titles so subsequent new threads in this batch also dedup
+        existing_titles[cluster_id] = title_lower
         new_thread_count += 1
         _cb("new_thread", {"thread_id": cluster_id, "title": title, "signal_count": len(sig_ids)})
 

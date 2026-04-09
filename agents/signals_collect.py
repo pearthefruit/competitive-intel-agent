@@ -23,23 +23,27 @@ def _content_hash(source, url, title):
 
 
 def _classify_domain(title, body=""):
-    """Classify a signal's domain from its title/body using keyword matching."""
-    text = (title + " " + (body or "")).lower()
+    """Classify a signal's domain from its title/body using keyword matching.
+    Title matches are weighted 2x. Falls back to economics only if nothing matches."""
+    title_lower = (title or "").lower()
+    body_lower = (body or "").lower()
     scores = {
         "economics": 0, "finance": 0, "geopolitics": 0,
         "tech_ai": 0, "labor": 0, "regulatory": 0,
     }
     kw = {
-        "economics": ["gdp", "recession", "inflation", "economic", "economy", "fed ", "interest rate", "monetary", "fiscal", "cpi", "consumer spending", "imf"],
-        "finance": ["stock", "earnings", "ipo", "spac", "merger", "acquisition", "investor", "sec filing", "13f", "revenue", "market cap", "shares", "dividend", "valuation"],
-        "geopolitics": ["tariff", "sanction", "trade war", "export control", "geopolit", "china", "iran", "strait of hormuz", "nato", "diplomacy", "embargo"],
-        "tech_ai": ["ai ", "artificial intelligence", "llm", "machine learning", "chip", "semiconductor", "software", "cloud", "startup", "tech", "robot", "autonomous", "data center", "low-code", "no-code", "saas"],
-        "labor": ["layoff", "hiring", "workforce", "employment", "job market", "remote work", "salary", "labor", "worker", "talent", "contractor"],
-        "regulatory": ["regulation", "compliance", "enforcement", "fda", "antitrust", "privacy", "gdpr", "sec enforce", "ban", "oversight"],
+        "economics": ["gdp", "recession", "inflation", "economic", "economy", "fed ", "interest rate", "monetary", "fiscal", "cpi", "consumer spending", "imf", "central bank", "treasury"],
+        "finance": ["earnings", "ipo", "spac", "merger", "acquisition", "investor", "sec filing", "13f", "market cap", "dividend", "valuation", "wall street", "hedge fund", "bond", "yield"],
+        "geopolitics": ["tariff", "sanction", "trade war", "export control", "geopolit", "china", "iran", "strait of hormuz", "nato", "diplomacy", "embargo", "military", "conflict", "ceasefire", "war "],
+        "tech_ai": ["ai ", "artificial intelligence", "llm", "machine learning", "chip", "semiconductor", "software", "cloud", "startup", "tech", "robot", "autonomous", "data center", "low-code", "no-code", "saas", "iphone", "apple", "google", "microsoft", "meta ", "amazon", "nvidia", "phone", "device", "launch", "hardware", "foldable", "android", "app ", "platform", "cyber", "quantum"],
+        "labor": ["layoff", "hiring", "workforce", "employment", "job market", "remote work", "salary", "labor", "worker", "talent", "contractor", "jobs report", "nonfarm", "unemployment"],
+        "regulatory": ["regulation", "compliance", "enforcement", "fda", "antitrust", "privacy", "gdpr", "sec enforce", "ban", "oversight", "legislation", "congress", "executive order"],
     }
     for domain, keywords in kw.items():
         for k in keywords:
-            if k in text:
+            if k in title_lower:
+                scores[domain] += 2  # title matches weighted 2x
+            elif k in body_lower:
                 scores[domain] += 1
     best = max(scores, key=scores.get)
     return best if scores[best] > 0 else "economics"
