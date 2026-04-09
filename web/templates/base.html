@@ -14321,21 +14321,12 @@ function _showThreadContextMenu(threadId, x, y) {
 
 function _renameThread(threadId) {
     document.querySelectorAll('.thread-ctx-menu').forEach(m => m.remove());
-    const thread = (_threadsCache || []).find(t => t.id === threadId);
-    _showInlineInput(window.innerWidth / 2, window.innerHeight / 3, 'New title...', thread ? thread.title : '', (title) => {
-        if (!title || !title.trim()) return;
-        fetch(`/api/signals/threads/${threadId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: title.trim() })
-        }).then(r => r.json()).then(data => {
-            if (data.ok) {
-                _showToast('Thread renamed', 'success');
-                loadSignals();
-                if (_signalTab === 'graph') loadBoard();
-            }
-        });
-    });
+    // Open thread detail then focus the editable title
+    openThreadDetail(threadId);
+    setTimeout(() => {
+        const title = document.querySelector('.editable-title');
+        if (title) _startTitleEdit(title);
+    }, 300);
 }
 
 function _deleteThread(threadId) {
@@ -14529,6 +14520,71 @@ function _showDetailPane(title) {
     return detailBody;
 }
 
+/**
+ * Render an inline-editable title. Click to edit, Enter/blur to save.
+ * @param {string} text - current title
+ * @param {string} endpoint - API endpoint (PATCH) e.g. '/api/signals/threads/5'
+ * @param {string} field - JSON field name, default 'title'
+ * @param {string} onSaveAction - JS code to run after save (e.g. 'loadSignals()')
+ * @param {string} fontSize - optional, default '14px'
+ */
+function _editableTitle(text, endpoint, field, onSaveAction, fontSize) {
+    const fs = fontSize || '14px';
+    return `<h2 class="editable-title" data-endpoint="${escHtml(endpoint)}" data-field="${field}" data-onsave="${escHtml(onSaveAction || 'loadSignals()')}"
+        style="font-size:${fs};font-weight:700;margin:0;cursor:text;padding:2px 4px;margin:-2px -4px;border-radius:4px;border:1px solid transparent;transition:border-color 0.15s"
+        onclick="_startTitleEdit(this)"
+        onmouseenter="this.style.borderColor='var(--border)'" onmouseleave="if(!this.querySelector('input'))this.style.borderColor='transparent'"
+        title="Click to rename">${escHtml(text)}</h2>`;
+}
+
+function _startTitleEdit(el) {
+    if (el.querySelector('input')) return;
+    const current = el.textContent;
+    const endpoint = el.dataset.endpoint;
+    const field = el.dataset.field || 'title';
+    const onSaveAction = el.dataset.onsave || 'loadSignals()';
+    const fontSize = getComputedStyle(el).fontSize;
+    el.style.borderColor = 'var(--accent)';
+    el.onmouseenter = null;
+    el.onmouseleave = null;
+    el.innerHTML = `<input type="text" value="${current.replace(/"/g, '&quot;')}" style="width:100%;font-size:${fontSize};font-weight:700;background:var(--bg-tertiary);border:none;color:var(--text-primary);outline:none;padding:0;margin:0;font-family:inherit" />`;
+    const input = el.querySelector('input');
+    input.focus();
+    input.select();
+
+    let saved = false;
+    const save = () => {
+        if (saved) return;
+        saved = true;
+        const newTitle = input.value.trim();
+        if (!newTitle || newTitle === current) {
+            el.textContent = current;
+            el.style.borderColor = 'transparent';
+            return;
+        }
+        el.textContent = newTitle;
+        el.style.borderColor = 'transparent';
+        fetch(endpoint, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [field]: newTitle })
+        }).then(r => r.json()).then(data => {
+            if (data.ok) {
+                _showToast('Renamed', 'success', 2000);
+                try { eval(onSaveAction); } catch(e) {}
+            } else {
+                el.textContent = current;
+            }
+        });
+    };
+
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') { saved = true; el.textContent = current; el.style.borderColor = 'transparent'; }
+    });
+    input.addEventListener('blur', save);
+}
+
 function openThreadDetail(threadId) {
     _activeThreadId = threadId;
     const myRequest = ++_detailRequestId; // capture this request's ID
@@ -14632,7 +14688,7 @@ function openThreadDetail(threadId) {
                 <div class="sig-detail-card">
                     ${narrativeBreadcrumb}
                     <div class="sig-detail-hero" style="border-left: 4px solid ${domColor}">
-                        <h2>${escHtml(thread.title)}</h2>
+                        ${_editableTitle(thread.title, '/api/signals/threads/' + thread.id, 'title', 'loadSignals()')}
                         <div class="sig-detail-meta">
                             ${_renderDomainBadges(thread.domain, '10px')}
                             <span class="thread-momentum ${escHtml(mDir)}">${mLabel}</span>
@@ -20002,7 +20058,7 @@ function openNarrativeDetail(narrativeId) {
 
             detailBody.innerHTML = `
                 <div style="padding:20px">
-                    <h2 style="font-size:16px;font-weight:700;margin-bottom:8px">${escHtml(n.title)}</h2>
+                    ${_editableTitle(n.title, '/api/narratives/' + n.id, 'title', 'loadNarratives()', '16px')}
                     <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:12px;padding:10px;background:var(--bg-tertiary);border-radius:8px;border-left:3px solid var(--accent)">${escHtml(n.thesis)}</div>
                     ${n.reasoning ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px"><strong>Reasoning:</strong> ${escHtml(n.reasoning)}</div>` : ''}
 
