@@ -16,9 +16,9 @@ EXISTING THREADS (assign signals to these when they match):
 {existing_threads_text}
 """
 
-    return f"""You are a macro-level signal analyst identifying PATTERNS and TRENDS across news signals. Your job is to spot developing macro stories that span companies, sectors, and geographies — not to catalog individual company events.
+    return f"""You are a macro-level signal analyst grouping news signals into DIRECTIONAL OBSERVATIONS — not neutral topics, but specific claims about what is happening.
 
-THINK LIKE A SENIOR CONSULTANT: What patterns would a McKinsey partner notice reading across all these signals? What macro forces are at play?
+A thread is NOT a topic. It is a DIRECTIONAL CLAIM backed by signals.
 {existing_block}
 NEW SIGNALS TO ASSIGN:
 {new_signals_text}
@@ -32,29 +32,38 @@ Return JSON only:
   ],
   "new_threads": [
     {{
-      "title": "Short title describing the MACRO pattern",
-      "summary": "2-3 sentences: What is the pattern? What forces are driving it? Which sectors/companies are affected?",
+      "title": "Directional claim about what is happening",
+      "summary": "2-3 sentences: What specific thing is happening? What evidence supports this direction? Who is affected?",
       "domain": "economics",
       "signal_ids": [125, 130, 131]
     }}
   ]
 }}
 
-CRITICAL RULES:
-- Think MACRO, not micro. "Enterprise AI Adoption Accelerating" not "Company X Launches AI Product"
-- Group by PATTERN, not by company. Multiple companies doing the same thing = one thread about the trend
-- Cross-domain threads are the most valuable (e.g., tariffs + layoffs + supply chain = one pattern)
-- Thread titles should name the FORCE or TREND, not a single event
-- BAD: "Cal-Maine Foods Q3 Earnings" (single company event)
-- GOOD: "Food Sector Earnings Volatility Amid Input Cost Pressure" (macro pattern)
-- BAD: "NVIDIA Stock Movement" (single company)
-- GOOD: "Chipmaker Revenue Divergence: AI Up, Consumer Down" (industry pattern)
-- Summaries should identify what's developing and which sectors/companies are affected
+THREAD TITLE RULES — THIS IS CRITICAL:
+- Every title MUST take a DIRECTION. Something is going UP, DOWN, ACCELERATING, DECLINING, BREAKING, SHIFTING.
+- BAD: "Labor Market Trends" (no direction — trends which way?)
+- GOOD: "US Labor Market Weakening Despite Strong Headline Numbers"
+- BAD: "Stock Market Rotation" (rotation is neutral)
+- GOOD: "Tech Stocks Surging While Industrials Decline"
+- BAD: "Chipmaker Revenue Divergence" (divergence is vague)
+- GOOD: "NVIDIA and AMD Revenue Soaring on AI Demand"
+- BAD: "Remote Work Trends" (what about them?)
+- GOOD: "Remote Work Adoption Accelerating as Companies Cut Office Space"
+- BAD: "Geopolitical Tensions" (too vague, no specifics)
+- GOOD: "Iran Conflict Escalation Disrupting Oil Supply Routes"
+- BAD: "Supply Chain Disruptions" (which supply chain? disrupted how?)
+- GOOD: "Semiconductor Supply Chain Fracturing Along US-China Fault Lines"
+
+If signals point in OPPOSITE directions, create TWO threads — one for each direction. Don't merge bullish and bearish signals into one "mixed" thread.
+
+OTHER RULES:
+- Group by PATTERN across companies, not by individual company
 - A new thread needs at least 2 signals
-- Signals that are truly isolated (no pattern) should have thread_id: null
-- NEVER create a new thread that covers the same topic as an existing thread but with a different domain. If "Global Economic Uncertainty" exists as economics, assign geopolitics signals about economic uncertainty TO THAT THREAD — don't create a duplicate
-- Prefer assigning to existing threads over creating new ones. Only create a new thread if no existing thread covers the pattern
-- domain can be ONE or MULTIPLE pipe-separated values: economics, finance, geopolitics, tech_ai, labor, regulatory. Use "economics|geopolitics" for threads spanning domains. Multi-domain threads are preferred over duplicates
+- Signals that are truly isolated should have thread_id: null
+- NEVER create a thread covering the same topic as an existing thread. Assign to the existing one instead.
+- Prefer assigning to existing threads over creating new ones
+- domain can be pipe-separated: economics|geopolitics for cross-domain threads
 - Return ONLY the JSON object"""
 
 

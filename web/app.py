@@ -2800,6 +2800,68 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True, **result})
 
+    @app.route("/api/signals/retitle-threads", methods=["POST"])
+    def signals_retitle_threads_api():
+        """Re-title all active threads using LLM to generate directional, specific titles."""
+        from agents.llm import generate_json, CHEAP_CHAIN
+
+        conn = get_connection(db_path)
+        threads = conn.execute(
+            """SELECT sc.id, sc.title, sc.domain, sc.synthesis,
+                      GROUP_CONCAT(s.title, ' | ') as signal_titles
+               FROM signal_clusters sc
+               LEFT JOIN signal_cluster_items sci ON sci.cluster_id = sc.id
+               LEFT JOIN signals s ON s.id = sci.signal_id
+               WHERE sc.status = 'active' AND sc.domain != 'narrative'
+               GROUP BY sc.id
+               ORDER BY sc.id"""
+        ).fetchall()
+
+        updated = 0
+        errors = 0
+        for t in threads:
+            t = dict(t)
+            signals_preview = (t.get("signal_titles") or "")[:500]
+            if not signals_preview:
+                continue
+
+            prompt = f"""Rewrite this thread title to be DIRECTIONAL and SPECIFIC.
+
+Current title: {t['title']}
+Current summary: {(t.get('synthesis') or '')[:200]}
+Sample signals in this thread: {signals_preview}
+
+Rules:
+- Title MUST take a DIRECTION (something is going up, down, accelerating, declining, breaking, shifting)
+- BAD: "Labor Market Trends" → GOOD: "US Job Market Holding Steady Despite Tech Layoffs"
+- BAD: "Stock Market Rotation" → GOOD: "Investors Rotating from Tech into Defensive Sectors"
+- BAD: "Supply Chain Disruptions" → GOOD: "Semiconductor Supply Chains Fracturing on US-China Tariffs"
+- BAD: "Remote Work Trends" → GOOD: "Remote Work Expanding as Companies Cut Office Costs"
+- Be specific about WHO and WHAT DIRECTION. No vague "mixed" or "divergence" or "trends".
+- Keep it under 60 characters if possible.
+
+Return JSON: {{"title": "New directional title", "summary": "Updated 1-2 sentence summary with specific direction and evidence"}}
+Return ONLY the JSON."""
+
+            try:
+                result = generate_json(prompt, timeout=15, chain=CHEAP_CHAIN)
+                if result and result.get("title"):
+                    new_title = result["title"][:100]
+                    new_summary = result.get("summary", t.get("synthesis", ""))[:500]
+                    conn.execute(
+                        "UPDATE signal_clusters SET title = ?, synthesis = ? WHERE id = ?",
+                        (new_title, new_summary, t["id"])
+                    )
+                    updated += 1
+                    print(f"[retitle] {t['title'][:40]} → {new_title[:40]}")
+            except Exception as e:
+                print(f"[retitle] Error on thread {t['id']}: {e}")
+                errors += 1
+
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "updated": updated, "errors": errors, "total": len(threads)})
+
     @app.route("/api/signals/timeline", methods=["GET"])
     def signals_timeline_api():
         """Signal timeline data — all signals with dates, grouped by thread."""
