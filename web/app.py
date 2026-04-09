@@ -3364,8 +3364,8 @@ Return ONLY the JSON."""
 
         conn = get_connection(db_path)
         board = get_board_state(conn)
-        # Threads NOT in any narrative
-        threads = get_signal_clusters(conn, status="all", limit=200, exclude_domain="narrative")
+        # Threads NOT in any narrative (active only — exclude merged/deleted)
+        threads = get_signal_clusters(conn, status="active", limit=200, exclude_domain="narrative")
         orphan_threads = [t for t in threads if not t.get("narrative_id")]
         links = get_thread_links(conn)
         narratives = get_narratives(conn, status="all")
@@ -3400,10 +3400,12 @@ Return ONLY the JSON."""
                 "child_thread_ids": [],  # populated after narrative_child_threads fetch
             })
 
-        # Orphan thread nodes (not in a narrative)
+        # Orphan thread nodes (not in a narrative, with at least 1 signal)
         for t in orphan_threads:
-            t["momentum"] = compute_thread_momentum(conn, t["id"])
             sn = get_pattern_signal_noise_counts(conn, t["id"])
+            if sn["signal_count"] == 0 and sn["noise_count"] == 0:
+                continue  # skip empty threads
+            t["momentum"] = compute_thread_momentum(conn, t["id"])
             key = f"thread:{t['id']}"
             pos = board["positions"].get(key)
             nodes.append({
@@ -3417,7 +3419,7 @@ Return ONLY the JSON."""
 
         # Narrative child threads (domain='narrative') — fetched separately since excluded above
         # Also backfill child_thread_ids on narrative nodes
-        narrative_child_threads = get_signal_clusters(conn, status="all", limit=200, domain="narrative")
+        narrative_child_threads = get_signal_clusters(conn, status="active", limit=200, domain="narrative")
         for t in narrative_child_threads:
             sn = get_pattern_signal_noise_counts(conn, t["id"])
             key = f"thread:{t['id']}"
