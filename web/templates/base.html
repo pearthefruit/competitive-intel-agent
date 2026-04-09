@@ -5520,6 +5520,7 @@
                     <button class="sig-feed-tab" data-tab="narratives" onclick="switchSignalTab('narratives')">Narratives</button>
                     <button class="sig-feed-tab" data-tab="graph" onclick="switchSignalTab('graph')">Board</button>
                     <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
+                    <button class="sig-feed-tab" data-tab="causal" onclick="switchSignalTab('causal')">Causal</button>
                 </div>
                 <div class="signals-feed-controls">
                     <input type="text" id="signals-search" placeholder="Filter..." oninput="renderActiveSignalTab()">
@@ -5602,6 +5603,55 @@
                         <div style="font-size:32px;margin-bottom:12px">&#9881;</div>
                         <div>No scan executed yet</div>
                         <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click <strong>Scan Now</strong> to see the execution pipeline.</div>
+                    </div>
+                </div>
+
+                <!-- Causal/Temporal View -->
+                <div class="sig-tab-content" id="sig-tab-causal" style="padding:0">
+                    <div style="display:flex;flex-direction:column;height:100%">
+                        <!-- Mode toggle -->
+                        <div style="display:flex;align-items:center;padding:6px 12px;border-bottom:1px solid var(--border);gap:8px">
+                            <button id="causal-mode-split" class="sig-feed-tab active" style="font-size:10px;padding:4px 10px" onclick="_setCausalMode('split')">Builder</button>
+                            <button id="causal-mode-cascade" class="sig-feed-tab" style="font-size:10px;padding:4px 10px" onclick="_setCausalMode('cascade')">Cascade</button>
+                            <span id="causal-link-count" style="margin-left:auto;font-size:10px;color:var(--text-muted)"></span>
+                        </div>
+
+                        <!-- Split View (Builder) -->
+                        <div id="causal-split-view" style="flex:1;display:flex;min-height:0">
+                            <!-- Thread picker -->
+                            <div id="causal-thread-picker" style="width:240px;border-right:1px solid var(--border);overflow-y:auto;padding:8px;flex-shrink:0">
+                                <input id="causal-thread-search" type="text" placeholder="Filter threads..." oninput="_filterCausalThreadPicker()" style="width:100%;padding:5px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--text-primary);font-size:10px;margin-bottom:6px;box-sizing:border-box;outline:none">
+                                <div id="causal-thread-list" style="font-size:10px"></div>
+                            </div>
+                            <!-- Before column -->
+                            <div id="causal-before-col" style="flex:1;display:flex;flex-direction:column;border-right:1px solid var(--border);min-width:0" ondragover="event.preventDefault();this.style.background='rgba(6,182,212,0.05)'" ondragleave="this.style.background=''" ondrop="_dropThread(event,'before');this.style.background=''">
+                                <div style="padding:6px 12px;font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border)">&#9664; Causes (Before)</div>
+                                <div id="causal-before-threads" style="flex:1;overflow-y:auto;padding:8px"></div>
+                            </div>
+                            <!-- Arrow zone -->
+                            <div id="causal-arrow-zone" style="width:80px;position:relative;flex-shrink:0">
+                                <svg id="causal-arrows-svg" style="width:100%;height:100%;position:absolute;top:0;left:0"></svg>
+                            </div>
+                            <!-- After column -->
+                            <div id="causal-after-col" style="flex:1;display:flex;flex-direction:column;min-width:0" ondragover="event.preventDefault();this.style.background='rgba(168,85,247,0.05)'" ondragleave="this.style.background=''" ondrop="_dropThread(event,'after');this.style.background=''">
+                                <div style="padding:6px 12px;font-size:10px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border)">Effects (After) &#9654;</div>
+                                <div id="causal-after-threads" style="flex:1;overflow-y:auto;padding:8px"></div>
+                            </div>
+                        </div>
+
+                        <!-- Cascade View -->
+                        <div id="causal-cascade-view" style="flex:1;display:none;position:relative;min-height:0">
+                            <div class="signals-empty" id="causal-cascade-empty" style="display:flex">
+                                <div style="font-size:32px;margin-bottom:12px">&#128279;</div>
+                                <div>No causal links yet</div>
+                                <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Switch to Builder to create causal chains between threads.</div>
+                            </div>
+                            <svg id="causal-cascade-svg" style="width:100%;height:100%;display:none"></svg>
+                            <div id="causal-cascade-controls" style="display:none;position:absolute;bottom:12px;left:12px;display:flex;gap:3px">
+                                <button onclick="_causalZoom(1.3)" style="width:26px;height:26px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center">+</button>
+                                <button onclick="_causalZoom(0.7)" style="width:26px;height:26px;border-radius:5px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center">-</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -13969,6 +14019,7 @@ function _applyGlobalDomainFilter() {
     renderActiveSignalTab();
     if (_signalTab === 'graph') loadBoard();
     if (_signalTab === 'narratives') loadNarratives();
+    if (_signalTab === 'causal') { _renderCausalThreadPicker(); _renderCausalArrows(); }
 }
 
 function _renderDomainChips() {
@@ -14006,11 +14057,12 @@ function switchSignalTab(tab) {
     document.getElementById(`sig-tab-${tab}`).classList.add('active');
     if (tab === 'graph') loadBoard();
     if (tab === 'narratives') loadNarratives();
+    if (tab === 'causal') loadCausalView();
     // Show/hide filter input (only useful for threads and raw tabs)
     const searchInput = document.getElementById('signals-search');
     if (searchInput) searchInput.style.display = (tab === 'threads' || tab === 'raw') ? '' : 'none';
-    // Clear detail pane on tab switch (except graph — clicking nodes shows detail)
-    if (tab !== 'graph') closeSignalDetail();
+    // Clear detail pane on tab switch (except graph and causal — clicking nodes shows detail)
+    if (tab !== 'graph' && tab !== 'causal') closeSignalDetail();
 }
 
 function renderActiveSignalTab() {
@@ -16798,7 +16850,6 @@ function _renderBrainstormLinks(text) {
 let _bsDrawerHistory = [];
 
 function _brainstormConceptClick(concept) {
-    // Add as a board highlight pill (stacked)
     fetch(`/api/signals/search?q=${encodeURIComponent(concept)}`)
         .then(r => r.ok ? r.json() : null)
         .then(data => {
@@ -16811,8 +16862,15 @@ function _brainstormConceptClick(concept) {
                 _applyBoardHighlights();
                 _renderHighlightPills();
             }
-            // Open drawer with results
-            _openBsDrawer(concept, data);
+            // If brainstorm overlay is open, use the drawer; otherwise switch to board
+            const overlay = document.getElementById('brainstorm-overlay');
+            if (overlay && overlay.classList.contains('visible')) {
+                _openBsDrawer(concept, data);
+            } else {
+                const matchCount = (data.thread_matches || []).length;
+                _showToast(`"${concept}" — ${matchCount} thread${matchCount !== 1 ? 's' : ''} matched`, 'info', 3000);
+                switchSignalTab('graph');
+            }
         });
 }
 
@@ -17161,6 +17219,474 @@ function closeSignalDetail() {
 }
 
 // Structured execution data (persists for "View Last Execution" button)
+// ===================== CAUSAL/TEMPORAL VIEW =====================
+
+let _causalMode = 'split';
+let _causalBeforeThreads = [];
+let _causalAfterThreads = [];
+let _causalLinksCache = [];
+let _causalCascadeData = null;
+let _causalZoomTransform = null;
+
+function _setCausalMode(mode) {
+    _causalMode = mode;
+    document.getElementById('causal-mode-split').classList.toggle('active', mode === 'split');
+    document.getElementById('causal-mode-cascade').classList.toggle('active', mode === 'cascade');
+    document.getElementById('causal-split-view').style.display = mode === 'split' ? 'flex' : 'none';
+    document.getElementById('causal-cascade-view').style.display = mode === 'cascade' ? '' : 'none';
+    if (mode === 'cascade') _loadCascadeView();
+    if (mode === 'split') _renderCausalArrows();
+}
+
+function loadCausalView() {
+    fetch('/api/causal-links')
+        .then(r => r.json())
+        .then(data => {
+            _causalLinksCache = data.links || [];
+            const countEl = document.getElementById('causal-link-count');
+            if (countEl) countEl.textContent = `${_causalLinksCache.length} causal link${_causalLinksCache.length !== 1 ? 's' : ''}`;
+            _renderCausalThreadPicker();
+            if (_causalMode === 'cascade') _loadCascadeView();
+            else _renderCausalArrows();
+        });
+}
+
+function _renderCausalThreadPicker() {
+    const container = document.getElementById('causal-thread-list');
+    if (!container) return;
+    const search = (document.getElementById('causal-thread-search')?.value || '').toLowerCase();
+    const placed = new Set([..._causalBeforeThreads, ..._causalAfterThreads].map(t => t.id));
+    const filtered = (_threadsCache || [])
+        .filter(t => !placed.has(t.id))
+        .filter(t => _activeDomains.size === _ALL_DOMAINS.length || _parseDomains(t.domain).some(d => _activeDomains.has(d)))
+        .filter(t => !search || t.title.toLowerCase().includes(search))
+        .slice(0, 50);
+    container.innerHTML = filtered.map(t => {
+        const domColor = _DOMAIN_COLORS[_parseDomains(t.domain)[0]] || '#6b7280';
+        return `<div draggable="true" ondragstart="event.dataTransfer.setData('text/plain','${t.id}')"
+            onclick="openThreadDetail(${t.id})"
+            style="padding:5px 8px;margin-bottom:3px;background:var(--bg-secondary);border-radius:5px;border-left:2px solid ${domColor};cursor:grab;font-size:10px;color:var(--text-secondary);display:flex;justify-content:space-between;align-items:center;transition:background 0.1s"
+            onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background='var(--bg-secondary)'">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title)}</span>
+            <span style="font-size:8px;color:var(--text-muted);flex-shrink:0;margin-left:4px">${t.signal_count || 0}</span>
+        </div>`;
+    }).join('') || '<div style="color:var(--text-muted);font-size:10px;padding:8px">No threads available</div>';
+}
+function _filterCausalThreadPicker() { _renderCausalThreadPicker(); }
+
+function _dropThread(event, column) {
+    event.preventDefault();
+    const threadId = parseInt(event.dataTransfer.getData('text/plain'));
+    const thread = (_threadsCache || []).find(t => t.id === threadId);
+    if (!thread) return;
+    if (column === 'before' && !_causalBeforeThreads.find(t => t.id === threadId)) {
+        _causalBeforeThreads.push(thread);
+    } else if (column === 'after' && !_causalAfterThreads.find(t => t.id === threadId)) {
+        _causalAfterThreads.push(thread);
+    }
+    _renderCausalColumns();
+    _renderCausalThreadPicker();
+}
+
+function _removeCausalThread(threadId, column) {
+    if (column === 'before') _causalBeforeThreads = _causalBeforeThreads.filter(t => t.id !== threadId);
+    else _causalAfterThreads = _causalAfterThreads.filter(t => t.id !== threadId);
+    _renderCausalColumns();
+    _renderCausalThreadPicker();
+}
+
+function _renderCausalColumns() {
+    _renderColumnThreads('causal-before-threads', _causalBeforeThreads, 'before');
+    _renderColumnThreads('causal-after-threads', _causalAfterThreads, 'after');
+    _renderCausalArrows();
+}
+
+function _renderColumnThreads(containerId, threads, column) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = threads.map(t => {
+        const domColor = _DOMAIN_COLORS[_parseDomains(t.domain)[0]] || '#6b7280';
+        return `<div class="causal-col-thread" data-thread-id="${t.id}" data-column="${column}"
+            style="padding:8px 10px;margin-bottom:6px;background:var(--bg-secondary);border-radius:6px;border-left:3px solid ${domColor};font-size:11px;position:relative;cursor:pointer"
+            onclick="openThreadDetail(${t.id})">
+            <div style="font-weight:600;color:var(--text-primary);margin-bottom:2px;padding-right:20px">${escHtml(t.title)}</div>
+            <div style="font-size:9px;color:var(--text-muted)">${t.signal_count || 0} signals</div>
+            <button onclick="event.stopPropagation();_removeCausalThread(${t.id},'${column}')" style="position:absolute;top:4px;right:6px;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:12px;padding:2px">&times;</button>
+        </div>`;
+    }).join('') || `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:10px">Drag threads here</div>`;
+}
+
+function _renderCausalArrows() {
+    const svg = d3.select('#causal-arrows-svg');
+    svg.selectAll('*').remove();
+    if (!_causalBeforeThreads.length || !_causalAfterThreads.length) return;
+
+    const beforeEls = document.querySelectorAll('#causal-before-threads .causal-col-thread');
+    const afterEls = document.querySelectorAll('#causal-after-threads .causal-col-thread');
+    const arrowZone = document.getElementById('causal-arrow-zone');
+    if (!arrowZone) return;
+    const zoneRect = arrowZone.getBoundingClientRect();
+
+    const statusColors = { captured: '#6b7280', investigating: '#06b6d4', validated: '#22c55e', disproven: '#ef4444' };
+
+    beforeEls.forEach(bEl => {
+        const bId = parseInt(bEl.dataset.threadId);
+        const bRect = bEl.getBoundingClientRect();
+        const y1 = bRect.top + bRect.height / 2 - zoneRect.top;
+
+        afterEls.forEach(aEl => {
+            const aId = parseInt(aEl.dataset.threadId);
+            const aRect = aEl.getBoundingClientRect();
+            const y2 = aRect.top + aRect.height / 2 - zoneRect.top;
+
+            const existing = _causalLinksCache.find(l => l.cause_thread_id === bId && l.effect_thread_id === aId);
+
+            if (existing) {
+                const color = statusColors[existing.status] || '#6b7280';
+                svg.append('line').attr('x1', 0).attr('y1', y1).attr('x2', 72).attr('y2', y2)
+                    .attr('stroke', color).attr('stroke-width', 2);
+                svg.append('polygon').attr('points', `${68},${y2-4} ${76},${y2} ${68},${y2+4}`).attr('fill', color);
+                if (existing.label) {
+                    svg.append('text').attr('x', 40).attr('y', (y1 + y2) / 2 - 5)
+                        .attr('text-anchor', 'middle').attr('font-size', 7).attr('fill', 'var(--text-muted)')
+                        .text(existing.label.substring(0, 20));
+                }
+            } else {
+                svg.append('line').attr('x1', 5).attr('y1', y1).attr('x2', 75).attr('y2', y2)
+                    .attr('stroke', '#333').attr('stroke-width', 1).attr('stroke-dasharray', '4 3');
+                const cy = (y1 + y2) / 2;
+                svg.append('circle').attr('cx', 40).attr('cy', cy).attr('r', 8)
+                    .attr('fill', 'var(--bg-tertiary)').attr('stroke', 'var(--border)').attr('cursor', 'pointer')
+                    .on('click', () => _createCausalLink(bId, aId));
+                svg.append('text').attr('x', 40).attr('y', cy + 3)
+                    .attr('text-anchor', 'middle').attr('font-size', 10).attr('fill', 'var(--accent)').attr('cursor', 'pointer')
+                    .text('+').on('click', () => _createCausalLink(bId, aId));
+            }
+        });
+    });
+}
+
+function _createCausalLink(causeId, effectId) {
+    const rect = document.getElementById('causal-arrow-zone').getBoundingClientRect();
+    _showInlineInput(rect.left + rect.width / 2, rect.top + rect.height / 2, 'Causal mechanism (e.g. "drives inflation")', '', (label) => {
+        fetch('/api/causal-links', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cause_thread_id: causeId, effect_thread_id: effectId, label: label || null })
+        }).then(r => r.json()).then(result => {
+            if (result.ok) {
+                _showToast(`Causal link created${label ? ': ' + label : ''}`, 'success');
+                loadCausalView();
+            } else {
+                _showToast(result.error || 'Failed', 'error');
+            }
+        });
+    });
+}
+
+// ── Cascade View ──
+
+function _loadCascadeView() {
+    fetch('/api/causal-graph')
+        .then(r => r.json())
+        .then(data => {
+            _causalCascadeData = data;
+            _renderCascade(data);
+        });
+}
+
+function _renderCascade(data) {
+    const svgEl = document.getElementById('causal-cascade-svg');
+    const empty = document.getElementById('causal-cascade-empty');
+    const controls = document.getElementById('causal-cascade-controls');
+
+    if (!data.links || !data.links.length) {
+        if (empty) empty.style.display = 'flex';
+        if (svgEl) svgEl.style.display = 'none';
+        if (controls) controls.style.display = 'none';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    if (svgEl) svgEl.style.display = 'block';
+    if (controls) controls.style.display = 'flex';
+
+    const svg = d3.select('#causal-cascade-svg');
+    svg.selectAll('*').remove();
+    const container = document.getElementById('causal-cascade-view');
+    const width = container.clientWidth || 800;
+    const height = container.clientHeight || 500;
+
+    const zoomGroup = svg.append('g');
+    const zoomBehavior = d3.zoom().scaleExtent([0.2, 5])
+        .filter(event => {
+            if (event.target.closest && event.target.closest('.causal-node')) return false;
+            return true;
+        })
+        .on('zoom', (event) => {
+            _causalZoomTransform = event.transform;
+            zoomGroup.attr('transform', event.transform);
+        });
+    svg.call(zoomBehavior);
+    svg.on('dblclick.zoom', null);
+    if (_causalZoomTransform) {
+        zoomGroup.attr('transform', _causalZoomTransform);
+        svg.call(zoomBehavior.transform, _causalZoomTransform);
+    }
+
+    const threads = data.threads || {};
+    const links = data.links || [];
+    const positions = data.positions || {};
+    const threadIds = [...new Set(links.flatMap(l => [l.cause_thread_id, l.effect_thread_id]))].filter(id => threads[id]);
+
+    // Topological layering (BFS)
+    const inDegree = {};
+    const adj = {};
+    threadIds.forEach(id => { inDegree[id] = 0; adj[id] = []; });
+    links.forEach(l => {
+        if (adj[l.cause_thread_id]) adj[l.cause_thread_id].push(l.effect_thread_id);
+        if (inDegree[l.effect_thread_id] !== undefined) inDegree[l.effect_thread_id]++;
+    });
+    const layers = [];
+    let queue = threadIds.filter(id => inDegree[id] === 0);
+    const visited = new Set();
+    while (queue.length) {
+        layers.push([...queue]);
+        queue.forEach(id => visited.add(id));
+        const next = [];
+        queue.forEach(id => {
+            (adj[id] || []).forEach(eid => {
+                inDegree[eid]--;
+                if (inDegree[eid] === 0 && !visited.has(eid)) next.push(eid);
+            });
+        });
+        queue = next;
+    }
+    threadIds.filter(id => !visited.has(id)).forEach(id => {
+        if (layers.length) layers[layers.length - 1].push(id);
+        else layers.push([id]);
+    });
+
+    // Compute positions
+    const layerWidth = Math.max(200, (width - 160) / Math.max(layers.length, 1));
+    const nodePos = {};
+    layers.forEach((layer, li) => {
+        const x = 100 + li * layerWidth;
+        layer.forEach((tid, ni) => {
+            const y = 80 + ni * 90 + Math.max(0, (height / 2 - layer.length * 45));
+            if (positions[tid] && positions[tid].pinned) {
+                nodePos[tid] = { x: positions[tid].x, y: positions[tid].y };
+            } else {
+                nodePos[tid] = { x, y };
+            }
+        });
+    });
+
+    const statusColors = { captured: '#6b7280', investigating: '#06b6d4', validated: '#22c55e', disproven: '#ef4444' };
+
+    // Arrow markers
+    const defs = svg.append('defs');
+    Object.entries(statusColors).forEach(([status, color]) => {
+        defs.append('marker').attr('id', `carrow-${status}`)
+            .attr('viewBox', '0 0 10 10').attr('refX', 10).attr('refY', 5)
+            .attr('markerWidth', 8).attr('markerHeight', 8).attr('orient', 'auto')
+            .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', color);
+    });
+
+    // Compute node radii for arrow offset
+    const nodeRadii = {};
+    threadIds.forEach(id => {
+        nodeRadii[id] = Math.sqrt((threads[id]?.signal_count || 1)) * 5 + 14;
+    });
+
+    // Function to compute edge path from current positions
+    function _edgePath(l) {
+        const from = nodePos[l.cause_thread_id];
+        const to = nodePos[l.effect_thread_id];
+        if (!from || !to) return '';
+        const r = nodeRadii[l.effect_thread_id] || 14;
+        const dx = to.x - from.x;
+        const midX = from.x + dx * 0.5;
+        return `M ${from.x} ${from.y} C ${midX} ${from.y}, ${midX} ${to.y}, ${to.x - r} ${to.y}`;
+    }
+
+    // Draw edges
+    const edgeGroup = zoomGroup.append('g').attr('class', 'causal-edges');
+    links.forEach(l => {
+        const color = statusColors[l.status] || '#6b7280';
+        edgeGroup.append('path')
+            .attr('class', 'causal-edge')
+            .attr('data-cause', l.cause_thread_id).attr('data-effect', l.effect_thread_id)
+            .attr('d', _edgePath(l))
+            .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 2)
+            .attr('marker-end', `url(#carrow-${l.status || 'captured'})`)
+            .attr('opacity', l.status === 'disproven' ? 0.3 : 0.8)
+            .style('cursor', 'pointer')
+            .on('click', () => _showCausalLinkDetail(l));
+        if (l.label) {
+            const from = nodePos[l.cause_thread_id];
+            const to = nodePos[l.effect_thread_id];
+            if (from && to) {
+                edgeGroup.append('text')
+                    .attr('class', 'causal-edge-label')
+                    .attr('data-cause', l.cause_thread_id).attr('data-effect', l.effect_thread_id)
+                    .attr('x', (from.x + to.x) / 2).attr('y', (from.y + to.y) / 2 - 8)
+                    .attr('text-anchor', 'middle').attr('font-size', 9).attr('fill', 'var(--text-muted)')
+                    .text(l.label.length > 25 ? l.label.substring(0, 23) + '...' : l.label);
+            }
+        }
+    });
+
+    // Update all edges touching a given thread (called during drag)
+    function _updateEdgesForThread(tid) {
+        edgeGroup.selectAll('.causal-edge').each(function() {
+            const el = d3.select(this);
+            const cause = parseInt(el.attr('data-cause'));
+            const effect = parseInt(el.attr('data-effect'));
+            if (cause === tid || effect === tid) {
+                const l = links.find(l => l.cause_thread_id === cause && l.effect_thread_id === effect);
+                if (l) el.attr('d', _edgePath(l));
+            }
+        });
+        edgeGroup.selectAll('.causal-edge-label').each(function() {
+            const el = d3.select(this);
+            const cause = parseInt(el.attr('data-cause'));
+            const effect = parseInt(el.attr('data-effect'));
+            if (cause === tid || effect === tid) {
+                const from = nodePos[cause];
+                const to = nodePos[effect];
+                if (from && to) {
+                    el.attr('x', (from.x + to.x) / 2).attr('y', (from.y + to.y) / 2 - 8);
+                }
+            }
+        });
+    }
+
+    // Draw nodes
+    threadIds.forEach(id => {
+        const t = threads[id];
+        const pos = nodePos[id];
+        if (!t || !pos) return;
+        const r = nodeRadii[id];
+        const domColor = _DOMAIN_COLORS[_parseDomains(t.domain)[0]] || '#6b7280';
+
+        const g = zoomGroup.append('g').attr('class', 'causal-node')
+            .attr('transform', `translate(${pos.x},${pos.y})`)
+            .style('cursor', 'pointer')
+            .call(d3.drag()
+                .on('drag', function(event) {
+                    nodePos[id].x = event.x;
+                    nodePos[id].y = event.y;
+                    d3.select(this).attr('transform', `translate(${event.x},${event.y})`);
+                    _updateEdgesForThread(id);
+                })
+                .on('end', () => _saveCausalPosition(id, nodePos[id].x, nodePos[id].y))
+            )
+            .on('click', () => openThreadDetail(id));
+
+        g.append('circle').attr('r', r)
+            .attr('fill', domColor).attr('fill-opacity', 0.15)
+            .attr('stroke', domColor).attr('stroke-width', 2);
+        g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
+            .attr('font-size', Math.min(r * 0.6, 12)).attr('font-weight', 700).attr('fill', '#fff').attr('pointer-events', 'none')
+            .text(t.signal_count || '');
+        g.append('text').attr('y', r + 14).attr('text-anchor', 'middle')
+            .attr('font-size', 10).attr('font-weight', 600).attr('fill', 'var(--text-primary)').attr('pointer-events', 'none')
+            .text(t.title.length > 25 ? t.title.substring(0, 23) + '...' : t.title);
+        g.append('text').attr('y', r + 26).attr('text-anchor', 'middle')
+            .attr('font-size', 8).attr('fill', domColor).attr('pointer-events', 'none')
+            .text(_parseDomains(t.domain).map(d => _DOMAIN_LABELS[d] || d).join(' · '));
+    });
+}
+
+function _saveCausalPosition(threadId, x, y) {
+    fetch('/api/board/positions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ positions: [{ node_type: 'causal', node_id: threadId, x, y, pinned: true }] })
+    });
+}
+
+function _causalZoom(factor) {
+    const svgEl = document.querySelector('#causal-cascade-svg');
+    if (!svgEl || !svgEl.__zoomBehavior) return;
+    d3.select(svgEl).transition().duration(300).call(svgEl.__zoomBehavior.scaleBy, factor);
+}
+
+// ── Causal Link Detail Pane ──
+
+function _showCausalLinkDetail(link) {
+    const detailBody = _showDetailPane('Causal Link');
+    const causeTitle = (_threadsCache.find(t => t.id === link.cause_thread_id) || {}).title || `Thread #${link.cause_thread_id}`;
+    const effectTitle = (_threadsCache.find(t => t.id === link.effect_thread_id) || {}).title || `Thread #${link.effect_thread_id}`;
+    const statusColors = { captured: '#6b7280', investigating: '#06b6d4', validated: '#22c55e', disproven: '#ef4444' };
+    const color = statusColors[link.status] || '#6b7280';
+
+    detailBody.innerHTML = `
+        <div style="padding:16px">
+            <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:12px">${escHtml(link.label || 'Unnamed causal link')}</div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                <span style="font-size:10px;padding:3px 8px;border-radius:4px;background:${color}22;color:${color};font-weight:600">${link.status}</span>
+                <span style="font-size:10px;color:var(--text-muted)">Confidence: ${link.confidence || 'medium'}</span>
+            </div>
+            <div style="margin-bottom:12px">
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">CAUSE</div>
+                <div style="padding:8px;background:var(--bg-secondary);border-radius:6px;font-size:11px;color:var(--text-primary);cursor:pointer;border-left:3px solid var(--accent)" onclick="openThreadDetail(${link.cause_thread_id})">${escHtml(causeTitle)}</div>
+            </div>
+            <div style="text-align:center;font-size:16px;color:var(--text-muted);margin:4px 0">&#8595;</div>
+            <div style="margin-bottom:16px">
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">EFFECT</div>
+                <div style="padding:8px;background:var(--bg-secondary);border-radius:6px;font-size:11px;color:var(--text-primary);cursor:pointer;border-left:3px solid var(--purple)" onclick="openThreadDetail(${link.effect_thread_id})">${escHtml(effectTitle)}</div>
+            </div>
+            ${link.reasoning ? `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:16px;line-height:1.5">${escHtml(link.reasoning)}</div>` : ''}
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button onclick="_updateCausalStatus(${link.id},'investigating')" style="padding:4px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--accent);font-size:10px;cursor:pointer">Investigate</button>
+                <button onclick="_updateCausalStatus(${link.id},'validated')" style="padding:4px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:#22c55e;font-size:10px;cursor:pointer">Validate</button>
+                <button onclick="_updateCausalStatus(${link.id},'disproven')" style="padding:4px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:#ef4444;font-size:10px;cursor:pointer">Disprove</button>
+                <button onclick="_deleteCausalLink(${link.id})" style="padding:4px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:#ef4444;font-size:10px;cursor:pointer;margin-left:auto">Delete</button>
+            </div>
+        </div>`;
+}
+
+function _updateCausalStatus(linkId, status) {
+    fetch(`/api/causal-links/${linkId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+    }).then(() => {
+        _showToast(`Status → ${status}`, 'success');
+        loadCausalView();
+    });
+}
+
+function _deleteCausalLink(linkId) {
+    _showConfirm('Delete this causal link?', () => {
+        fetch(`/api/causal-links/${linkId}`, { method: 'DELETE' })
+            .then(() => { closeSignalDetail(); loadCausalView(); _showToast('Causal link deleted', 'success'); });
+    });
+}
+
+// ── Brainstorm → Causal Seeding ──
+
+function _seedCausalFromBrainstorm(brainstormId, threadIds) {
+    const labels = window._brainstormLinkLabels || [];
+    const links = labels.map(l => {
+        const source = (_threadsCache || []).find(t => t.title === l.source_thread);
+        const target = (_threadsCache || []).find(t => t.title === l.target_thread);
+        if (!source || !target) return null;
+        return { cause_thread_id: source.id, effect_thread_id: target.id, label: l.label };
+    }).filter(Boolean);
+    if (!links.length) { _showToast('No thread matches found for causal seeding', 'warn'); return; }
+    fetch('/api/causal-links/from-brainstorm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brainstorm_id: brainstormId, links })
+    }).then(r => r.json()).then(result => {
+        _showToast(`Seeded ${result.created_count} causal link${result.created_count !== 1 ? 's' : ''}`, 'success');
+    });
+}
+
+// ===================== EXECUTION =====================
+
 let _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'idle', narrativeSearch: null, customSearches: [] };
 let _execExpandedDomains = new Set(); // track which domain cards the user has expanded
 let _narrativeSearchReader = null; // persisted SSE reader for narrative search
@@ -18639,6 +19165,8 @@ function _createNarrativeFromThreads() {
 
 
 let _hypothesesCache = [];
+let _expandedHypothesisId = null;
+let _hypRelatedCache = {}; // hypId -> related hypotheses array
 
 function loadNarratives() {
     Promise.all([
@@ -18687,28 +19215,31 @@ function renderNarrativesList() {
         </div>`;
     }).join('');
 
+    // Concept overlap visualization (between narratives and hypothesis bank)
+    if (_hypothesesCache.length >= 2) {
+        narrativesHtml += `<div style="padding:12px;border-top:1px solid var(--border)">
+            <div onclick="const b=document.getElementById('concept-overlap-body');b.style.display=b.style.display==='none'?'':'none'" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none">
+                <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Concept Overlap</div>
+                <span style="font-size:8px;color:var(--text-muted)">▾</span>
+            </div>
+            <div id="concept-overlap-body" style="margin-top:8px"></div>
+        </div>`;
+    }
+
     // Hypothesis bank section
     if (_hypothesesCache.length) {
-        const confColors = { high: 'var(--green)', medium: 'var(--accent)', low: 'var(--text-muted)' };
         narrativesHtml += `<div style="padding:12px;border-top:1px solid var(--border)">
             <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Hypothesis Bank (${_hypothesesCache.length})</div>
-            ${_hypothesesCache.map(h => `
-                <div style="padding:8px 12px;margin-bottom:4px;background:var(--bg-tertiary);border-radius:6px;border-left:2px solid ${confColors[h.confidence] || 'var(--border)'}">
-                    <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
-                        <div style="font-size:11px;font-weight:600;color:var(--text-primary);flex:1">${_renderBrainstormLinks(h.title)}</div>
-                        <span style="font-size:8px;padding:1px 5px;border-radius:3px;background:var(--bg-secondary);color:var(--text-muted);white-space:nowrap">${h.confidence}</span>
-                    </div>
-                    <div style="font-size:10px;color:var(--text-muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${_renderBrainstormLinks(h.reasoning || '')}</div>
-                    <div style="display:flex;gap:4px;margin-top:6px">
-                        <button onclick="_promoteHypothesis(${h.id}, '${escHtml(h.title.replace(/'/g, "\\'"))}', '${escHtml((h.reasoning || '').replace(/'/g, "\\'"))}')" style="padding:2px 8px;background:none;border:1px solid var(--purple);border-radius:4px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">📖 Promote</button>
-                        <button onclick="_dismissHypothesis(${h.id})" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:9px;cursor:pointer">Dismiss</button>
-                    </div>
-                </div>
-            `).join('')}
+            <div id="hypothesis-bank-list">${_renderHypothesisBank()}</div>
         </div>`;
     }
 
     container.innerHTML = narrativesHtml;
+
+    // Load concept overlap visualization
+    if (_hypothesesCache.length >= 2) {
+        _loadConceptOverlap();
+    }
 }
 
 function _promoteHypothesis(hypId, title, reasoning) {
@@ -18722,6 +19253,322 @@ function _promoteHypothesis(hypId, title, reasoning) {
 function _dismissHypothesis(hypId) {
     fetch(`/api/hypotheses/${hypId}`, { method: 'DELETE' })
         .then(() => loadNarratives());
+}
+
+function _renderHypothesisBank() {
+    const confColors = { high: 'var(--green)', medium: 'var(--accent)', low: 'var(--text-muted)' };
+    return _hypothesesCache.map(h => {
+        const isExpanded = _expandedHypothesisId === h.id;
+        const threadCount = (h.source_thread_ids || []).length;
+        const entityCount = (h.source_entities || []).length;
+        const borderColor = confColors[h.confidence] || 'var(--border)';
+
+        let expandedHtml = '';
+        if (isExpanded) {
+            // Full reasoning
+            expandedHtml += `<div style="font-size:11px;color:var(--text-secondary);margin-top:8px;line-height:1.5;padding:8px 0;border-top:1px solid var(--border)">${_renderBrainstormLinks(h.reasoning || '')}</div>`;
+
+            // Source threads
+            const srcThreads = (h.source_thread_ids || []).map(tid => (_threadsCache || []).find(t => t.id === tid)).filter(Boolean);
+            if (srcThreads.length) {
+                expandedHtml += `<div style="margin-top:8px"><div style="font-size:9px;font-weight:700;color:var(--text-muted);margin-bottom:4px">SOURCE THREADS</div>`;
+                expandedHtml += srcThreads.map(t => {
+                    const dc = _DOMAIN_COLORS[t.domain] || '#6b7280';
+                    return `<div onclick="switchSignalTab('graph');openThreadDetail(${t.id})" style="padding:4px 8px;margin-bottom:3px;background:var(--bg-secondary);border-radius:4px;border-left:2px solid ${dc};cursor:pointer;font-size:10px;color:var(--text-secondary);display:flex;justify-content:space-between;align-items:center">
+                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title)}</span>
+                        <span style="font-size:9px;color:var(--text-muted);flex-shrink:0;margin-left:6px">${t.signal_count || 0} sig</span>
+                    </div>`;
+                }).join('') + '</div>';
+            }
+
+            // Source entities
+            const entities = h.source_entities || [];
+            if (entities.length) {
+                expandedHtml += `<div style="margin-top:8px"><div style="font-size:9px;font-weight:700;color:var(--text-muted);margin-bottom:4px">ENTITIES</div><div style="display:flex;flex-wrap:wrap;gap:3px">`;
+                expandedHtml += entities.slice(0, 15).map(e => {
+                    const name = e.name || e.entity_value || e;
+                    const type = e.type || e.entity_type || 'concept';
+                    const icon = _entIcon[type] || '🔹';
+                    return `<span onclick="_brainstormConceptClick('${escHtml(String(name).replace(/'/g, "\\'"))}')" style="padding:2px 6px;border-radius:4px;font-size:9px;background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-secondary);cursor:pointer;transition:border-color 0.15s" onmouseenter="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor='var(--border)'">${icon} ${escHtml(String(name))}</span>`;
+                }).join('') + (entities.length > 15 ? `<span style="font-size:9px;color:var(--text-muted)">+${entities.length - 15} more</span>` : '') + '</div></div>';
+            }
+
+            // Related hypotheses (lazy-loaded)
+            expandedHtml += `<div id="hyp-related-${h.id}" style="margin-top:8px"></div>`;
+
+            // Action buttons
+            expandedHtml += `<div style="display:flex;gap:4px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+                <button onclick="event.stopPropagation();_promoteHypothesis(${h.id}, '${escHtml(h.title.replace(/'/g, "\\'"))}', '${escHtml((h.reasoning || '').replace(/'/g, "\\'"))}')" style="padding:3px 10px;background:none;border:1px solid var(--purple);border-radius:4px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">📖 Promote</button>
+                <button onclick="event.stopPropagation();_showHypAssignDropdown(${h.id}, this)" style="padding:3px 10px;background:none;border:1px solid var(--accent);border-radius:4px;color:var(--accent);font-size:9px;font-weight:600;cursor:pointer">📎 Assign to...</button>
+                <button onclick="event.stopPropagation();_dismissHypothesis(${h.id})" style="padding:3px 10px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:9px;cursor:pointer">Dismiss</button>
+            </div>`;
+        }
+
+        return `<div onclick="_toggleHypothesisExpand(${h.id})" style="padding:8px 12px;margin-bottom:4px;background:var(--bg-tertiary);border-radius:6px;border-left:2px solid ${borderColor};cursor:pointer;transition:background 0.15s" onmouseenter="this.style.background='var(--bg-secondary)'" onmouseleave="this.style.background='var(--bg-tertiary)'">
+            <div style="display:flex;justify-content:space-between;align-items:start;gap:8px">
+                <div style="font-size:11px;font-weight:600;color:var(--text-primary);flex:1">${_renderBrainstormLinks(h.title)}</div>
+                <span style="font-size:8px;padding:1px 5px;border-radius:3px;background:var(--bg-secondary);color:var(--text-muted);white-space:nowrap">${threadCount} threads · ${entityCount} entities</span>
+            </div>
+            ${isExpanded ? '' : `<div style="font-size:10px;color:var(--text-muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${_renderBrainstormLinks(h.reasoning || '')}</div>`}
+            ${isExpanded ? '' : `<div style="display:flex;gap:4px;margin-top:6px">
+                <button onclick="event.stopPropagation();_promoteHypothesis(${h.id}, '${escHtml(h.title.replace(/'/g, "\\'"))}', '${escHtml((h.reasoning || '').replace(/'/g, "\\'"))}')" style="padding:2px 8px;background:none;border:1px solid var(--purple);border-radius:4px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">📖 Promote</button>
+                <button onclick="event.stopPropagation();_dismissHypothesis(${h.id})" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:9px;cursor:pointer">Dismiss</button>
+            </div>`}
+            ${expandedHtml}
+        </div>`;
+    }).join('');
+}
+
+function _toggleHypothesisExpand(hypId) {
+    _expandedHypothesisId = _expandedHypothesisId === hypId ? null : hypId;
+    const container = document.getElementById('hypothesis-bank-list');
+    if (container) container.innerHTML = _renderHypothesisBank();
+    // Lazy-load related hypotheses when expanding
+    if (_expandedHypothesisId) {
+        const h = _hypothesesCache.find(h => h.id === _expandedHypothesisId);
+        if (h && !_hypRelatedCache[h.id]) {
+            const relEl = document.getElementById(`hyp-related-${h.id}`);
+            if (relEl) relEl.innerHTML = '<div style="font-size:9px;color:var(--text-muted)">Finding related hypotheses...</div>';
+            fetch('/api/hypotheses/related', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ thread_ids: h.source_thread_ids || [] })
+            }).then(r => r.json()).then(data => {
+                const related = (data.hypotheses || []).filter(rh => rh.id !== h.id);
+                _hypRelatedCache[h.id] = related;
+                _renderHypRelated(h.id, related);
+            });
+        } else if (h && _hypRelatedCache[h.id]) {
+            _renderHypRelated(h.id, _hypRelatedCache[h.id]);
+        }
+    }
+}
+
+function _renderHypRelated(hypId, related) {
+    const el = document.getElementById(`hyp-related-${hypId}`);
+    if (!el) return;
+    if (!related.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `<div style="font-size:9px;font-weight:700;color:var(--text-muted);margin-bottom:4px">RELATED HYPOTHESES</div>`
+        + related.slice(0, 5).map(rh => {
+            const score = rh.relevance_score >= 3 ? 'strong' : 'weak';
+            const color = score === 'strong' ? 'var(--accent)' : 'var(--text-muted)';
+            return `<div style="padding:4px 8px;margin-bottom:3px;background:var(--bg-secondary);border-radius:4px;border-left:2px solid ${color};font-size:10px">
+                <div style="display:flex;justify-content:space-between;align-items:start;gap:6px">
+                    <span style="color:var(--text-secondary);font-weight:600">${escHtml(rh.title)}</span>
+                    <span style="font-size:8px;color:${color};flex-shrink:0">${score}</span>
+                </div>
+                ${rh.match_reason ? `<div style="font-size:9px;color:var(--text-muted);margin-top:2px">${escHtml(rh.match_reason)}</div>` : ''}
+            </div>`;
+        }).join('');
+}
+
+let _conceptOverlapData = null;
+let _conceptHighlightedHypIds = new Set();
+
+function _loadConceptOverlap() {
+    const body = document.getElementById('concept-overlap-body');
+    if (!body) return;
+    body.innerHTML = '<div style="font-size:9px;color:var(--text-muted)">Loading concept graph...</div>';
+    fetch('/api/hypotheses/concepts')
+        .then(r => r.json())
+        .then(data => {
+            _conceptOverlapData = data;
+            _renderConceptOverlap(body, data);
+        })
+        .catch(() => { body.innerHTML = ''; });
+}
+
+function _renderConceptOverlap(container, data) {
+    const concepts = data.concepts || [];
+    const hypotheses = data.hypotheses || [];
+    if (!concepts.length) { container.innerHTML = '<div style="font-size:9px;color:var(--text-muted)">No shared concepts found across hypotheses</div>'; return; }
+
+    // Limit to top 20 concepts
+    const topConcepts = concepts.slice(0, 20);
+    const conceptNames = new Set(topConcepts.map(c => c.name));
+
+    // Build HTML: concept pills at top, then hypothesis cards grouped by shared concepts
+    let html = '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">';
+    topConcepts.forEach(c => {
+        const count = c.hypothesis_ids.length;
+        const isActive = _conceptHighlightedHypIds.size > 0 && c.hypothesis_ids.some(id => _conceptHighlightedHypIds.has(id));
+        html += `<span onclick="_toggleConceptHighlight('${escHtml(c.name.replace(/'/g, "\\'"))}')" style="padding:3px 8px;border-radius:12px;font-size:9px;font-weight:600;cursor:pointer;transition:all 0.15s;${isActive ? 'background:rgba(168,85,247,0.2);border:1px solid rgba(168,85,247,0.4);color:var(--purple)' : 'background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-secondary)'}" title="${count} hypotheses share this concept">${escHtml(c.name)} <span style="color:var(--text-muted);font-weight:400">${count}</span></span>`;
+    });
+    html += '</div>';
+
+    // Hypothesis connection pairs — show hypotheses that share 2+ concepts
+    const pairMap = {};
+    topConcepts.forEach(c => {
+        for (let i = 0; i < c.hypothesis_ids.length; i++) {
+            for (let j = i + 1; j < c.hypothesis_ids.length; j++) {
+                const key = [c.hypothesis_ids[i], c.hypothesis_ids[j]].sort().join('-');
+                if (!pairMap[key]) pairMap[key] = { a: c.hypothesis_ids[i], b: c.hypothesis_ids[j], concepts: [] };
+                pairMap[key].concepts.push(c.name);
+            }
+        }
+    });
+    const strongPairs = Object.values(pairMap).filter(p => p.concepts.length >= 2).sort((a, b) => b.concepts.length - a.concepts.length);
+
+    if (strongPairs.length) {
+        html += '<div style="font-size:9px;font-weight:700;color:var(--text-muted);margin:8px 0 4px">STRONG CONNECTIONS</div>';
+        strongPairs.slice(0, 10).forEach(pair => {
+            const hA = hypotheses.find(h => h.id === pair.a);
+            const hB = hypotheses.find(h => h.id === pair.b);
+            if (!hA || !hB) return;
+            html += `<div style="padding:6px 8px;margin-bottom:4px;background:var(--bg-secondary);border-radius:6px;border-left:2px solid var(--purple)">
+                <div style="display:flex;align-items:center;gap:6px;font-size:10px">
+                    <span onclick="_toggleHypothesisExpand(${hA.id})" style="color:var(--text-primary);font-weight:600;cursor:pointer;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(hA.title)}</span>
+                    <span style="color:var(--purple);font-size:9px;flex-shrink:0">⟷</span>
+                    <span onclick="_toggleHypothesisExpand(${hB.id})" style="color:var(--text-primary);font-weight:600;cursor:pointer;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right">${escHtml(hB.title)}</span>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;justify-content:center">
+                    ${pair.concepts.map(c => `<span style="padding:1px 5px;border-radius:3px;font-size:8px;background:rgba(168,85,247,0.1);color:var(--purple)">${escHtml(c)}</span>`).join('')}
+                </div>
+                <div style="text-align:center;margin-top:4px">
+                    <button onclick="event.stopPropagation();_mergeHypotheses([${hA.id}, ${hB.id}])" style="padding:2px 8px;background:none;border:1px solid var(--purple);border-radius:4px;color:var(--purple);font-size:8px;font-weight:600;cursor:pointer">Merge these</button>
+                </div>
+            </div>`;
+        });
+    }
+
+    container.innerHTML = html;
+}
+
+function _toggleConceptHighlight(conceptName) {
+    if (!_conceptOverlapData) return;
+    const concept = _conceptOverlapData.concepts.find(c => c.name === conceptName);
+    if (!concept) return;
+
+    // Toggle: if all of this concept's hyps are already highlighted, clear; otherwise set
+    const allHighlighted = concept.hypothesis_ids.every(id => _conceptHighlightedHypIds.has(id));
+    if (allHighlighted) {
+        concept.hypothesis_ids.forEach(id => _conceptHighlightedHypIds.delete(id));
+    } else {
+        concept.hypothesis_ids.forEach(id => _conceptHighlightedHypIds.add(id));
+    }
+
+    // Re-render concept overlap section
+    const body = document.getElementById('concept-overlap-body');
+    if (body) _renderConceptOverlap(body, _conceptOverlapData);
+
+    // Highlight matching hypothesis cards in bank
+    document.querySelectorAll('#hypothesis-bank-list > div').forEach((card, i) => {
+        const h = _hypothesesCache[i];
+        if (!h) return;
+        if (_conceptHighlightedHypIds.size === 0) {
+            card.style.opacity = '';
+        } else {
+            card.style.opacity = _conceptHighlightedHypIds.has(h.id) ? '' : '0.3';
+        }
+    });
+}
+
+function _showHypAssignDropdown(hypId, btnEl) {
+    // Remove any existing dropdown
+    document.querySelectorAll('.hyp-assign-dd').forEach(d => d.remove());
+    if (!_narrativesCache.length) { _showToast('No narratives to assign to', 'warn'); return; }
+    const dd = document.createElement('div');
+    dd.className = 'hyp-assign-dd';
+    dd.style.cssText = 'position:absolute;z-index:50;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.4);max-height:200px;overflow-y:auto;min-width:200px';
+    dd.innerHTML = _narrativesCache.map(n =>
+        `<div onclick="event.stopPropagation();_assignHypToNarrative(${hypId}, ${n.id})" style="padding:6px 10px;font-size:10px;color:var(--text-secondary);cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.1s" onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background=''">
+            ${escHtml(n.title)}
+        </div>`
+    ).join('');
+    btnEl.style.position = 'relative';
+    btnEl.parentElement.style.position = 'relative';
+    btnEl.parentElement.appendChild(dd);
+    dd.style.bottom = '100%';
+    dd.style.left = '0';
+    dd.style.marginBottom = '4px';
+    // Close on outside click
+    setTimeout(() => {
+        const close = (e) => { if (!dd.contains(e.target)) { dd.remove(); document.removeEventListener('click', close); } };
+        document.addEventListener('click', close);
+    }, 0);
+}
+
+function _assignHypToNarrative(hypId, narrativeId) {
+    const h = _hypothesesCache.find(h => h.id === hypId);
+    if (!h) return;
+    document.querySelectorAll('.hyp-assign-dd').forEach(d => d.remove());
+    fetch(`/api/narratives/${narrativeId}/add-subclaim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ claim: h.title, hypothesis_id: hypId })
+    }).then(r => r.json()).then(data => {
+        if (data.ok) {
+            _showToast('Hypothesis assigned as sub-claim', 'success');
+            loadNarratives();
+        } else {
+            _showToast(data.error || 'Failed to assign', 'error');
+        }
+    });
+}
+
+function _mergeHypotheses(hypIds) {
+    if (hypIds.length < 2) return;
+    const hyps = hypIds.map(id => _hypothesesCache.find(h => h.id === id)).filter(Boolean);
+    if (hyps.length < 2) return;
+
+    // Show merge overlay
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--bg-secondary);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto';
+
+    modal.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+            <h3 style="font-size:14px;font-weight:700;color:var(--text-primary);margin:0">Merge ${hyps.length} Hypotheses</h3>
+            <span onclick="this.closest('[style*=fixed]').remove()" style="cursor:pointer;color:var(--text-muted);font-size:16px">&times;</span>
+        </div>
+        <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:6px">SOURCE HYPOTHESES</div>
+        ${hyps.map(h => `<div style="padding:6px 8px;margin-bottom:4px;background:var(--bg-tertiary);border-radius:4px;font-size:10px">
+            <div style="font-weight:600;color:var(--text-primary)">${escHtml(h.title)}</div>
+            <div style="color:var(--text-muted);margin-top:2px">${escHtml((h.reasoning || '').substring(0, 120))}${(h.reasoning || '').length > 120 ? '...' : ''}</div>
+        </div>`).join('')}
+        <div style="margin-top:12px;text-align:center;padding:12px;color:var(--text-muted);font-size:10px" id="merge-status">Generating merged hypothesis...</div>
+        <div id="merge-result" style="display:none">
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:4px;margin-top:12px">MERGED RESULT</div>
+            <input type="text" id="merge-title" style="width:100%;padding:8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;font-weight:600;box-sizing:border-box;margin-bottom:6px">
+            <textarea id="merge-reasoning" rows="4" style="width:100%;padding:8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);font-size:11px;box-sizing:border-box;resize:vertical"></textarea>
+            <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end">
+                <button onclick="this.closest('[style*=fixed]').remove()" style="padding:6px 16px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer">Cancel</button>
+                <button id="merge-confirm-btn" style="padding:6px 16px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">Confirm Merge</button>
+            </div>
+        </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Call LLM to generate merged hypothesis
+    fetch('/api/hypotheses/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hypothesis_ids: hypIds })
+    }).then(r => r.json()).then(data => {
+        if (data.error) {
+            document.getElementById('merge-status').innerHTML = `<span style="color:var(--red)">${escHtml(data.error)}</span>`;
+            return;
+        }
+        document.getElementById('merge-status').style.display = 'none';
+        document.getElementById('merge-result').style.display = '';
+        document.getElementById('merge-title').value = data.merged_hypothesis.title;
+        document.getElementById('merge-reasoning').value = data.merged_hypothesis.reasoning;
+
+        // Confirm button just refreshes — the merge already happened server-side
+        document.getElementById('merge-confirm-btn').onclick = () => {
+            overlay.remove();
+            _showToast('Hypotheses merged', 'success');
+            _hypRelatedCache = {}; // clear cache
+            loadNarratives();
+        };
+    }).catch(() => {
+        document.getElementById('merge-status').innerHTML = '<span style="color:var(--red)">Merge failed — check server</span>';
+    });
 }
 
 function openNarrativeDetail(narrativeId) {

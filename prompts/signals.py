@@ -58,6 +58,30 @@ CRITICAL RULES:
 - Return ONLY the JSON object"""
 
 
+def build_hypothesis_merge_prompt(hypotheses):
+    """Prompt to merge 2-3 related hypotheses into one stronger hypothesis."""
+    hyp_text = "\n\n".join(
+        f"Hypothesis {i+1}: {h['title']}\nReasoning: {h.get('reasoning', '')}"
+        for i, h in enumerate(hypotheses)
+    )
+    return f"""These hypotheses from a macro signal analysis overlap significantly. Merge them into ONE stronger, more comprehensive hypothesis.
+
+{hyp_text}
+
+Return JSON:
+{{
+  "title": "A clear, concise title for the merged hypothesis (keep [[concept]] markers if present)",
+  "reasoning": "Combined reasoning that synthesizes all inputs — preserve specific details, data points, and [[concept]] markers from the originals. 2-4 sentences.",
+  "confidence": "high" | "medium" | "low"
+}}
+
+Rules:
+- The merged hypothesis should be STRONGER than any individual one — combine their evidence
+- Preserve [[concept]] markers from the originals
+- Don't just concatenate — synthesize into a cohesive narrative
+- Return ONLY the JSON object"""
+
+
 def build_entity_extraction_prompt(signals_text):
     """Prompt to extract entities including concepts and events from signals."""
     return f"""Extract entities from these news signals. Extract BOTH named entities AND thematic concepts.

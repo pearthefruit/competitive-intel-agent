@@ -353,6 +353,22 @@ CREATE TABLE IF NOT EXISTS signal_entities (
     campaign_id INTEGER REFERENCES campaigns(id),
     metadata_json TEXT
 );
+
+-- Directed causal links between threads (temporal/causal view)
+CREATE TABLE IF NOT EXISTS causal_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cause_thread_id INTEGER NOT NULL REFERENCES signal_clusters(id),
+    effect_thread_id INTEGER NOT NULL REFERENCES signal_clusters(id),
+    label TEXT,
+    hypothesis_id INTEGER REFERENCES hypotheses(id),
+    confidence TEXT DEFAULT 'medium',
+    status TEXT DEFAULT 'captured',
+    reasoning TEXT,
+    brainstorm_id INTEGER REFERENCES brainstorms(id),
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(cause_thread_id, effect_thread_id)
+);
 """
 
 
@@ -2601,6 +2617,140 @@ def get_hypotheses(conn, status=None, limit=50):
         d["source_entities"] = json.loads(d["source_entities_json"]) if d.get("source_entities_json") else []
         result.append(d)
     return result
+
+
+def get_hypothesis_concept_graph(conn):
+    """Build a concept overlap graph from all captured hypotheses.
+    Extracts [[concepts]] from title/reasoning + entities from source_entities_json.
+    Returns {concepts: [{name, hypothesis_ids}], hypotheses: [{id, title, concepts}]}."""
+    import re
+    hypotheses = get_hypotheses(conn, status="captured", limit=100)
+    concept_map = {}  # concept_name -> set of hyp IDs
+    hyp_concepts = {}  # hyp_id -> list of concept names
+
+    for h in hypotheses:
+        concepts = set()
+        # Extract [[concept]] from title and reasoning
+        text = (h.get("title", "") or "") + " " + (h.get("reasoning", "") or "")
+        for match in re.findall(r'\[\[([^\]]+)\]\]', text):
+            concepts.add(match.lower().strip())
+        # Also include entity names from source_entities
+        for e in (h.get("source_entities") or []):
+            name = e.get("name") or e.get("entity_value") or (e if isinstance(e, str) else "")
+            if name and len(str(name)) >= 3:
+                concepts.add(str(name).lower().strip())
+
+        hyp_concepts[h["id"]] = list(concepts)
+        for c in concepts:
+            if c not in concept_map:
+                concept_map[c] = set()
+            concept_map[c].add(h["id"])
+
+    # Filter to concepts appearing in 2+ hypotheses (the overlaps)
+    shared_concepts = {c: ids for c, ids in concept_map.items() if len(ids) >= 2}
+
+    return {
+        "concepts": [{"name": c, "hypothesis_ids": sorted(ids)} for c, ids in sorted(shared_concepts.items(), key=lambda x: -len(x[1]))],
+        "hypotheses": [{"id": h["id"], "title": h.get("title", ""), "confidence": h.get("confidence", "medium"),
+                        "concepts": [c for c in hyp_concepts.get(h["id"], []) if c in shared_concepts]}
+                       for h in hypotheses if any(c in shared_concepts for c in hyp_concepts.get(h["id"], []))],
+    }
+
+
+# ── Causal link helpers ────────────────────────────────────────────────
+
+def add_causal_link(conn, cause_thread_id, effect_thread_id, label=None,
+                    hypothesis_id=None, confidence='medium', status='captured',
+                    reasoning=None, brainstorm_id=None):
+    """Create a directed causal link between two threads. Returns link id or None if exists."""
+    try:
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO causal_links
+               (cause_thread_id, effect_thread_id, label, hypothesis_id,
+                confidence, status, reasoning, brainstorm_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (cause_thread_id, effect_thread_id, label, hypothesis_id,
+             confidence, status, reasoning, brainstorm_id),
+        )
+        conn.commit()
+        return cur.lastrowid if cur.rowcount > 0 else None
+    except Exception:
+        return None
+
+
+def get_causal_links(conn, thread_id=None, status=None):
+    """Fetch causal links, optionally filtered by thread involvement or status."""
+    query = "SELECT * FROM causal_links"
+    conditions, params = [], []
+    if thread_id:
+        conditions.append("(cause_thread_id = ? OR effect_thread_id = ?)")
+        params.extend([thread_id, thread_id])
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY created_at DESC"
+    return [dict(r) for r in conn.execute(query, params).fetchall()]
+
+
+def update_causal_link(conn, link_id, **kwargs):
+    """Update causal link fields (label, status, confidence, reasoning)."""
+    allowed = {'label', 'status', 'confidence', 'reasoning', 'hypothesis_id'}
+    updates = {k: v for k, v in kwargs.items() if k in allowed}
+    if not updates:
+        return
+    updates['updated_at'] = datetime.now(timezone.utc).isoformat()
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    conn.execute(f"UPDATE causal_links SET {set_clause} WHERE id = ?",
+                 (*updates.values(), link_id))
+    conn.commit()
+
+
+def delete_causal_link(conn, link_id):
+    """Delete a causal link."""
+    conn.execute("DELETE FROM causal_links WHERE id = ?", (link_id,))
+    conn.commit()
+
+
+def get_causal_graph(conn):
+    """Build full causal graph for cascade view rendering."""
+    links = [dict(r) for r in conn.execute(
+        "SELECT * FROM causal_links ORDER BY created_at"
+    ).fetchall()]
+    thread_ids = set()
+    for l in links:
+        thread_ids.add(l["cause_thread_id"])
+        thread_ids.add(l["effect_thread_id"])
+    threads = {}
+    for tid in thread_ids:
+        row = conn.execute(
+            """SELECT sc.id, sc.title, sc.domain, sc.created_at, sc.last_signal_at,
+                      COUNT(sci.id) as signal_count
+               FROM signal_clusters sc
+               LEFT JOIN signal_cluster_items sci ON sci.cluster_id = sc.id
+               WHERE sc.id = ? GROUP BY sc.id""",
+            (tid,)
+        ).fetchone()
+        if row:
+            threads[tid] = dict(row)
+    # Timeline data: first/last signal dates per thread
+    timeline = {}
+    for tid in thread_ids:
+        row = conn.execute(
+            """SELECT MIN(s.published_at) as first_signal, MAX(s.published_at) as last_signal
+               FROM signal_cluster_items sci
+               JOIN signals s ON s.id = sci.signal_id
+               WHERE sci.cluster_id = ? AND s.published_at IS NOT NULL AND s.published_at != ''""",
+            (tid,)
+        ).fetchone()
+        if row and row["first_signal"]:
+            timeline[tid] = {"first": row["first_signal"], "last": row["last_signal"]}
+    # Positions
+    positions = {}
+    for row in conn.execute("SELECT node_id, x, y, pinned FROM board_positions WHERE node_type = 'causal'").fetchall():
+        positions[row["node_id"]] = dict(row)
+    return {"links": links, "threads": threads, "timeline": timeline, "positions": positions}
 
 
 def update_hypothesis_status(conn, hypothesis_id, status, narrative_id=None):

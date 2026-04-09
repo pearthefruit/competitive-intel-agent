@@ -3493,6 +3493,159 @@ Return JSON:
         conn.close()
         return jsonify({"hypotheses": related})
 
+    @app.route("/api/hypotheses/merge", methods=["POST"])
+    def hypotheses_merge_api():
+        """Merge 2-3 hypotheses into one stronger hypothesis via LLM."""
+        from db import get_hypotheses, insert_hypothesis, update_hypothesis_status
+        from agents.llm import generate_json, CHEAP_CHAIN
+        from prompts.signals import build_hypothesis_merge_prompt
+        data = request.json or {}
+        hyp_ids = data.get("hypothesis_ids", [])
+        if len(hyp_ids) < 2 or len(hyp_ids) > 4:
+            return jsonify({"error": "Need 2-4 hypothesis IDs"}), 400
+
+        conn = get_connection(db_path)
+        # Fetch the hypotheses
+        all_hyps = get_hypotheses(conn, status="all", limit=200)
+        hyps = [h for h in all_hyps if h["id"] in hyp_ids]
+        if len(hyps) < 2:
+            conn.close()
+            return jsonify({"error": "Hypotheses not found"}), 404
+
+        # LLM merge
+        prompt = build_hypothesis_merge_prompt(hyps)
+        try:
+            result = generate_json(prompt, timeout=20, chain=CHEAP_CHAIN)
+        except Exception as e:
+            conn.close()
+            return jsonify({"error": f"LLM merge failed: {e}"}), 500
+
+        if not result or not result.get("title"):
+            conn.close()
+            return jsonify({"error": "LLM returned empty result"}), 500
+
+        # Combine source data from all originals
+        all_thread_ids = []
+        all_entities = []
+        seen_entities = set()
+        for h in hyps:
+            all_thread_ids.extend(h.get("source_thread_ids") or [])
+            for e in (h.get("source_entities") or []):
+                key = str(e.get("name") or e.get("entity_value") or e)
+                if key not in seen_entities:
+                    seen_entities.add(key)
+                    all_entities.append(e)
+
+        # Create merged hypothesis
+        merged_id = insert_hypothesis(conn, {
+            "title": result["title"],
+            "reasoning": result.get("reasoning", ""),
+            "confidence": result.get("confidence", "medium"),
+            "source_thread_ids": list(set(all_thread_ids)),
+            "source_entities": all_entities,
+        })
+
+        # Mark originals as merged
+        for h in hyps:
+            update_hypothesis_status(conn, h["id"], "merged")
+
+        conn.commit()
+        conn.close()
+        return jsonify({
+            "ok": True,
+            "merged_hypothesis": {
+                "id": merged_id,
+                "title": result["title"],
+                "reasoning": result.get("reasoning", ""),
+                "confidence": result.get("confidence", "medium"),
+            },
+            "merged_ids": hyp_ids,
+        })
+
+    @app.route("/api/hypotheses/concepts", methods=["GET"])
+    def hypotheses_concepts_api():
+        """Get concept overlap graph for all captured hypotheses."""
+        from db import get_hypothesis_concept_graph
+        conn = get_connection(db_path)
+        graph = get_hypothesis_concept_graph(conn)
+        conn.close()
+        return jsonify(graph)
+
+    # ── Causal Links API ─────────────────────────────────────────────────
+
+    @app.route("/api/causal-links", methods=["GET"])
+    def causal_links_list_api():
+        from db import get_causal_links
+        conn = get_connection(db_path)
+        thread_id = request.args.get("thread_id", type=int)
+        status = request.args.get("status")
+        links = get_causal_links(conn, thread_id=thread_id, status=status)
+        conn.close()
+        return jsonify({"links": links})
+
+    @app.route("/api/causal-links", methods=["POST"])
+    def causal_link_create_api():
+        from db import add_causal_link
+        data = request.json or {}
+        cause = data.get("cause_thread_id")
+        effect = data.get("effect_thread_id")
+        if not cause or not effect:
+            return jsonify({"error": "cause_thread_id and effect_thread_id required"}), 400
+        if cause == effect:
+            return jsonify({"error": "Thread cannot cause itself"}), 400
+        conn = get_connection(db_path)
+        link_id = add_causal_link(conn, cause, effect,
+                                  label=data.get("label"),
+                                  hypothesis_id=data.get("hypothesis_id"),
+                                  confidence=data.get("confidence", "medium"),
+                                  reasoning=data.get("reasoning"),
+                                  brainstorm_id=data.get("brainstorm_id"))
+        conn.close()
+        if link_id:
+            return jsonify({"ok": True, "id": link_id})
+        return jsonify({"ok": False, "error": "Link already exists"})
+
+    @app.route("/api/causal-links/<int:link_id>", methods=["PATCH"])
+    def causal_link_update_api(link_id):
+        from db import update_causal_link
+        conn = get_connection(db_path)
+        update_causal_link(conn, link_id, **(request.json or {}))
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/causal-links/<int:link_id>", methods=["DELETE"])
+    def causal_link_delete_api(link_id):
+        from db import delete_causal_link
+        conn = get_connection(db_path)
+        delete_causal_link(conn, link_id)
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/causal-graph", methods=["GET"])
+    def causal_graph_api():
+        from db import get_causal_graph
+        conn = get_connection(db_path)
+        graph = get_causal_graph(conn)
+        conn.close()
+        return jsonify(graph)
+
+    @app.route("/api/causal-links/from-brainstorm", methods=["POST"])
+    def causal_links_from_brainstorm_api():
+        from db import add_causal_link
+        data = request.json or {}
+        brainstorm_id = data.get("brainstorm_id")
+        links = data.get("links", [])
+        conn = get_connection(db_path)
+        created = []
+        for link in links:
+            lid = add_causal_link(conn, link["cause_thread_id"], link["effect_thread_id"],
+                                  label=link.get("label"), brainstorm_id=brainstorm_id,
+                                  reasoning=link.get("reasoning"))
+            if lid:
+                created.append(lid)
+        conn.close()
+        return jsonify({"ok": True, "created_count": len(created), "ids": created})
+
     @app.route("/api/narratives/<int:narrative_id>/link-thread", methods=["POST"])
     def narratives_link_thread_api(narrative_id):
         """Link an existing thread to a narrative."""
@@ -3505,6 +3658,45 @@ Return JSON:
         link_thread_to_narrative(conn, thread_id, narrative_id)
         conn.close()
         return jsonify({"ok": True})
+
+    @app.route("/api/narratives/<int:narrative_id>/add-subclaim", methods=["POST"])
+    def narratives_add_subclaim_api(narrative_id):
+        """Add a hypothesis as a sub-claim to an existing narrative."""
+        from db import get_narrative, update_narrative, insert_signal_cluster, link_thread_to_narrative, update_hypothesis_status
+        data = request.json or {}
+        claim = data.get("claim", "").strip()
+        hypothesis_id = data.get("hypothesis_id")
+        if not claim:
+            return jsonify({"error": "claim required"}), 400
+
+        conn = get_connection(db_path)
+        narrative = get_narrative(conn, narrative_id)
+        if not narrative:
+            conn.close()
+            return jsonify({"error": "Narrative not found"}), 404
+
+        # Append to sub_claims
+        sub_claims = narrative.get("sub_claims", [])
+        sub_claims.append({"claim": claim, "queries": []})
+
+        # Create a thread for this sub-claim
+        thread_id = insert_signal_cluster(conn, {
+            "domain": "narrative",
+            "title": claim[:100],
+            "synthesis": "",
+        })
+        link_thread_to_narrative(conn, thread_id, narrative_id)
+
+        # Update narrative's sub_claims_json
+        update_narrative(conn, narrative_id, {"sub_claims": sub_claims})
+
+        # Mark hypothesis as promoted if provided
+        if hypothesis_id:
+            update_hypothesis_status(conn, hypothesis_id, "promoted", narrative_id=narrative_id)
+
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "thread_id": thread_id})
 
     @app.route("/api/narratives/<int:narrative_id>/search", methods=["POST"])
     @app.route("/api/narratives/<int:narrative_id>/scan-internal", methods=["POST"])
