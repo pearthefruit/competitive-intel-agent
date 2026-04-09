@@ -354,6 +354,16 @@ CREATE TABLE IF NOT EXISTS signal_entities (
     metadata_json TEXT
 );
 
+-- Named paths through the causal graph (saved chain views)
+CREATE TABLE IF NOT EXISTS causal_paths (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    thread_ids_json TEXT NOT NULL,
+    status TEXT DEFAULT 'active',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Directed causal links between threads (temporal/causal view)
 CREATE TABLE IF NOT EXISTS causal_links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2713,6 +2723,166 @@ def delete_causal_link(conn, link_id):
     conn.commit()
 
 
+def get_causal_suggestions(conn, limit=20):
+    """Discover potential causal links using three heuristics:
+    1. Temporal lead/lag between threads
+    2. Entity overlap (shared entities suggest connection)
+    3. Brainstorm second-order effects (LLM-generated causal predictions)
+    Excludes pairs that already have a causal_link."""
+
+    # Fetch active threads with signal counts (exclude narrative threads)
+    threads = conn.execute(
+        """SELECT sc.id, sc.title, sc.domain, sc.created_at, sc.last_signal_at,
+                  COUNT(sci.id) as signal_count
+           FROM signal_clusters sc
+           LEFT JOIN signal_cluster_items sci ON sci.cluster_id = sc.id
+           WHERE sc.status = 'active' AND sc.domain != 'narrative'
+           GROUP BY sc.id HAVING signal_count >= 2
+           ORDER BY sc.last_signal_at DESC LIMIT 60"""
+    ).fetchall()
+    threads = [dict(t) for t in threads]
+    if len(threads) < 2:
+        return []
+
+    thread_map = {t["id"]: t for t in threads}
+    thread_ids = [t["id"] for t in threads]
+
+    # Existing causal links — exclude these pairs
+    existing = set()
+    for row in conn.execute("SELECT cause_thread_id, effect_thread_id FROM causal_links").fetchall():
+        existing.add((row[0], row[1]))
+        existing.add((row[1], row[0]))  # both directions
+
+    # ── Heuristic 1: Temporal lead/lag ──
+    # Batch query: median signal date per thread
+    placeholders = ",".join("?" * len(thread_ids))
+    temporal = {}
+    rows = conn.execute(
+        f"""SELECT sci.cluster_id as tid,
+                   MIN(s.published_at) as first_sig,
+                   MAX(s.published_at) as last_sig,
+                   AVG(julianday(s.published_at)) as median_jd
+            FROM signal_cluster_items sci
+            JOIN signals s ON s.id = sci.signal_id
+            WHERE sci.cluster_id IN ({placeholders})
+              AND s.published_at IS NOT NULL AND s.published_at != ''
+            GROUP BY sci.cluster_id""",
+        thread_ids
+    ).fetchall()
+    for r in rows:
+        temporal[r["tid"]] = {
+            "first": r["first_sig"][:10] if r["first_sig"] else None,
+            "last": r["last_sig"][:10] if r["last_sig"] else None,
+            "median_jd": r["median_jd"],
+        }
+
+    # ── Heuristic 2: Entity overlap ──
+    # Batch query: all entities for all threads at once
+    entity_rows = conn.execute(
+        f"""SELECT DISTINCT
+                COALESCE(se.cluster_id, sci.cluster_id) as tid,
+                LOWER(COALESCE(se.normalized_value, se.entity_value)) as name
+            FROM signal_entities se
+            LEFT JOIN signal_cluster_items sci ON sci.signal_id = se.signal_id
+            WHERE COALESCE(se.cluster_id, sci.cluster_id) IN ({placeholders})""",
+        thread_ids
+    ).fetchall()
+    thread_entities = {}
+    for r in entity_rows:
+        tid = r["tid"]
+        if tid not in thread_entities:
+            thread_entities[tid] = set()
+        if r["name"] and len(r["name"]) >= 3:
+            thread_entities[tid].add(r["name"])
+
+    # ── Heuristic 3: Brainstorm second-order effects ──
+    brainstorms = conn.execute("SELECT * FROM brainstorms ORDER BY created_at DESC LIMIT 30").fetchall()
+    # Build a lookup: lowercase thread title → thread id
+    title_to_id = {}
+    for t in threads:
+        for word in t["title"].lower().split():
+            clean = word.strip(".,;:!?\"'()-")
+            if len(clean) > 4:
+                if clean not in title_to_id:
+                    title_to_id[clean] = set()
+                title_to_id[clean].add(t["id"])
+
+    brainstorm_links = []  # (cause_tid, effect_tid, effect_text)
+    for bs in brainstorms:
+        bs_thread_ids = json.loads(bs["thread_ids"]) if bs["thread_ids"] else []
+        effects = json.loads(bs["second_order_json"]) if bs.get("second_order_json") else []
+        for eff in effects:
+            effect_text = (eff.get("effect") or "").lower()
+            if not effect_text:
+                continue
+            # Find which threads the effect text matches (by keyword)
+            matched_tids = set()
+            for word in effect_text.split():
+                clean = word.strip(".,;:!?\"'()-")
+                if clean in title_to_id:
+                    matched_tids.update(title_to_id[clean])
+            # Effect points from brainstorm source threads → matched effect threads
+            for cause_tid in bs_thread_ids:
+                for effect_tid in matched_tids:
+                    if cause_tid != effect_tid and cause_tid in thread_map:
+                        brainstorm_links.append((cause_tid, effect_tid, eff.get("effect", "")))
+
+    # ── Score all pairs ──
+    scored = {}
+    for i, tid_a in enumerate(thread_ids):
+        for tid_b in thread_ids[i+1:]:
+            if (tid_a, tid_b) in existing:
+                continue
+
+            reasons = []
+            score = 0
+
+            # Temporal: does A lead B or B lead A?
+            ta = temporal.get(tid_a)
+            tb = temporal.get(tid_b)
+            cause, effect = tid_a, tid_b
+            if ta and tb and ta["median_jd"] and tb["median_jd"]:
+                lag_days = tb["median_jd"] - ta["median_jd"]
+                if abs(lag_days) >= 2:
+                    if lag_days < 0:
+                        cause, effect = tid_b, tid_a
+                        lag_days = -lag_days
+                    temporal_score = min(int(lag_days), 10)  # cap at 10
+                    score += temporal_score
+                    reasons.append({"type": "temporal", "detail": f"Leads by {int(lag_days)} days"})
+
+            # Entity overlap
+            ents_a = thread_entities.get(tid_a, set())
+            ents_b = thread_entities.get(tid_b, set())
+            shared = ents_a & ents_b
+            if len(shared) >= 2:
+                entity_score = len(shared) * 3
+                score += entity_score
+                reasons.append({"type": "entity", "detail": f"Shared: {', '.join(list(shared)[:4])}"})
+
+            # Brainstorm second-order
+            for (c, e, txt) in brainstorm_links:
+                if (c == cause and e == effect) or (c == effect and e == cause):
+                    score += 5
+                    reasons.append({"type": "brainstorm", "detail": f"Second-order: '{txt[:60]}'"})
+                    break  # one brainstorm match per pair is enough
+
+            if score >= 5 and reasons:
+                key = (cause, effect)
+                if key not in scored or scored[key]["score"] < score:
+                    scored[key] = {
+                        "cause_thread_id": cause,
+                        "cause_title": thread_map.get(cause, {}).get("title", ""),
+                        "effect_thread_id": effect,
+                        "effect_title": thread_map.get(effect, {}).get("title", ""),
+                        "score": score,
+                        "reasons": reasons,
+                    }
+
+    results = sorted(scored.values(), key=lambda x: -x["score"])
+    return results[:limit]
+
+
 def get_causal_graph(conn):
     """Build full causal graph for cascade view rendering."""
     links = [dict(r) for r in conn.execute(
@@ -2751,6 +2921,50 @@ def get_causal_graph(conn):
     for row in conn.execute("SELECT node_id, x, y, pinned FROM board_positions WHERE node_type = 'causal'").fetchall():
         positions[row["node_id"]] = dict(row)
     return {"links": links, "threads": threads, "timeline": timeline, "positions": positions}
+
+
+# ── Causal path helpers ────────────────────────────────────────────────
+
+def create_causal_path(conn, name, thread_ids):
+    """Create a named path through the causal graph. Returns path id."""
+    cur = conn.execute(
+        "INSERT INTO causal_paths (name, thread_ids_json) VALUES (?, ?)",
+        (name, json.dumps(thread_ids)),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_causal_paths(conn):
+    """Fetch all causal paths."""
+    rows = conn.execute("SELECT * FROM causal_paths WHERE status = 'active' ORDER BY updated_at DESC").fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["thread_ids"] = json.loads(d["thread_ids_json"]) if d.get("thread_ids_json") else []
+        result.append(d)
+    return result
+
+
+def update_causal_path(conn, path_id, name=None, thread_ids=None):
+    """Update a causal path's name or thread sequence."""
+    updates = ["updated_at = CURRENT_TIMESTAMP"]
+    params = []
+    if name is not None:
+        updates.append("name = ?")
+        params.append(name)
+    if thread_ids is not None:
+        updates.append("thread_ids_json = ?")
+        params.append(json.dumps(thread_ids))
+    params.append(path_id)
+    conn.execute(f"UPDATE causal_paths SET {', '.join(updates)} WHERE id = ?", params)
+    conn.commit()
+
+
+def delete_causal_path(conn, path_id):
+    """Delete a causal path."""
+    conn.execute("DELETE FROM causal_paths WHERE id = ?", (path_id,))
+    conn.commit()
 
 
 def update_hypothesis_status(conn, hypothesis_id, status, narrative_id=None):

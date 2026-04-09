@@ -5616,12 +5616,30 @@
                             <span id="causal-link-count" style="margin-left:auto;font-size:10px;color:var(--text-muted)"></span>
                         </div>
 
+                        <!-- Suggested Links panel (collapsible) -->
+                        <div id="causal-suggestions-panel" style="display:none;border-bottom:1px solid var(--border);max-height:200px;overflow-y:auto">
+                            <div onclick="const b=document.getElementById('causal-suggestions-body');b.style.display=b.style.display==='none'?'':'none'" style="padding:6px 12px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none">
+                                <span style="font-size:10px;font-weight:700;color:var(--purple)">&#128302; Suggested Links <span id="causal-suggestions-count" style="font-weight:400;color:var(--text-muted)"></span></span>
+                                <span style="font-size:8px;color:var(--text-muted)">&#9662;</span>
+                            </div>
+                            <div id="causal-suggestions-body" style="padding:0 12px 8px"></div>
+                        </div>
+
                         <!-- Split View (Builder) -->
                         <div id="causal-split-view" style="flex:1;display:flex;min-height:0">
                             <!-- Thread picker -->
-                            <div id="causal-thread-picker" style="width:240px;border-right:1px solid var(--border);overflow-y:auto;padding:8px;flex-shrink:0">
+                            <div id="causal-thread-picker" style="width:240px;border-right:1px solid var(--border);overflow-y:auto;padding:8px;flex-shrink:0;display:flex;flex-direction:column">
+                                <!-- Saved Chains -->
+                                <div id="causal-chains-section" style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                                        <span style="font-size:9px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Chains</span>
+                                        <button onclick="_startPathTrace()" style="padding:1px 6px;background:none;border:1px solid var(--purple);border-radius:3px;color:var(--purple);font-size:8px;font-weight:600;cursor:pointer">+ New</button>
+                                    </div>
+                                    <div id="causal-chains-list"></div>
+                                </div>
+                                <!-- Thread picker -->
                                 <input id="causal-thread-search" type="text" placeholder="Filter threads..." oninput="_filterCausalThreadPicker()" style="width:100%;padding:5px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:5px;color:var(--text-primary);font-size:10px;margin-bottom:6px;box-sizing:border-box;outline:none">
-                                <div id="causal-thread-list" style="font-size:10px"></div>
+                                <div id="causal-thread-list" style="font-size:10px;flex:1;overflow-y:auto"></div>
                             </div>
                             <!-- Before column -->
                             <div id="causal-before-col" style="flex:1;display:flex;flex-direction:column;border-right:1px solid var(--border);min-width:0" ondragover="event.preventDefault();this.style.background='rgba(6,182,212,0.05)'" ondragleave="this.style.background=''" ondrop="_dropThread(event,'before');this.style.background=''">
@@ -17238,17 +17256,281 @@ function _setCausalMode(mode) {
     if (mode === 'split') _renderCausalArrows();
 }
 
+let _causalDismissedPairs = JSON.parse(localStorage.getItem('causal_dismissed') || '[]');
+
 function loadCausalView() {
-    fetch('/api/causal-links')
+    _loadCausalPaths();
+    Promise.all([
+        fetch('/api/causal-links').then(r => r.json()),
+        fetch('/api/causal-suggestions?limit=15').then(r => r.json()),
+    ]).then(([linkData, suggData]) => {
+        _causalLinksCache = linkData.links || [];
+        const countEl = document.getElementById('causal-link-count');
+        if (countEl) countEl.textContent = `${_causalLinksCache.length} causal link${_causalLinksCache.length !== 1 ? 's' : ''}`;
+        _renderCausalThreadPicker();
+        _renderCausalSuggestions(suggData.suggestions || []);
+        if (_causalMode === 'cascade') _loadCascadeView();
+        else _renderCausalArrows();
+    });
+}
+
+function _renderCausalSuggestions(suggestions) {
+    const panel = document.getElementById('causal-suggestions-panel');
+    const body = document.getElementById('causal-suggestions-body');
+    const countEl = document.getElementById('causal-suggestions-count');
+    if (!panel || !body) return;
+
+    // Filter out dismissed pairs
+    const dismissed = new Set(_causalDismissedPairs.map(p => `${p[0]}-${p[1]}`));
+    const filtered = suggestions.filter(s => !dismissed.has(`${s.cause_thread_id}-${s.effect_thread_id}`));
+
+    if (!filtered.length) {
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = '';
+    if (countEl) countEl.textContent = `(${filtered.length})`;
+
+    body.innerHTML = filtered.map(s => {
+        const reasonsHtml = s.reasons.map(r => {
+            const icon = r.type === 'temporal' ? '&#9203;' : r.type === 'entity' ? '&#128279;' : '&#129504;';
+            const color = r.type === 'temporal' ? 'var(--accent)' : r.type === 'entity' ? '#22c55e' : 'var(--purple)';
+            return `<span style="font-size:9px;color:${color}">${icon} ${escHtml(r.detail)}</span>`;
+        }).join('<span style="color:var(--border);margin:0 4px">·</span>');
+
+        return `<div id="causal-sugg-${s.cause_thread_id}-${s.effect_thread_id}" style="padding:8px;margin-bottom:4px;background:var(--bg-tertiary);border-radius:6px;border-left:2px solid var(--purple)">
+            <div style="font-size:11px;font-weight:600;color:var(--text-primary);margin-bottom:3px">
+                ${escHtml(s.cause_title)} <span style="color:var(--purple);font-size:9px">&#10132;</span> ${escHtml(s.effect_title)}
+            </div>
+            <div style="margin-bottom:6px">${reasonsHtml}</div>
+            <div style="display:flex;gap:4px">
+                <button onclick="_acceptCausalSuggestion(${s.cause_thread_id}, ${s.effect_thread_id}, this)" style="padding:2px 8px;background:none;border:1px solid #22c55e;border-radius:4px;color:#22c55e;font-size:9px;font-weight:600;cursor:pointer">Accept</button>
+                <button onclick="_validateCausalSuggestion(${s.cause_thread_id}, ${s.effect_thread_id}, this)" style="padding:2px 8px;background:none;border:1px solid var(--purple);border-radius:4px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">Validate with AI</button>
+                <button onclick="_dismissCausalSuggestion(${s.cause_thread_id}, ${s.effect_thread_id})" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:9px;cursor:pointer">Dismiss</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function _acceptCausalSuggestion(causeId, effectId, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = '...'; }
+    fetch('/api/causal-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cause_thread_id: causeId, effect_thread_id: effectId })
+    }).then(r => r.json()).then(result => {
+        if (result.ok) {
+            _showToast('Causal link created', 'success');
+            const el = document.getElementById(`causal-sugg-${causeId}-${effectId}`);
+            if (el) { el.style.opacity = '0.3'; el.innerHTML = '<span style="color:#22c55e;font-size:10px">&#10003; Accepted</span>'; }
+            loadCausalView();
+        }
+    });
+}
+
+function _dismissCausalSuggestion(causeId, effectId) {
+    _causalDismissedPairs.push([causeId, effectId]);
+    localStorage.setItem('causal_dismissed', JSON.stringify(_causalDismissedPairs));
+    const el = document.getElementById(`causal-sugg-${causeId}-${effectId}`);
+    if (el) el.remove();
+    // Update count
+    const remaining = document.querySelectorAll('#causal-suggestions-body > div').length;
+    const countEl = document.getElementById('causal-suggestions-count');
+    if (countEl) countEl.textContent = remaining ? `(${remaining})` : '';
+    if (!remaining) document.getElementById('causal-suggestions-panel').style.display = 'none';
+}
+
+function _validateCausalSuggestion(causeId, effectId, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Validating...'; }
+    fetch('/api/causal-links/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cause_thread_id: causeId, effect_thread_id: effectId })
+    }).then(r => r.json()).then(data => {
+        if (btn) { btn.disabled = false; btn.textContent = 'Validate with AI'; }
+        const a = data.assessment || {};
+        const el = document.getElementById(`causal-sugg-${causeId}-${effectId}`);
+        if (!el) return;
+        const color = a.plausible ? '#22c55e' : '#ef4444';
+        const icon = a.plausible ? '&#10003;' : '&#10007;';
+        // Insert assessment below the reasons
+        const existing = el.querySelector('.causal-assessment');
+        if (existing) existing.remove();
+        const div = document.createElement('div');
+        div.className = 'causal-assessment';
+        div.style.cssText = `margin-top:6px;padding:6px 8px;background:${color}11;border:1px solid ${color}33;border-radius:4px;font-size:10px;color:var(--text-secondary)`;
+        div.innerHTML = `<span style="color:${color};font-weight:600">${icon} ${a.plausible ? 'Plausible' : 'Unlikely'}</span> (${a.confidence || 'medium'}) — ${escHtml(a.mechanism || '')}`;
+        el.appendChild(div);
+    }).catch(() => {
+        if (btn) { btn.disabled = false; btn.textContent = 'Validate with AI'; }
+        _showToast('Validation failed', 'error');
+    });
+}
+
+// ── Chain (Path) Management ──
+
+let _causalPathsCache = [];
+let _activePathId = null;
+let _pathTraceMode = false;
+let _pathTraceIds = [];
+
+function _loadCausalPaths() {
+    fetch('/api/causal-paths')
         .then(r => r.json())
         .then(data => {
-            _causalLinksCache = data.links || [];
-            const countEl = document.getElementById('causal-link-count');
-            if (countEl) countEl.textContent = `${_causalLinksCache.length} causal link${_causalLinksCache.length !== 1 ? 's' : ''}`;
-            _renderCausalThreadPicker();
-            if (_causalMode === 'cascade') _loadCascadeView();
-            else _renderCausalArrows();
+            _causalPathsCache = data.paths || [];
+            _renderCausalChainList();
         });
+}
+
+function _renderCausalChainList() {
+    const container = document.getElementById('causal-chains-list');
+    if (!container) return;
+    if (!_causalPathsCache.length && !_pathTraceMode) {
+        container.innerHTML = '<div style="font-size:9px;color:var(--text-muted);padding:4px 0">No chains saved yet</div>';
+        return;
+    }
+
+    let html = '';
+
+    // Path trace mode banner
+    if (_pathTraceMode) {
+        html += `<div style="padding:6px 8px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.3);border-radius:5px;margin-bottom:4px;font-size:9px">
+            <div style="color:var(--purple);font-weight:600;margin-bottom:2px">Tracing chain... (${_pathTraceIds.length} nodes)</div>
+            <div style="color:var(--text-muted)">Click threads in cascade to add</div>
+            <div style="display:flex;gap:4px;margin-top:4px">
+                <button onclick="_savePathTrace()" style="padding:2px 6px;background:var(--purple);border:none;border-radius:3px;color:#fff;font-size:8px;font-weight:600;cursor:pointer"${_pathTraceIds.length < 2 ? ' disabled' : ''}>Save</button>
+                <button onclick="_cancelPathTrace()" style="padding:2px 6px;background:none;border:1px solid var(--border);border-radius:3px;color:var(--text-muted);font-size:8px;cursor:pointer">Cancel</button>
+            </div>
+        </div>`;
+    }
+
+    html += _causalPathsCache.map(p => {
+        const isActive = _activePathId === p.id;
+        const nodeCount = (p.thread_ids || []).length;
+        return `<div onclick="_selectCausalPath(${p.id})" style="padding:5px 8px;margin-bottom:3px;background:${isActive ? 'rgba(168,85,247,0.12)' : 'var(--bg-secondary)'};border:1px solid ${isActive ? 'var(--purple)' : 'var(--border)'};border-radius:5px;cursor:pointer;font-size:10px;display:flex;justify-content:space-between;align-items:center;transition:all 0.15s">
+            <span style="color:${isActive ? 'var(--purple)' : 'var(--text-secondary)'};font-weight:${isActive ? '600' : '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.name)}</span>
+            <span style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+                <span style="font-size:8px;color:var(--text-muted)">${nodeCount} nodes</span>
+                <span onclick="event.stopPropagation();_deleteCausalPath(${p.id})" style="color:var(--text-muted);font-size:10px;cursor:pointer;padding:0 2px">&times;</span>
+            </span>
+        </div>`;
+    }).join('');
+
+    container.innerHTML = html;
+}
+
+function _selectCausalPath(pathId) {
+    _activePathId = _activePathId === pathId ? null : pathId;
+    _renderCausalChainList();
+    // If cascade mode, highlight the path
+    if (_causalMode === 'cascade' && _causalCascadeData) {
+        _renderCascade(_causalCascadeData);
+    }
+    // If split mode, load the chain into before/after for focused navigation
+    if (_causalMode === 'split' && _activePathId) {
+        const path = _causalPathsCache.find(p => p.id === _activePathId);
+        if (path && path.thread_ids.length >= 2) {
+            _loadPathIntoSplitView(path);
+        }
+    }
+}
+
+function _loadPathIntoSplitView(path) {
+    const tids = path.thread_ids || [];
+    if (tids.length < 2) return;
+    // Load first pair: tids[0] → tids[1]
+    window._pathNavIndex = 0;
+    window._pathNavIds = tids;
+    _showPathStep(0);
+}
+
+function _showPathStep(index) {
+    const tids = window._pathNavIds || [];
+    if (index < 0 || index >= tids.length - 1) return;
+    window._pathNavIndex = index;
+    const causeThread = (_threadsCache || []).find(t => t.id === tids[index]);
+    const effectThread = (_threadsCache || []).find(t => t.id === tids[index + 1]);
+    _causalBeforeThreads = causeThread ? [causeThread] : [];
+    _causalAfterThreads = effectThread ? [effectThread] : [];
+    _renderCausalColumns();
+
+    // Show navigation bar
+    const beforeCol = document.getElementById('causal-before-col');
+    if (beforeCol) {
+        const navHtml = `<div style="padding:6px 12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:10px">
+            <button onclick="_showPathStep(${index - 1})" style="padding:2px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:10px;cursor:pointer;${index <= 0 ? 'opacity:0.3;pointer-events:none' : ''}">&larr; Prev</button>
+            <span style="color:var(--text-muted)">Step ${index + 1} of ${tids.length - 1}</span>
+            <button onclick="_showPathStep(${index + 1})" style="padding:2px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:10px;cursor:pointer;${index >= tids.length - 2 ? 'opacity:0.3;pointer-events:none' : ''}">Next &rarr;</button>
+        </div>`;
+        // Insert nav at the bottom of the arrow zone
+        const arrowZone = document.getElementById('causal-arrow-zone');
+        let navEl = document.getElementById('causal-path-nav');
+        if (!navEl) {
+            navEl = document.createElement('div');
+            navEl.id = 'causal-path-nav';
+            navEl.style.cssText = 'position:absolute;bottom:0;left:-100px;right:-100px;z-index:10';
+            arrowZone.appendChild(navEl);
+        }
+        navEl.innerHTML = navHtml;
+    }
+}
+
+function _startPathTrace() {
+    _pathTraceMode = true;
+    _pathTraceIds = [];
+    _renderCausalChainList();
+    if (_causalMode !== 'cascade') _setCausalMode('cascade');
+    _showToast('Click nodes in the cascade to trace a chain path', 'info', 4000);
+}
+
+function _cancelPathTrace() {
+    _pathTraceMode = false;
+    _pathTraceIds = [];
+    _renderCausalChainList();
+    if (_causalCascadeData) _renderCascade(_causalCascadeData);
+}
+
+function _addToPathTrace(threadId) {
+    if (!_pathTraceMode) return false;
+    if (_pathTraceIds.includes(threadId)) return false; // no duplicates
+    _pathTraceIds.push(threadId);
+    _renderCausalChainList();
+    // Highlight traced nodes in cascade
+    if (_causalCascadeData) _renderCascade(_causalCascadeData);
+    return true;
+}
+
+function _savePathTrace() {
+    if (_pathTraceIds.length < 2) return;
+    const midX = window.innerWidth / 2;
+    const midY = window.innerHeight / 2;
+    _showInlineInput(midX, midY, 'Chain name...', '', (name) => {
+        if (!name || !name.trim()) return;
+        fetch('/api/causal-paths', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name.trim(), thread_ids: _pathTraceIds })
+        }).then(r => r.json()).then(result => {
+            if (result.ok) {
+                _showToast(`Chain "${name.trim()}" saved`, 'success');
+                _pathTraceMode = false;
+                _pathTraceIds = [];
+                _activePathId = result.id;
+                _loadCausalPaths();
+            }
+        });
+    });
+}
+
+function _deleteCausalPath(pathId) {
+    _showConfirm('Delete this chain?', () => {
+        fetch(`/api/causal-paths/${pathId}`, { method: 'DELETE' }).then(() => {
+            if (_activePathId === pathId) _activePathId = null;
+            _loadCausalPaths();
+            _showToast('Chain deleted', 'success');
+        });
+    });
 }
 
 function _renderCausalThreadPicker() {
@@ -17581,11 +17863,25 @@ function _renderCascade(data) {
                 })
                 .on('end', () => _saveCausalPosition(id, nodePos[id].x, nodePos[id].y))
             )
-            .on('click', () => openThreadDetail(id));
+            .on('click', () => {
+                if (_pathTraceMode) {
+                    _addToPathTrace(id);
+                } else {
+                    openThreadDetail(id);
+                }
+            });
+
+        // Highlight for active path or trace mode
+        const activePath = _activePathId ? _causalPathsCache.find(p => p.id === _activePathId) : null;
+        const inActivePath = activePath && (activePath.thread_ids || []).includes(id);
+        const inTrace = _pathTraceMode && _pathTraceIds.includes(id);
+        const dimmed = (activePath && !inActivePath) || (_pathTraceMode && _pathTraceIds.length > 0 && !inTrace);
+        const highlighted = inActivePath || inTrace;
 
         g.append('circle').attr('r', r)
-            .attr('fill', domColor).attr('fill-opacity', 0.15)
-            .attr('stroke', domColor).attr('stroke-width', 2);
+            .attr('fill', domColor).attr('fill-opacity', highlighted ? 0.3 : dimmed ? 0.05 : 0.15)
+            .attr('stroke', highlighted ? '#fff' : domColor).attr('stroke-width', highlighted ? 3 : 2)
+            .attr('opacity', dimmed ? 0.3 : 1);
         g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
             .attr('font-size', Math.min(r * 0.6, 12)).attr('font-weight', 700).attr('fill', '#fff').attr('pointer-events', 'none')
             .text(t.signal_count || '');

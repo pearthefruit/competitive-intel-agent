@@ -82,6 +82,39 @@ Rules:
 - Return ONLY the JSON object"""
 
 
+def build_causal_validation_prompt(cause_thread, effect_thread):
+    """Prompt to validate whether one thread plausibly causes another."""
+    cause_signals = "\n".join(
+        f"- {s.get('title', '')}" for s in (cause_thread.get("signals") or [])[:5]
+    )
+    effect_signals = "\n".join(
+        f"- {s.get('title', '')}" for s in (effect_thread.get("signals") or [])[:5]
+    )
+    return f"""Assess whether Thread A plausibly CAUSES or LEADS TO Thread B.
+
+Thread A: {cause_thread.get('title', '')}
+Domain: {cause_thread.get('domain', '')}
+Summary: {cause_thread.get('synthesis', '')[:300]}
+Recent signals:
+{cause_signals}
+
+Thread B: {effect_thread.get('title', '')}
+Domain: {effect_thread.get('domain', '')}
+Summary: {effect_thread.get('synthesis', '')[:300]}
+Recent signals:
+{effect_signals}
+
+Return JSON:
+{{
+  "plausible": true | false,
+  "mechanism": "1-2 sentences explaining HOW A causes B (the causal mechanism)",
+  "confidence": "high" | "medium" | "low",
+  "temporal": "Does A temporally precede B? yes/no/unclear"
+}}
+
+Be honest. If the connection is weak or speculative, say so. Not everything that correlates is causal."""
+
+
 def build_entity_extraction_prompt(signals_text):
     """Prompt to extract entities including concepts and events from signals."""
     return f"""Extract entities from these news signals. Extract BOTH named entities AND thematic concepts.

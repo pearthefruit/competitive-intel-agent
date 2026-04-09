@@ -3646,6 +3646,82 @@ Return JSON:
         conn.close()
         return jsonify({"ok": True, "created_count": len(created), "ids": created})
 
+    # ── Causal Paths API ────────────────────────────────────────────────
+
+    @app.route("/api/causal-paths", methods=["GET"])
+    def causal_paths_list_api():
+        from db import get_causal_paths
+        conn = get_connection(db_path)
+        paths = get_causal_paths(conn)
+        conn.close()
+        return jsonify({"paths": paths})
+
+    @app.route("/api/causal-paths", methods=["POST"])
+    def causal_path_create_api():
+        from db import create_causal_path
+        data = request.json or {}
+        name = data.get("name", "").strip()
+        thread_ids = data.get("thread_ids", [])
+        if not name or len(thread_ids) < 2:
+            return jsonify({"error": "name and at least 2 thread_ids required"}), 400
+        conn = get_connection(db_path)
+        path_id = create_causal_path(conn, name, thread_ids)
+        conn.close()
+        return jsonify({"ok": True, "id": path_id})
+
+    @app.route("/api/causal-paths/<int:path_id>", methods=["PATCH"])
+    def causal_path_update_api(path_id):
+        from db import update_causal_path
+        data = request.json or {}
+        conn = get_connection(db_path)
+        update_causal_path(conn, path_id, name=data.get("name"), thread_ids=data.get("thread_ids"))
+        conn.close()
+        return jsonify({"ok": True})
+
+    @app.route("/api/causal-paths/<int:path_id>", methods=["DELETE"])
+    def causal_path_delete_api(path_id):
+        from db import delete_causal_path
+        conn = get_connection(db_path)
+        delete_causal_path(conn, path_id)
+        conn.close()
+        return jsonify({"ok": True})
+
+    # ── Causal Discovery ──────────────────────────────────────────────
+
+    @app.route("/api/causal-suggestions", methods=["GET"])
+    def causal_suggestions_api():
+        """Discover potential causal links via heuristics (temporal, entity, brainstorm)."""
+        from db import get_causal_suggestions
+        limit = request.args.get("limit", 20, type=int)
+        conn = get_connection(db_path)
+        suggestions = get_causal_suggestions(conn, limit=limit)
+        conn.close()
+        return jsonify({"suggestions": suggestions})
+
+    @app.route("/api/causal-links/validate", methods=["POST"])
+    def causal_link_validate_api():
+        """LLM validation of a potential causal link between two threads."""
+        from db import get_cluster_detail
+        from agents.llm import generate_json, CHEAP_CHAIN
+        from prompts.signals import build_causal_validation_prompt
+        data = request.json or {}
+        cause_id = data.get("cause_thread_id")
+        effect_id = data.get("effect_thread_id")
+        if not cause_id or not effect_id:
+            return jsonify({"error": "cause_thread_id and effect_thread_id required"}), 400
+        conn = get_connection(db_path)
+        cause = get_cluster_detail(conn, cause_id)
+        effect = get_cluster_detail(conn, effect_id)
+        conn.close()
+        if not cause or not effect:
+            return jsonify({"error": "Thread not found"}), 404
+        prompt = build_causal_validation_prompt(cause, effect)
+        try:
+            result = generate_json(prompt, timeout=15, chain=CHEAP_CHAIN)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        return jsonify({"ok": True, "assessment": result or {}})
+
     @app.route("/api/narratives/<int:narrative_id>/link-thread", methods=["POST"])
     def narratives_link_thread_api(narrative_id):
         """Link an existing thread to a narrative."""
