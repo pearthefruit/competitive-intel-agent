@@ -2791,6 +2791,15 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True, "groups": len(groups), "pruned": pruned})
 
+    @app.route("/api/signals/merge-threads", methods=["POST"])
+    def signals_merge_threads_api():
+        """Merge duplicate threads by title similarity. Keeps highest-signal thread per group."""
+        from db import merge_duplicate_threads
+        conn = get_connection(db_path)
+        result = merge_duplicate_threads(conn)
+        conn.close()
+        return jsonify({"ok": True, **result})
+
     @app.route("/api/signals/timeline", methods=["GET"])
     def signals_timeline_api():
         """Signal timeline data — all signals with dates, grouped by thread."""

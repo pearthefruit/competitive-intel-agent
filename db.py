@@ -2932,6 +2932,120 @@ def get_causal_graph(conn):
     return {"links": links, "threads": threads, "timeline": timeline, "positions": positions}
 
 
+def merge_duplicate_threads(conn, similarity_threshold=0.8):
+    """Find and merge duplicate threads. Keeps the thread with the most signals,
+    reassigns all signals from duplicates, merges domains, deletes empty duplicates.
+    Returns {groups_merged, threads_removed, signals_reassigned}."""
+    from difflib import SequenceMatcher
+
+    threads = conn.execute(
+        """SELECT sc.id, sc.title, sc.domain, sc.narrative_id,
+                  COUNT(sci.id) as signal_count
+           FROM signal_clusters sc
+           LEFT JOIN signal_cluster_items sci ON sci.cluster_id = sc.id
+           WHERE sc.status = 'active' AND sc.domain != 'narrative'
+           GROUP BY sc.id ORDER BY sc.title"""
+    ).fetchall()
+    threads = [dict(t) for t in threads]
+
+    # Find duplicate groups
+    seen = set()
+    groups = []
+    for i, a in enumerate(threads):
+        if a["id"] in seen:
+            continue
+        group = [a]
+        for b in threads[i+1:]:
+            if b["id"] in seen:
+                continue
+            if SequenceMatcher(None, a["title"].lower(), b["title"].lower()).ratio() >= similarity_threshold:
+                group.append(b)
+                seen.add(b["id"])
+        if len(group) > 1:
+            seen.add(a["id"])
+            groups.append(group)
+
+    total_removed = 0
+    total_reassigned = 0
+
+    for group in groups:
+        # Keep the thread with the most signals
+        group.sort(key=lambda t: t["signal_count"], reverse=True)
+        primary = group[0]
+        dupes = group[1:]
+
+        # Merge domains into primary
+        all_domains = set()
+        for t in group:
+            for d in (t["domain"] or "").split("|"):
+                d = d.strip()
+                if d and d in _VALID_DOMAINS:
+                    all_domains.add(d)
+        merged_domain = "|".join(sorted(all_domains)) if all_domains else primary["domain"]
+        conn.execute("UPDATE signal_clusters SET domain = ? WHERE id = ?", (merged_domain, primary["id"]))
+
+        for dup in dupes:
+            # Reassign all signals from dup to primary
+            dup_signals = conn.execute(
+                "SELECT signal_id FROM signal_cluster_items WHERE cluster_id = ?", (dup["id"],)
+            ).fetchall()
+            for row in dup_signals:
+                # Check if signal already in primary
+                existing = conn.execute(
+                    "SELECT 1 FROM signal_cluster_items WHERE cluster_id = ? AND signal_id = ?",
+                    (primary["id"], row["signal_id"])
+                ).fetchone()
+                if not existing:
+                    conn.execute(
+                        "INSERT INTO signal_cluster_items (cluster_id, signal_id) VALUES (?, ?)",
+                        (primary["id"], row["signal_id"])
+                    )
+                    total_reassigned += 1
+            # Delete signal assignments from dup
+            conn.execute("DELETE FROM signal_cluster_items WHERE cluster_id = ?", (dup["id"],))
+
+            # Transfer thread_links
+            for link in conn.execute("SELECT * FROM thread_links WHERE thread_a_id = ? OR thread_b_id = ?", (dup["id"], dup["id"])).fetchall():
+                other_id = link["thread_b_id"] if link["thread_a_id"] == dup["id"] else link["thread_a_id"]
+                if other_id != primary["id"]:
+                    a, b = min(primary["id"], other_id), max(primary["id"], other_id)
+                    conn.execute("INSERT OR IGNORE INTO thread_links (thread_a_id, thread_b_id, label) VALUES (?, ?, ?)",
+                                (a, b, link["label"]))
+            conn.execute("DELETE FROM thread_links WHERE thread_a_id = ? OR thread_b_id = ?", (dup["id"], dup["id"]))
+
+            # Transfer causal_links
+            for cl in conn.execute("SELECT * FROM causal_links WHERE cause_thread_id = ? OR effect_thread_id = ?", (dup["id"], dup["id"])).fetchall():
+                new_cause = primary["id"] if cl["cause_thread_id"] == dup["id"] else cl["cause_thread_id"]
+                new_effect = primary["id"] if cl["effect_thread_id"] == dup["id"] else cl["effect_thread_id"]
+                if new_cause != new_effect:
+                    conn.execute("INSERT OR IGNORE INTO causal_links (cause_thread_id, effect_thread_id, label, status) VALUES (?, ?, ?, ?)",
+                                (new_cause, new_effect, cl["label"], cl["status"]))
+            conn.execute("DELETE FROM causal_links WHERE cause_thread_id = ? OR effect_thread_id = ?", (dup["id"], dup["id"]))
+
+            # Transfer board positions (keep primary's if it has one)
+            conn.execute("DELETE FROM board_positions WHERE node_type = 'thread' AND node_id = ?", (dup["id"],))
+
+            # Transfer entity assignments
+            conn.execute("UPDATE OR IGNORE signal_entities SET cluster_id = ? WHERE cluster_id = ?", (primary["id"], dup["id"]))
+
+            # If dup belongs to a narrative, keep primary's narrative_id (or adopt dup's if primary has none)
+            if dup.get("narrative_id") and not primary.get("narrative_id"):
+                conn.execute("UPDATE signal_clusters SET narrative_id = ? WHERE id = ?", (dup["narrative_id"], primary["id"]))
+
+            # Mark dup as inactive
+            conn.execute("UPDATE signal_clusters SET status = 'merged' WHERE id = ?", (dup["id"],))
+            total_removed += 1
+
+        # Update primary's last_signal_at
+        conn.execute("""UPDATE signal_clusters SET last_signal_at = (
+            SELECT MAX(s.published_at) FROM signal_cluster_items sci
+            JOIN signals s ON s.id = sci.signal_id WHERE sci.cluster_id = ?
+        ) WHERE id = ?""", (primary["id"], primary["id"]))
+
+    conn.commit()
+    return {"groups_merged": len(groups), "threads_removed": total_removed, "signals_reassigned": total_reassigned}
+
+
 # ── Causal path helpers ────────────────────────────────────────────────
 
 def create_causal_path(conn, name, thread_ids):

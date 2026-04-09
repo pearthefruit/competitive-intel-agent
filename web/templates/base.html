@@ -5499,6 +5499,7 @@
                 <div style="display:flex;gap:4px;margin-top:6px">
                     <button id="signals-resynth-btn" onclick="runResynthesize()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.2);border-radius:6px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">🧠 Re-detect</button>
                     <button id="signals-prune-btn" onclick="_pruneSignals()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:9px;font-weight:600;cursor:pointer">✂️ Prune</button>
+                    <button onclick="_mergeThreads()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:9px;font-weight:600;cursor:pointer">🔗 Merge</button>
                 </div>
                 <div class="signals-freshness" id="signals-freshness" style="font-size:9px;color:var(--text-muted);margin-top:4px;text-align:center">No scans yet</div>
             </div>
@@ -15079,6 +15080,25 @@ function _pruneSignals() {
             if (btn) { btn.disabled = false; btn.textContent = '✂️ Prune Duplicates'; }
             _showToast('Prune failed — restart server', 'error');
         });
+}
+
+function _mergeThreads() {
+    _showConfirm('Merge duplicate threads? This will consolidate threads with similar titles, keeping the one with the most signals.', () => {
+        _showToast('Merging threads...', 'info', 10000);
+        fetch('/api/signals/merge-threads', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    _showToast(`Merged ${data.groups_merged} groups: ${data.threads_removed} duplicates removed, ${data.signals_reassigned} signals reassigned`, 'success', 8000);
+                    loadSignals();
+                    if (_signalTab === 'graph') loadBoard();
+                    if (_signalTab === 'causal') loadCausalView();
+                } else {
+                    _showToast(data.error || 'Merge failed', 'error');
+                }
+            })
+            .catch(() => _showToast('Merge failed — restart server', 'error'));
+    });
 }
 
 function _runCustomSearch() {

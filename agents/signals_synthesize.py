@@ -143,7 +143,7 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
         title_lower = title.lower()
         merged = False
         for eid, etitle in existing_titles.items():
-            if SequenceMatcher(None, title_lower, etitle).ratio() >= 0.85:
+            if SequenceMatcher(None, title_lower, etitle).ratio() >= 0.75:
                 print(f"[synthesize] Merging near-duplicate thread '{title}' into existing #{eid} '{etitle}'")
                 for sid in sig_ids:
                     if isinstance(sid, int):
