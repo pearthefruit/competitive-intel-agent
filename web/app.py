@@ -3853,16 +3853,6 @@ Return JSON:
         conn.close()
         return jsonify({"ok": True})
 
-    @app.route("/api/narratives/<int:narrative_id>", methods=["PATCH"])
-    def narratives_update_api(narrative_id):
-        """Update narrative fields (title, thesis, reasoning, status)."""
-        from db import update_narrative
-        data = request.json or {}
-        conn = get_connection(db_path)
-        update_narrative(conn, narrative_id, data)
-        conn.close()
-        return jsonify({"ok": True})
-
     @app.route("/api/narratives/<int:narrative_id>/add-subclaim", methods=["POST"])
     def narratives_add_subclaim_api(narrative_id):
         """Add a hypothesis as a sub-claim to an existing narrative."""
