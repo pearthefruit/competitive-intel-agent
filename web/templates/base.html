@@ -3782,6 +3782,7 @@
         .sig-tab-content { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow-y: auto; padding: 8px; }
         .sig-tab-content.active { display: block; }
         #sig-tab-graph.active { display: flex !important; flex-direction: column; }
+        #sig-tab-causal.active { display: flex !important; flex-direction: column; }
 
         /* Thread cards */
         .thread-card {
@@ -17260,18 +17261,19 @@ let _causalDismissedPairs = JSON.parse(localStorage.getItem('causal_dismissed') 
 
 function loadCausalView() {
     _loadCausalPaths();
-    Promise.all([
-        fetch('/api/causal-links').then(r => r.json()),
-        fetch('/api/causal-suggestions?limit=15').then(r => r.json()),
-    ]).then(([linkData, suggData]) => {
+    // Load links first (critical), then suggestions (nice-to-have)
+    fetch('/api/causal-links').then(r => r.json()).then(linkData => {
         _causalLinksCache = linkData.links || [];
         const countEl = document.getElementById('causal-link-count');
         if (countEl) countEl.textContent = `${_causalLinksCache.length} causal link${_causalLinksCache.length !== 1 ? 's' : ''}`;
         _renderCausalThreadPicker();
-        _renderCausalSuggestions(suggData.suggestions || []);
         if (_causalMode === 'cascade') _loadCascadeView();
         else _renderCausalArrows();
     });
+    // Load suggestions separately — don't block on failure
+    fetch('/api/causal-suggestions?limit=15').then(r => r.json())
+        .then(data => _renderCausalSuggestions(data.suggestions || []))
+        .catch(e => console.warn('[causal] Suggestions failed:', e));
 }
 
 function _renderCausalSuggestions(suggestions) {
@@ -17580,7 +17582,8 @@ function _removeCausalThread(threadId, column) {
 function _renderCausalColumns() {
     _renderColumnThreads('causal-before-threads', _causalBeforeThreads, 'before');
     _renderColumnThreads('causal-after-threads', _causalAfterThreads, 'after');
-    _renderCausalArrows();
+    // Defer arrow rendering so DOM has reflowed and getBoundingClientRect returns correct positions
+    requestAnimationFrame(() => _renderCausalArrows());
 }
 
 function _renderColumnThreads(containerId, threads, column) {
