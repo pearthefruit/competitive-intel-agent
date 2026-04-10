@@ -422,6 +422,7 @@ def _migrate_db(conn):
         ("signals", "source_type", "TEXT DEFAULT 'news'"),
         ("signal_clusters", "narrative_id", "INTEGER REFERENCES narratives(id)"),
         ("signal_cluster_items", "evidence_stance", "TEXT DEFAULT 'neutral'"),
+        ("causal_links", "alternatives_json", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -2705,8 +2706,8 @@ def get_causal_links(conn, thread_id=None, status=None):
 
 
 def update_causal_link(conn, link_id, **kwargs):
-    """Update causal link fields (label, status, confidence, reasoning)."""
-    allowed = {'label', 'status', 'confidence', 'reasoning', 'hypothesis_id'}
+    """Update causal link fields (label, status, confidence, reasoning, alternatives_json)."""
+    allowed = {'label', 'status', 'confidence', 'reasoning', 'hypothesis_id', 'alternatives_json'}
     updates = {k: v for k, v in kwargs.items() if k in allowed}
     if not updates:
         return
@@ -3088,6 +3089,59 @@ def delete_causal_path(conn, path_id):
     """Delete a causal path."""
     conn.execute("DELETE FROM causal_paths WHERE id = ?", (path_id,))
     conn.commit()
+
+
+def promote_chain_to_narrative(conn, path_id):
+    """Promote a causal chain to a narrative. Returns narrative_id."""
+    path = conn.execute("SELECT * FROM causal_paths WHERE id = ?", (path_id,)).fetchone()
+    if not path:
+        return None
+    tids = json.loads(path["thread_ids_json"])
+    if len(tids) < 2:
+        return None
+
+    # Build thesis from chain structure
+    threads = []
+    for tid in tids:
+        row = conn.execute("SELECT id, title FROM signal_clusters WHERE id = ?", (tid,)).fetchone()
+        threads.append(dict(row) if row else {"id": tid, "title": f"Thread #{tid}"})
+
+    # Get causal link labels for adjacent pairs
+    link_labels = []
+    for i in range(len(tids) - 1):
+        link = conn.execute(
+            "SELECT label FROM causal_links WHERE cause_thread_id = ? AND effect_thread_id = ?",
+            (tids[i], tids[i + 1])
+        ).fetchone()
+        link_labels.append(link["label"] if link and link["label"] else "leads to")
+
+    # Construct thesis from chain
+    parts = []
+    for i, t in enumerate(threads):
+        parts.append(t["title"])
+        if i < len(link_labels):
+            parts.append(f"({link_labels[i]})")
+    thesis = " → ".join(
+        f"{threads[i]['title']} ({link_labels[i]}) {threads[i+1]['title']}"
+        for i in range(len(threads) - 1)
+    )
+
+    # Create narrative
+    cur = conn.execute(
+        "INSERT INTO narratives (title, thesis, status) VALUES (?, ?, 'active')",
+        (path["name"], thesis)
+    )
+    narrative_id = cur.lastrowid
+
+    # Link all threads
+    for tid in tids:
+        conn.execute(
+            "UPDATE signal_clusters SET narrative_id = ? WHERE id = ? AND narrative_id IS NULL",
+            (narrative_id, tid)
+        )
+
+    conn.commit()
+    return narrative_id
 
 
 def update_hypothesis_status(conn, hypothesis_id, status, narrative_id=None):

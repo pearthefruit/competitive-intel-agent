@@ -2099,6 +2099,46 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"ok": True})
 
+    @app.route("/api/signals/threads/<int:thread_id>/ai-rename", methods=["POST"])
+    def signals_thread_ai_rename_api(thread_id):
+        """LLM generates a better directional title for a thread based on its signals."""
+        from db import get_cluster_detail
+        from agents.llm import generate_json, FAST_CHAIN
+        conn = get_connection(db_path)
+        detail = get_cluster_detail(conn, thread_id)
+        if not detail:
+            conn.close()
+            return jsonify({"error": "Thread not found"}), 404
+        signals = detail.get("signals", [])[:15]
+        signals_text = "\n".join(f"- {s.get('title', '')}" for s in signals)
+        prompt = f"""Rename this thread to have a specific DIRECTIONAL claim title.
+
+Current title: {detail.get('title', '')}
+Domain: {detail.get('domain', '')}
+Signals:
+{signals_text}
+
+RULES:
+- The title MUST take a DIRECTION — something is going UP, DOWN, ACCELERATING, DECLINING, SHIFTING
+- BAD: "Labor Market Trends" → GOOD: "US Labor Market Weakening Despite Strong Headlines"
+- BAD: "Stock Market Rotation" → GOOD: "Tech Stocks Surging While Industrials Decline"
+- Be specific with entities, geographies, sectors
+
+Return JSON: {{"title": "New directional title"}}"""
+        try:
+            result = generate_json(prompt, timeout=10, chain=FAST_CHAIN)
+        except Exception as e:
+            conn.close()
+            return jsonify({"error": str(e)}), 500
+        new_title = (result or {}).get("title", "").strip()
+        if not new_title:
+            conn.close()
+            return jsonify({"error": "LLM returned empty title"}), 500
+        conn.execute("UPDATE signal_clusters SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (new_title, thread_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "title": new_title})
+
     @app.route("/api/signals/threads/<int:thread_id>/propose-split", methods=["POST"])
     def signals_thread_propose_split_api(thread_id):
         """LLM proposes how to split a large thread into specific sub-threads."""
@@ -2681,6 +2721,7 @@ def create_app(db_path="intel.db"):
         )
         conn.commit()
         conn.close()
+        _review_groups_cache["key"] = None  # invalidate groups cache
         return jsonify({"ok": True})
 
     @app.route("/api/signals/review-queue/dismiss", methods=["POST"])
@@ -2695,6 +2736,7 @@ def create_app(db_path="intel.db"):
         conn.execute("UPDATE signals SET signal_status = 'noise' WHERE id = ?", (signal_id,))
         conn.commit()
         conn.close()
+        _review_groups_cache["key"] = None  # invalidate groups cache
         return jsonify({"ok": True})
 
     @app.route("/api/signals/review-queue/unassign", methods=["POST"])
@@ -2728,6 +2770,134 @@ def create_app(db_path="intel.db"):
         conn.commit()
         conn.close()
         return jsonify({"ok": True})
+
+    _review_groups_cache = {"key": None, "data": None}
+
+    @app.route("/api/signals/review-queue/groups", methods=["GET"])
+    def signals_review_queue_groups_api():
+        """Cluster unassigned signals by title similarity, return grouped + ungrouped with TF-IDF suggestions.
+        Results are cached in memory — only recomputed when the set of unassigned signals changes."""
+        from difflib import SequenceMatcher
+        from agents.signals_classify import score_signals, build_thread_profiles
+
+        conn = get_connection(db_path)
+        unassigned = conn.execute(
+            """SELECT * FROM signals
+               WHERE id NOT IN (SELECT signal_id FROM signal_cluster_items)
+               AND COALESCE(signal_status, 'signal') != 'noise'
+               ORDER BY collected_at DESC LIMIT 500"""
+        ).fetchall()
+        unassigned = [dict(r) for r in unassigned]
+        total_unassigned = len(unassigned)
+
+        if not unassigned:
+            conn.close()
+            return jsonify({"groups": [], "ungrouped": [], "total_unassigned": 0})
+
+        # Check cache — return instantly if unassigned signal set hasn't changed
+        cache_key = hash(tuple(sorted(s["id"] for s in unassigned)))
+        if _review_groups_cache["key"] == cache_key and _review_groups_cache["data"]:
+            conn.close()
+            return jsonify(_review_groups_cache["data"])
+
+        # Cluster by title similarity (0.65 threshold)
+        THRESHOLD = 0.65
+        seen = set()
+        groups = []
+        ungrouped_signals = []
+
+        for i in range(len(unassigned)):
+            if unassigned[i]["id"] in seen:
+                continue
+            group = [unassigned[i]]
+            title_i = (unassigned[i]["title"] or "").lower()
+            for j in range(i + 1, len(unassigned)):
+                if unassigned[j]["id"] in seen:
+                    continue
+                title_j = (unassigned[j]["title"] or "").lower()
+                if SequenceMatcher(None, title_i, title_j).ratio() >= THRESHOLD:
+                    group.append(unassigned[j])
+                    seen.add(unassigned[j]["id"])
+            if len(group) > 1:
+                seen.add(unassigned[i]["id"])
+                groups.append(group)
+            else:
+                ungrouped_signals.append(unassigned[i])
+
+        # Build TF-IDF profile once for scoring
+        try:
+            profile = build_thread_profiles(conn)
+        except Exception:
+            profile = None
+
+        # Score each group
+        group_results = []
+        for g in groups:
+            representative = max(g, key=lambda s: len(s.get("title") or ""))
+            top_suggestion = None
+            all_suggestions = []
+            if profile:
+                try:
+                    scored = score_signals(conn, [representative], profile)
+                    if scored and scored[0].get("scores"):
+                        all_suggestions = [{"thread_id": s["thread_id"], "thread_title": s["thread_title"], "score": round(s["score"], 3)} for s in scored[0]["scores"][:3]]
+                        if all_suggestions:
+                            top_suggestion = all_suggestions[0]
+                except Exception:
+                    pass
+            group_results.append({
+                "group_title": representative.get("title", ""),
+                "signals": [{"id": s["id"], "title": s.get("title", ""), "source_name": s.get("source_name", s.get("source", "")), "published_at": s.get("published_at", ""), "domain": s.get("domain", "")} for s in g],
+                "suggested_thread": top_suggestion,
+                "all_suggestions": all_suggestions,
+            })
+
+        # Score ungrouped signals
+        ungrouped_results = []
+        if ungrouped_signals and profile:
+            try:
+                scored_all = score_signals(conn, ungrouped_signals, profile)
+                for sc in scored_all:
+                    sig = next((s for s in ungrouped_signals if s["id"] == sc["signal_id"]), {})
+                    ungrouped_results.append({
+                        "id": sc["signal_id"], "title": sc.get("signal_title", ""),
+                        "source_name": sig.get("source_name", sig.get("source", "")),
+                        "published_at": sig.get("published_at", ""), "domain": sig.get("domain", ""),
+                        "confidence": sc.get("confidence", "low"),
+                        "suggestions": [{"thread_id": s["thread_id"], "thread_title": s["thread_title"], "score": round(s["score"], 3)} for s in sc.get("scores", [])[:3]],
+                    })
+            except Exception:
+                ungrouped_results = [{"id": s["id"], "title": s.get("title", ""), "source_name": s.get("source_name", ""), "published_at": s.get("published_at", ""), "domain": s.get("domain", ""), "confidence": "low", "suggestions": []} for s in ungrouped_signals]
+        elif ungrouped_signals:
+            ungrouped_results = [{"id": s["id"], "title": s.get("title", ""), "source_name": s.get("source_name", ""), "published_at": s.get("published_at", ""), "domain": s.get("domain", ""), "confidence": "low", "suggestions": []} for s in ungrouped_signals]
+
+        conn.close()
+        # Sort groups by size (largest first)
+        group_results.sort(key=lambda g: len(g["signals"]), reverse=True)
+        result = {"groups": group_results, "ungrouped": ungrouped_results, "total_unassigned": total_unassigned}
+        _review_groups_cache["key"] = cache_key
+        _review_groups_cache["data"] = result
+        return jsonify(result)
+
+    @app.route("/api/signals/review-queue/bulk-assign", methods=["POST"])
+    def signals_review_bulk_assign_api():
+        """Assign multiple signals to a thread at once."""
+        from db import link_signal_to_cluster
+        data = request.json or {}
+        signal_ids = data.get("signal_ids", [])
+        thread_id = data.get("thread_id")
+        if not signal_ids or not thread_id:
+            return jsonify({"error": "signal_ids and thread_id required"}), 400
+        conn = get_connection(db_path)
+        count = 0
+        for sid in signal_ids:
+            link_signal_to_cluster(conn, thread_id, sid)
+            count += 1
+        conn.execute("UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (thread_id,))
+        conn.commit()
+        conn.close()
+        _review_groups_cache["key"] = None  # invalidate groups cache
+        return jsonify({"ok": True, "assigned": count})
 
     @app.route("/api/signals/prune", methods=["POST"])
     def signals_prune_api():
@@ -3782,8 +3952,8 @@ Return JSON:
         data = request.json or {}
         name = data.get("name", "").strip()
         thread_ids = data.get("thread_ids", [])
-        if not name or len(thread_ids) < 2:
-            return jsonify({"error": "name and at least 2 thread_ids required"}), 400
+        if not name or len(thread_ids) < 1:
+            return jsonify({"error": "name and at least 1 thread_id required"}), 400
         conn = get_connection(db_path)
         path_id = create_causal_path(conn, name, thread_ids)
         conn.close()
@@ -3818,11 +3988,41 @@ Return JSON:
         conn.close()
         return jsonify({"suggestions": suggestions})
 
+    @app.route("/api/causal-links/<int:link_id>/validate", methods=["POST"])
+    def causal_link_validate_api(link_id):
+        """Devil's advocate validation: challenge the causal claim, surface alternatives."""
+        from db import get_cluster_detail, get_causal_links, update_causal_link
+        from agents.llm import generate_json, FAST_CHAIN
+        from prompts.signals import build_causal_validation_prompt
+        conn = get_connection(db_path)
+        link = conn.execute("SELECT * FROM causal_links WHERE id = ?", (link_id,)).fetchone()
+        if not link:
+            conn.close()
+            return jsonify({"error": "Link not found"}), 404
+        cause = get_cluster_detail(conn, link["cause_thread_id"])
+        effect = get_cluster_detail(conn, link["effect_thread_id"])
+        if not cause or not effect:
+            conn.close()
+            return jsonify({"error": "Thread not found"}), 404
+        prompt = build_causal_validation_prompt(cause, effect)
+        try:
+            result = generate_json(prompt, timeout=20, chain=FAST_CHAIN)
+        except Exception as e:
+            conn.close()
+            return jsonify({"error": str(e)}), 500
+        # Persist alternatives on the link
+        import json as _json
+        if result and result.get("alternatives"):
+            update_causal_link(conn, link_id,
+                               alternatives_json=_json.dumps(result["alternatives"]))
+        conn.close()
+        return jsonify({"ok": True, "assessment": result or {}})
+
     @app.route("/api/causal-links/validate", methods=["POST"])
-    def causal_link_validate_api():
-        """LLM validation of a potential causal link between two threads."""
+    def causal_link_validate_legacy_api():
+        """Legacy validation endpoint (by thread IDs, not link ID)."""
         from db import get_cluster_detail
-        from agents.llm import generate_json, CHEAP_CHAIN
+        from agents.llm import generate_json, FAST_CHAIN
         from prompts.signals import build_causal_validation_prompt
         data = request.json or {}
         cause_id = data.get("cause_thread_id")
@@ -3837,10 +4037,21 @@ Return JSON:
             return jsonify({"error": "Thread not found"}), 404
         prompt = build_causal_validation_prompt(cause, effect)
         try:
-            result = generate_json(prompt, timeout=15, chain=CHEAP_CHAIN)
+            result = generate_json(prompt, timeout=20, chain=FAST_CHAIN)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
         return jsonify({"ok": True, "assessment": result or {}})
+
+    @app.route("/api/causal-paths/<int:path_id>/promote", methods=["POST"])
+    def causal_path_promote_api(path_id):
+        """Promote a causal chain to a narrative."""
+        from db import promote_chain_to_narrative
+        conn = get_connection(db_path)
+        narrative_id = promote_chain_to_narrative(conn, path_id)
+        conn.close()
+        if narrative_id:
+            return jsonify({"ok": True, "narrative_id": narrative_id})
+        return jsonify({"error": "Chain not found or too short (need >= 2 threads)"}), 400
 
     @app.route("/api/narratives/<int:narrative_id>/link-thread", methods=["POST"])
     def narratives_link_thread_api(narrative_id):

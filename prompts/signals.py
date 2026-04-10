@@ -92,36 +92,49 @@ Rules:
 
 
 def build_causal_validation_prompt(cause_thread, effect_thread):
-    """Prompt to validate whether one thread plausibly causes another."""
+    """Devil's advocate prompt: challenge the causal claim, surface alternative explanations."""
     cause_signals = "\n".join(
         f"- {s.get('title', '')}" for s in (cause_thread.get("signals") or [])[:5]
     )
     effect_signals = "\n".join(
         f"- {s.get('title', '')}" for s in (effect_thread.get("signals") or [])[:5]
     )
-    return f"""Assess whether Thread A plausibly CAUSES or LEADS TO Thread B.
+    return f"""The user claims Thread A CAUSES Thread B. Your job is to CHALLENGE this claim fairly.
 
-Thread A: {cause_thread.get('title', '')}
+Thread A (alleged cause): {cause_thread.get('title', '')}
 Domain: {cause_thread.get('domain', '')}
 Summary: {cause_thread.get('synthesis', '')[:300]}
 Recent signals:
 {cause_signals}
 
-Thread B: {effect_thread.get('title', '')}
+Thread B (alleged effect): {effect_thread.get('title', '')}
 Domain: {effect_thread.get('domain', '')}
 Summary: {effect_thread.get('synthesis', '')[:300]}
 Recent signals:
 {effect_signals}
 
+Instructions:
+1. First, assess the claimed causal link honestly (is there a plausible mechanism?).
+2. Then, generate 2-3 ALTERNATIVE EXPLANATIONS for Thread B that do NOT involve Thread A.
+   These should be genuinely plausible — not strawmen.
+3. For each alternative, explain what evidence would distinguish it from the claimed cause.
+
 Return JSON:
 {{
   "plausible": true | false,
-  "mechanism": "1-2 sentences explaining HOW A causes B (the causal mechanism)",
+  "mechanism": "1-2 sentences: the most likely causal mechanism IF this link is real",
   "confidence": "high" | "medium" | "low",
-  "temporal": "Does A temporally precede B? yes/no/unclear"
+  "temporal": "Does A temporally precede B? yes/no/unclear",
+  "alternatives": [
+    {{
+      "explanation": "An alternative cause for Thread B that doesn't involve Thread A",
+      "plausibility": "high" | "medium" | "low",
+      "distinguishing_evidence": "What evidence would prove THIS is the real cause instead?"
+    }}
+  ]
 }}
 
-Be honest. If the connection is weak or speculative, say so. Not everything that correlates is causal."""
+Be rigorous. Correlation is not causation. The user deserves truth, not confirmation."""
 
 
 def build_entity_extraction_prompt(signals_text):
