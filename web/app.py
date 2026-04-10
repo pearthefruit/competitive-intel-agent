@@ -2392,6 +2392,219 @@ Return JSON: {{"title": "New directional title"}}"""
         conn.close()
         return jsonify({"ok": False, "body": row["body"] or "", "error": "Could not extract article text"})
 
+    # ── Quick Capture ──────────────────────────────────────────────────
+
+    @app.route("/capture")
+    def capture_page():
+        return render_template("capture.html")
+
+    @app.route("/api/signals/manual", methods=["POST"])
+    def signals_manual_capture():
+        """Manually capture a signal from pasted content (LinkedIn, X, etc.).
+
+        Accepts raw text, auto-parses LinkedIn format, classifies domain,
+        runs TF-IDF for immediate thread assignment.
+        """
+        import hashlib
+        import re
+        import json as _json
+        from datetime import datetime as _dt, timedelta as _td
+        from agents.signals_collect import _classify_domain
+
+        data = request.json or {}
+        content = (data.get("content") or "").strip()
+        if not content:
+            return jsonify({"error": "content required"}), 400
+
+        source_tag = data.get("source", "linkedin")  # linkedin, twitter, manual, etc.
+        source_url = (data.get("url") or "").strip()
+        user_author = (data.get("author") or "").strip()
+        user_author_context = (data.get("author_context") or "").strip()
+        user_date = (data.get("published_at") or "").strip()
+
+        # ── Smart paste parser (LinkedIn format detection) ──────────
+        parsed_author = user_author
+        parsed_author_context = user_author_context
+        parsed_date = user_date
+        parsed_engagement = None
+        parsed_content = content
+
+        lines = content.split("\n")
+        lines_stripped = [l.strip() for l in lines]
+
+        # Detect LinkedIn format: Name / Title at Company / Time indicator / content
+        is_linkedin_format = False
+        header_end = 0
+
+        if len(lines_stripped) >= 3:
+            # Line 2 often has title/company pattern, line 3 has relative time
+            time_pattern = re.compile(
+                r"^(\d+[dhwmo]|just now|yesterday|\d+\s*(day|hour|week|month|min)s?\s*ago)",
+                re.IGNORECASE,
+            )
+            # Check lines 1-4 for a time indicator
+            for i in range(1, min(5, len(lines_stripped))):
+                line = lines_stripped[i]
+                # LinkedIn time lines often end with "• 🌐" or "• Edited" or just the time
+                clean_line = re.sub(r"[•·🌐🔒]\s*|Edited\s*", "", line).strip()
+                if time_pattern.match(clean_line) and len(clean_line) < 40:
+                    is_linkedin_format = True
+                    header_end = i + 1
+                    # Parse relative time to absolute date
+                    now = _dt.now()
+                    m = re.match(r"(\d+)\s*([dhwmo])", clean_line)
+                    if m:
+                        n, unit = int(m.group(1)), m.group(2)
+                        delta = {"d": _td(days=n), "h": _td(hours=n),
+                                 "w": _td(weeks=n), "m": _td(days=n*30),
+                                 "o": _td(days=n*30)}.get(unit, _td(days=n))
+                        parsed_date = parsed_date or (now - delta).strftime("%Y-%m-%d")
+                    elif "yesterday" in clean_line.lower():
+                        parsed_date = parsed_date or (now - _td(days=1)).strftime("%Y-%m-%d")
+                    elif "just now" in clean_line.lower():
+                        parsed_date = parsed_date or now.strftime("%Y-%m-%d")
+                    break
+
+        if is_linkedin_format:
+            # Line 0 = author name
+            if not parsed_author and lines_stripped[0]:
+                parsed_author = lines_stripped[0]
+            # Lines between name and time = title/company context
+            context_lines = [l for l in lines_stripped[1:header_end-1] if l and not re.match(r"^\d+[dhwmo]", l)]
+            if not parsed_author_context and context_lines:
+                parsed_author_context = " · ".join(context_lines)
+
+            # Extract engagement metrics from bottom
+            engagement_pattern = re.compile(
+                r"(?:(\d[\d,]*)\s*(?:likes?|reactions?|👍|❤️|🎉))|(?:(\d[\d,]*)\s*comments?)|(?:(\d[\d,]*)\s*reposts?)",
+                re.IGNORECASE,
+            )
+            # Check last 3 lines for engagement
+            for line in reversed(lines_stripped[-3:]):
+                matches = engagement_pattern.findall(line)
+                if matches:
+                    eng = {}
+                    for likes, comments, reposts in matches:
+                        if likes:
+                            eng["likes"] = int(likes.replace(",", ""))
+                        if comments:
+                            eng["comments"] = int(comments.replace(",", ""))
+                        if reposts:
+                            eng["reposts"] = int(reposts.replace(",", ""))
+                    if eng:
+                        parsed_engagement = eng
+                    break
+
+            # Strip header and engagement lines from content
+            # Skip blank lines after header
+            body_start = header_end
+            while body_start < len(lines_stripped) and not lines_stripped[body_start]:
+                body_start += 1
+            # Strip engagement footer
+            body_end = len(lines)
+            if parsed_engagement:
+                for i in range(len(lines_stripped) - 1, max(body_start, len(lines_stripped) - 4), -1):
+                    if engagement_pattern.search(lines_stripped[i]):
+                        body_end = i
+                        break
+            parsed_content = "\n".join(lines[body_start:body_end]).strip()
+
+        # Strip hashtags from content, preserve as tags
+        hashtags = re.findall(r"#(\w+)", parsed_content)
+        clean_content = re.sub(r"\s*#\w+", "", parsed_content).strip()
+
+        # ── Build signal dict ──────────────────────────────────────
+        title = clean_content[:120].split("\n")[0].rstrip(".")
+        if len(clean_content) > 120:
+            title = title.rsplit(" ", 1)[0] + "…"
+
+        domain = _classify_domain(title, clean_content)
+        content_hash = hashlib.sha256(
+            f"manual|{source_url or ''}|{title}".lower().strip().encode()
+        ).hexdigest()
+
+        engagement_str = _json.dumps(parsed_engagement) if parsed_engagement else None
+
+        signal_dict = {
+            "source": source_tag,
+            "domain": domain,
+            "title": title,
+            "url": source_url,
+            "body": clean_content[:2000],
+            "published_at": parsed_date or _dt.now().strftime("%Y-%m-%d"),
+            "source_name": source_tag.replace("_", " ").title(),
+            "content_hash": content_hash,
+            "raw_json": _json.dumps({
+                "original_paste": content[:3000],
+                "hashtags": hashtags,
+                "parsed_format": "linkedin" if is_linkedin_format else "raw",
+            }),
+            "source_type": "social",
+            "author": parsed_author or None,
+            "author_context": parsed_author_context or None,
+            "engagement_json": engagement_str,
+        }
+
+        # ── Insert signal ──────────────────────────────────────────
+        from db import insert_signal, link_signal_to_cluster
+        conn = get_connection(db_path)
+        sig_id = insert_signal(conn, signal_dict)
+
+        if not sig_id:
+            conn.close()
+            return jsonify({"ok": False, "error": "Duplicate signal (already captured)"}), 409
+
+        conn.commit()
+
+        # ── Immediate TF-IDF thread assignment ─────────────────────
+        thread_assignment = None
+        try:
+            from agents.signals_classify import score_signals
+            sig_row = conn.execute("SELECT id, title FROM signals WHERE id = ?", (sig_id,)).fetchone()
+            if sig_row:
+                scored = score_signals(conn, [{"id": sig_row["id"], "title": sig_row["title"]}])
+                if scored and scored[0]["confidence"] == "high" and scored[0]["top_thread_id"]:
+                    tid = scored[0]["top_thread_id"]
+                    link_signal_to_cluster(conn, tid, sig_id)
+                    conn.execute(
+                        "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (tid,),
+                    )
+                    conn.commit()
+                    top = scored[0]["scores"][0] if scored[0]["scores"] else {}
+                    thread_assignment = {
+                        "thread_id": tid,
+                        "thread_title": top.get("thread_title", ""),
+                        "score": scored[0]["top_score"],
+                        "confidence": "high",
+                    }
+                elif scored and scored[0]["confidence"] == "medium" and scored[0]["top_thread_id"]:
+                    top = scored[0]["scores"][0] if scored[0]["scores"] else {}
+                    thread_assignment = {
+                        "thread_id": scored[0]["top_thread_id"],
+                        "thread_title": top.get("thread_title", ""),
+                        "score": scored[0]["top_score"],
+                        "confidence": "medium",
+                        "suggestion": True,
+                    }
+        except Exception as e:
+            print(f"[capture] TF-IDF assignment error: {e}")
+
+        conn.close()
+
+        return jsonify({
+            "ok": True,
+            "signal_id": sig_id,
+            "title": title,
+            "domain": domain,
+            "author": parsed_author,
+            "author_context": parsed_author_context,
+            "published_at": signal_dict["published_at"],
+            "engagement": parsed_engagement,
+            "thread_assignment": thread_assignment,
+            "parsed_format": "linkedin" if is_linkedin_format else "raw",
+        })
+
     @app.route("/api/signals/search", methods=["POST"])
     def signals_targeted_search_api():
         """Run a targeted signal search for a specific query. Optionally link results to a pattern.
@@ -2657,6 +2870,19 @@ Return JSON: {{"title": "New directional title"}}"""
         return Response(generate(), mimetype="text/event-stream",
                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+    @app.route("/api/signals/<int:signal_id>", methods=["PATCH"])
+    def signals_update_api(signal_id):
+        """Update a signal's title."""
+        data = request.json or {}
+        title = (data.get("title") or "").strip()
+        if not title:
+            return jsonify({"error": "title required"}), 400
+        conn = get_connection(db_path)
+        conn.execute("UPDATE signals SET title = ? WHERE id = ?", (title, signal_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True})
+
     @app.route("/api/signals/review-queue", methods=["GET"])
     def signals_review_queue_api():
         """Get unassigned signals with TF-IDF thread suggestions for user review."""
@@ -2800,7 +3026,7 @@ Return JSON: {{"title": "New directional title"}}"""
             conn.close()
             return jsonify(_review_groups_cache["data"])
 
-        # Cluster by title similarity (0.65 threshold)
+        # Cluster by title similarity (0.65 threshold) — transitive grouping
         THRESHOLD = 0.65
         seen = set()
         groups = []
@@ -2810,14 +3036,21 @@ Return JSON: {{"title": "New directional title"}}"""
             if unassigned[i]["id"] in seen:
                 continue
             group = [unassigned[i]]
-            title_i = (unassigned[i]["title"] or "").lower()
-            for j in range(i + 1, len(unassigned)):
-                if unassigned[j]["id"] in seen:
-                    continue
-                title_j = (unassigned[j]["title"] or "").lower()
-                if SequenceMatcher(None, title_i, title_j).ratio() >= THRESHOLD:
-                    group.append(unassigned[j])
-                    seen.add(unassigned[j]["id"])
+            group_titles = [(unassigned[i]["title"] or "").lower()]
+            # Scan remaining signals; re-scan when group grows (transitive closure)
+            changed = True
+            while changed:
+                changed = False
+                for j in range(i + 1, len(unassigned)):
+                    if unassigned[j]["id"] in seen:
+                        continue
+                    title_j = (unassigned[j]["title"] or "").lower()
+                    # Match against ANY title already in the group
+                    if any(SequenceMatcher(None, gt, title_j).ratio() >= THRESHOLD for gt in group_titles):
+                        group.append(unassigned[j])
+                        group_titles.append(title_j)
+                        seen.add(unassigned[j]["id"])
+                        changed = True
             if len(group) > 1:
                 seen.add(unassigned[i]["id"])
                 groups.append(group)

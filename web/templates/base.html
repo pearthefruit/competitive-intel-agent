@@ -3820,6 +3820,21 @@
         #sig-tab-graph.active { display: flex !important; flex-direction: column; }
         #sig-tab-causal.active { display: flex !important; flex-direction: column; }
 
+        /* Chain Board view toggle + container */
+        .causal-view-bar { padding: 6px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+        .causal-view-btn { padding: 5px 14px; border-radius: 5px; border: 1px solid var(--border); background: none; color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+        .causal-view-btn:hover { color: var(--text-secondary); border-color: var(--text-muted); }
+        .causal-view-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+        #causal-board-container { flex: 1; overflow: hidden; position: relative; display: none; }
+        #causal-board-container.active { display: flex; }
+        .cb-node { transition: filter 0.15s; }
+        .cb-node:hover { filter: brightness(1.4) drop-shadow(0 0 12px rgba(255,255,255,0.3)) !important; }
+        .cb-node.cb-dimmed:hover { filter: brightness(0.6) drop-shadow(0 0 6px rgba(255,255,255,0.15)) !important; }
+        #causal-board-controls { position: absolute; bottom: 12px; left: 12px; display: flex; gap: 4px; z-index: 5; }
+        .cb-control-btn { height: 28px; padding: 0 10px; border-radius: 5px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); font-size: 10px; font-weight: 600; cursor: pointer; backdrop-filter: blur(8px); }
+        .cb-control-btn:hover { border-color: var(--accent); color: var(--accent); }
+        #causal-board-legend { position: absolute; bottom: 12px; right: 12px; display: flex; gap: 8px; font-size: 10px; color: var(--text-muted); z-index: 5; }
+
         /* ── Causal View Layout ── */
         .causal-layout { display: flex; height: 100%; overflow: hidden; }
         .causal-threads-panel { width: var(--causal-left-width, 240px); min-width: 160px; max-width: 400px; border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; position: relative; }
@@ -5687,6 +5702,28 @@
         <div class="signals-sidebar" id="signals-sidebar">
             <div class="signals-sidebar-header">
                 <div class="signals-sidebar-title">Signals</div>
+                <button id="quick-capture-toggle" onclick="_toggleQuickCapture()" title="Quick Capture" style="margin-left:auto;display:flex;align-items:center;justify-content:center;width:24px;height:24px;background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.25);border-radius:6px;color:var(--purple);font-size:14px;font-weight:700;cursor:pointer;transition:all 0.15s;line-height:1">+</button>
+            </div>
+
+            <!-- Quick Capture panel (collapsed by default) -->
+            <div id="quick-capture-panel" style="display:none;padding:8px 12px;border-bottom:1px solid var(--border)">
+                <textarea id="qc-paste" placeholder="Paste a LinkedIn post, tweet, or signal…" style="width:100%;min-height:80px;max-height:180px;padding:8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:10px;font-family:inherit;line-height:1.4;resize:vertical;outline:none;box-sizing:border-box"></textarea>
+                <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
+                    <button class="qc-source active" data-source="linkedin" onclick="_qcSelectSource(this)" style="padding:2px 8px;font-size:9px;font-weight:600;border-radius:10px;border:1px solid rgba(168,85,247,0.3);background:rgba(168,85,247,0.1);color:var(--purple);cursor:pointer">LinkedIn</button>
+                    <button class="qc-source" data-source="twitter" onclick="_qcSelectSource(this)" style="padding:2px 8px;font-size:9px;font-weight:600;border-radius:10px;border:1px solid var(--border);background:none;color:var(--text-muted);cursor:pointer">X</button>
+                    <button class="qc-source" data-source="news" onclick="_qcSelectSource(this)" style="padding:2px 8px;font-size:9px;font-weight:600;border-radius:10px;border:1px solid var(--border);background:none;color:var(--text-muted);cursor:pointer">News</button>
+                    <button class="qc-source" data-source="manual" onclick="_qcSelectSource(this)" style="padding:2px 8px;font-size:9px;font-weight:600;border-radius:10px;border:1px solid var(--border);background:none;color:var(--text-muted);cursor:pointer">Other</button>
+                    <input type="text" id="qc-url" placeholder="URL (optional)" style="flex:1;min-width:80px;padding:3px 6px;font-size:9px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);outline:none">
+                </div>
+                <div id="qc-parsed" style="display:none;margin-top:6px;padding:6px 8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:9px">
+                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                        <span id="qc-author-badge" style="color:var(--text-primary);font-weight:600"></span>
+                        <span id="qc-domain-badge" style="padding:1px 6px;border-radius:6px;background:rgba(59,130,246,0.1);color:var(--accent);border:1px solid rgba(59,130,246,0.2);font-weight:600"></span>
+                        <span id="qc-date-badge" style="color:var(--text-muted)"></span>
+                    </div>
+                </div>
+                <button id="qc-submit" onclick="_qcCapture()" disabled style="width:100%;margin-top:6px;padding:6px;font-size:10px;font-weight:600;border:none;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--purple));color:white;cursor:pointer;opacity:0.4;transition:all 0.15s">Capture</button>
+                <div id="qc-session" style="display:none;margin-top:6px;max-height:100px;overflow-y:auto"></div>
             </div>
 
             <!-- Custom search — primary action, top of sidebar -->
@@ -5741,12 +5778,13 @@
                     <button class="sig-feed-tab" data-tab="threads" onclick="switchSignalTab('threads')">Threads</button>
                     <button class="sig-feed-tab" data-tab="narratives" onclick="switchSignalTab('narratives')">Narratives</button>
                     <button class="sig-feed-tab" data-tab="graph" onclick="switchSignalTab('graph')">Board</button>
-                    <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
                     <button class="sig-feed-tab" data-tab="causal" onclick="switchSignalTab('causal')">Causal</button>
+                    <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
                 </div>
-                <div class="signals-feed-controls">
-                    <input type="text" id="signals-search" placeholder="Filter..." oninput="renderActiveSignalTab()">
-                </div>
+            </div>
+            <div id="signals-filter-bar" style="padding:6px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="flex-shrink:0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                <input type="text" id="signals-search" placeholder="Filter signals…" oninput="renderActiveSignalTab()" style="flex:1;padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);border-radius:6px;font-size:11px;outline:none">
             </div>
             <div class="signals-feed-body" id="signals-feed-body">
                 <!-- Threads view (default) -->
@@ -5868,6 +5906,12 @@
 
                 <!-- Causal/Temporal View — Redesigned 4-zone layout -->
                 <div class="sig-tab-content" id="sig-tab-causal" style="padding:0">
+                    <!-- View toggle -->
+                    <div class="causal-view-bar">
+                        <button class="causal-view-btn active" data-mode="editor" onclick="_switchCausalViewMode('editor')">Editor</button>
+                        <button class="causal-view-btn" data-mode="board" onclick="_switchCausalViewMode('board')">Board</button>
+                    </div>
+                    <!-- Editor layout (existing) -->
                     <div class="causal-layout">
                         <!-- LEFT: Thread Picker -->
                         <div class="causal-threads-panel" id="causal-thread-picker"
@@ -5923,6 +5967,25 @@
                                 </div>
                                 <div id="causal-suggestions-list"></div>
                             </div>
+                        </div>
+                    </div>
+                    <!-- Chain Board (D3 canvas, shown in board mode) -->
+                    <div id="causal-board-container">
+                        <svg id="causal-board-svg" style="width:100%;height:100%"></svg>
+                        <div style="position:absolute;top:12px;right:12px;z-index:5;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+                            <input id="cb-search" type="text" placeholder="Highlight threads..." onkeydown="if(event.key==='Enter'){_cbHighlightSearch(this.value);this.value=''}else if(event.key==='Escape'){this.value='';this.blur();_cbClearHighlight()}" style="width:200px;padding:6px 10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:11px;outline:none;backdrop-filter:blur(8px)" />
+                            <div id="cb-highlight-pills" style="display:none;flex-wrap:wrap;gap:4px;max-width:360px;padding:6px 8px;background:rgba(10,10,10,0.85);backdrop-filter:blur(8px);border-radius:8px;border:1px solid var(--border)"></div>
+                        </div>
+                        <div id="causal-board-controls">
+                            <button class="cb-control-btn" onclick="_cbZoom(1.3)" title="Zoom in">+</button>
+                            <button class="cb-control-btn" onclick="_cbZoom(0.7)" title="Zoom out">-</button>
+                            <button class="cb-control-btn" onclick="_cbResetZoom()" title="Reset">&#8634;</button>
+                        </div>
+                        <div id="causal-board-legend">
+                            <span><span style="display:inline-block;width:12px;height:2px;background:#6b7280;vertical-align:middle;margin-right:3px"></span>captured</span>
+                            <span><span style="display:inline-block;width:12px;height:2px;background:#06b6d4;vertical-align:middle;margin-right:3px"></span>investigating</span>
+                            <span><span style="display:inline-block;width:12px;height:2px;background:#22c55e;vertical-align:middle;margin-right:3px"></span>validated</span>
+                            <span><span style="display:inline-block;width:12px;height:2px;background:#ef4444;vertical-align:middle;margin-right:3px"></span>disproven</span>
                         </div>
                     </div>
                 </div>
@@ -14447,9 +14510,13 @@ function switchSignalTab(tab) {
     if (tab === 'graph') loadBoard();
     if (tab === 'narratives') loadNarratives();
     if (tab === 'causal') loadCausalView();
-    // Show/hide filter input (only useful for threads and raw tabs)
-    const searchInput = document.getElementById('signals-search');
-    if (searchInput) searchInput.style.display = (tab === 'threads' || tab === 'raw') ? '' : 'none';
+    // Show/hide filter bar (only useful for threads and raw tabs)
+    const filterBar = document.getElementById('signals-filter-bar');
+    if (filterBar) {
+        filterBar.style.display = (tab === 'threads' || tab === 'raw') ? '' : 'none';
+        const searchInput = document.getElementById('signals-search');
+        if (searchInput) searchInput.placeholder = tab === 'threads' ? 'Filter threads…' : 'Filter signals…';
+    }
     // Toggle shared detail pane — raw tab has its own inline detail, causal has inspector
     const sharedDetail = document.getElementById('signals-detail');
     if (tab === 'raw' || tab === 'graph' || tab === 'causal') {
@@ -15336,7 +15403,7 @@ function openSignalDetail(signalId) {
     detailBody.innerHTML = `
         <div class="sig-detail-card">
             <div class="sig-detail-hero" style="border-left: 4px solid ${domColor}">
-                <h2>${escHtml(s.title)}</h2>
+                <h2 class="sig-editable-title" onclick="_editSignalTitle(${s.id},this)" title="Click to edit" style="cursor:text">${escHtml(s.title)}</h2>
                 <div class="sig-detail-meta">
                     ${_renderDomainBadges(s.domain, '10px')}
                     <span style="font-size:11px;color:var(--text-muted)">${escHtml(s.source_name || s.source)}</span>
@@ -15350,6 +15417,51 @@ function openSignalDetail(signalId) {
             </div>
         </div>
     `;
+}
+
+function _editSignalTitle(signalId, h2El) {
+    const current = h2El.textContent;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = current;
+    input.style.cssText = 'width:100%;font-size:inherit;font-weight:inherit;font-family:inherit;line-height:inherit;color:var(--text-primary);background:var(--bg-tertiary);border:1px solid var(--accent);border-radius:4px;padding:2px 6px;outline:none;box-sizing:border-box';
+    h2El.replaceWith(input);
+    input.focus();
+    input.select();
+
+    function save() {
+        const newTitle = input.value.trim();
+        const h2 = document.createElement('h2');
+        h2.className = 'sig-editable-title';
+        h2.style.cursor = 'text';
+        h2.title = 'Click to edit';
+        h2.onclick = () => _editSignalTitle(signalId, h2);
+        h2.textContent = newTitle || current;
+        input.replaceWith(h2);
+
+        if (newTitle && newTitle !== current) {
+            fetch(`/api/signals/${signalId}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({title: newTitle}),
+            }).then(r => r.json()).then(d => {
+                if (d.ok) {
+                    // Update cache + card in list
+                    const cached = _signalsCache.find(x => x.id == signalId);
+                    if (cached) cached.title = newTitle;
+                    const card = document.querySelector(`.sig-card[data-id="${signalId}"] .sig-card-title`);
+                    if (card) card.textContent = newTitle;
+                    _showToast('Title updated', 'success');
+                }
+            });
+        }
+    }
+
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { input.value = current; input.blur(); }
+    });
 }
 
 function fetchArticleText(signalId, attempt) {
@@ -16155,6 +16267,172 @@ function _mergeThreads() {
             })
             .catch(() => _showToast('Merge failed — restart server', 'error'));
     });
+}
+
+// ── Quick Capture ─────────────────────────────────────────────────
+
+let _qcSource = 'linkedin';
+let _qcCapturing = false;
+let _qcSessionItems = [];
+
+function _toggleQuickCapture() {
+    const panel = document.getElementById('quick-capture-panel');
+    const btn = document.getElementById('quick-capture-toggle');
+    if (panel.style.display === 'none') {
+        panel.style.display = 'block';
+        btn.style.background = 'rgba(168,85,247,0.2)';
+        btn.textContent = '×';
+        document.getElementById('qc-paste').focus();
+    } else {
+        panel.style.display = 'none';
+        btn.style.background = 'rgba(168,85,247,0.08)';
+        btn.textContent = '+';
+    }
+}
+
+function _qcSelectSource(el) {
+    document.querySelectorAll('.qc-source').forEach(c => {
+        c.style.background = 'none';
+        c.style.borderColor = 'var(--border)';
+        c.style.color = 'var(--text-muted)';
+        c.classList.remove('active');
+    });
+    el.classList.add('active');
+    el.style.background = 'rgba(168,85,247,0.1)';
+    el.style.borderColor = 'rgba(168,85,247,0.3)';
+    el.style.color = 'var(--purple)';
+    _qcSource = el.dataset.source;
+}
+
+// Live preview parse on input
+(function() {
+    const ta = document.getElementById('qc-paste');
+    if (!ta) return;
+    ta.addEventListener('input', () => {
+        const btn = document.getElementById('qc-submit');
+        btn.disabled = !ta.value.trim();
+        btn.style.opacity = ta.value.trim() ? '1' : '0.4';
+        _qcPreviewParse(ta.value);
+    });
+    ta.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            if (!document.getElementById('qc-submit').disabled) _qcCapture();
+        }
+    });
+})();
+
+function _qcPreviewParse(text) {
+    const parsed = document.getElementById('qc-parsed');
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) { parsed.style.display = 'none'; return; }
+
+    const timeRe = /^(\d+[dhwmo]|just now|yesterday|\d+\s*(day|hour|week|month|min)s?\s*ago)/i;
+    let headerEnd = -1;
+    for (let i = 1; i < Math.min(5, lines.length); i++) {
+        const clean = lines[i].replace(/[•·🌐🔒]/g, '').replace(/Edited\s*/i, '').trim();
+        if (timeRe.test(clean) && clean.length < 40) { headerEnd = i; break; }
+    }
+
+    const authorEl = document.getElementById('qc-author-badge');
+    const domainEl = document.getElementById('qc-domain-badge');
+    const dateEl = document.getElementById('qc-date-badge');
+
+    if (headerEnd > 0) {
+        authorEl.textContent = lines[0];
+        const body = lines.slice(headerEnd + 1).join(' ').toLowerCase();
+        domainEl.textContent = _qcGuessDomain(body);
+        // Parse date
+        const timeLine = lines[headerEnd].replace(/[•·🌐🔒]/g, '').replace(/Edited\s*/i, '').trim();
+        const m = timeLine.match(/^(\d+)\s*([dhwmo])/);
+        if (m) {
+            const n = parseInt(m[1]), u = m[2];
+            const d = new Date();
+            d.setDate(d.getDate() - n * ({d:1,h:1/24,w:7,m:30,o:30}[u]||1));
+            dateEl.textContent = d.toISOString().slice(0,10);
+        } else if (/yesterday/i.test(timeLine)) {
+            const d = new Date(); d.setDate(d.getDate()-1);
+            dateEl.textContent = d.toISOString().slice(0,10);
+        } else {
+            dateEl.textContent = new Date().toISOString().slice(0,10);
+        }
+    } else {
+        authorEl.textContent = '';
+        domainEl.textContent = _qcGuessDomain(text.toLowerCase());
+        dateEl.textContent = '';
+    }
+    parsed.style.display = 'block';
+}
+
+function _qcGuessDomain(text) {
+    const kw = {
+        tech_ai: ['ai ','artificial intelligence','llm','machine learning','software','cloud','startup','saas','semiconductor'],
+        finance: ['earnings','ipo','merger','acquisition','investor','market cap','valuation','hedge fund'],
+        economics: ['gdp','recession','inflation','economic','fed ','interest rate','monetary'],
+        labor: ['layoff','hiring','workforce','employment','job market','remote work','salary'],
+        geopolitics: ['tariff','sanction','trade war','china','nato','conflict'],
+        regulatory: ['regulation','compliance','fda','antitrust','privacy','gdpr'],
+    };
+    let best = 'economics', bs = 0;
+    for (const [d, ws] of Object.entries(kw)) {
+        let s = 0; for (const w of ws) if (text.includes(w)) s++;
+        if (s > bs) { bs = s; best = d; }
+    }
+    return best;
+}
+
+async function _qcCapture() {
+    if (_qcCapturing) return;
+    _qcCapturing = true;
+    const btn = document.getElementById('qc-submit');
+    btn.disabled = true;
+    btn.textContent = 'Capturing…';
+
+    const ta = document.getElementById('qc-paste');
+    try {
+        const res = await fetch('/api/signals/manual', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                content: ta.value,
+                source: _qcSource,
+                url: document.getElementById('qc-url').value.trim(),
+            }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+            _qcSessionItems.unshift(data);
+            _qcRenderSession();
+            _showToast('Captured' + (data.thread_assignment ? ' → ' + data.thread_assignment.thread_title : ''), 'success');
+            ta.value = '';
+            document.getElementById('qc-url').value = '';
+            document.getElementById('qc-parsed').style.display = 'none';
+            btn.style.opacity = '0.4';
+            ta.focus();
+            // Refresh signals list if on Signals tab
+            if (typeof loadSignals === 'function') loadSignals();
+        } else {
+            _showToast(data.error || 'Capture failed', 'error');
+        }
+    } catch (e) {
+        _showToast('Network error', 'error');
+    }
+    _qcCapturing = false;
+    btn.disabled = !ta.value.trim();
+    btn.textContent = 'Capture';
+}
+
+function _qcRenderSession() {
+    const wrap = document.getElementById('qc-session');
+    wrap.style.display = 'block';
+    wrap.innerHTML = _qcSessionItems.map(s => {
+        const thread = s.thread_assignment ? `<span style="color:var(--purple)">→ ${escHtml(s.thread_assignment.thread_title)}</span>` : '';
+        return `<div style="display:flex;align-items:center;gap:4px;padding:3px 0;font-size:9px;border-bottom:1px solid var(--border)">
+            <span style="color:var(--green)">✓</span>
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary)">${escHtml(s.title)}</span>
+            ${thread}
+        </div>`;
+    }).join('');
 }
 
 function _runCustomSearch() {
@@ -18719,12 +18997,14 @@ function _toggleSignalArticle(signalId, el) {
 }
 
 function _closeSharedDetailPane() {
-    // When on raw tab, only hide the shared pane (don't touch the raw detail pane)
-    if (_signalTab === 'raw') {
+    // When on raw or causal tab, only hide the shared pane
+    if (_signalTab === 'raw' || _signalTab === 'causal') {
         const detailPane = document.getElementById('signals-detail');
         if (detailPane) detailPane.style.display = 'none';
         _activeThreadId = null;
         _activeNarrativeId = null;
+        // Clear chain board node highlights
+        document.querySelectorAll('.cb-node circle:not(.cb-shared-ring)').forEach(c => c.setAttribute('stroke-width', '2'));
         return;
     }
     closeSignalDetail();
@@ -18772,6 +19052,9 @@ let _causalSuggestionsCollapsed = false;
 const _causalStatusColors = { captured: '#6b7280', investigating: '#06b6d4', validated: '#22c55e', disproven: '#ef4444' };
 
 function loadCausalView() {
+    // Restore view mode on tab load
+    _switchCausalViewMode(_causalViewMode);
+
     Promise.all([
         fetch('/api/causal-links').then(r => r.json()),
         fetch('/api/causal-paths').then(r => r.json()),
@@ -18786,6 +19069,8 @@ function loadCausalView() {
             if (still) _renderCausalEditor();
             else { _activeCausalPathId = null; _renderCausalEditor(); }
         }
+        // Render chain board if in board mode
+        if (_causalViewMode === 'board') _renderChainBoard();
     });
     fetch('/api/causal-suggestions?limit=20').then(r => r.json())
         .then(data => { _causalSuggestionsCache = data.suggestions || []; _renderCausalSuggestions(); })
@@ -19639,6 +19924,383 @@ function _showChainItemMenu(event, pathId) {
 }
 
 function _setCausalMode() {}  // no-op stub for compatibility
+
+// ===================== CHAIN BOARD =====================
+
+let _causalViewMode = localStorage.getItem('causal_view_mode') || 'editor';
+let _chainBoardSim = null;
+let _chainBoardZoomTransform = null;
+
+function _switchCausalViewMode(mode) {
+    _causalViewMode = mode;
+    localStorage.setItem('causal_view_mode', mode);
+    const layout = document.querySelector('.causal-layout');
+    const board = document.getElementById('causal-board-container');
+    document.querySelectorAll('.causal-view-btn').forEach(b => b.classList.remove('active'));
+    const activeBtn = document.querySelector(`.causal-view-btn[data-mode="${mode}"]`);
+    if (activeBtn) activeBtn.classList.add('active');
+    if (mode === 'editor') {
+        if (layout) layout.style.display = '';
+        if (board) board.classList.remove('active');
+        if (_chainBoardSim) { _chainBoardSim.stop(); _chainBoardSim = null; }
+    } else {
+        if (layout) layout.style.display = 'none';
+        if (board) board.classList.add('active');
+        setTimeout(() => _renderChainBoard(), 50); // slight delay for container to get dimensions
+    }
+}
+
+function _renderChainBoard() {
+    const container = document.getElementById('causal-board-container');
+    const svg = d3.select('#causal-board-svg');
+    if (!container || !svg.node()) return;
+
+    const width = container.clientWidth || 800;
+    const height = container.clientHeight || 600;
+    svg.selectAll('*').remove();
+    svg.attr('viewBox', null);
+    if (_chainBoardSim) { _chainBoardSim.stop(); _chainBoardSim = null; }
+
+    if (!_causalPathsCache.length) {
+        svg.append('text').attr('x', width / 2).attr('y', height / 2)
+            .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 14)
+            .text('No chains yet \u2014 create chains in the Editor view');
+        return;
+    }
+
+    // ── Build nodes ──
+    const nodes = [];
+    const threadToNodes = {};
+    const sharedColors = ['#f59e0b', '#06b6d4', '#a855f7', '#22c55e', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6'];
+    let colorIdx = 0;
+
+    _causalPathsCache.forEach(path => {
+        const tids = path.thread_ids || [];
+        tids.forEach((tid, i) => {
+            const t = (_threadsCache || []).find(t => t.id === tid);
+            const node = {
+                id: `p${path.id}_t${tid}`,
+                threadId: tid, pathId: path.id, pathIndex: i, pathLength: tids.length,
+                pathName: path.name || 'Untitled',
+                title: t?.title || `Thread #${tid}`,
+                domain: t?.domain || '', signal_count: t?.signal_count || 0,
+                shared: false, sharedColor: null,
+            };
+            nodes.push(node);
+            if (!threadToNodes[tid]) threadToNodes[tid] = [];
+            threadToNodes[tid].push(node);
+        });
+    });
+
+    // Mark shared threads
+    Object.values(threadToNodes).forEach(copies => {
+        if (copies.length > 1) {
+            const color = sharedColors[colorIdx++ % sharedColors.length];
+            copies.forEach(n => { n.shared = true; n.sharedColor = color; });
+        }
+    });
+
+    // ── Build edges ──
+    const chainEdges = [];
+    const sharedEdges = [];
+
+    _causalPathsCache.forEach(path => {
+        const tids = path.thread_ids || [];
+        for (let i = 0; i < tids.length - 1; i++) {
+            const link = _causalLinksCache.find(l => l.cause_thread_id === tids[i] && l.effect_thread_id === tids[i + 1]);
+            chainEdges.push({
+                source: `p${path.id}_t${tids[i]}`, target: `p${path.id}_t${tids[i + 1]}`,
+                type: 'chain', status: link?.status || 'captured', label: link?.label || '',
+                pathId: path.id,
+            });
+        }
+    });
+
+    Object.values(threadToNodes).forEach(copies => {
+        if (copies.length > 1) {
+            for (let i = 0; i < copies.length - 1; i++) {
+                sharedEdges.push({
+                    source: copies[i].id, target: copies[i + 1].id,
+                    type: 'shared', sharedColor: copies[i].sharedColor,
+                });
+            }
+        }
+    });
+
+    const allEdges = [...chainEdges, ...sharedEdges];
+
+    // ── D3 setup ──
+    const zoomGroup = svg.append('g').attr('class', 'cb-zoom-group');
+    const zoomBehavior = d3.zoom().scaleExtent([0.2, 4]).on('zoom', (event) => {
+        _chainBoardZoomTransform = event.transform;
+        zoomGroup.attr('transform', event.transform);
+    });
+    svg.call(zoomBehavior);
+    svg.on('dblclick.zoom', null);
+    if (_chainBoardZoomTransform) {
+        zoomGroup.attr('transform', _chainBoardZoomTransform);
+        svg.call(zoomBehavior.transform, _chainBoardZoomTransform);
+    }
+
+    // Store zoom behavior for controls
+    svg.node().__cbZoom = zoomBehavior;
+
+    // Arrow marker
+    svg.append('defs').append('marker')
+        .attr('id', 'cb-arrow').attr('viewBox', '0 0 10 6').attr('refX', 10).attr('refY', 3)
+        .attr('markerWidth', 8).attr('markerHeight', 6).attr('orient', 'auto')
+        .append('path').attr('d', 'M0,0 L10,3 L0,6 Z').attr('fill', '#6b7280');
+
+    // Status-colored arrow markers
+    Object.entries(_causalStatusColors).forEach(([status, color]) => {
+        svg.select('defs').append('marker')
+            .attr('id', `cb-arrow-${status}`).attr('viewBox', '0 0 10 6').attr('refX', 10).attr('refY', 3)
+            .attr('markerWidth', 8).attr('markerHeight', 6).attr('orient', 'auto')
+            .append('path').attr('d', 'M0,0 L10,3 L0,6 Z').attr('fill', color);
+    });
+
+    // ── Render edges ──
+    const link = zoomGroup.append('g').selectAll('line').data(allEdges).join('line')
+        .attr('stroke', d => d.type === 'shared' ? (d.sharedColor || '#333') : (_causalStatusColors[d.status] || '#6b7280'))
+        .attr('stroke-width', d => d.type === 'shared' ? 1 : 2)
+        .attr('stroke-dasharray', d => d.type === 'shared' ? '4 4' : 'none')
+        .attr('stroke-opacity', d => d.type === 'shared' ? 0.4 : 0.8)
+        .attr('marker-end', d => d.type === 'chain' ? `url(#cb-arrow-${d.status || 'captured'})` : '');
+
+    // Edge labels (for chain edges with labels)
+    const linkLabel = zoomGroup.append('g').selectAll('text')
+        .data(chainEdges.filter(e => e.label)).join('text')
+        .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 9)
+        .text(d => d.label.length > 20 ? d.label.substring(0, 18) + '...' : d.label);
+
+    // ── Render nodes ──
+    const nodeR = d => Math.sqrt(d.signal_count || 1) * 5 + 12;
+
+    const node = zoomGroup.append('g').selectAll('g').data(nodes).join('g')
+        .attr('class', 'cb-node')
+        .attr('data-thread-id', d => d.threadId)
+        .attr('cursor', 'pointer')
+        .call(d3.drag()
+            .on('start', (event, d) => { if (!event.active) _chainBoardSim.alphaTarget(0.1).restart(); d.fx = d.x; d.fy = d.y; })
+            .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+            .on('end', (event, d) => { if (!event.active) _chainBoardSim.alphaTarget(0); d.fx = null; d.fy = null; })
+        )
+        .on('click', (event, d) => {
+            event.stopPropagation();
+            // Show thread detail in the shared detail pane
+            const detailPane = document.getElementById('signals-detail');
+            if (detailPane) detailPane.style.display = '';
+            _activeThreadId = d.threadId;
+            // Use shared pane directly (bypass raw tab check)
+            const savedTab = _signalTab;
+            _signalTab = 'causal_board'; // temp override so openThreadDetail uses shared pane
+            openThreadDetail(d.threadId);
+            _signalTab = savedTab;
+            // Highlight shared copies
+            if (d.shared) {
+                const copies = threadToNodes[d.threadId] || [];
+                node.select('.cb-shared-ring').attr('opacity', dd => copies.some(c => c.id === dd.id) ? 1 : (dd.shared ? 0.2 : 0));
+                setTimeout(() => node.select('.cb-shared-ring').attr('opacity', dd => dd.shared ? 0.6 : 0), 3000);
+            }
+            // Highlight clicked node
+            node.each(function(dd) {
+                d3.select(this).select('circle:not(.cb-shared-ring)').attr('stroke-width', dd.id === d.id ? 3.5 : 2);
+            });
+        })
+        .on('contextmenu', (event, d) => {
+            event.preventDefault();
+            event.stopPropagation();
+            _showContextMenu([
+                { label: 'Inspect thread', icon: '🔍', action: `_cbClickNode(${d.threadId})` },
+                { label: 'Open chain in editor', icon: '✏️', action: `_selectCausalChain(${d.pathId});_switchCausalViewMode('editor')` },
+                { label: 'Find similar', icon: '🔎', submenu: [
+                    { label: 'By shared entities', icon: '🏢', action: `_findSimilarByEntities(${d.threadId})` },
+                    { label: 'By domain', icon: '🎯', action: `_findSimilarByDomain(${d.threadId})` },
+                    { label: 'By signal count', icon: '📊', action: `_findSimilarBySize(${d.threadId})` },
+                ]},
+            ], event.clientX, event.clientY, d.title.substring(0, 40));
+        });
+
+    // Draw nodes
+    node.each(function(d) {
+        const g = d3.select(this);
+        const r = nodeR(d);
+        const domColor = _DOMAIN_COLORS[_parseDomains(d.domain)[0]] || '#6b7280';
+
+        // Shared ring (outer glow)
+        if (d.shared) {
+            g.append('circle').attr('class', 'cb-shared-ring')
+                .attr('r', r + 5).attr('fill', 'none')
+                .attr('stroke', d.sharedColor).attr('stroke-width', 2.5)
+                .attr('stroke-dasharray', '3 2').attr('opacity', 0.6);
+        }
+
+        // Main circle
+        g.append('circle').attr('r', r)
+            .attr('fill', domColor + '33').attr('stroke', domColor).attr('stroke-width', 2);
+
+        // Signal count
+        g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
+            .attr('fill', '#fff').attr('font-size', Math.min(13, r * 0.7)).attr('font-weight', 700)
+            .attr('pointer-events', 'none')
+            .text(d.signal_count);
+
+        // Title below
+        g.append('text').attr('text-anchor', 'middle').attr('y', r + 14)
+            .attr('fill', 'var(--text-secondary)').attr('font-size', 10).attr('font-weight', 600)
+            .attr('pointer-events', 'none')
+            .text(d.title.length > 25 ? d.title.substring(0, 23) + '...' : d.title);
+
+        // Chain name (only on first node of each chain)
+        if (d.pathIndex === 0) {
+            g.append('text').attr('text-anchor', 'middle').attr('y', -(r + 10))
+                .attr('fill', 'var(--accent)').attr('font-size', 10).attr('font-weight', 700)
+                .attr('pointer-events', 'none').attr('class', 'cb-chain-label')
+                .text(d.pathName.length > 30 ? d.pathName.substring(0, 28) + '...' : d.pathName);
+        }
+
+        // Store element ref
+        d._el = g;
+    });
+
+    // ── Force simulation ──
+    _chainBoardSim = d3.forceSimulation(nodes)
+        .force('chainX', d3.forceX(d => {
+            const progress = d.pathLength > 1 ? d.pathIndex / (d.pathLength - 1) : 0.5;
+            return 120 + progress * (width - 240);
+        }).strength(0.25))
+        .force('chainY', d3.forceY(d => {
+            const pathIdx = _causalPathsCache.findIndex(p => p.id === d.pathId);
+            const totalPaths = _causalPathsCache.length;
+            return 80 + (pathIdx / Math.max(1, totalPaths - 1)) * (height - 160);
+        }).strength(0.12))
+        .force('sharedLink', d3.forceLink(sharedEdges).id(d => d.id).distance(50).strength(0.5))
+        .force('chainLink', d3.forceLink(chainEdges).id(d => d.id).distance(120).strength(0.6))
+        .force('collide', d3.forceCollide().radius(d => nodeR(d) + 18))
+        .force('center', d3.forceCenter(width / 2, height / 2).strength(0.015))
+        .on('tick', () => {
+            node.attr('transform', d => `translate(${d.x},${d.y})`);
+            link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+                .attr('x2', d => {
+                    // Shorten line to not overlap arrowhead with node
+                    const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const r = d.type === 'chain' ? nodeR(d.target) + 4 : 0;
+                    return d.target.x - (dx / dist) * r;
+                })
+                .attr('y2', d => {
+                    const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const r = d.type === 'chain' ? nodeR(d.target) + 4 : 0;
+                    return d.target.y - (dy / dist) * r;
+                });
+            linkLabel.attr('x', d => (d.source.x + d.target.x) / 2)
+                     .attr('y', d => (d.source.y + d.target.y) / 2 - 6);
+        });
+
+    // Run for 200 ticks then slow down
+    for (let i = 0; i < 100; i++) _chainBoardSim.tick();
+    _chainBoardSim.alpha(0.3).restart();
+}
+
+// ── Chain Board Controls ──
+function _cbZoom(factor) {
+    const svg = d3.select('#causal-board-svg');
+    const zoom = svg.node()?.__cbZoom;
+    if (zoom) svg.transition().duration(200).call(zoom.scaleBy, factor);
+}
+function _cbResetZoom() {
+    const svg = d3.select('#causal-board-svg');
+    const zoom = svg.node()?.__cbZoom;
+    if (zoom) { svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity); _chainBoardZoomTransform = null; }
+}
+
+function _cbClickNode(threadId) {
+    const detailPane = document.getElementById('signals-detail');
+    if (detailPane) detailPane.style.display = '';
+    _activeThreadId = threadId;
+    const savedTab = _signalTab;
+    _signalTab = 'causal_board';
+    openThreadDetail(threadId);
+    _signalTab = savedTab;
+}
+
+let _cbHighlights = []; // [{label, query, matchedThreadIds: Set}]
+
+function _cbHighlightSearch(query) {
+    if (!query || query.length < 2) return;
+    const q = query.toLowerCase();
+    // Check if already highlighted
+    if (_cbHighlights.some(h => h.query === q)) return;
+    const matchedIds = new Set();
+    (_threadsCache || []).forEach(t => {
+        const title = (t.title || '').toLowerCase();
+        const synthesis = (t.synthesis || '').toLowerCase();
+        if (title.includes(q) || synthesis.includes(q)) matchedIds.add(t.id);
+    });
+    if (!matchedIds.size) { _showToast('No matches', 'info'); return; }
+    _cbHighlights.push({ label: query.substring(0, 20), query: q, matchedThreadIds: matchedIds });
+    _applyCbHighlights();
+    _renderCbPills();
+    _showToast(`${matchedIds.size} threads match "${query}"`, 'info');
+}
+
+function _removeCbHighlight(idx) {
+    _cbHighlights.splice(idx, 1);
+    _applyCbHighlights();
+    _renderCbPills();
+}
+
+function _cbClearHighlight() {
+    _cbHighlights = [];
+    _applyCbHighlights();
+    _renderCbPills();
+}
+
+function _applyCbHighlights() {
+    const cbNodes = document.querySelectorAll('.cb-node');
+    if (!_cbHighlights.length) {
+        cbNodes.forEach(n => { n.style.filter = ''; n.style.pointerEvents = ''; n.classList.remove('cb-dimmed'); });
+        return;
+    }
+    const unionIds = new Set();
+    _cbHighlights.forEach(h => h.matchedThreadIds.forEach(id => unionIds.add(id)));
+    cbNodes.forEach(n => {
+        const tid = parseInt(n.dataset.threadId);
+        if (unionIds.has(tid)) {
+            const matchCount = _cbHighlights.filter(h => h.matchedThreadIds.has(tid)).length;
+            const glow = matchCount >= _cbHighlights.length ? '1.5' : '1.2';
+            const color = matchCount >= 2 ? 'rgba(6,182,212,0.7)' : 'rgba(168,85,247,0.5)';
+            n.style.filter = `brightness(${glow}) drop-shadow(0 0 12px ${color})`;
+            n.style.pointerEvents = '';
+            n.classList.remove('cb-dimmed');
+            // Pulse new highlights
+            const circle = n.querySelector('circle:not(.cb-shared-ring)');
+            if (circle) {
+                const origR = circle.getAttribute('r');
+                if (origR) d3.select(circle).transition().duration(150).attr('r', parseFloat(origR) * 1.15).transition().duration(200).attr('r', origR);
+            }
+        } else {
+            n.style.filter = 'brightness(0.25) saturate(0.3)';
+            n.style.pointerEvents = 'none';
+            n.classList.add('cb-dimmed');
+        }
+    });
+}
+
+function _renderCbPills() {
+    const tray = document.getElementById('cb-highlight-pills');
+    if (!tray) return;
+    if (!_cbHighlights.length) { tray.innerHTML = ''; tray.style.display = 'none'; return; }
+    tray.style.display = 'flex';
+    tray.innerHTML = _cbHighlights.map((h, i) =>
+        `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.3);border-radius:12px;font-size:10px;color:#a855f7;font-weight:600;white-space:nowrap">
+            🔍 ${escHtml(h.label)} <span style="font-weight:400;color:var(--text-muted)">${h.matchedThreadIds.size}</span>
+            <span onclick="_removeCbHighlight(${i})" style="cursor:pointer;margin-left:2px;font-size:12px;color:var(--text-muted);line-height:1" title="Remove">&times;</span>
+        </span>`
+    ).join('') +
+    `<span onclick="_cbClearHighlight()" style="display:inline-flex;align-items:center;padding:3px 8px;border-radius:12px;font-size:10px;color:var(--text-muted);cursor:pointer;border:1px solid var(--border);white-space:nowrap">Clear all</span>`;
+}
 
 // ===================== DISCOVERY DRAWER =====================
 
@@ -20541,10 +21203,9 @@ function renderBoard(data) {
         });
     });
 
-    // Filter nodes: hide narrative_thread nodes unless their narrative is expanded
+    // Filter nodes: narratives moved to Chain Board in Causal tab — hide them here
     const visibleNodes = data.nodes.filter(d => {
-        if (d.type === 'narrative_thread') return _expandedNarratives.has(d.narrative_id);
-        if (d.type === 'narrative') return !_expandedNarratives.has(d.node_id); // hide super-node when expanded
+        if (d.type === 'narrative' || d.type === 'narrative_thread') return false;
         return true;
     });
 

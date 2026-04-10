@@ -423,6 +423,9 @@ def _migrate_db(conn):
         ("signal_clusters", "narrative_id", "INTEGER REFERENCES narratives(id)"),
         ("signal_cluster_items", "evidence_stance", "TEXT DEFAULT 'neutral'"),
         ("causal_links", "alternatives_json", "TEXT"),
+        ("signals", "author", "TEXT"),
+        ("signals", "author_context", "TEXT"),
+        ("signals", "engagement_json", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -2145,8 +2148,9 @@ def insert_signal(conn, signal_dict):
     try:
         cur = conn.execute(
             """INSERT OR IGNORE INTO signals
-               (source, domain, title, url, body, published_at, source_name, content_hash, raw_json, source_type)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (source, domain, title, url, body, published_at, source_name, content_hash, raw_json, source_type,
+                author, author_context, engagement_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 signal_dict["source"],
                 signal_dict["domain"],
@@ -2158,6 +2162,9 @@ def insert_signal(conn, signal_dict):
                 signal_dict["content_hash"],
                 signal_dict.get("raw_json"),
                 signal_dict.get("source_type", "news"),
+                signal_dict.get("author"),
+                signal_dict.get("author_context"),
+                signal_dict.get("engagement_json"),
             ),
         )
         return cur.lastrowid if cur.rowcount > 0 else None

@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SignalVault · Quick Capture</title>
+<style>
+  :root {
+    --bg-primary: #0a0a0a;
+    --bg-secondary: #141414;
+    --bg-tertiary: #1a1a1a;
+    --border: rgba(255,255,255,0.08);
+    --text-primary: #e5e5e5;
+    --text-muted: #737373;
+    --accent: #3b82f6;
+    --purple: #a855f7;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    padding: 24px;
+  }
+  .capture-container {
+    width: 100%;
+    max-width: 520px;
+  }
+  .capture-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .capture-header h1 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  .capture-header .badge {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(168,85,247,0.12);
+    color: var(--purple);
+    border: 1px solid rgba(168,85,247,0.25);
+  }
+  .capture-header .link-back {
+    margin-left: auto;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-decoration: none;
+  }
+  .capture-header .link-back:hover { color: var(--accent); }
+
+  .paste-area {
+    width: 100%;
+    min-height: 160px;
+    max-height: 320px;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-size: 12px;
+    font-family: inherit;
+    line-height: 1.5;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .paste-area:focus { border-color: rgba(168,85,247,0.4); }
+  .paste-area::placeholder { color: var(--text-muted); }
+
+  .source-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .source-chip {
+    padding: 4px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .source-chip:hover { border-color: rgba(168,85,247,0.3); color: var(--text-primary); }
+  .source-chip.active {
+    background: rgba(168,85,247,0.12);
+    border-color: rgba(168,85,247,0.4);
+    color: var(--purple);
+  }
+  .url-input {
+    flex: 1;
+    padding: 5px 10px;
+    font-size: 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    outline: none;
+  }
+  .url-input:focus { border-color: rgba(59,130,246,0.4); }
+  .url-input::placeholder { color: var(--text-muted); }
+
+  .parsed-section {
+    margin-top: 14px;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: none;
+  }
+  .parsed-section.visible { display: block; }
+  .parsed-label {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+  .parsed-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 5px;
+  }
+  .parsed-key {
+    font-size: 10px;
+    color: var(--text-muted);
+    min-width: 50px;
+  }
+  .parsed-value {
+    font-size: 10px;
+    color: var(--text-primary);
+    flex: 1;
+  }
+  .parsed-value input {
+    width: 100%;
+    padding: 3px 6px;
+    background: var(--bg-tertiary);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 10px;
+    outline: none;
+  }
+  .parsed-value input:focus { border-color: var(--border); }
+  .domain-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    font-size: 9px;
+    font-weight: 600;
+    border-radius: 8px;
+    background: rgba(59,130,246,0.1);
+    color: var(--accent);
+    border: 1px solid rgba(59,130,246,0.2);
+  }
+
+  .capture-btn-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .capture-btn {
+    flex: 1;
+    padding: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .capture-btn.primary {
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    color: white;
+  }
+  .capture-btn.primary:hover { opacity: 0.9; }
+  .capture-btn.primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .capture-btn .shortcut {
+    font-size: 9px;
+    opacity: 0.6;
+    font-weight: 400;
+  }
+
+  .session-log {
+    margin-top: 20px;
+    display: none;
+  }
+  .session-log.visible { display: block; }
+  .session-log-header {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .session-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 6px;
+    animation: slideIn 0.2s ease;
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .session-item .check {
+    color: var(--green);
+    font-size: 12px;
+    margin-top: 1px;
+  }
+  .session-item-content {
+    flex: 1;
+    min-width: 0;
+  }
+  .session-item-title {
+    font-size: 11px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .session-item-meta {
+    font-size: 9px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    display: flex;
+    gap: 8px;
+  }
+  .session-item-thread {
+    color: var(--purple);
+    font-weight: 600;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    padding: 10px 20px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-primary);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .toast.visible { opacity: 1; }
+  .toast .icon { font-size: 14px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="capture-container">
+  <div class="capture-header">
+    <h1>SignalVault</h1>
+    <span class="badge">Quick Capture</span>
+    <a href="/" class="link-back">← Open full app</a>
+  </div>
+
+  <textarea
+    class="paste-area"
+    id="paste-input"
+    placeholder="Paste a LinkedIn post, tweet, article excerpt, or any signal…"
+    autofocus
+  ></textarea>
+
+  <div class="source-row">
+    <button class="source-chip active" data-source="linkedin" onclick="selectSource(this)">LinkedIn</button>
+    <button class="source-chip" data-source="twitter" onclick="selectSource(this)">X</button>
+    <button class="source-chip" data-source="news" onclick="selectSource(this)">News</button>
+    <button class="source-chip" data-source="manual" onclick="selectSource(this)">Other</button>
+    <input type="text" class="url-input" id="url-input" placeholder="URL (optional)">
+  </div>
+
+  <div class="parsed-section" id="parsed-section">
+    <div class="parsed-label">Auto-detected</div>
+    <div class="parsed-row">
+      <span class="parsed-key">Author</span>
+      <span class="parsed-value"><input type="text" id="parsed-author" placeholder="—"></span>
+    </div>
+    <div class="parsed-row">
+      <span class="parsed-key">Title</span>
+      <span class="parsed-value"><input type="text" id="parsed-context" placeholder="—"></span>
+    </div>
+    <div class="parsed-row">
+      <span class="parsed-key">Date</span>
+      <span class="parsed-value"><input type="text" id="parsed-date" placeholder="—"></span>
+    </div>
+    <div class="parsed-row">
+      <span class="parsed-key">Domain</span>
+      <span class="parsed-value"><span class="domain-badge" id="parsed-domain">—</span></span>
+    </div>
+  </div>
+
+  <div class="capture-btn-row">
+    <button class="capture-btn primary" id="capture-btn" onclick="captureSignal()" disabled>
+      Capture <span class="shortcut">Ctrl+↵</span>
+    </button>
+  </div>
+
+  <div class="session-log" id="session-log">
+    <div class="session-log-header">
+      This session <span id="session-count" style="color:var(--accent)">(0)</span>
+    </div>
+    <div id="session-items"></div>
+  </div>
+</div>
+
+<script>
+let _selectedSource = 'linkedin';
+let _sessionCaptures = [];
+let _capturing = false;
+
+// ── Source chip selection ──────────────────────────────────────────
+function selectSource(el) {
+  document.querySelectorAll('.source-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  _selectedSource = el.dataset.source;
+}
+
+// ── Enable/disable capture button based on content ────────────────
+const pasteInput = document.getElementById('paste-input');
+const captureBtn = document.getElementById('capture-btn');
+
+pasteInput.addEventListener('input', () => {
+  captureBtn.disabled = !pasteInput.value.trim();
+  // Run client-side preview parse
+  previewParse(pasteInput.value);
+});
+
+// ── Ctrl+Enter to submit ──────────────────────────────────────────
+pasteInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    if (!captureBtn.disabled) captureSignal();
+  }
+});
+
+// ── Client-side preview parse (lightweight LinkedIn detection) ─────
+function previewParse(text) {
+  const section = document.getElementById('parsed-section');
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  if (lines.length < 2) {
+    section.classList.remove('visible');
+    return;
+  }
+
+  // Detect LinkedIn format
+  const timeRe = /^(\d+[dhwmo]|just now|yesterday|\d+\s*(day|hour|week|month|min)s?\s*ago)/i;
+  let headerEnd = -1;
+  for (let i = 1; i < Math.min(5, lines.length); i++) {
+    const clean = lines[i].replace(/[•·🌐🔒]/g, '').replace(/Edited\s*/i, '').trim();
+    if (timeRe.test(clean) && clean.length < 40) {
+      headerEnd = i;
+      break;
+    }
+  }
+
+  if (headerEnd > 0) {
+    document.getElementById('parsed-author').value = lines[0] || '';
+    const ctx = lines.slice(1, headerEnd).filter(l => !timeRe.test(l.replace(/[•·🌐🔒]/g, '').trim()));
+    document.getElementById('parsed-context').value = ctx.join(' · ') || '';
+
+    // Parse relative date
+    const timeLine = lines[headerEnd].replace(/[•·🌐🔒]/g, '').replace(/Edited\s*/i, '').trim();
+    const m = timeLine.match(/^(\d+)\s*([dhwmo])/);
+    if (m) {
+      const n = parseInt(m[1]);
+      const unit = m[2];
+      const now = new Date();
+      const deltas = { d: 1, h: 1/24, w: 7, m: 30, o: 30 };
+      now.setDate(now.getDate() - n * (deltas[unit] || 1));
+      document.getElementById('parsed-date').value = now.toISOString().slice(0, 10);
+    } else if (/yesterday/i.test(timeLine)) {
+      const y = new Date(); y.setDate(y.getDate() - 1);
+      document.getElementById('parsed-date').value = y.toISOString().slice(0, 10);
+    } else if (/just now/i.test(timeLine)) {
+      document.getElementById('parsed-date').value = new Date().toISOString().slice(0, 10);
+    }
+
+    // Infer domain from content
+    const body = lines.slice(headerEnd + 1).join(' ').toLowerCase();
+    document.getElementById('parsed-domain').textContent = guessDomain(body);
+    section.classList.add('visible');
+  } else {
+    // Not LinkedIn format — still show domain guess
+    const body = text.toLowerCase();
+    document.getElementById('parsed-author').value = '';
+    document.getElementById('parsed-context').value = '';
+    document.getElementById('parsed-date').value = '';
+    document.getElementById('parsed-domain').textContent = guessDomain(body);
+    section.classList.add('visible');
+  }
+}
+
+function guessDomain(text) {
+  const kw = {
+    tech_ai: ['ai ', 'artificial intelligence', 'llm', 'machine learning', 'software', 'cloud', 'startup', 'saas', 'data center', 'semiconductor', 'chip'],
+    finance: ['earnings', 'ipo', 'merger', 'acquisition', 'investor', 'market cap', 'valuation', 'hedge fund'],
+    economics: ['gdp', 'recession', 'inflation', 'economic', 'fed ', 'interest rate', 'monetary', 'fiscal'],
+    labor: ['layoff', 'hiring', 'workforce', 'employment', 'job market', 'remote work', 'salary'],
+    geopolitics: ['tariff', 'sanction', 'trade war', 'china', 'nato', 'conflict'],
+    regulatory: ['regulation', 'compliance', 'fda', 'antitrust', 'privacy', 'gdpr'],
+  };
+  let best = 'economics', bestScore = 0;
+  for (const [domain, words] of Object.entries(kw)) {
+    let score = 0;
+    for (const w of words) if (text.includes(w)) score++;
+    if (score > bestScore) { bestScore = score; best = domain; }
+  }
+  return best;
+}
+
+// ── Capture ───────────────────────────────────────────────────────
+async function captureSignal() {
+  if (_capturing) return;
+  _capturing = true;
+  captureBtn.disabled = true;
+  captureBtn.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Capturing…';
+
+  const payload = {
+    content: pasteInput.value,
+    source: _selectedSource,
+    url: document.getElementById('url-input').value.trim(),
+    author: document.getElementById('parsed-author').value.trim(),
+    author_context: document.getElementById('parsed-context').value.trim(),
+    published_at: document.getElementById('parsed-date').value.trim(),
+  };
+
+  try {
+    const res = await fetch('/api/signals/manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      // Add to session log
+      _sessionCaptures.unshift(data);
+      renderSessionLog();
+      showToast('Signal captured' + (data.thread_assignment ? ` → ${data.thread_assignment.thread_title}` : ''), 'success');
+
+      // Clear for next capture
+      pasteInput.value = '';
+      document.getElementById('url-input').value = '';
+      document.getElementById('parsed-section').classList.remove('visible');
+      pasteInput.focus();
+    } else {
+      showToast(data.error || 'Capture failed', 'error');
+    }
+  } catch (err) {
+    showToast('Network error: ' + err.message, 'error');
+  }
+
+  _capturing = false;
+  captureBtn.disabled = !pasteInput.value.trim();
+  captureBtn.innerHTML = 'Capture <span class="shortcut">Ctrl+↵</span>';
+}
+
+// ── Session log ───────────────────────────────────────────────────
+function renderSessionLog() {
+  const log = document.getElementById('session-log');
+  const items = document.getElementById('session-items');
+  const count = document.getElementById('session-count');
+
+  log.classList.add('visible');
+  count.textContent = `(${_sessionCaptures.length})`;
+
+  items.innerHTML = _sessionCaptures.map(s => {
+    const thread = s.thread_assignment
+      ? `<span class="session-item-thread">→ ${escHtml(s.thread_assignment.thread_title)}</span>`
+      : '<span style="color:var(--text-muted)">unassigned</span>';
+    const meta = [
+      s.domain ? `<span>${s.domain}</span>` : '',
+      s.author ? `<span>${escHtml(s.author)}</span>` : '',
+      thread,
+    ].filter(Boolean).join('');
+    return `<div class="session-item">
+      <span class="check">✓</span>
+      <div class="session-item-content">
+        <div class="session-item-title">${escHtml(s.title)}</div>
+        <div class="session-item-meta">${meta}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Toast ─────────────────────────────────────────────────────────
+function showToast(msg, type) {
+  const colors = { success: '#22c55e', error: '#ef4444', info: '#3b82f6' };
+  const icons = { success: '✓', error: '✕', info: 'ℹ' };
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.style.borderLeft = `3px solid ${colors[type] || colors.info}`;
+  t.innerHTML = `<span class="icon" style="color:${colors[type] || colors.info}">${icons[type] || icons.info}</span> ${escHtml(msg)}`;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('visible'));
+  setTimeout(() => { t.classList.remove('visible'); setTimeout(() => t.remove(), 200); }, 3000);
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+</script>
+
+<style>
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+</style>
+
+</body>
+</html>
