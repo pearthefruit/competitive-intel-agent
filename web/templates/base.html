@@ -498,6 +498,28 @@
         }
         .analysis-row-icon.done {
             border-color: var(--green);
+            background: rgba(34,197,94,0.15);
+        }
+
+        /* --- REVIEW QUEUE DROPDOWN --- */
+        .rq-list-item.active {
+            background: var(--bg-hover) !important;
+            border-left: 2px solid var(--accent) !important;
+        }
+
+        /* Navigable rows in review queue */
+        .rq-nav-item.active-row {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+            background: rgba(6,182,212,0.05);
+        }
+
+        /* Active suggestion pill within focused row */
+        .sig-rq-suggestion-pill.active-pill {
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 0 2px var(--accent-dim);
+            transform: translateY(-1px);
+        }
             background: rgba(16,163,74,0.1);
             color: var(--green);
         }
@@ -16093,6 +16115,9 @@ function _assignFromQueue(signalId, threadId, el) {
         body: JSON.stringify({ signal_id: signalId, thread_id: threadId })
     }).then(r => r.json()).then(data => {
         if (data.ok && item) {
+            const cached = _rqListCache.find(s => s.id === signalId);
+            if (cached) cached._assigned = true;
+
             item.style.opacity = '0.5';
             item.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0">
                 <span style="font-size:11px;color:var(--green)">✓ Assigned</span>
@@ -16112,6 +16137,9 @@ function _undoAssign(signalId, threadId, btn) {
         body: JSON.stringify({ signal_id: signalId, thread_id: threadId })
     }).then(r => r.json()).then(data => {
         if (data.ok) {
+            const cached = _rqListCache.find(s => s.id === signalId);
+            if (cached) delete cached._assigned;
+
             const item = document.getElementById(`rq-item-${signalId}`);
             if (item && item._originalHtml) {
                 item.innerHTML = item._originalHtml;
@@ -16134,6 +16162,9 @@ function _dismissFromQueue(signalId, el) {
         body: JSON.stringify({ signal_id: signalId })
     }).then(r => r.json()).then(data => {
         if (data.ok && item) {
+            const cached = _rqListCache.find(s => s.id === signalId);
+            if (cached) cached._assigned = true;
+
             item.style.opacity = '0.5';
             item.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0">
                 <span style="font-size:11px;color:var(--text-muted)">✕ Dismissed</span>
@@ -16153,6 +16184,9 @@ function _undoDismiss(signalId, btn) {
         body: JSON.stringify({ signal_id: signalId })
     }).then(r => r.json()).then(data => {
         if (data.ok) {
+            const cached = _rqListCache.find(s => s.id === signalId);
+            if (cached) delete cached._assigned;
+
             const item = document.getElementById(`rq-item-${signalId}`);
             if (item && item._originalHtml) {
                 item.innerHTML = item._originalHtml;
@@ -16191,13 +16225,134 @@ function _rqSearchKeydown(event, sigId) {
         if (dd) dd.style.display = 'none';
         return;
     }
-    if (event.key === 'Enter') {
-        const v = event.target.value.trim();
-        if (v && !_threadsCache.some(t => t.title.toLowerCase() === v.toLowerCase())) {
-            _createThreadFromQueue(sigId, v);
+
+    const items = document.querySelectorAll(`#rq-list-${sigId} .rq-list-item`);
+    if (!items.length) return;
+
+    if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        _activeRqIndex = (_activeRqIndex + 1) % items.length;
+        _updateRqHighlight(sigId);
+    } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        _activeRqIndex = (_activeRqIndex - 1 + items.length) % items.length;
+        _updateRqHighlight(sigId);
+    } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (_activeRqIndex >= 0 && _activeRqIndex < items.length) {
+            items[_activeRqIndex].click();
         }
     }
 }
+
+function _updateRqHighlight(sigId) {
+    const items = document.querySelectorAll(`#rq-list-${sigId} .rq-list-item`);
+    items.forEach((it, idx) => {
+        if (idx === _activeRqIndex) {
+            it.classList.add('active');
+            it.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+            it.classList.remove('active');
+        }
+    });
+}
+
+function _updateRqNavHighlight() {
+    const rows = document.querySelectorAll('#sig-rq-body .rq-nav-item');
+    rows.forEach((row, rIdx) => {
+        if (rIdx === _rqActiveSignalIdx) {
+            row.classList.add('active-row');
+            // Ensure visible
+            row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            
+            // Highlight pills within this row
+            const pills = row.querySelectorAll('.sig-rq-suggestion-pill');
+            pills.forEach((pill, pIdx) => {
+                if (pIdx === _rqActivePillIdx) pill.classList.add('active-pill');
+                else pill.classList.remove('active-pill');
+            });
+        } else {
+            row.classList.remove('active-row');
+            row.querySelectorAll('.sig-rq-suggestion-pill').forEach(p => p.classList.remove('active-pill'));
+        }
+    });
+}
+
+// Global keyboard listener for Review Queue navigation
+window.addEventListener('keydown', (e) => {
+    // Ignore if typing in an input/textarea
+    if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+    
+    const rqPane = document.getElementById('sig-review-queue');
+    if (!rqPane || rqPane.classList.contains('hidden')) return;
+
+    const rows = document.querySelectorAll('#sig-rq-body .rq-nav-item');
+    if (!rows.length) return;
+
+    let handled = true;
+    switch (e.key) {
+        case 'j':
+        case 'ArrowDown':
+            _rqActiveSignalIdx = Math.min(rows.length - 1, _rqActiveSignalIdx + 1);
+            _rqActivePillIdx = -1; // reset pill focus when moving rows
+            break;
+        case 'k':
+        case 'ArrowUp':
+            _rqActiveSignalIdx = Math.max(0, _rqActiveSignalIdx - 1);
+            _rqActivePillIdx = -1;
+            break;
+        case 'l':
+        case 'ArrowRight':
+            if (_rqActiveSignalIdx >= 0) {
+                const pills = rows[_rqActiveSignalIdx].querySelectorAll('.sig-rq-suggestion-pill');
+                if (pills.length) _rqActivePillIdx = Math.min(pills.length - 1, _rqActivePillIdx + 1);
+            }
+            break;
+        case 'h':
+        case 'ArrowLeft':
+            if (_rqActiveSignalIdx >= 0) {
+                _rqActivePillIdx = Math.max(0, _rqActivePillIdx - 1);
+            }
+            break;
+        case 'Enter':
+            if (_rqActiveSignalIdx >= 0 && _rqActivePillIdx >= 0) {
+                const pills = rows[_rqActiveSignalIdx].querySelectorAll('.sig-rq-suggestion-pill');
+                if (pills[_rqActivePillIdx]) {
+                    pills[_rqActivePillIdx].click();
+                    // Optional: keep focus index for next item if this one disappears
+                }
+            }
+            break;
+        case 'x':
+        case 'Delete':
+            if (_rqActiveSignalIdx >= 0) {
+                const dismissBtn = rows[_rqActiveSignalIdx].querySelector('button[title="Dismiss"]');
+                if (dismissBtn) dismissBtn.click();
+            }
+            break;
+        default:
+            // Check for number keys 1-9
+            if (e.key >= '1' && e.key <= '9') {
+                const num = parseInt(e.key) - 1;
+                if (_rqActiveSignalIdx >= 0) {
+                    const pills = rows[_rqActiveSignalIdx].querySelectorAll('.sig-rq-suggestion-pill');
+                    if (pills[num]) {
+                        _rqActivePillIdx = num;
+                        _updateRqNavHighlight();
+                        // wait a bit? No, user usually wants to see then enter, or we could just click.
+                        // User likely wants to see highlight first.
+                    }
+                }
+            } else {
+                handled = false;
+            }
+    }
+
+    if (handled) {
+        e.preventDefault();
+        _updateRqNavHighlight();
+    }
+});
 
 function _renderRqList(sigId, query) {
     const list = document.getElementById(`rq-list-${sigId}`);
@@ -16206,16 +16361,21 @@ function _renderRqList(sigId, query) {
     const threads = _getSortedThreads();
     const filtered = q ? threads.filter(t => (t.title || '').toLowerCase().includes(q)) : threads;
 
+    _activeRqIndex = 0; // Default to first item (+ New thread)
+
     // "+ New thread" at top — uses search text as suggested title
     const newTitle = q || '';
-    const newBtn = `<div onclick="_createThreadFromQueue(${sigId}, '${escHtml(newTitle.replace(/'/g, "\\'"))}')" style="padding:8px 12px;font-size:12px;color:var(--accent);cursor:pointer;border-bottom:1px solid var(--border);font-weight:600;transition:background 0.1s" onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background=''">+ New thread${newTitle ? `: "${escHtml(newTitle)}"` : ''}</div>`;
+    const newBtn = `<div onclick="_createThreadFromQueue(${sigId}, '${escHtml(newTitle.replace(/'/g, "\\'"))}')" class="rq-list-item" style="padding:8px 12px;font-size:12px;color:var(--accent);cursor:pointer;border-bottom:1px solid var(--border);font-weight:600;transition:background 0.1s" onmouseenter="_activeRqIndex=0;_updateRqHighlight(${sigId})" onmouseleave="this.style.background=''">+ New thread${newTitle ? `: "${escHtml(newTitle)}"` : ''}</div>`;
 
-    list.innerHTML = newBtn + filtered.map(t =>
-        `<div onclick="_assignFromQueue(${sigId}, ${t.id}, this);document.getElementById('rq-dd-${sigId}').style.display='none'" style="padding:7px 12px;font-size:12px;color:var(--text-secondary);cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;transition:background 0.1s" onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background=''">
+    list.innerHTML = newBtn + filtered.map((t, i) =>
+        `<div onclick="_assignFromQueue(${sigId}, ${t.id}, this);document.getElementById('rq-dd-${sigId}').style.display='none'" class="rq-list-item" style="padding:7px 12px;font-size:12px;color:var(--text-secondary);cursor:pointer;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;transition:background 0.1s" onmouseenter="_activeRqIndex=${i + 1};_updateRqHighlight(${sigId})" onmouseleave="this.style.background=''">
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title)}</span>
             <span style="flex-shrink:0;font-size:11px;color:var(--text-muted);margin-left:8px">${t.signal_count || 0}</span>
         </div>`
     ).join('') || '';
+
+    // Initial highlight
+    _updateRqHighlight(sigId);
 }
 
 function _createThreadFromQueue(sigId, title) {
@@ -16235,6 +16395,9 @@ function _createThreadFromQueue(sigId, title) {
     }).then(r => r.json()).then(data => {
         if (data.ok || data.id) {
             const threadId = data.id;
+            const cached = _rqListCache.find(s => s.id === sigId);
+            if (cached) cached._assigned = true;
+
             const originalHtml = item ? item.innerHTML : '';
             if (item) {
                 item.style.opacity = '0.5';
@@ -16247,30 +16410,10 @@ function _createThreadFromQueue(sigId, title) {
             const countEl = document.getElementById('review-queue-count');
             if (countEl) countEl.textContent = Math.max(0, parseInt(countEl.textContent || '0') - 1);
 
-            // Immediately add to _threadsCache so dropdown lists include it right away
-            if (!_threadsCache.some(t => t.id === threadId)) {
-                _threadsCache.push({ id: threadId, title, domain: '', signal_count: 1 });
-            }
+            // Sync with all other signals in all views
+            _injectRecentThread(threadId, title);
 
-            // Inject new thread as a "recent" suggestion pill on remaining review items
-            document.querySelectorAll('[id^="rq-item-"]').forEach(el => {
-                const elId = parseInt(el.id.replace('rq-item-', ''));
-                if (elId === sigId || el.style.opacity === '0.5') return; // skip assigned items
-                const suggsContainer = el.querySelector('[style*="flex-direction:column"]');
-                if (!suggsContainer) return;
-                const pill = document.createElement('div');
-                pill.onclick = () => { _assignFromQueue(elId, threadId, pill); };
-                pill.style.cssText = 'position:relative;padding:6px 10px;background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.3);border-radius:6px;cursor:pointer;overflow:hidden;transition:all 0.15s';
-                pill.onmouseenter = () => { pill.style.borderColor = '#22c55e'; pill.style.background = 'rgba(34,197,94,0.1)'; };
-                pill.onmouseleave = () => { pill.style.borderColor = 'rgba(34,197,94,0.3)'; pill.style.background = 'rgba(34,197,94,0.05)'; };
-                pill.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-                    <span style="font-size:11px;color:#22c55e;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(title)}</span>
-                    <span style="font-size:9px;color:rgba(34,197,94,0.6);font-weight:600;flex-shrink:0">new</span>
-                </div>`;
-                suggsContainer.insertBefore(pill, suggsContainer.firstChild);
-            });
-
-            // Refresh threads cache for dropdown lists
+            // Refresh local threads list
             fetch('/api/signals/threads').then(r => r.json()).then(td => {
                 _threadsCache = td.threads || td || [];
             });
@@ -18775,6 +18918,9 @@ function _loadReviewGroups() {
 }
 
 function _renderReviewGroups() {
+    _rqActiveSignalIdx = -1;
+    _rqActivePillIdx = -1;
+
     const body = document.getElementById('sig-rq-body');
     if (!body) return;
     const { groups, ungrouped, total_unassigned } = _reviewGroupsCache;
@@ -18800,7 +18946,7 @@ function _renderReviewGroups() {
             </div>`;
         }).join('');
 
-        html += `<div class="sig-rq-group" id="rq-group-${gi}" draggable="true"
+        html += `<div class="sig-rq-group rq-nav-item" id="rq-group-${gi}" draggable="true"
             ondragstart="event.dataTransfer.setData('text/plain','rq-group:${gi}');event.dataTransfer.effectAllowed='move'">
             <div class="sig-rq-group-header" onclick="document.getElementById('rq-group-signals-${gi}').style.display=document.getElementById('rq-group-signals-${gi}').style.display==='none'?'':'none'">
                 <div class="sig-rq-group-title">${escHtml(g.group_title)}</div>
@@ -18810,7 +18956,7 @@ function _renderReviewGroups() {
             <div class="sig-rq-group-signals" id="rq-group-signals-${gi}">
                 ${g.signals.map(s => `<div class="sig-rq-group-signal">
                     <span style="color:var(--text-muted);flex-shrink:0">&#8226;</span>
-                    <span onclick="openSignalDetail(${s.id})" style="cursor:pointer" onmouseenter="this.style.color='var(--accent)'" onmouseleave="this.style.color=''">${escHtml(s.title)}</span>
+                    <span onclick="openSignalDetail(${s.id})" oncontextmenu="_showRqSignalCtxMenu(event, ${s.id}, ${JSON.stringify(s.title).replace(/"/g, '&quot;')}, ${JSON.stringify(s.url || '').replace(/"/g, '&quot;')})" style="cursor:pointer" onmouseenter="this.style.color='var(--accent)'" onmouseleave="this.style.color=''">${escHtml(s.title)}</span>
                 </div>`).join('')}
             </div>
             <div class="sig-rq-group-actions">
@@ -18849,9 +18995,9 @@ function _renderReviewGroups() {
                     <span style="font-size:11px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
                 </div>`;
             }).join('');
-            html += `<div id="rq-ungrouped-${sig.id}" style="padding:10px 12px;margin-bottom:6px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
+            html += `<div id="rq-ungrouped-${sig.id}" class="rq-nav-item" style="padding:10px 12px;margin-bottom:6px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
                 <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:6px">
-                    <div onclick="openSignalDetail(${sig.id})" style="font-size:13px;font-weight:600;color:var(--text-primary);cursor:pointer;line-height:1.3">${escHtml(sig.title)}</div>
+                    <div onclick="openSignalDetail(${sig.id})" oncontextmenu="_showRqSignalCtxMenu(event, ${sig.id}, ${JSON.stringify(sig.title).replace(/"/g, '&quot;')}, ${JSON.stringify(sig.url || '').replace(/"/g, '&quot;')})" style="font-size:13px;font-weight:600;color:var(--text-primary);cursor:pointer;line-height:1.3">${escHtml(sig.title)}</div>
                     <button onclick="_dismissFromQueue(${sig.id},this);_onRqItemAssigned()" style="flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;background:none;border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text-muted);cursor:pointer" title="Dismiss">&#10005;</button>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:4px">
@@ -18871,8 +19017,8 @@ function _renderReviewGroups() {
     }
 
     body.innerHTML = html || '<div style="padding:20px;color:var(--text-muted);font-size:12px;text-align:center">No signals to review</div>';
-    // Show dismissed count footer
     _renderNoiseFooter(body);
+    _updateRqNavHighlight();
 }
 
 function _bulkAssignGroup(gi, threadId) {
@@ -19016,6 +19162,10 @@ function _onRqItemAssigned() {
 
 let _rqView = 'grouped'; // 'grouped' or 'list'
 let _rqListOffset = 0;
+let _rqListCache = []; // signals for current List view page
+let _activeRqIndex = -1; // index of highlighted item in dropdown
+let _rqActiveSignalIdx = -1; // currently focused row in review queue
+let _rqActivePillIdx = -1;    // currently focused pill in active row
 
 function _switchRqView(view) {
     _rqView = view;
@@ -19046,66 +19196,85 @@ function _switchRqView(view) {
     }
 }
 
-function _renderReviewList(offset) {
-    offset = offset || 0;
+function _renderReviewList(offsetOrFromCache) {
+    let fromCache = (offsetOrFromCache === true);
+    let offset = fromCache ? _rqListOffset : (offsetOrFromCache || 0);
     _rqListOffset = offset;
+
     const body = document.getElementById('sig-rq-body');
     if (!body) return;
-    body.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:12px;text-align:center">Loading…</div>';
 
+    const render = (signals, total) => {
+        _rqActiveSignalIdx = -1;
+        _rqActivePillIdx = -1;
+
+        if (!signals.length) {
+            body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)"><div style="font-size:28px;margin-bottom:8px">✓</div><div style="font-size:13px">All signals assigned</div></div>';
+            return;
+        }
+        let html = `<div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:11px;color:var(--text-muted)">${offset + 1}–${Math.min(offset + signals.length, total)} of ${total}</span>
+            <div style="display:flex;gap:4px">
+                <button onclick="_enrichVisibleSignals()" style="padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--accent);font-size:11px;cursor:pointer;margin-right:8px">Enrich Page</button>
+                ${offset > 0 ? `<button onclick="_renderReviewList(${offset - 20})" style="padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;cursor:pointer">← Prev</button>` : ''}
+                ${offset + 20 < total ? `<button onclick="_renderReviewList(${offset + 20})" style="padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;cursor:pointer">Next →</button>` : ''}
+            </div>
+        </div>
+        <div id="rq-progress-bar" style="display:none;height:2px;background:var(--bg-tertiary);width:100%"><div id="rq-progress-fill" style="height:100%;width:0;background:var(--accent);transition:width 0.3s"></div></div>`;
+        html += signals.map(sig => {
+            if (sig._assigned) return ''; // local hide for immediate feedback
+            const dateStr = sig.published_at ? sig.published_at.substring(0, 10) : '';
+            const suggHtml = (sig.suggestions || []).map((s, si) => {
+                const pct = Math.round(s.score * 100);
+                const isTop = si === 0 && pct > 15;
+                return `<div onclick="_assignFromQueue(${sig.id},${s.thread_id},this);_onRqItemAssigned()" data-rq-pill-tid="${s.thread_id}" data-rq-pill-title="${escHtml(s.thread_title)}" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
+                    <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.thread_title)}</span>
+                    <span style="font-size:11px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
+                </div>`;
+            }).join('');
+            const bodyPreview = sig.body ? _formatBody(sig.body) : '';
+            const urlLink = sig.url ? `<a href="${escHtml(sig.url)}" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none;margin-top:4px;display:inline-block" onclick="event.stopPropagation()">Open source →</a>` : '';
+            return `<div id="rq-item-${sig.id}" class="rq-nav-item" style="padding:10px 12px;border-bottom:1px solid var(--border)">
+                <div style="display:flex;align-items:start;justify-content:space-between;gap:8px;margin-bottom:6px">
+                    <div style="flex:1;min-width:0">
+                        <div onclick="const el=document.getElementById('rq-body-${sig.id}');el.style.display=el.style.display==='none'?'block':'none'" oncontextmenu="_showRqSignalCtxMenu(event, ${sig.id}, ${JSON.stringify(sig.title).replace(/"/g, '&quot;')}, ${JSON.stringify(sig.url || '').replace(/"/g, '&quot;')})" style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.3;cursor:pointer">${escHtml(sig.title)}</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${escHtml(sig.source_name)} · ${escHtml(dateStr)}</div>
+                        <div id="rq-body-${sig.id}" style="display:none;margin-top:6px;padding:8px;background:var(--bg-tertiary);border-radius:6px;font-size:12px;color:var(--text-secondary);line-height:1.5;max-height:200px;overflow-y:auto">${bodyPreview || '<span style="color:var(--text-muted);font-style:italic">No body text</span>'}${urlLink ? '<br>' + urlLink : ''}</div>
+                    </div>
+                    <button onclick="_dismissFromQueue(${sig.id},this);_onRqItemAssigned()" style="flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;background:none;border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text-muted);cursor:pointer" title="Dismiss">✕</button>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:4px">
+                    ${suggHtml}
+                    <div style="position:relative">
+                        <div onclick="_toggleRqDropdown(${sig.id})" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                            <span>Other thread…</span><span style="font-size:9px">▼</span>
+                        </div>
+                        <div id="rq-dd-${sig.id}" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:20;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;margin-top:2px;box-shadow:0 4px 16px rgba(0,0,0,0.5);overflow:hidden">
+                            <input type="text" placeholder="Search or create thread…" id="rq-search-${sig.id}" oninput="_filterRqDropdown(${sig.id},this.value)" onkeydown="_rqSearchKeydown(event,${sig.id})" style="width:100%;padding:7px 12px;background:var(--bg-tertiary);border:none;border-bottom:1px solid var(--border);color:var(--text-primary);font-size:12px;outline:none;box-sizing:border-box">
+                            <div id="rq-list-${sig.id}" style="max-height:200px;overflow-y:auto"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+        body.innerHTML = html;
+        _renderNoiseFooter(body);
+        _updateRqNavHighlight();
+    };
+
+    if (fromCache && _rqListCache.length) {
+        // Find total from meta if available, otherwise just use cache length
+        render(_rqListCache, _rqListCache.total || _rqListCache.length);
+        return;
+    }
+
+    body.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:12px;text-align:center">Loading…</div>';
     fetch(`/api/signals/review-queue?limit=20&offset=${offset}`)
         .then(r => r.json())
         .then(data => {
-            const signals = data.signals || [];
-            const total = data.total || 0;
-            if (!signals.length) {
-                body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)"><div style="font-size:28px;margin-bottom:8px">✓</div><div style="font-size:13px">All signals assigned</div></div>';
-                return;
-            }
-            let html = `<div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-                <span style="font-size:11px;color:var(--text-muted)">${offset + 1}–${Math.min(offset + signals.length, total)} of ${total}</span>
-                <div style="display:flex;gap:4px">
-                    ${offset > 0 ? `<button onclick="_renderReviewList(${offset - 20})" style="padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;cursor:pointer">← Prev</button>` : ''}
-                    ${offset + 20 < total ? `<button onclick="_renderReviewList(${offset + 20})" style="padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;cursor:pointer">Next →</button>` : ''}
-                </div>
-            </div>`;
-            html += signals.map(sig => {
-                const dateStr = sig.published_at ? sig.published_at.substring(0, 10) : '';
-                const suggHtml = (sig.suggestions || []).map((s, si) => {
-                    const pct = Math.round(s.score * 100);
-                    const isTop = si === 0 && pct > 15;
-                    return `<div onclick="_assignFromQueue(${sig.id},${s.thread_id},this);_onRqItemAssigned()" data-rq-pill-tid="${s.thread_id}" data-rq-pill-title="${escHtml(s.thread_title)}" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
-                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.thread_title)}</span>
-                        <span style="font-size:11px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
-                    </div>`;
-                }).join('');
-                const bodyPreview = sig.body ? _formatBody(sig.body) : '';
-                const urlLink = sig.url ? `<a href="${escHtml(sig.url)}" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none;margin-top:4px;display:inline-block" onclick="event.stopPropagation()">Open source →</a>` : '';
-                return `<div id="rq-item-${sig.id}" style="padding:10px 12px;border-bottom:1px solid var(--border)">
-                    <div style="display:flex;align-items:start;justify-content:space-between;gap:8px;margin-bottom:6px">
-                        <div style="flex:1;min-width:0">
-                            <div onclick="const el=document.getElementById('rq-body-${sig.id}');el.style.display=el.style.display==='none'?'block':'none'" style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.3;cursor:pointer">${escHtml(sig.title)}</div>
-                            <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${escHtml(sig.source_name)} · ${escHtml(dateStr)}</div>
-                            <div id="rq-body-${sig.id}" style="display:none;margin-top:6px;padding:8px;background:var(--bg-tertiary);border-radius:6px;font-size:12px;color:var(--text-secondary);line-height:1.5;max-height:200px;overflow-y:auto">${bodyPreview || '<span style="color:var(--text-muted);font-style:italic">No body text</span>'}${urlLink ? '<br>' + urlLink : ''}</div>
-                        </div>
-                        <button onclick="_dismissFromQueue(${sig.id},this);_onRqItemAssigned()" style="flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;background:none;border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text-muted);cursor:pointer" title="Dismiss">✕</button>
-                    </div>
-                    <div style="display:flex;flex-direction:column;gap:4px">
-                        ${suggHtml}
-                        <div style="position:relative">
-                            <div onclick="_toggleRqDropdown(${sig.id})" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
-                                <span>Other thread…</span><span style="font-size:9px">▼</span>
-                            </div>
-                            <div id="rq-dd-${sig.id}" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:20;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;margin-top:2px;box-shadow:0 4px 16px rgba(0,0,0,0.5);overflow:hidden">
-                                <input type="text" placeholder="Search or create thread…" id="rq-search-${sig.id}" oninput="_filterRqDropdown(${sig.id},this.value)" onkeydown="_rqSearchKeydown(event,${sig.id})" style="width:100%;padding:7px 12px;background:var(--bg-tertiary);border:none;border-bottom:1px solid var(--border);color:var(--text-primary);font-size:12px;outline:none;box-sizing:border-box">
-                                <div id="rq-list-${sig.id}" style="max-height:200px;overflow-y:auto"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>`;
-            }).join('');
-            body.innerHTML = html;
-            _renderNoiseFooter(body);
+            _rqListCache = data.signals || [];
+            _rqListCache.total = data.total || 0;
+            render(_rqListCache, _rqListCache.total);
         });
 }
 
@@ -19175,6 +19344,69 @@ document.addEventListener('contextmenu', (e) => {
     openThreadDetail(tid);
     _showToast(`Viewing: ${title.substring(0, 40)}`, 'info', 2000);
 });
+
+function _showRqSignalCtxMenu(e, sigId, title, url) {
+    e.preventDefault();
+    e.stopPropagation();
+    const safeTitle = title.replace(/'/g, "\\'");
+    const safeUrl = url.replace(/'/g, "\\'");
+    const items = [
+        { label: 'Open Detail', icon: '🔍', action: `openSignalDetail(${sigId})` },
+        { label: 'Open Source URL', icon: '🌐', action: `window.open('${safeUrl}', '_blank')` },
+        { label: 'Fetch Full Text', icon: '📥', action: `_scrapeSignal(${sigId})` },
+        { label: 'Copy link', icon: '🔗', action: `navigator.clipboard.writeText('${safeUrl}');_showToast('Copied link', 'info')` },
+    ];
+    _showContextMenu(items, e.clientX, e.clientY, title);
+}
+
+function _scrapeSignal(sigId) {
+    _showToast('Fetching article text...', 'info', 2000);
+    fetch(`/api/signals/${sigId}/scrape`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                _showToast('Article text fetched', 'success');
+                const bodyEl = document.getElementById(`rq-body-${sigId}`);
+                if (bodyEl) {
+                    bodyEl.innerHTML = _formatBody(data.body);
+                    bodyEl.style.display = 'block';
+                }
+            } else {
+                _showToast(data.error || 'Failed to fetch text', 'error');
+            }
+        });
+}
+
+async function _enrichVisibleSignals() {
+    const items = Array.from(document.querySelectorAll('[id^="rq-item-"]')).filter(el => {
+        const bodyEl = el.querySelector('[id^="rq-body-"]');
+        return bodyEl && (bodyEl.innerText.includes('No body text') || bodyEl.innerText.length < 500);
+    });
+    if (!items.length) { _showToast('No signals on this page need text', 'info'); return; }
+
+    const bar = document.getElementById('rq-progress-bar');
+    const fill = document.getElementById('rq-progress-fill');
+    if (bar) bar.style.display = 'block';
+    if (fill) fill.style.width = '0%';
+    
+    let count = 0;
+    for (const item of items) {
+        const sigId = parseInt(item.id.replace('rq-item-', ''));
+        try {
+            const r = await fetch(`/api/signals/${sigId}/scrape`, { method: 'POST' });
+            const data = await r.json();
+            if (data.ok) {
+                const bodyEl = document.getElementById(`rq-body-${sigId}`);
+                if (bodyEl) bodyEl.innerHTML = _formatBody(data.body);
+            }
+        } catch (e) {}
+        count++;
+        if (fill) fill.style.width = `${(count / items.length) * 100}%`;
+    }
+    
+    _showToast('Page enrichment complete', 'success');
+    setTimeout(() => { if (bar) bar.style.display = 'none'; }, 2000);
+}
 
 // Close group search dropdowns on click outside
 document.addEventListener('click', (e) => {
@@ -19251,12 +19483,21 @@ function _injectRecentThread(threadId, title) {
         }
     });
 
+    // Update list view cache
+    (_rqListCache || []).forEach(s => {
+        if (s._assigned) return;
+        if (!s.suggestions) s.suggestions = [];
+        if (!s.suggestions.some(sg => sg.thread_id === threadId)) {
+            s.suggestions.unshift(newSugg);
+        }
+    });
+
     // Re-render current view
     if (_rqView === 'grouped') {
         _renderReviewGroups();
+    } else {
+        _renderReviewList(true); // render from cache
     }
-    // List view: pills are rendered per-fetch, so re-render
-    // (list view re-fetches on switch, so this mainly helps grouped view)
 }
 
 function _createThreadForGroup(gi, title) {
