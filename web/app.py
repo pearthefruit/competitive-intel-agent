@@ -3684,8 +3684,8 @@ Return ONLY the JSON."""
         from db import get_brainstorms, get_signal_clusters
         conn = get_connection(db_path)
         brainstorms = get_brainstorms(conn)
-        # Enrich with thread titles
-        all_threads = {t["id"]: t for t in get_signal_clusters(conn, status="active", limit=100)}
+        # Enrich with thread titles — high limit to avoid "Thread N" fallback
+        all_threads = {t["id"]: t for t in get_signal_clusters(conn, status="active", limit=2000)}
         for b in brainstorms:
             b["thread_titles"] = [all_threads.get(tid, {}).get("title", f"Thread {tid}") for tid in b.get("thread_ids", [])]
         conn.close()
@@ -3701,7 +3701,7 @@ Return ONLY the JSON."""
             conn.close()
             return jsonify({"error": "Brainstorm not found"}), 404
         # Enrich with thread titles and data
-        all_threads = {t["id"]: t for t in get_signal_clusters(conn, status="active", limit=100)}
+        all_threads = {t["id"]: t for t in get_signal_clusters(conn, status="active", limit=2000)}
         b["threads"] = [all_threads.get(tid, {"id": tid, "title": f"Thread {tid}", "domain": "unknown"}) for tid in b.get("thread_ids", [])]
         conn.close()
         return jsonify(b)
