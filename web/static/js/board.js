@@ -713,6 +713,57 @@ function _threadActionSearchMore(query, patternId) {
     });
 }
 
+function _threadActionSearchInternal(threadId, threadTitle) {
+    const btn = event.target.closest('button');
+    const actionsDiv = btn ? btn.parentElement : null;
+    if (btn) { btn.disabled = true; }
+
+    const stopWords = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'are', 'was', 'has', 'have', 'will', 'not', 'but', 'all', 'its', 'into', 'amid', 'over', 'under', 'about', 'between', 'after', 'before', 'during', 'while', 'amid']);
+    const keywords = threadTitle.toLowerCase()
+        .split(/[\s\-_,./]+/)
+        .filter(w => w.length >= 3 && !stopWords.has(w));
+
+    if (!keywords.length) {
+        if (btn) btn.textContent = '🔍 No keywords extracted';
+        return;
+    }
+
+    const matches = (_signalsCache || []).filter(sig => {
+        const text = ((sig.title || '') + ' ' + (sig.body || '')).toLowerCase();
+        return keywords.some(kw => text.includes(kw));
+    }).slice(0, 15);
+
+    if (btn) btn.textContent = matches.length ? `🔍 ${matches.length} matching signals found` : '🔍 No matches in existing signals';
+
+    if (!matches.length || !actionsDiv) return;
+
+    const resultsEl = document.createElement('div');
+    resultsEl.style.cssText = 'margin-top:8px;padding:10px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px';
+    resultsEl.innerHTML = `<div style="font-weight:700;color:var(--text-secondary);margin-bottom:6px;font-size:10px">Matching existing signals</div>` +
+        matches.map(s => `<div id="isig-${threadId}-${s.id}" style="display:flex;align-items:start;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+            <span style="font-size:11px;color:var(--text-secondary);line-height:1.4;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(s.title)}">${escHtml(s.title)}</span>
+            <button onclick="_addSingleSignalToThread(${s.id},${threadId},this)" style="flex-shrink:0;padding:2px 8px;background:var(--accent);border:none;border-radius:4px;color:white;font-size:10px;font-weight:700;cursor:pointer">+</button>
+        </div>`).join('');
+    actionsDiv.appendChild(resultsEl);
+}
+
+function _addSingleSignalToThread(sigId, threadId, btn) {
+    if (btn) { btn.textContent = '…'; btn.disabled = true; }
+    fetch('/api/signals/review-queue/bulk-assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signal_ids: [sigId], thread_id: threadId })
+    }).then(r => r.json()).then(() => {
+        if (btn) { btn.textContent = '✓'; btn.style.background = 'var(--green)'; }
+        const row = document.getElementById(`isig-${threadId}-${sigId}`);
+        if (row) row.style.opacity = '0.5';
+        loadSignals();
+        if (_signalTab === 'graph') loadBoard();
+    }).catch(() => {
+        if (btn) { btn.textContent = '✗'; btn.disabled = false; }
+    });
+}
+
 function openEntityPopover(event, entityType, entityValue) {
     event.stopPropagation();
     // Remove any existing popover

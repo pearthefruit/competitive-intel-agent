@@ -357,7 +357,7 @@ document.addEventListener('keydown', (e) => {
 
     // F — focus tab-local filter
     if (kl === 'f') {
-        const map = { raw: 'signals-search', threads: 'signals-search', graph: 'board-keyword-search', causal: 'causal-thread-search' };
+        const map = { raw: 'signals-search', threads: 'signals-search', narratives: 'signals-search', graph: 'board-keyword-search', causal: 'causal-thread-search' };
         const inp = document.getElementById(map[tab]);
         if (inp) { inp.focus(); inp.select(); }
         e.preventDefault(); return;

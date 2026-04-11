@@ -8,17 +8,18 @@ function openBrainstormMode() {
     overlay.classList.add('visible');
 
     const ids = [..._selectedThreadIds];
+    const _findThread = id => _graphData?.nodes.find(n => n.id === id) || (_threadsCache || []).find(t => t.id === id);
     const threadNames = ids.map(id => {
-        const n = _graphData?.nodes.find(n => n.id === id);
-        return n ? n.title : `Thread ${id}`;
-    });
+        const n = _findThread(id);
+        return n ? n.title : '';
+    }).filter(Boolean);
     subtitle.textContent = threadNames.join(' × ');
 
     // Show selected threads while loading
     content.innerHTML = `
         <div class="brainstorm-threads">
             ${ids.map(id => {
-                const n = _graphData?.nodes.find(n => n.id === id);
+                const n = _findThread(id);
                 if (!n) return '';
                 const bDoms = _parseDomains(n.domain);
                 const domColor = _DOMAIN_COLORS[bDoms[0]] || '#6b7280';
@@ -513,8 +514,9 @@ function _loadReviewGroups() {
     }
 
     // If user is on list view, just render list
+    // Use cache if already populated (preserves locally-injected suggestions from _injectRecentThread)
     if (_rqView === 'list') {
-        _renderReviewList();
+        _renderReviewList(_rqListCache && _rqListCache.length > 0);
         // Still update the count badge
         fetch('/api/signals/review-queue?limit=1').then(r => r.json()).then(d => {
             if (countEl) countEl.textContent = d.total || '';

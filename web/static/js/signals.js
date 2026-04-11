@@ -1628,7 +1628,8 @@ function _buildThreadActions(thread, entities) {
         actions.push(`<button onclick="_threadActionDiscover('${escHtml(niche.replace(/'/g, "\\'"))}')" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary)">📊 Discover companies in ${escHtml(sectorNames[0])}</button>`);
     }
 
-    // Always offer to search for more signals
+    // Internal search (existing signals) + external search (new sources)
+    actions.push(`<button onclick="_threadActionSearchInternal(${thread.id}, '${escHtml(thread.title.replace(/'/g, "\\'"))}')" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary)">🔍 Find in existing signals</button>`);
     actions.push(`<button onclick="_threadActionSearchMore('${escHtml(thread.title.replace(/'/g, "\\'"))}', ${thread.id})" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted)">📡 Search for more signals</button>`);
 
     // Split thread (only for threads with 6+ signals)
