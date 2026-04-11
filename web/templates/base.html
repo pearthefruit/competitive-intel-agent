@@ -18245,8 +18245,8 @@ function openBrainstormMode() {
         </div>
     `;
 
-    // Fetch related hypotheses in parallel with brainstorm
-    fetch('/api/hypotheses/related', {
+    // Fetch related hypotheses and brainstorm in parallel, render only when both complete
+    const relatedPromise = fetch('/api/hypotheses/related', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ thread_ids: ids })
@@ -18254,14 +18254,14 @@ function openBrainstormMode() {
         window._brainstormRelatedHyps = data.hypotheses || [];
     }).catch(() => { window._brainstormRelatedHyps = []; });
 
-    // Call brainstorm API
-    fetch('/api/signals/brainstorm', {
+    const brainstormPromise = fetch('/api/signals/brainstorm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ thread_ids: ids })
-    })
-    .then(r => r.json())
-    .then(result => {
+    }).then(r => r.json());
+
+    Promise.all([relatedPromise, brainstormPromise]).then(([_, result]) => {
+        console.log('[brainstorm] Promise.all resolved, relatedHyps:', window._brainstormRelatedHyps?.length);
         if (result.error) {
             content.querySelector('div:last-child').innerHTML = `<div style="color:var(--red)">${escHtml(result.error)}</div>`;
             return;
@@ -18346,25 +18346,25 @@ function _renderBrainstormResults(container, result, threadIds) {
 
     // Related past hypotheses (serendipity engine)
     const relatedHyps = window._brainstormRelatedHyps || [];
-    if (relatedHyps.length) {
-        html += `<div class="brainstorm-section">
-            <div class="brainstorm-section-title">🔮 Related Past Hypotheses</div>
-            <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">From previous brainstorm sessions — may reveal unexpected connections</div>
-            ${relatedHyps.map(h => `
-                <div style="padding:10px 12px;margin-bottom:6px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);border-left:3px solid ${h.relevance_score >= 3 ? 'var(--accent)' : 'var(--border)'}">
-                    <div style="display:flex;justify-content:space-between;align-items:start">
-                        <div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(h.title)}</div>
-                        <span style="font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(6,182,212,0.15);color:var(--accent);white-space:nowrap">${h.relevance_score >= 3 ? 'strong' : 'weak'}</span>
-                    </div>
-                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${escHtml(h.reasoning || '')}</div>
-                    <div style="font-size:9px;color:var(--text-muted);margin-top:6px">Match: ${escHtml(h.match_reason || '')}</div>
-                    <div style="display:flex;gap:6px;margin-top:6px">
-                        <button onclick="_createNarrativeFromHypothesis('${escHtml(h.title.replace(/'/g, "\\'"))}', '${escHtml((h.reasoning || '').replace(/'/g, "\\'"))}')" style="padding:3px 8px;background:var(--bg-tertiary);border:1px solid var(--purple);border-radius:4px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">📖 Narrative</button>
-                    </div>
+    console.log('[brainstorm] relatedHyps:', relatedHyps.length, relatedHyps);
+    
+    html += `<div class="brainstorm-section">
+        <div class="brainstorm-section-title">🔮 Related Past Hypotheses</div>
+        <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">From previous brainstorm sessions — may reveal unexpected connections</div>
+        ${relatedHyps.length ? relatedHyps.map(h => `
+            <div style="padding:10px 12px;margin-bottom:6px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);border-left:3px solid ${h.relevance_score >= 3 ? 'var(--accent)' : 'var(--border)'}">
+                <div style="display:flex;justify-content:space-between;align-items:start">
+                    <div style="font-size:12px;font-weight:600;color:var(--text-primary)">${_renderBrainstormLinks(h.title)}</div>
+                    <span style="font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(6,182,212,0.15);color:var(--accent);white-space:nowrap">${h.relevance_score >= 3 ? 'strong' : 'weak'}</span>
                 </div>
-            `).join('')}
-        </div>`;
-    }
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${_renderBrainstormLinks(h.reasoning || '')}</div>
+                <div style="font-size:9px;color:var(--text-muted);margin-top:6px">Match: ${_renderBrainstormLinks(h.match_reason || '')}</div>
+                <div style="display:flex;gap:6px;margin-top:6px">
+                    <button onclick="_createNarrativeFromHypothesis('${escHtml(h.title.replace(/'/g, "\\'"))}', '${escHtml((h.reasoning || '').replace(/'/g, "\\'"))}')" style="padding:3px 8px;background:var(--bg-tertiary);border:1px solid var(--purple);border-radius:4px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">📖 Narrative</button>
+                </div>
+            </div>
+        `).join('') : '<div style="font-size:11px;color:var(--text-muted);padding:8px 0;font-style:italic">No related past hypotheses found for these threads.</div>'}
+    </div>`;
 
     // Actions bar
     const tids = JSON.stringify(threadIds);
@@ -18534,7 +18534,23 @@ function openPastBrainstorm(brainstormId) {
                 }).join('')}
             </div>
             <div style="font-size:10px;color:var(--text-muted);margin-bottom:16px">Brainstormed ${b.created_at ? _timeAgo(b.created_at) : 'previously'}</div>`;
-            _renderBrainstormResults(content, result, b.thread_ids || []);
+
+            // Fetch related hypotheses for this past brainstorm before rendering the rest
+            const tids = b.thread_ids || [];
+            fetch('/api/hypotheses/related', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ thread_ids: tids })
+            })
+            .then(r => r.json())
+            .then(data => {
+                window._brainstormRelatedHyps = (data.hypotheses || []).filter(h => h.brainstorm_id !== brainstormId);
+                _renderBrainstormResults(content, result, tids);
+            })
+            .catch(() => {
+                window._brainstormRelatedHyps = [];
+                _renderBrainstormResults(content, result, tids);
+            });
         })
         .catch(() => { content.innerHTML = '<div style="color:var(--red)">Failed to load</div>'; });
 }
@@ -18871,11 +18887,12 @@ function _bulkAssignGroup(gi, threadId) {
                 <button onclick="_undoBulkAssign(${gi},${threadId})" style="padding:3px 8px;background:none;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--text-muted);cursor:pointer">Undo</button>
             </div>`;
             groupEl.style.opacity = '1';
-            // Remove group from frontend cache so view toggle doesn't show it again
             _reviewGroupsCache.groups[gi] = null;
             _onRqItemAssigned();
-            // Refresh thread cache (signal counts changed)
-            fetch('/api/signals/threads').then(r => r.json()).then(td => { _threadsCache = td.threads || []; });
+            // Boost this thread in remaining signals' suggestions
+            _injectRecentThread(threadId, threadTitle);
+            // Refresh thread cache
+            fetch('/api/signals/threads').then(r => r.json()).then(td => { _threadsCache = td.threads || []; _sortedThreadsCache = null; });
         }
     });
 }
@@ -19193,6 +19210,34 @@ function _rqGroupSearchKeydown(event, gi) {
     }
 }
 
+function _injectRecentThread(threadId, title) {
+    // Add newly created thread as top suggestion to all remaining groups and ungrouped signals
+    const newSugg = { thread_id: threadId, thread_title: title, score: 0.99 };
+
+    // Update groups cache
+    (_reviewGroupsCache.groups || []).forEach(g => {
+        if (!g) return;
+        if (!g.all_suggestions) g.all_suggestions = [];
+        // Prepend if not already present
+        if (!g.all_suggestions.some(s => s.thread_id === threadId)) {
+            g.all_suggestions.unshift(newSugg);
+        }
+    });
+    (_reviewGroupsCache.ungrouped || []).forEach(s => {
+        if (!s.suggestions) s.suggestions = [];
+        if (!s.suggestions.some(sg => sg.thread_id === threadId)) {
+            s.suggestions.unshift(newSugg);
+        }
+    });
+
+    // Re-render current view
+    if (_rqView === 'grouped') {
+        _renderReviewGroups();
+    }
+    // List view: pills are rendered per-fetch, so re-render
+    // (list view re-fetches on switch, so this mainly helps grouped view)
+}
+
 function _createThreadForGroup(gi, title) {
     const group = _reviewGroupsCache.groups[gi];
     if (!group) return;
@@ -19210,8 +19255,11 @@ function _createThreadForGroup(gi, title) {
             }
             _reviewGroupsCache.groups[gi] = null;
             _onRqItemAssigned();
-            // Refresh thread cache so new thread appears in other groups' search dropdowns
-            fetch('/api/signals/threads').then(r => r.json()).then(td => { _threadsCache = td.threads || []; });
+            // Inject new thread as top suggestion into all remaining groups + ungrouped signals
+            const newThreadId = data.id;
+            _injectRecentThread(newThreadId, title);
+            // Refresh thread cache
+            fetch('/api/signals/threads').then(r => r.json()).then(td => { _threadsCache = td.threads || []; _sortedThreadsCache = null; });
             _showToast(`Created thread "${title}" with ${sigIds.length} signals`, 'success');
         }
     });
