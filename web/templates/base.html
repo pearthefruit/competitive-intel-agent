@@ -5874,6 +5874,7 @@
                                 <button onclick="_toggleReviewQueue()" style="display:flex;align-items:center;gap:6px;padding:0;background:none;border:none;color:var(--text-primary);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap" title="Collapse">Review Queue <span class="sig-rq-count" id="sig-rq-count" style="background:var(--purple);color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600"></span> <span style="color:var(--text-muted);font-size:16px;margin-left:2px">›</span></button>
                                 <button class="sig-rq-tab" id="sig-rq-tab-thread" onclick="_switchRightPaneTab('thread')" style="display:none">Thread Detail</button>
                                 <div style="margin-left:auto;display:flex;align-items:center">
+                                    <button id="rq-dismiss-all" onclick="_dismissAllReviewQueue()" style="margin-right:12px;padding:5px 12px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:12px;font-weight:600;cursor:pointer" title="Dismiss all remaining signals as noise" onmouseenter="this.style.borderColor='#ef4444';this.style.color='#ef4444'" onmouseleave="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">Dismiss All</button>
                                     <button id="rq-view-grouped" onclick="_switchRqView('grouped')" style="padding:5px 12px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.3);border-radius:6px 0 0 6px;color:var(--purple);font-size:12px;font-weight:600;cursor:pointer">Grouped</button>
                                     <button id="rq-view-list" onclick="_switchRqView('list')" style="padding:5px 12px;background:none;border:1px solid var(--border);border-left:none;border-radius:0 6px 6px 0;color:var(--text-muted);font-size:12px;font-weight:600;cursor:pointer">List</button>
                                 </div>
@@ -16699,15 +16700,13 @@ function _addBoardHighlight(hl) {
 }
 
 function _removeBoardHighlight(idx) {
-    const removed = _boardHighlights.splice(idx, 1)[0];
-    if (removed && removed.kind === 'entity') {
-        // Unmark entity chip
-        document.querySelectorAll('.ent-chip-active').forEach(c => {
-            if (c.textContent.includes(removed.label)) c.classList.remove('ent-chip-active');
-        });
+    _boardHighlights.splice(idx, 1);
+    if (!_boardHighlights.length) {
+        _clearBoardHighlight();
+    } else {
+        _applyBoardHighlights();
+        _renderHighlightPills();
     }
-    _applyBoardHighlights();
-    _renderHighlightPills();
 }
 
 function _clearBoardHighlight() {
@@ -16748,10 +16747,10 @@ function _applyBoardHighlights() {
         const oldBadge = n.querySelector('.board-match-badge');
         if (oldBadge) oldBadge.remove();
 
-        n.classList.remove('board-dimmed', 'board-highlighted');
-        n.style.pointerEvents = '';
         if (!_boardHighlights.length) {
             n.style.filter = '';
+            n.classList.remove('board-dimmed', 'board-highlighted');
+            n.style.pointerEvents = '';
             return;
         }
 
@@ -16880,9 +16879,9 @@ function _clusterHighlightedNodes(unionIds) {
     const cy = nodes.reduce((s, n) => s + n.y, 0) / nodes.length;
 
     // Compute ring radii from actual node sizes
-    const padding = 18; // px between node edges
+    const padding = 12; // px between node edges (tightened)
     let cumulativeRadius = 0;
-    const ringGap = 40; // gap between concentric rings
+    const ringGap = 30; // gap between concentric rings (tightened)
     const ringTargets = rings.map((ringNodes, ri) => {
         const avgDiam = ringNodes.reduce((s, n) => s + n.diameter, 0) / ringNodes.length;
         const circumference = ringNodes.length * (avgDiam + padding);
@@ -16905,7 +16904,7 @@ function _clusterHighlightedNodes(unionIds) {
     });
 
     // Push dimmed nodes out of the cluster area — only if they're inside it
-    const outerRadius = cumulativeRadius + 80;
+    const outerRadius = cumulativeRadius + 20; // Tightened buffer
     const dimmedNodes = [];
     document.querySelectorAll('.graph-node.board-dimmed').forEach(n => {
         const nid = parseInt(n.dataset.nodeId);
@@ -16954,6 +16953,7 @@ function _clusterHighlightedNodes(unionIds) {
         if (frame < totalFrames) {
             _hlClusterAnim = requestAnimationFrame(animate);
         } else {
+            _hlClusterAnim = null;
             _zoomToCluster(cx, cy, cumulativeRadius, nodes);
         }
     }
@@ -16981,7 +16981,10 @@ function _zoomToCluster(cx, cy, outerRadius, nodes) {
     const zb = svgEl.__zoomBehavior;
     if (!zb) return;
 
-    // Save original zoom so we can restore on unhighlight
+    // Save original zoom so we can restore on unhighlight.
+    // ONLY save if we don't already have a baseline saved.
+    // This prevents subsequent searches (while highights are active) from 
+    // overwriting the 'home' position with a zoomed-in one.
     if (!_hlOriginalZoom) {
         _hlOriginalZoom = d3.zoomTransform(svgEl);
     }
@@ -16993,12 +16996,14 @@ function _zoomToCluster(cx, cy, outerRadius, nodes) {
 
     // Largest node diameter for margin
     const maxDiam = nodes.reduce((m, n) => Math.max(m, n.diameter), 0);
-    const clusterSpan = (outerRadius + maxDiam) * 2;
+    // clusterSpan is the diameter of the cluster edge-to-edge
+    const clusterSpan = (outerRadius + maxDiam / 2) * 2;
 
-    // Target scale: cluster fills ~70% of viewport
-    const targetScale = Math.min(viewW * 0.7 / clusterSpan, viewH * 0.7 / clusterSpan);
+    // Target scale: cluster fills ~90% of viewport (tighter framing)
+    const targetScale = Math.min(viewW * 0.9 / clusterSpan, viewH * 0.9 / clusterSpan);
     // Clamp to zoom extent
     const scale = Math.max(0.3, Math.min(targetScale, 3));
+    console.log(`[zoom] clustering around (${Math.round(cx)},${Math.round(cy)}) span=${Math.round(clusterSpan)} scale=${scale.toFixed(2)}`);
 
     const tx = viewW / 2 - cx * scale;
     const ty = viewH / 2 - cy * scale;
@@ -18980,6 +18985,22 @@ function _clearAllNoise() {
     });
 }
 
+function _dismissAllReviewQueue() {
+    _showConfirm('Dismiss all remaining unassigned signals as noise?', () => {
+        const body = document.getElementById('sig-rq-body');
+        if (body) body.style.opacity = '0.5';
+        fetch('/api/signals/review-queue/dismiss-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(r => r.json()).then(d => {
+            if (d.ok) {
+                _showToast(`${d.count || 0} signals dismissed`, 'success');
+                _loadReviewGroups();
+            }
+        });
+    });
+}
+
 function _onRqItemAssigned() {
     const countEl = document.getElementById('sig-rq-count');
     if (countEl) {
@@ -19374,8 +19395,20 @@ function loadCausalView() {
         fetch('/api/causal-links').then(r => r.json()),
         fetch('/api/causal-paths').then(r => r.json()),
         fetch('/api/signals/threads').then(r => r.json()),
-    ]).then(([linkData, pathData, threadData]) => {
-        _threadsCache = threadData.threads || _threadsCache || [];
+        fetch('/api/signals/threads/names').then(r => r.json()),
+    ]).then(([linkData, pathData, threadData, namesData]) => {
+        let activeThreads = threadData.threads || _threadsCache || [];
+        // Merge missing lightweight threads so we have titles for older/inactive threads
+        if (namesData && namesData.threads) {
+            const activeIds = new Set(activeThreads.map(t => t.id));
+            namesData.threads.forEach(nt => {
+                if (!activeIds.has(nt.id)) {
+                    activeThreads.push(nt);
+                }
+            });
+        }
+        _threadsCache = activeThreads;
+
         _causalLinksCache = linkData.links || [];
         _causalPathsCache = pathData.paths || [];
         _renderCausalThreadPicker();
@@ -20933,24 +20966,27 @@ function _discoveryClickKeyword(text) {
 function _renderDiscoveryBreadcrumb() {
     const el = document.getElementById('discovery-breadcrumb');
     if (!el || !_discoveryBreadcrumb.length) { if (el) el.innerHTML = ''; return; }
-    const crumbs = _discoveryBreadcrumb.map((node, i) => {
-        const isCurrent = i === _discoveryBreadcrumb.length - 1;
+    // Entities (lightbulbs) are not threads and cannot be added to chains,
+    // so they are filtered out of the visible breadcrumb trail.
+    const visibleCrumbs = _discoveryBreadcrumb
+        .map((node, i) => ({ node, originalIndex: i }))
+        .filter(({ node }) => node.type !== 'entity');
+    if (!visibleCrumbs.length) { el.innerHTML = ''; return; }
+    const crumbs = visibleCrumbs.map(({ node, originalIndex }, vi) => {
+        const isCurrent = originalIndex === _discoveryBreadcrumb.length - 1;
         let icon = '', label = '';
         if (node.type === 'thread') { icon = '📄'; label = (node.title || '').substring(0, 20); }
-        else if (node.type === 'entity') { icon = _entIconMap[node.entityType] || '🔹'; label = node.label || node.entityValue; }
         else if (node.type === 'keyword') { icon = '🔍'; label = (node.label || node.query || '').substring(0, 20); }
         const cls = isCurrent ? 'disc-crumb current' : 'disc-crumb';
-        // All crumbs are clickable — current node opens thread detail, past nodes jump back
         let onclick = '';
         if (isCurrent && node.type === 'thread') {
             onclick = `onclick="openThreadDetail(${node.threadId})"`;
         } else if (isCurrent && node.type === 'keyword') {
-            onclick = `onclick="_discoveryJumpTo(${i})"`;
+            onclick = `onclick="_discoveryJumpTo(${originalIndex})"`;
         } else if (!isCurrent) {
-            onclick = `onclick="_discoveryJumpTo(${i})"`;
+            onclick = `onclick="_discoveryJumpTo(${originalIndex})"`;
         }
-        const safeJsonTitle = JSON.stringify(node.title || '').slice(1, -1); // escape for JS string without outer quotes
-        const ctxmenu = node.type === 'thread' ? `data-ctx-tid="${node.threadId}" data-ctx-idx="${i}" data-ctx-title="${escHtml(node.title || '')}"` : '';
+        const ctxmenu = node.type === 'thread' ? `data-ctx-tid="${node.threadId}" data-ctx-idx="${originalIndex}" data-ctx-title="${escHtml(node.title || '')}"` : '';
         return `<span class="${cls}" ${onclick} ${ctxmenu} title="${escHtml(node.title || node.label || '')}" style="cursor:pointer"><span class="disc-crumb-icon">${icon}</span>${escHtml(label)}</span>`;
     });
     el.innerHTML = crumbs.join('<span class="disc-crumb-sep">›</span>');

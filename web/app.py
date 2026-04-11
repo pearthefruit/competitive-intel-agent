@@ -2029,6 +2029,15 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"threads": threads})
 
+    @app.route("/api/signals/threads/names", methods=["GET"])
+    def signals_threads_names_api():
+        """Fetch all thread IDs and titles lightweight."""
+        conn = get_connection(db_path)
+        rows = conn.execute("SELECT id, title, domain, (SELECT COUNT(1) FROM signal_cluster_items WHERE cluster_id = signal_clusters.id) as signal_count FROM signal_clusters").fetchall()
+        conn.close()
+        threads = [{"id": r["id"], "title": r["title"], "domain": r["domain"], "signal_count": r["signal_count"]} for r in rows]
+        return jsonify({"threads": threads})
+
     @app.route("/api/signals/clusters", methods=["GET"])
     def signals_clusters_api():
         """Fetch signal clusters (alias for threads, backwards compat)."""
@@ -3021,6 +3030,20 @@ Return JSON: {{"title": "New directional title"}}"""
         conn.close()
         _review_groups_cache["key"] = None  # invalidate groups cache
         return jsonify({"ok": True})
+
+    @app.route("/api/signals/review-queue/dismiss-all", methods=["POST"])
+    def signals_review_dismiss_all_api():
+        """Mark ALL remaining unassigned signals as noise."""
+        conn = get_connection(db_path)
+        conn.execute(
+            """UPDATE signals SET signal_status = 'noise' 
+               WHERE signal_status != 'noise' AND id NOT IN (SELECT signal_id FROM signal_cluster_items)"""
+        )
+        count = conn.execute("SELECT changes()").fetchone()[0]
+        conn.commit()
+        conn.close()
+        _review_groups_cache["key"] = None  # invalidate groups cache
+        return jsonify({"ok": True, "count": count})
 
     @app.route("/api/signals/review-queue/unassign", methods=["POST"])
     def signals_review_unassign_api():
