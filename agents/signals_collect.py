@@ -322,24 +322,24 @@ def _collect_gov_for_domain(domain, max_per_source=10, progress_cb=None):
     _cb = progress_cb or (lambda *a: None)
     signals = []
     try:
-        from scraper.gov_rss import GOV_FEEDS, fetch_gov_feed
+        from scraper.rss_feeds import RSS_FEEDS, fetch_rss_feed
     except ImportError:
         return signals
 
-    domain_feeds = {k: v for k, v in GOV_FEEDS.items() if v["domain"] == domain}
+    domain_feeds = {k: v for k, v in RSS_FEEDS.items() if v["domain"] == domain}
     if not domain_feeds:
         return signals
 
     feed_names = list(domain_feeds.keys())
     _cb("source_start", {"source": "gov_rss", "domain": domain, "feeds": feed_names})
     for key in feed_names:
-        items = fetch_gov_feed(key, max_results=max_per_source, days_back=7)
+        items = fetch_rss_feed(key, max_results=max_per_source, days_back=7)
         for item in items:
-            sig = _normalize_signal(item, "gov_rss", domain)
+            sig = _normalize_signal(item, "rss_feed", domain)
             if sig:
                 sig["source_name"] = item.get("source", key)
                 signals.append(sig)
-    _cb("source_done", {"source": "gov_rss", "count": len(signals), "feeds": feed_names})
+    _cb("source_done", {"source": "rss_feed", "count": len(signals), "feeds": feed_names})
     return signals
 
 
@@ -503,29 +503,29 @@ def targeted_search(query, days_back=30, progress_cb=None):
         audit.append({"source": "Reddit", "raw": 0, "new": 0, "error": str(e)})
     _cb("source_done", {"source": "reddit", "count": count if 'count' in dir() else 0})
 
-    # 5. Government RSS — keyword-filter across all 10 feeds
-    _cb("source_start", {"source": "gov_rss", "query": query})
+    # 5. RSS Feeds — keyword-filter across all feeds
+    _cb("source_start", {"source": "rss_feeds", "query": query})
     try:
-        from scraper.gov_rss import GOV_FEEDS, fetch_gov_feed
+        from scraper.rss_feeds import RSS_FEEDS, fetch_rss_feed
         query_lower = query.lower()
-        gov_count = 0
-        for key in GOV_FEEDS:
-            items = fetch_gov_feed(key, max_results=15, days_back=days_back)
+        rss_count = 0
+        for key in RSS_FEEDS:
+            items = fetch_rss_feed(key, max_results=15, days_back=days_back)
             for item in items:
                 title = (item.get("title") or "").lower()
                 body = (item.get("body") or "").lower()
                 if query_lower in title or query_lower in body:
-                    sig = _normalize_signal(item, "gov_rss", GOV_FEEDS[key]["domain"])
+                    sig = _normalize_signal(item, "rss_feed", RSS_FEEDS[key]["domain"])
                     if sig:
-                        sig["source_type"] = "government"
-                        sig["source_name"] = GOV_FEEDS[key]["source_name"]
+                        sig["source_type"] = RSS_FEEDS[key].get("source_type", "news")
+                        sig["source_name"] = RSS_FEEDS[key]["source_name"]
                         if _add(sig):
-                            gov_count += 1
-        audit.append({"source": "Gov RSS (10 feeds)", "new": gov_count})
+                            rss_count += 1
+        audit.append({"source": "RSS Feeds", "new": rss_count})
     except Exception as e:
-        print(f"[targeted_search] Gov RSS error: {e}")
-        audit.append({"source": "Gov RSS", "raw": 0, "new": 0, "error": str(e)})
-    _cb("source_done", {"source": "gov_rss", "count": gov_count if 'gov_count' in dir() else 0})
+        print(f"[targeted_search] RSS feed error: {e}")
+        audit.append({"source": "RSS Feeds", "raw": 0, "new": 0, "error": str(e)})
+    _cb("source_done", {"source": "rss_feeds", "count": rss_count if 'rss_count' in dir() else 0})
 
     # 6. FRED — search for relevant economic indicators
     _cb("source_start", {"source": "fred", "query": query})

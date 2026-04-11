@@ -1,6 +1,7 @@
-"""Government RSS feed scraper — official data sources from federal agencies.
+"""RSS feed scraper — general news and official data sources.
 
-Fetches press releases, statements, and data from:
+Fetches press releases, statements, and news from:
+- Al Jazeera (English news)
 - Federal Reserve (FOMC, speeches, policy)
 - FDA (drug approvals, safety alerts, enforcement)
 - CDC (health alerts, disease tracking, guidance)
@@ -21,8 +22,14 @@ _HEADERS = {
     "Accept": "application/rss+xml, application/xml, text/xml, */*",
 }
 
-# Feed registry: name → (url, domain, source_name)
-GOV_FEEDS = {
+# Feed registry: name → (url, domain, source_name, source_type)
+RSS_FEEDS = {
+    "aljazeera": {
+        "url": "https://www.aljazeera.com/xml/rss/all.xml",
+        "domain": "geopolitics",
+        "source_name": "Al Jazeera",
+        "source_type": "news",
+    },
     "fed": {
         "url": "https://www.federalreserve.gov/feeds/press_all.xml",
         "domain": "economics",
@@ -111,23 +118,23 @@ def _strip_html(text):
     return re.sub(r"<[^>]+>", " ", text).strip()
 
 
-def fetch_gov_feed(feed_key, max_results=15, days_back=7):
-    """Fetch items from a government RSS feed.
+def fetch_rss_feed(feed_key, max_results=15, days_back=7):
+    """Fetch items from an RSS feed.
 
     Returns list of dicts: {title, href, body, date, source, source_type}
     """
-    feed = GOV_FEEDS.get(feed_key)
+    feed = RSS_FEEDS.get(feed_key)
     if not feed:
         return []
 
     try:
         resp = httpx.get(feed["url"], headers=_HEADERS, timeout=15, follow_redirects=True)
         if resp.status_code != 200:
-            print(f"[gov_rss] {feed_key} HTTP {resp.status_code}")
+            print(f"[rss_feed] {feed_key} HTTP {resp.status_code}")
             return []
         root = ET.fromstring(resp.content)
     except Exception as e:
-        print(f"[gov_rss] {feed_key} fetch/parse error: {e}")
+        print(f"[rss_feed] {feed_key} fetch/parse error: {e}")
         return []
 
     # Handle both RSS 2.0 (<channel><item>) and Atom (<entry>)
@@ -179,19 +186,19 @@ def fetch_gov_feed(feed_key, max_results=15, days_back=7):
             "body": body[:2000],
             "date": date_str,
             "source": feed["source_name"],
-            "source_type": "government",
+            "source_type": feed["source_type"],
         })
 
         if len(results) >= max_results:
             break
 
-    print(f"[gov_rss] {feed_key}: {len(results)} items")
+    print(f"[rss_feed] {feed_key}: {len(results)} items")
     return results
 
 
-def fetch_all_gov_feeds(max_per_feed=10, days_back=7):
-    """Fetch from all government feeds. Returns dict of feed_key → items."""
+def fetch_all_rss_feeds(max_per_feed=10, days_back=7):
+    """Fetch from all RSS feeds. Returns dict of feed_key → items."""
     all_results = {}
-    for key in GOV_FEEDS:
-        all_results[key] = fetch_gov_feed(key, max_results=max_per_feed, days_back=days_back)
+    for key in RSS_FEEDS:
+        all_results[key] = fetch_rss_feed(key, max_results=max_per_feed, days_back=days_back)
     return all_results

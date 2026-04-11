@@ -2007,6 +2007,32 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"signals": signals})
 
+    @app.route("/api/signals/<int:sig_id>/scrape", methods=["POST"])
+    def signals_scrape_api(sig_id):
+        """Scrape full article text for a specific signal and update DB."""
+        from scraper.web_search import fetch_page_text
+
+        conn = get_connection(db_path)
+        row = conn.execute("SELECT url FROM signals WHERE id = ?", (sig_id,)).fetchone()
+        if not row or not row["url"]:
+            conn.close()
+            return jsonify({"error": "Signal not found or has no URL"}), 404
+
+        url = row["url"]
+        try:
+            text = fetch_page_text(url, max_chars=4000)
+            if text and len(text) > 200:
+                conn.execute("UPDATE signals SET body = ? WHERE id = ?", (text, sig_id))
+                conn.commit()
+                conn.close()
+                return jsonify({"ok": True, "body": text})
+            else:
+                conn.close()
+                return jsonify({"error": "Failed to extract meaningful text from page"}), 500
+        except Exception as e:
+            conn.close()
+            return jsonify({"error": str(e)}), 500
+
     @app.route("/api/signals/threads", methods=["GET"])
     def signals_threads_api():
         """Fetch signal threads with momentum data."""
