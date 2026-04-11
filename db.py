@@ -426,6 +426,7 @@ def _migrate_db(conn):
         ("signals", "author", "TEXT"),
         ("signals", "author_context", "TEXT"),
         ("signals", "engagement_json", "TEXT"),
+        ("brainstorms", "thread_titles_json", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -2410,13 +2411,14 @@ def update_cluster_status(conn, cluster_id, status):
 
 # ── Brainstorm helpers ─────────────────────────────────────────────────
 
-def save_brainstorm(conn, thread_ids, result):
+def save_brainstorm(conn, thread_ids, result, thread_titles=None):
     """Persist a brainstorm session. Returns brainstorm id."""
     cur = conn.execute(
-        """INSERT INTO brainstorms (thread_ids, connection_summary, hypotheses_json, second_order_json, questions_json)
-           VALUES (?, ?, ?, ?, ?)""",
+        """INSERT INTO brainstorms (thread_ids, thread_titles_json, connection_summary, hypotheses_json, second_order_json, questions_json)
+           VALUES (?, ?, ?, ?, ?, ?)""",
         (
             json.dumps(thread_ids),
+            json.dumps(thread_titles or []),
             result.get("connection_summary", ""),
             json.dumps(result.get("hypotheses", [])),
             json.dumps(result.get("second_order_effects", [])),
@@ -2436,6 +2438,7 @@ def get_brainstorms(conn, limit=20):
     for r in rows:
         d = dict(r)
         d["thread_ids"] = json.loads(d["thread_ids"]) if d.get("thread_ids") else []
+        d["thread_titles"] = json.loads(d["thread_titles_json"]) if d.get("thread_titles_json") else []
         d["hypotheses"] = json.loads(d["hypotheses_json"]) if d.get("hypotheses_json") else []
         d["second_order_effects"] = json.loads(d["second_order_json"]) if d.get("second_order_json") else []
         d["questions_to_investigate"] = json.loads(d["questions_json"]) if d.get("questions_json") else []
@@ -2450,6 +2453,7 @@ def get_brainstorm(conn, brainstorm_id):
         return None
     d = dict(row)
     d["thread_ids"] = json.loads(d["thread_ids"]) if d.get("thread_ids") else []
+    d["thread_titles"] = json.loads(d["thread_titles_json"]) if d.get("thread_titles_json") else []
     d["hypotheses"] = json.loads(d["hypotheses_json"]) if d.get("hypotheses_json") else []
     d["second_order_effects"] = json.loads(d["second_order_json"]) if d.get("second_order_json") else []
     d["questions_to_investigate"] = json.loads(d["questions_json"]) if d.get("questions_json") else []
@@ -2508,11 +2512,18 @@ def get_narratives(conn, status="all", limit=50):
     params = [status, limit] if status != "all" else [limit]
     rows = conn.execute(
         f"""SELECT n.*, COUNT(sc.id) as thread_count,
-                   SUM(CASE WHEN sci_cnt.cnt > 0 THEN sci_cnt.cnt ELSE 0 END) as signal_count
+                   SUM(COALESCE(sci_cnt.signal_cnt, 0)) as signal_count,
+                   SUM(COALESCE(sci_cnt.noise_cnt, 0)) as noise_count
             FROM narratives n
             LEFT JOIN signal_clusters sc ON sc.narrative_id = n.id
-            LEFT JOIN (SELECT cluster_id, COUNT(*) as cnt FROM signal_cluster_items GROUP BY cluster_id) sci_cnt
-                ON sci_cnt.cluster_id = sc.id
+            LEFT JOIN (
+                SELECT sci.cluster_id,
+                       SUM(CASE WHEN COALESCE(s.signal_status, 'signal') != 'noise' THEN 1 ELSE 0 END) as signal_cnt,
+                       SUM(CASE WHEN s.signal_status = 'noise' THEN 1 ELSE 0 END) as noise_cnt
+                FROM signal_cluster_items sci
+                JOIN signals s ON s.id = sci.signal_id
+                GROUP BY sci.cluster_id
+            ) sci_cnt ON sci_cnt.cluster_id = sc.id
             {where}
             GROUP BY n.id ORDER BY n.updated_at DESC LIMIT ?""",
         params,

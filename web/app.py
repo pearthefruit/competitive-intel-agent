@@ -3641,9 +3641,13 @@ Return ONLY the JSON."""
             if not result:
                 conn.close()
                 return jsonify({"error": "LLM returned no result"}), 500
-            # Persist brainstorm
-            from db import save_brainstorm, insert_hypothesis
-            brainstorm_id = save_brainstorm(conn, thread_ids, result)
+            # Persist brainstorm — collect titles at save time so they survive thread merges/deletes
+            from db import save_brainstorm, insert_hypothesis, get_cluster_detail as _gcd
+            thread_titles = []
+            for tid in thread_ids:
+                d = get_cluster_detail(conn, tid)
+                thread_titles.append(d["title"] if d else f"Thread {tid}")
+            brainstorm_id = save_brainstorm(conn, thread_ids, result, thread_titles=thread_titles)
             result["brainstorm_id"] = brainstorm_id
 
             # Auto-save hypotheses to the bank
@@ -3684,12 +3688,43 @@ Return ONLY the JSON."""
         from db import get_brainstorms, get_signal_clusters
         conn = get_connection(db_path)
         brainstorms = get_brainstorms(conn)
-        # Enrich with thread titles — high limit to avoid "Thread N" fallback
-        all_threads = {t["id"]: t for t in get_signal_clusters(conn, status="active", limit=2000)}
+        # Use stored titles (set at save time). For old rows without stored titles, fall back to live lookup.
+        needs_live = any(not b.get("thread_titles") for b in brainstorms)
+        if needs_live:
+            all_threads = {t["id"]: t for t in get_signal_clusters(conn, status="all", limit=2000)}
         for b in brainstorms:
-            b["thread_titles"] = [all_threads.get(tid, {}).get("title", f"Thread {tid}") for tid in b.get("thread_ids", [])]
+            if not b.get("thread_titles"):
+                b["thread_titles"] = [all_threads.get(tid, {}).get("title", f"Thread {tid}") for tid in b.get("thread_ids", [])]
         conn.close()
         return jsonify({"brainstorms": brainstorms})
+
+    @app.route("/api/signals/brainstorms/repair-titles", methods=["POST"])
+    def signals_brainstorms_repair_titles_api():
+        """Backfill thread_titles_json for old brainstorms that don't have stored titles."""
+        from db import get_brainstorms, get_signal_clusters, get_cluster_detail
+        conn = get_connection(db_path)
+        brainstorms = get_brainstorms(conn, limit=500)
+        all_threads = {t["id"]: t for t in get_signal_clusters(conn, status="all", limit=2000)}
+        updated = 0
+        for b in brainstorms:
+            if b.get("thread_titles"):
+                continue  # already has stored titles
+            titles = []
+            for tid in b.get("thread_ids", []):
+                live = all_threads.get(tid)
+                titles.append(live["title"] if live else None)
+            if any(t is not None for t in titles):
+                # Store what we could recover; keep None slots so index alignment is preserved
+                filled = [t if t is not None else f"Thread {b['thread_ids'][i]}" for i, t in enumerate(titles)]
+                import json as _json
+                conn.execute(
+                    "UPDATE brainstorms SET thread_titles_json = ? WHERE id = ?",
+                    (_json.dumps(filled), b["id"])
+                )
+                updated += 1
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "updated": updated})
 
     @app.route("/api/signals/brainstorms/<int:brainstorm_id>", methods=["GET"])
     def signals_brainstorm_detail_api(brainstorm_id):
@@ -3700,9 +3735,18 @@ Return ONLY the JSON."""
         if not b:
             conn.close()
             return jsonify({"error": "Brainstorm not found"}), 404
-        # Enrich with thread titles and data
-        all_threads = {t["id"]: t for t in get_signal_clusters(conn, status="active", limit=2000)}
-        b["threads"] = [all_threads.get(tid, {"id": tid, "title": f"Thread {tid}", "domain": "unknown"}) for tid in b.get("thread_ids", [])]
+        # Build threads list — use stored titles for deleted/merged threads, live data for domain/summary
+        all_threads = {t["id"]: t for t in get_signal_clusters(conn, status="all", limit=2000)}
+        stored_titles = b.get("thread_titles", [])
+        threads_list = []
+        for i, tid in enumerate(b.get("thread_ids", [])):
+            live = all_threads.get(tid)
+            if live:
+                threads_list.append(live)
+            else:
+                fallback_title = stored_titles[i] if i < len(stored_titles) else f"Thread {tid}"
+                threads_list.append({"id": tid, "title": fallback_title, "domain": "unknown"})
+        b["threads"] = threads_list
         conn.close()
         return jsonify(b)
 
@@ -3928,6 +3972,7 @@ Return ONLY the JSON."""
                 "title": n["title"], "thesis": n.get("thesis", ""),
                 "thread_count": n.get("thread_count", 0),
                 "signal_count": n.get("signal_count", 0),
+                "noise_count": n.get("noise_count", 0),
                 "evidence": ev, "status": n.get("status", "active"),
                 "x": pos["x"] if pos else None, "y": pos["y"] if pos else None,
                 "pinned": bool(pos["pinned"]) if pos else False,

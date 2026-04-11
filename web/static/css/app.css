@@ -4137,7 +4137,7 @@
         .signals-detail-body {
             flex: 1;
             overflow-y: auto;
-            padding: 16px;
+            padding: 0 16px 16px;
         }
         /* === Discovery Drawer === */
         .discovery-drawer {
@@ -4200,11 +4200,17 @@
         .sig-detail-card {
             border: 1px solid var(--border);
             border-radius: 10px;
-            overflow: hidden;
+            overflow: clip; /* clip preserves border-radius clipping but allows sticky children */
         }
         .sig-detail-hero {
-            padding: 20px;
+            padding: 20px 20px 22px;
             border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--bg-secondary);
+            border-radius: 10px 10px 0 0;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
         }
         .sig-detail-hero h2 {
             font-size: 16px;
