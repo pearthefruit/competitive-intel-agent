@@ -4522,15 +4522,15 @@
         .sig-rq-collapsed span { writing-mode: vertical-rl; text-orientation: mixed; font-size: 11px; font-weight: 600; color: var(--text-muted); letter-spacing: 0.5px; }
 
         /* Review queue group cards */
-        .sig-rq-group { margin-bottom: 10px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg-secondary); }
+        .sig-rq-group { margin-bottom: 10px; border: 1px solid var(--border); border-radius: 8px; overflow: visible; background: var(--bg-secondary); }
         .sig-rq-group-header { padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; background: var(--bg-tertiary); border-bottom: 1px solid var(--border); }
         .sig-rq-group-title { font-size: 14px; font-weight: 600; color: var(--text-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .sig-rq-group-count { font-size: 12px; color: var(--text-muted); font-weight: 600; background: var(--bg-primary); padding: 3px 10px; border-radius: 4px; margin-left: 8px; flex-shrink: 0; }
         .sig-rq-group-signals { max-height: 240px; overflow-y: auto; padding: 8px 12px; }
         .sig-rq-group-signal { font-size: 13px; color: var(--text-secondary); padding: 5px 0; border-bottom: 1px solid var(--border); line-height: 1.4; display: flex; align-items: start; gap: 6px; }
         .sig-rq-group-signal:last-child { border-bottom: none; }
-        .sig-rq-group-actions { padding: 8px 10px; border-top: 1px solid var(--border); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-        .sig-rq-suggestion-pill { padding: 7px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text-secondary); transition: all 0.15s; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+        .sig-rq-group-actions { padding: 8px 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; }
+        .sig-rq-suggestion-pill { padding: 7px 12px; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text-secondary); transition: all 0.15s; display: flex; align-items: center; justify-content: space-between; gap: 6px; overflow: hidden; }
         .sig-rq-suggestion-pill:hover { border-color: var(--accent); background: rgba(59,130,246,0.08); }
         .sig-rq-suggestion-pill.top { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 
@@ -16202,7 +16202,7 @@ function _renderRqList(sigId, query) {
     const list = document.getElementById(`rq-list-${sigId}`);
     if (!list) return;
     const q = (query || '').toLowerCase();
-    const threads = [...(_threadsCache || [])].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    const threads = _getSortedThreads();
     const filtered = q ? threads.filter(t => (t.title || '').toLowerCase().includes(q)) : threads;
 
     // "+ New thread" at top — uses search text as suggested title
@@ -18701,6 +18701,10 @@ function _loadReviewGroups() {
     if (!body) return;
     // Ensure queue body is visible (not thread detail)
     _switchRightPaneTab('queue');
+    // Pre-fetch threads cache if empty (needed for "Other thread..." dropdown)
+    if (!_threadsCache || !_threadsCache.length) {
+        fetch('/api/signals/threads').then(r => r.json()).then(td => { _threadsCache = td.threads || []; }).catch(() => {});
+    }
 
     // If user is on list view, just render list
     if (_rqView === 'list') {
@@ -18764,11 +18768,12 @@ function _renderReviewGroups() {
 
     // Groups
     groups.forEach((g, gi) => {
+        if (!g) return; // skip assigned/dismissed groups
         const sigCount = g.signals.length;
         const suggPills = (g.all_suggestions || []).map((s, si) => {
             const pct = Math.round(s.score * 100);
             const isTop = si === 0 && pct > 15;
-            return `<div onclick="_bulkAssignGroup(${gi},${s.thread_id})" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
+            return `<div onclick="_bulkAssignGroup(${gi},${s.thread_id})" data-rq-pill-tid="${s.thread_id}" data-rq-pill-title="${escHtml(s.thread_title)}" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
                 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.thread_title)}</span>
                 <span style="font-size:11px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
             </div>`;
@@ -18809,7 +18814,7 @@ function _renderReviewGroups() {
             const suggPills = (sig.suggestions || []).map((s, si) => {
                 const pct = Math.round(s.score * 100);
                 const isTop = si === 0 && pct > 15;
-                return `<div onclick="_assignFromQueue(${sig.id},${s.thread_id},this);_onRqItemAssigned()" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
+                return `<div onclick="_assignFromQueue(${sig.id},${s.thread_id},this);_onRqItemAssigned()" data-rq-pill-tid="${s.thread_id}" data-rq-pill-title="${escHtml(s.thread_title)}" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
                     <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.thread_title)}</span>
                     <span style="font-size:11px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
                 </div>`;
@@ -18846,7 +18851,11 @@ function _bulkAssignGroup(gi, threadId) {
                 <button onclick="_undoBulkAssign(${gi},${threadId})" style="padding:3px 8px;background:none;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--text-muted);cursor:pointer">Undo</button>
             </div>`;
             groupEl.style.opacity = '1';
+            // Remove group from frontend cache so view toggle doesn't show it again
+            _reviewGroupsCache.groups[gi] = null;
             _onRqItemAssigned();
+            // Refresh thread cache (signal counts changed)
+            fetch('/api/signals/threads').then(r => r.json()).then(td => { _threadsCache = td.threads || []; });
         }
     });
 }
@@ -18880,6 +18889,7 @@ function _dismissGroup(gi) {
             </div>`;
             groupEl.style.opacity = '1';
         }
+        _reviewGroupsCache.groups[gi] = null;
         _onRqItemAssigned();
     });
 }
@@ -18971,7 +18981,7 @@ function _switchRqView(view) {
         }
     }
     if (view === 'grouped') {
-        _renderReviewGroups();
+        _loadReviewGroups(); // re-fetch fresh data, not stale cache
     } else {
         _rqListOffset = 0;
         _renderReviewList();
@@ -19006,7 +19016,7 @@ function _renderReviewList(offset) {
                 const suggHtml = (sig.suggestions || []).map((s, si) => {
                     const pct = Math.round(s.score * 100);
                     const isTop = si === 0 && pct > 15;
-                    return `<div onclick="_assignFromQueue(${sig.id},${s.thread_id},this);_onRqItemAssigned()" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
+                    return `<div onclick="_assignFromQueue(${sig.id},${s.thread_id},this);_onRqItemAssigned()" data-rq-pill-tid="${s.thread_id}" data-rq-pill-title="${escHtml(s.thread_title)}" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
                         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.thread_title)}</span>
                         <span style="font-size:11px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
                     </div>`;
@@ -19096,17 +19106,40 @@ function _rqGroupDrop(event) {
     _bulkAssignGroup(gi, _activeThreadId);
 }
 
+// Right-click on suggestion pills to view thread
+document.addEventListener('contextmenu', (e) => {
+    const pill = e.target.closest('[data-rq-pill-tid]');
+    if (!pill) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const tid = parseInt(pill.dataset.rqPillTid);
+    const title = pill.dataset.rqPillTitle || '';
+    openThreadDetail(tid);
+    _showToast(`Viewing: ${title.substring(0, 40)}`, 'info', 2000);
+});
+
 // Close group search dropdowns on click outside
 document.addEventListener('click', (e) => {
     if (!e.target.closest('[id^="rq-gsearch-"]') && !e.target.closest('[id^="rq-glist-"]')) {
         document.querySelectorAll('[id^="rq-glist-"]').forEach(l => l.style.display = 'none');
     }
 });
+let _sortedThreadsCache = null;
+let _sortedThreadsCacheKey = 0;
+
+function _getSortedThreads() {
+    const key = (_threadsCache || []).length;
+    if (_sortedThreadsCache && _sortedThreadsCacheKey === key) return _sortedThreadsCache;
+    _sortedThreadsCache = [...(_threadsCache || [])].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    _sortedThreadsCacheKey = key;
+    return _sortedThreadsCache;
+}
+
 function _renderRqGroupList(gi, query) {
     const list = document.getElementById(`rq-glist-${gi}`);
     if (!list) return;
     const q = (query || '').toLowerCase().trim();
-    const threads = [...(_threadsCache || [])].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    const threads = _getSortedThreads();
     const filtered = q ? threads.filter(t => (t.title || '').toLowerCase().includes(q)) : threads.slice(0, 20);
 
     // Show "+ Create thread" option if query doesn't match an existing thread exactly
@@ -19155,8 +19188,9 @@ function _createThreadForGroup(gi, title) {
                     <span style="font-size:12px;color:var(--green)">&#10003; ${sigIds.length} signals → new thread "${escHtml(title)}"</span>
                 </div>`;
             }
+            _reviewGroupsCache.groups[gi] = null;
             _onRqItemAssigned();
-            // Refresh thread cache
+            // Refresh thread cache so new thread appears in other groups' search dropdowns
             fetch('/api/signals/threads').then(r => r.json()).then(td => { _threadsCache = td.threads || []; });
             _showToast(`Created thread "${title}" with ${sigIds.length} signals`, 'success');
         }
