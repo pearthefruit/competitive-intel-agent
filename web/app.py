@@ -2724,6 +2724,58 @@ Return JSON: {{"title": "New directional title"}}"""
             "edges": edges,
         })
 
+    @app.route("/api/signals/threads/create", methods=["POST"])
+    def signals_create_thread_api():
+        """Create a thread manually, optionally with pasted content split into signals."""
+        import hashlib
+        from db import insert_signal_cluster, link_signal_to_cluster, insert_signal
+        from agents.signals_collect import _classify_domain
+
+        data = request.json or {}
+        title = (data.get("title") or "").strip()
+        paste = (data.get("content") or "").strip()
+        if not title:
+            return jsonify({"error": "title required"}), 400
+
+        domain = _classify_domain(title, paste)
+        conn = get_connection(db_path)
+        thread_id = insert_signal_cluster(conn, {"domain": domain, "title": title, "synthesis": ""})
+        conn.execute("UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP WHERE id = ?", (thread_id,))
+
+        # If paste content provided, split into signals and link to thread
+        signals_created = 0
+        if paste:
+            import re
+            # Split on bullet points, numbered items, or double newlines
+            items = re.split(r'\n\s*[-•·]\s+|\n\s*\d+[.)]\s+|\n\s*\n', paste)
+            items = [item.strip() for item in items if item.strip() and len(item.strip()) > 15]
+            if not items:
+                items = [paste]
+
+            for item in items:
+                sig_title = item[:120].split('\n')[0].rstrip('.')
+                if len(item) > 120:
+                    sig_title = sig_title.rsplit(' ', 1)[0] + '…'
+                content_hash = hashlib.sha256(f"manual||{sig_title}".lower().strip().encode()).hexdigest()
+                sig_id = insert_signal(conn, {
+                    "source": "manual",
+                    "domain": domain,
+                    "title": sig_title,
+                    "url": "",
+                    "body": item[:2000],
+                    "published_at": "",
+                    "source_name": "Manual",
+                    "content_hash": content_hash,
+                    "source_type": "social",
+                })
+                if sig_id:
+                    link_signal_to_cluster(conn, thread_id, sig_id)
+                    signals_created += 1
+
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "thread_id": thread_id, "signals_created": signals_created})
+
     @app.route("/api/signals/patterns", methods=["POST"])
     def signals_create_pattern_api():
         """Manually create a pattern from selected signal IDs."""
@@ -2895,13 +2947,16 @@ Return JSON: {{"title": "New directional title"}}"""
         unassigned = conn.execute(
             """SELECT * FROM signals
                WHERE id NOT IN (SELECT signal_id FROM signal_cluster_items)
+               AND COALESCE(signal_status, 'signal') != 'noise'
                ORDER BY collected_at DESC LIMIT ? OFFSET ?""",
             (limit, offset),
         ).fetchall()
         unassigned = [dict(r) for r in unassigned]
 
         total_unassigned = conn.execute(
-            "SELECT COUNT(*) as c FROM signals WHERE id NOT IN (SELECT signal_id FROM signal_cluster_items)"
+            """SELECT COUNT(*) as c FROM signals
+               WHERE id NOT IN (SELECT signal_id FROM signal_cluster_items)
+               AND COALESCE(signal_status, 'signal') != 'noise'"""
         ).fetchone()["c"]
 
         if not unassigned:
@@ -2922,6 +2977,8 @@ Return JSON: {{"title": "New directional title"}}"""
                 "source_name": sig.get("source_name", sig.get("source", "")),
                 "published_at": sig.get("published_at", ""),
                 "domain": sig.get("domain", ""),
+                "body": (sig.get("body") or "")[:500],
+                "url": sig.get("url", ""),
                 "confidence": sc["confidence"],
                 "suggestions": sc["scores"][:3],
             })
@@ -2996,6 +3053,32 @@ Return JSON: {{"title": "New directional title"}}"""
         conn.commit()
         conn.close()
         return jsonify({"ok": True})
+
+    @app.route("/api/signals/noise-count", methods=["GET"])
+    def signals_noise_count_api():
+        conn = get_connection(db_path)
+        count = conn.execute("SELECT COUNT(*) as c FROM signals WHERE signal_status = 'noise'").fetchone()["c"]
+        conn.close()
+        return jsonify({"count": count})
+
+    @app.route("/api/signals/noise", methods=["GET"])
+    def signals_noise_list_api():
+        limit = int(request.args.get("limit", 50))
+        conn = get_connection(db_path)
+        rows = conn.execute(
+            "SELECT id, title, source_name, published_at FROM signals WHERE signal_status = 'noise' ORDER BY collected_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        conn.close()
+        return jsonify({"signals": [dict(r) for r in rows]})
+
+    @app.route("/api/signals/noise", methods=["DELETE"])
+    def signals_noise_delete_api():
+        conn = get_connection(db_path)
+        cur = conn.execute("DELETE FROM signals WHERE signal_status = 'noise'")
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "deleted": cur.rowcount})
 
     _review_groups_cache = {"key": None, "data": None}
 
@@ -4185,8 +4268,8 @@ Return JSON:
         data = request.json or {}
         name = data.get("name", "").strip()
         thread_ids = data.get("thread_ids", [])
-        if not name or len(thread_ids) < 1:
-            return jsonify({"error": "name and at least 1 thread_id required"}), 400
+        if not name:
+            return jsonify({"error": "name required"}), 400
         conn = get_connection(db_path)
         path_id = create_causal_path(conn, name, thread_ids)
         conn.close()

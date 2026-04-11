@@ -3719,7 +3719,7 @@
             border: none;
             border-radius: 8px;
             color: #fff;
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             transition: opacity 0.15s;
@@ -3803,11 +3803,11 @@
             padding: 2px;
         }
         .sig-feed-tab {
-            padding: 4px 12px;
+            padding: 6px 14px;
             border: none;
             background: none;
             color: var(--text-muted);
-            font-size: 11px;
+            font-size: 13px;
             font-weight: 600;
             border-radius: 5px;
             cursor: pointer;
@@ -4131,10 +4131,18 @@
         /* === Discovery Drawer === */
         .discovery-drawer {
             width: var(--discovery-drawer-width, 320px);
-            min-width: 220px; max-width: 450px; flex-shrink: 0;
+            min-width: 240px; max-width: 400px;
+            flex-shrink: 0;
             display: flex; flex-direction: column; overflow: hidden;
-            position: relative; border-left: 1px solid var(--border);
-            background: var(--bg-primary); animation: disc-slide-in 0.2s ease-out;
+            border-left: 1px solid var(--border);
+            background: var(--bg-primary);
+            animation: disc-slide-in 0.2s ease-out;
+        }
+        /* When brainstorm overlay is open, drawer floats above it */
+        .discovery-drawer.floating {
+            position: fixed; top: 0; right: 0; bottom: 0;
+            z-index: 10000;
+            box-shadow: -4px 0 24px rgba(0,0,0,0.4);
         }
         @keyframes disc-slide-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         .discovery-drawer-resize {
@@ -4161,8 +4169,8 @@
         .discovery-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 6px 0 10px; font-size: 12px; min-height: 24px; }
         .disc-crumb { cursor: pointer; color: #60a5fa; font-weight: 500; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; transition: color 0.1s; }
         .disc-crumb:hover { text-decoration: underline; }
-        .disc-crumb.current { color: var(--text-primary); cursor: default; font-weight: 600; }
-        .disc-crumb.current:hover { text-decoration: none; }
+        .disc-crumb.current { color: var(--text-primary); cursor: pointer; font-weight: 600; }
+        .disc-crumb.current:hover { text-decoration: underline; }
         .disc-crumb-sep { color: var(--text-muted); margin: 0 3px; font-size: 10px; }
         .disc-crumb-icon { font-size: 10px; margin-right: 2px; }
         .discovery-drawer-body { flex: 1; overflow-y: auto; padding: 14px; }
@@ -4504,11 +4512,7 @@
         .sig-rq-resize { position: absolute; top: 0; left: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 10; background: transparent; transition: background 0.15s; }
         .sig-rq-resize:hover, .sig-rq-resize.active { background: var(--accent); }
         .sig-rq-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; display: none; /* replaced by tabs */ }
-        .sig-rq-tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-        .sig-rq-tab { flex: 1; padding: 10px 12px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; display: flex; align-items: center; justify-content: center; gap: 6px; }
-        .sig-rq-tab:hover { color: var(--text-secondary); }
-        .sig-rq-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-        .sig-rq-count { background: var(--purple); color: #fff; padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 600; }
+        .sig-rq-tabs { display: flex; flex-shrink: 0; }
         .sig-rq-thread-body { flex: 1; overflow-y: auto; padding: 16px; }
         .sig-rq-body { flex: 1; overflow-y: auto; padding: 10px; }
 
@@ -5726,10 +5730,23 @@
                 <div id="qc-session" style="display:none;margin-top:6px;max-height:100px;overflow-y:auto"></div>
             </div>
 
+            <!-- Thread creation panel (collapsed by default) -->
+            <div id="thread-create-panel" style="display:none;padding:8px 12px;border-bottom:1px solid var(--border)">
+                <input type="text" id="tc-title" placeholder="Thread title…" style="width:100%;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:12px;outline:none;box-sizing:border-box">
+                <textarea id="tc-paste" placeholder="Optional: paste a LinkedIn News article or list of related items to auto-create signals…" style="width:100%;min-height:60px;max-height:160px;margin-top:6px;padding:8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:11px;font-family:inherit;line-height:1.4;resize:vertical;outline:none;box-sizing:border-box"></textarea>
+                <button id="tc-submit" onclick="_tcCreate()" style="width:100%;margin-top:6px;padding:6px;font-size:11px;font-weight:600;border:none;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--purple));color:white;cursor:pointer;transition:all 0.15s">Create Thread</button>
+            </div>
+
+            <!-- Chain creation panel (collapsed by default) -->
+            <div id="chain-create-panel" style="display:none;padding:8px 12px;border-bottom:1px solid var(--border)">
+                <input type="text" id="cc-name" placeholder="Chain name…" style="width:100%;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:12px;outline:none;box-sizing:border-box" onkeydown="if(event.key==='Enter'){event.preventDefault();_ccCreate()}">
+                <button id="cc-submit" onclick="_ccCreate()" style="width:100%;margin-top:6px;padding:6px;font-size:11px;font-weight:600;border:none;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--purple));color:white;cursor:pointer;transition:all 0.15s">Create Chain</button>
+            </div>
+
             <!-- Custom search — primary action, top of sidebar -->
             <div style="padding:8px 12px 0">
                 <div style="position:relative">
-                    <input type="text" id="custom-search-input" placeholder="Search for signals..." style="width:100%;padding:7px 10px 7px 28px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:10px;outline:none;box-sizing:border-box" onkeydown="if(event.key==='Enter')_runCustomSearch()">
+                    <input type="text" id="custom-search-input" placeholder="Search for signals..." style="width:100%;padding:8px 10px 8px 28px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:12px;outline:none;box-sizing:border-box" onkeydown="if(event.key==='Enter')_runCustomSearch()">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);pointer-events:none"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                 </div>
                 <div id="custom-search-status" style="display:none;font-size:10px;color:var(--text-muted);margin-top:3px;padding:0 2px"></div>
@@ -5743,22 +5760,45 @@
 
             <!-- Brainstorm history -->
             <div class="signals-brainstorm-list" id="signals-brainstorm-list" style="display:none;padding:8px 12px;border-top:1px solid var(--border)">
-                <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Brainstorms</div>
+                <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Brainstorms</div>
                 <div id="brainstorm-list-items"></div>
             </div>
 
             <!-- Actions — bottom of sidebar -->
             <div class="signals-actions">
-                <button class="signals-scan-btn" id="signals-scan-btn" onclick="runSignalScan()">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                    Scan Now
-                </button>
-                <div style="display:flex;gap:4px;margin-top:6px">
-                    <button id="signals-resynth-btn" onclick="runResynthesize()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px;background:rgba(168,85,247,0.06);border:1px solid rgba(168,85,247,0.2);border-radius:6px;color:var(--purple);font-size:9px;font-weight:600;cursor:pointer">🧠 Re-detect</button>
-                    <button id="signals-prune-btn" onclick="_pruneSignals()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:9px;font-weight:600;cursor:pointer">✂️ Prune</button>
-                    <button onclick="_mergeThreads()" style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:9px;font-weight:600;cursor:pointer">🔗 Merge</button>
+                <div style="display:flex;gap:6px;align-items:center">
+                    <button class="signals-scan-btn" id="signals-scan-btn" onclick="runSignalScan()" style="flex:1">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+                        Scan Now
+                    </button>
+                    <div style="position:relative">
+                        <button onclick="_toggleSignalTools()" id="signal-tools-btn" style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:16px;cursor:pointer;transition:all 0.15s" title="Tools">⋯</button>
+                        <div id="signal-tools-menu" style="display:none;position:absolute;bottom:100%;right:0;margin-bottom:4px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.5);min-width:200px;z-index:50;overflow:hidden">
+                            <button id="signals-resynth-btn" onclick="runResynthesize();_toggleSignalTools()" style="width:100%;display:flex;align-items:center;gap:8px;padding:10px 14px;background:none;border:none;border-bottom:1px solid var(--border);color:var(--text-primary);font-size:12px;cursor:pointer;text-align:left" onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background='none'">
+                                <span style="font-size:14px">🧠</span>
+                                <div>
+                                    <div style="font-weight:600">Re-detect Threads</div>
+                                    <div style="font-size:10px;color:var(--text-muted);margin-top:1px">Reassign unassigned signals to threads using TF-IDF + LLM</div>
+                                </div>
+                            </button>
+                            <button id="signals-prune-btn" onclick="_pruneSignals();_toggleSignalTools()" style="width:100%;display:flex;align-items:center;gap:8px;padding:10px 14px;background:none;border:none;border-bottom:1px solid var(--border);color:var(--text-primary);font-size:12px;cursor:pointer;text-align:left" onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background='none'">
+                                <span style="font-size:14px">✂️</span>
+                                <div>
+                                    <div style="font-weight:600">Prune Duplicates</div>
+                                    <div style="font-size:10px;color:var(--text-muted);margin-top:1px">Remove signals with ≥85% similar titles, keep earliest</div>
+                                </div>
+                            </button>
+                            <button onclick="_mergeThreads();_toggleSignalTools()" style="width:100%;display:flex;align-items:center;gap:8px;padding:10px 14px;background:none;border:none;color:var(--text-primary);font-size:12px;cursor:pointer;text-align:left" onmouseenter="this.style.background='var(--bg-tertiary)'" onmouseleave="this.style.background='none'">
+                                <span style="font-size:14px">🔗</span>
+                                <div>
+                                    <div style="font-weight:600">Merge Threads</div>
+                                    <div style="font-size:10px;color:var(--text-muted);margin-top:1px">Combine similar threads into one, preserving all signals</div>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
                 </div>
-                <div class="signals-freshness" id="signals-freshness" style="font-size:9px;color:var(--text-muted);margin-top:4px;text-align:center">No scans yet</div>
+                <div class="signals-freshness" id="signals-freshness" style="font-size:10px;color:var(--text-muted);margin-top:4px;text-align:center">No scans yet</div>
             </div>
             <div class="signals-scan-history" id="signals-scan-history" style="display:none;padding:6px 12px;border-top:1px solid var(--border)">
                 <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Recent Scans</div>
@@ -5778,13 +5818,15 @@
                     <button class="sig-feed-tab" data-tab="threads" onclick="switchSignalTab('threads')">Threads</button>
                     <button class="sig-feed-tab" data-tab="narratives" onclick="switchSignalTab('narratives')">Narratives</button>
                     <button class="sig-feed-tab" data-tab="graph" onclick="switchSignalTab('graph')">Board</button>
-                    <button class="sig-feed-tab" data-tab="causal" onclick="switchSignalTab('causal')">Causal</button>
+                    <button class="sig-feed-tab" data-tab="causal" onclick="switchSignalTab('causal')">Chains</button>
                     <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
                 </div>
             </div>
-            <div id="signals-filter-bar" style="padding:6px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+            <div id="signals-filter-bar" style="padding:5px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="flex-shrink:0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                <input type="text" id="signals-search" placeholder="Filter signals…" oninput="renderActiveSignalTab()" style="flex:1;padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);border-radius:6px;font-size:11px;outline:none">
+                <input type="text" id="signals-search" placeholder="Filter…" oninput="renderActiveSignalTab()" style="flex:1;max-width:220px;padding:4px 10px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);border-radius:6px;font-size:12px;outline:none">
+                <div id="selection-action-bar" style="display:none;margin-left:auto;display:none;align-items:center;gap:6px"></div>
+                <button id="review-queue-badge" onclick="_toggleReviewQueue()" style="display:none;margin-left:auto;padding:4px 10px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.3);border-radius:12px;color:var(--purple);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap" onmouseenter="this.style.background='rgba(168,85,247,0.2)'" onmouseleave="this.style.background='rgba(168,85,247,0.1)'">📋 <span id="review-queue-count">0</span></button>
             </div>
             <div class="signals-feed-body" id="signals-feed-body">
                 <!-- Threads view (default) -->
@@ -5797,9 +5839,6 @@
                 </div>
                 <!-- Narratives view -->
                 <div class="sig-tab-content" id="sig-tab-narratives">
-                    <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center">
-                        <button onclick="openNarrativeModal()" style="padding:5px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:10px;font-weight:600;cursor:pointer;margin-left:auto">+ New Narrative</button>
-                    </div>
                     <div id="narratives-list"></div>
                 </div>
                 <!-- Raw signals view -->
@@ -5831,9 +5870,13 @@
                         <!-- RIGHT: Tabbed pane (Review Queue / Thread Detail) -->
                         <div class="sig-review-queue" id="sig-review-queue">
                             <div class="sig-rq-resize" id="sig-rq-resize"></div>
-                            <div class="sig-rq-tabs">
-                                <button class="sig-rq-tab active" id="sig-rq-tab-queue" onclick="_switchRightPaneTab('queue')">Review Queue <span class="sig-rq-count" id="sig-rq-count"></span></button>
+                            <div class="sig-rq-tabs" style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border)">
+                                <button onclick="_toggleReviewQueue()" style="display:flex;align-items:center;gap:6px;padding:0;background:none;border:none;color:var(--text-primary);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap" title="Collapse">Review Queue <span class="sig-rq-count" id="sig-rq-count" style="background:var(--purple);color:#fff;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600"></span> <span style="color:var(--text-muted);font-size:16px;margin-left:2px">›</span></button>
                                 <button class="sig-rq-tab" id="sig-rq-tab-thread" onclick="_switchRightPaneTab('thread')" style="display:none">Thread Detail</button>
+                                <div style="margin-left:auto;display:flex;align-items:center">
+                                    <button id="rq-view-grouped" onclick="_switchRqView('grouped')" style="padding:5px 12px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.3);border-radius:6px 0 0 6px;color:var(--purple);font-size:12px;font-weight:600;cursor:pointer">Grouped</button>
+                                    <button id="rq-view-list" onclick="_switchRqView('list')" style="padding:5px 12px;background:none;border:1px solid var(--border);border-left:none;border-radius:0 6px 6px 0;color:var(--text-muted);font-size:12px;font-weight:600;cursor:pointer">List</button>
+                                </div>
                             </div>
                             <div class="sig-rq-body" id="sig-rq-body">
                                 <div style="padding:16px;color:var(--text-muted);font-size:12px;text-align:center">Loading...</div>
@@ -6010,22 +6053,24 @@
         </div>
 
         <!-- PANE 4: Discovery Drawer -->
+        <!-- Discovery Drawer (in-flow, sits next to detail pane) -->
         <div class="discovery-drawer" id="discovery-drawer" style="display:none">
             <div class="discovery-drawer-resize" id="discovery-drawer-resize"></div>
             <div class="discovery-drawer-header">
                 <div class="discovery-drawer-title-row">
-                    <span class="discovery-drawer-title">Discover</span>
+                    <span class="discovery-drawer-title">Explore</span>
                     <div class="discovery-drawer-actions">
-                        <button id="discovery-save-chain-btn" onclick="_discoverySaveChain()" style="display:none" title="Save this trail as a causal chain">&#9939; Save as Chain</button>
-                        <button class="discovery-drawer-close" onclick="_closeDiscoveryDrawer()">&times;</button>
+                        <button id="discovery-save-chain-btn" onclick="_discoverySaveChain()" style="display:none" title="Save this trail as a causal chain">⛓ Save as Chain</button>
+                        <button onclick="_clearDiscoveryTrail()" style="padding:3px 8px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:10px;cursor:pointer" title="Clear trail and start fresh">Clear</button>
+                        <button class="discovery-drawer-close" onclick="_closeDiscoveryDrawer()">×</button>
                     </div>
                 </div>
                 <div class="discovery-breadcrumb" id="discovery-breadcrumb"></div>
             </div>
             <div class="discovery-drawer-body" id="discovery-drawer-body">
                 <div class="discovery-drawer-empty">
-                    <div style="font-size:28px;margin-bottom:10px">&#128270;</div>
-                    <div style="font-size:14px">Right-click a thread and choose "Find similar"</div>
+                    <div style="font-size:28px;margin-bottom:10px">🔍</div>
+                    <div style="font-size:14px">Click a concept, entity, or "Find similar" to start exploring</div>
                 </div>
             </div>
         </div>
@@ -9645,6 +9690,25 @@ function escHtml(s) {
     if (!s) return '';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+function _formatBody(text) {
+    // Add paragraph breaks to wall-of-text article bodies.
+    // Respects existing newlines, inserts breaks every ~4 sentences.
+    if (!text) return '';
+    const escaped = escHtml(text);
+    // Split on existing double-newlines first (already has paragraphs)
+    const paras = escaped.split(/\n\s*\n/);
+    if (paras.length > 2) return paras.map(p => p.replace(/\n/g, ' ').trim()).filter(Boolean).map(p => `<p style="margin:0 0 12px">${p}</p>`).join('');
+    // No existing paragraphs — split by sentences
+    const flat = escaped.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    // Split on sentence-ending punctuation followed by a space and capital letter
+    const sentences = flat.split(/(?<=[.!?])\s+(?=[A-Z""])/);
+    if (sentences.length <= 4) return `<p style="margin:0">${flat}</p>`;
+    let html = '';
+    for (let i = 0; i < sentences.length; i += 4) {
+        html += `<p style="margin:0 0 12px">${sentences.slice(i, i + 4).join(' ')}</p>`;
+    }
+    return html;
+}
 function displayReportType(t) {
     if (!t) return 'report';
     // lens_workforce-management → workforce management
@@ -12463,10 +12527,11 @@ function _inferSourceType(url) {
 }
 
 function _toggleResearchSelection(name, checkboxEl) {
-    // Parse data from the parent list item
-    const item = checkboxEl.closest('.discovery-list-item');
+    // Parse data from the parent list item (supports both discovery list and niche eval cards)
+    const item = checkboxEl.closest('.discovery-list-item') || checkboxEl.closest('.ne-company-card');
     let data;
-    try { data = JSON.parse(item?.dataset.companyPayload || '{}'); } catch { data = { name }; }
+    try { data = JSON.parse(item?.dataset?.companyPayload || '{}'); } catch { data = {}; }
+    if (!data.name) data.name = name;
 
     if (checkboxEl.checked) {
         // If at max, prevent checking
@@ -13135,8 +13200,8 @@ async function _sendToResearch(lensSelectId) {
     const selEl = document.getElementById(selId);
     if (selEl) localStorage.setItem('sv_last_lens', selEl.value);
 
-    const btn = document.querySelector('.str-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+    const btns = document.querySelectorAll('.str-btn');
+    btns.forEach(b => { b.disabled = true; b.textContent = 'Sending...'; });
 
     try {
         const resp = await fetch('/api/send-to-research', {
@@ -13189,7 +13254,7 @@ async function _sendToResearch(lensSelectId) {
         console.error('Send to research failed:', e);
         _showToast('Failed: ' + e.message, 'error');
     } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Send to Research'; }
+        btns.forEach(b => { b.disabled = false; b.textContent = 'Send to Research'; });
     }
 }
 
@@ -14501,6 +14566,9 @@ let _discoveryBreadcrumb = [];
 let _discoveryResults = [];
 let _rawSelectedSignals = new Set(); // selected signal IDs in Raw tab for pattern creation
 
+const _TAB_TITLES = { raw: 'Signals', threads: 'Threads', narratives: 'Narratives', graph: 'Board', causal: 'Chains', execution: 'Execution' };
+const _TAB_HAS_ADD = { raw: true, threads: true, narratives: true, causal: true };
+
 function switchSignalTab(tab) {
     _signalTab = tab;
     document.querySelectorAll('.sig-feed-tab').forEach(t => t.classList.remove('active'));
@@ -14510,12 +14578,19 @@ function switchSignalTab(tab) {
     if (tab === 'graph') loadBoard();
     if (tab === 'narratives') loadNarratives();
     if (tab === 'causal') loadCausalView();
-    // Show/hide filter bar (only useful for threads and raw tabs)
+    // Update sidebar title + add button
+    const titleEl = document.querySelector('.signals-sidebar-title');
+    if (titleEl) titleEl.textContent = _TAB_TITLES[tab] || 'Signals';
+    const addBtn = document.getElementById('quick-capture-toggle');
+    if (addBtn) addBtn.style.display = _TAB_HAS_ADD[tab] ? '' : 'none';
+    // Close any open add panel when switching tabs
+    _closeAllAddPanels();
+    // Show/hide filter bar
     const filterBar = document.getElementById('signals-filter-bar');
     if (filterBar) {
-        filterBar.style.display = (tab === 'threads' || tab === 'raw') ? '' : 'none';
+        filterBar.style.display = (tab === 'threads' || tab === 'raw' || tab === 'narratives') ? '' : 'none';
         const searchInput = document.getElementById('signals-search');
-        if (searchInput) searchInput.placeholder = tab === 'threads' ? 'Filter threads…' : 'Filter signals…';
+        if (searchInput) searchInput.placeholder = `Filter ${(_TAB_TITLES[tab] || 'signals').toLowerCase()}…`;
     }
     // Toggle shared detail pane — raw tab has its own inline detail, causal has inspector
     const sharedDetail = document.getElementById('signals-detail');
@@ -14528,10 +14603,13 @@ function switchSignalTab(tab) {
     if (tab === 'raw') _loadReviewGroups();
     // Clear detail pane on tab switch (except graph)
     if (tab !== 'graph' && tab !== 'raw') closeSignalDetail();
+    // Update selection bar for current tab
+    _updateSelectionBar();
 }
 
 function renderActiveSignalTab() {
     if (_signalTab === 'threads') renderThreadFeed();
+    else if (_signalTab === 'narratives') renderNarrativesList();
     else renderSignalFeed();
 }
 
@@ -14580,8 +14658,8 @@ function _renderBrainstormList(brainstorms) {
         const titles = (b.thread_titles || []).join(' × ');
         const date = b.created_at ? _timeAgo(b.created_at) : '';
         return `<div onclick="openPastBrainstorm(${b.id})" style="padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer;transition:color 0.15s" onmouseenter="this.style.color='var(--accent)'" onmouseleave="this.style.color=''">
-            <div style="font-size:11px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(titles)}</div>
-            <div style="font-size:9px;color:var(--text-muted)">${escHtml(date)} · ${(b.hypotheses || []).length} hypotheses</div>
+            <div style="font-size:12px;font-weight:600;color:var(--text-primary);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(titles)}</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escHtml(date)} · ${(b.hypotheses || []).length} hypotheses</div>
         </div>`;
     }).join('');
 }
@@ -14706,18 +14784,8 @@ function renderSignalFeed() {
         </div>`;
     }).join('');
 
-    // Add create pattern bar if signals are selected
-    const barHtml = _rawSelectedSignals.size >= 2
-        ? `<div class="sig-create-pattern-bar">
-            <span style="font-size:11px;color:var(--text-secondary);font-weight:600">${_rawSelectedSignals.size} selected</span>
-            <button onclick="_createPatternFromSelection()" style="margin-left:auto;padding:6px 14px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">Create Thread →</button>
-            <button onclick="_clearRawSelection()" style="padding:6px 10px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer">Clear</button>
-           </div>`
-        : _rawSelectedSignals.size === 1
-        ? `<div class="sig-create-pattern-bar"><span style="font-size:11px;color:var(--text-muted)">1 selected — select 1 more to create a thread</span></div>`
-        : '';
-
-    container.innerHTML = barHtml + html;
+    container.innerHTML = html;
+    _updateSelectionBar();
 }
 
 // Single event delegation on the feed body — handles both tabs
@@ -15168,16 +15236,20 @@ function _showTextContextMenu(text, x, y) {
 
 function _findThreadsInDetail(text) {
     document.querySelectorAll('.text-ctx-menu').forEach(m => m.remove());
+
+    // Always use Discovery Drawer for related thread exploration
+    _brainstormConceptClick(text);
+    return;
+
+    // Legacy: detail pane fallback (kept for reference)
     const detailBody = _showDetailPane('Search: ' + text);
     detailBody.innerHTML = '<div style="padding:20px;color:var(--text-muted);font-size:11px">Searching threads...</div>';
 
-    // Search existing signals for thread matches
     fetch(`/api/signals/search?q=${encodeURIComponent(text)}`)
         .then(r => r.json())
         .then(data => {
             const matches = data.thread_matches || [];
             if (!matches.length) {
-                // Fallback: fuzzy match against thread titles in cache
                 const q = text.toLowerCase();
                 const titleMatches = (_threadsCache || []).filter(t =>
                     t.title.toLowerCase().includes(q) || (t.synthesis || '').toLowerCase().includes(q)
@@ -15231,7 +15303,20 @@ function _renderThreadSearchResults(container, query, matches) {
 
 function _highlightOnBoard(text) {
     document.querySelectorAll('.text-ctx-menu').forEach(m => m.remove());
-    _brainstormConceptClick(text);
+    fetch(`/api/signals/search?q=${encodeURIComponent(text)}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (!data || data.error) return;
+            const key = _hlKey('keyword', text);
+            if (_boardHighlights.findIndex(h => h.key === key) === -1) {
+                const threadIds = new Set((data.thread_matches || []).map(m => m.thread_id));
+                _boardHighlights.push({ kind: 'keyword', label: text, icon: '🔍', threadIds, key });
+                _applyBoardHighlights();
+                _renderHighlightPills();
+            }
+            const matchCount = (data.thread_matches || []).length;
+            _showToast(`"${text}" highlighted — ${matchCount} thread${matchCount !== 1 ? 's' : ''}`, 'success', 3000);
+        });
 }
 
 function _searchSignalsFor(text) {
@@ -15326,15 +15411,7 @@ function renderThreadFeed() {
         return;
     }
 
-    // Review queue badge — show count of unassigned signals
-    const reviewBadge = `<div id="review-queue-badge" style="padding:8px 12px;border-bottom:1px solid var(--border);display:none">
-        <button onclick="_openReviewQueue()" style="width:100%;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--purple);border-radius:8px;color:var(--purple);font-size:11px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:space-between">
-            <span>📋 Review Queue</span>
-            <span id="review-queue-count" style="background:var(--purple);color:#fff;padding:1px 7px;border-radius:10px;font-size:10px"></span>
-        </button>
-    </div>`;
-
-    const html = reviewBadge + filtered.map(t => {
+    const html = filtered.map(t => {
         const m = t.momentum || {};
         const mDir = m.direction || 'stable';
         const mLabel = {accelerating: '↑ Accelerating', stable: '→ Stable', fading: '↓ Decelerating'}[mDir] || '→ Stable';
@@ -15364,18 +15441,8 @@ function renderThreadFeed() {
             </div>
         </div>`;
     }).join('');
-    // Selection action bar
-    const selCount = _selectedThreadsForNarrative.size;
-    const actionBar = selCount > 0
-        ? `<div style="position:sticky;top:0;z-index:5;padding:8px 12px;background:var(--bg-secondary);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
-            <span style="font-size:11px;color:var(--text-secondary);font-weight:600">${selCount} selected</span>
-            ${selCount >= 2 ? `<button onclick="_createNarrativeFromThreads()" style="padding:5px 12px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer;margin-left:auto">📖 Create Narrative</button>` : `<span style="font-size:10px;color:var(--text-muted);margin-left:auto">Select 1 more to create narrative</span>`}
-            <button onclick="_bulkDeleteThreads([..._selectedThreadsForNarrative])" style="padding:5px 8px;background:none;border:1px solid #ef4444;border-radius:6px;color:#ef4444;font-size:10px;cursor:pointer">🗑️ Delete</button>
-            <button onclick="_selectedThreadsForNarrative.clear();renderThreadFeed()" style="padding:5px 8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer">Clear</button>
-        </div>`
-        : '';
-
-    container.innerHTML = actionBar + html;
+    container.innerHTML = html;
+    _updateSelectionBar();
 }
 
 function openSignalDetail(signalId) {
@@ -15410,7 +15477,7 @@ function openSignalDetail(signalId) {
                     <span style="font-size:11px;color:var(--text-muted)">${escHtml(dateStr)}</span>
                 </div>
             </div>
-            <div class="sig-detail-body-text" id="sig-detail-text-${s.id}">${s.body ? escHtml(s.body) : '<span style="color:var(--text-muted);font-style:italic">No article text yet</span>'}</div>
+            <div class="sig-detail-body-text" id="sig-detail-text-${s.id}">${s.body ? _formatBody(s.body) : '<span style="color:var(--text-muted);font-style:italic">No article text yet</span>'}</div>
             <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 ${s.url && (!s.body || s.body.length < 500) ? `<button id="sig-fetch-btn-${s.id}" onclick="fetchArticleText(${s.id})" style="padding:6px 14px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer">Load full article</button>` : ''}
                 ${s.url ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--text-muted);font-size:11px;text-decoration:none">Open source &rarr;</a>` : ''}
@@ -15475,7 +15542,7 @@ function fetchArticleText(signalId, attempt) {
         .then(r => r.json())
         .then(data => {
             if (data.ok && data.body) {
-                textEl.textContent = data.body;
+                textEl.innerHTML = _formatBody(data.body);
                 const cached = _signalsCache.find(x => x.id == signalId);
                 if (cached) cached.body = data.body;
                 if (btn) btn.remove();
@@ -15577,18 +15644,16 @@ function openThreadDetail(threadId) {
     _activeThreadId = threadId;
     const myRequest = ++_detailRequestId; // capture this request's ID
 
-    // On raw tab, show thread detail in the right pane tab instead of shared detail pane
-    if (_signalTab === 'raw') {
-        _showThreadInRightPane(threadId);
-        return;
-    }
+    // Ensure shared detail pane is visible (may be hidden on board/chains/execution tabs)
+    const sharedDetail = document.getElementById('signals-detail');
+    if (sharedDetail && _signalTab !== 'raw') sharedDetail.style.display = '';
 
     // Highlight active thread card + graph node
     document.querySelectorAll('.thread-card').forEach(c => c.classList.remove('active'));
     const card = document.querySelector(`.thread-card[data-id="${threadId}"]`);
     if (card) card.classList.add('active');
 
-    const detailBody = _showDetailPane('Thread Detail');
+    const detailBody = _signalTab === 'raw' ? _showRawDetailPane('Thread Detail') : _showDetailPane('Thread Detail');
     detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading thread...</div>`;
 
     fetch(`/api/signals/threads/${threadId}`)
@@ -15921,17 +15986,15 @@ function _loadReviewQueueCount() {
     fetch('/api/signals/review-queue?limit=1')
         .then(r => r.json())
         .then(data => {
+            const total = data.total || 0;
+            // Inline badge in filter bar (threads + signals tabs)
             const badge = document.getElementById('review-queue-badge');
             const count = document.getElementById('review-queue-count');
-            if (badge && data.total > 0) {
-                badge.style.display = '';
-                if (count) count.textContent = data.total;
-            } else if (badge) {
-                badge.style.display = 'none';
-            }
-            // Also update inline review queue count
+            if (badge) badge.style.display = total > 0 ? '' : 'none';
+            if (count) count.textContent = total;
+            // Right-pane count (signals raw tab)
             const rqCount = document.getElementById('sig-rq-count');
-            if (rqCount) rqCount.textContent = data.total || '';
+            if (rqCount) rqCount.textContent = total || '';
         })
         .catch(() => {});
 }
@@ -16269,24 +16332,93 @@ function _mergeThreads() {
     });
 }
 
+// ── Selection Action Bar (inline in filter bar) ──────────────────
+function _updateSelectionBar() {
+    const bar = document.getElementById('selection-action-bar');
+    if (!bar) return;
+
+    if (_signalTab === 'raw') {
+        const count = _rawSelectedSignals.size;
+        if (count === 0) {
+            bar.style.display = 'none';
+            return;
+        }
+        bar.style.display = 'flex';
+        bar.innerHTML = `<span style="font-size:11px;color:var(--text-secondary);font-weight:600;white-space:nowrap">${count} selected</span>` +
+            (count >= 2
+                ? `<button onclick="_createPatternFromSelection()" style="padding:4px 10px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">Create Thread</button>`
+                : `<span style="font-size:10px;color:var(--text-muted);white-space:nowrap">+1 more</span>`) +
+            `<button onclick="_clearRawSelection()" style="padding:4px 8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer">✕</button>`;
+    } else if (_signalTab === 'threads') {
+        const count = _selectedThreadsForNarrative.size;
+        if (count === 0) {
+            bar.style.display = 'none';
+            return;
+        }
+        bar.style.display = 'flex';
+        bar.innerHTML = `<span style="font-size:11px;color:var(--text-secondary);font-weight:600;white-space:nowrap">${count} selected</span>` +
+            (count >= 2
+                ? `<button onclick="_createNarrativeFromThreads()" style="padding:4px 10px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">Create Narrative</button>`
+                : `<span style="font-size:10px;color:var(--text-muted);white-space:nowrap">+1 more</span>`) +
+            `<button onclick="_bulkDeleteThreads([..._selectedThreadsForNarrative])" style="padding:4px 8px;background:none;border:1px solid #ef4444;border-radius:6px;color:#ef4444;font-size:10px;cursor:pointer" title="Delete selected">🗑</button>` +
+            `<button onclick="_selectedThreadsForNarrative.clear();renderThreadFeed()" style="padding:4px 8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer">✕</button>`;
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+// ── Signal Tools Menu ─────────────────────────────────────────────
+function _toggleSignalTools() {
+    const menu = document.getElementById('signal-tools-menu');
+    if (menu) menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+// Close on click outside
+document.addEventListener('click', (e) => {
+    const menu = document.getElementById('signal-tools-menu');
+    if (menu && menu.style.display !== 'none' && !e.target.closest('#signal-tools-btn') && !e.target.closest('#signal-tools-menu')) {
+        menu.style.display = 'none';
+    }
+});
+
 // ── Quick Capture ─────────────────────────────────────────────────
 
 let _qcSource = 'linkedin';
 let _qcCapturing = false;
 let _qcSessionItems = [];
 
-function _toggleQuickCapture() {
-    const panel = document.getElementById('quick-capture-panel');
+function _closeAllAddPanels() {
     const btn = document.getElementById('quick-capture-toggle');
-    if (panel.style.display === 'none') {
+    ['quick-capture-panel', 'thread-create-panel', 'chain-create-panel'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    });
+    if (btn) { btn.style.background = 'rgba(168,85,247,0.08)'; btn.textContent = '+'; }
+}
+
+function _toggleQuickCapture() {
+    const btn = document.getElementById('quick-capture-toggle');
+    const isOpen = btn && btn.textContent === '×';
+    if (isOpen) { _closeAllAddPanels(); return; }
+
+    _closeAllAddPanels();
+    btn.style.background = 'rgba(168,85,247,0.2)';
+    btn.textContent = '×';
+
+    if (_signalTab === 'raw') {
+        const panel = document.getElementById('quick-capture-panel');
         panel.style.display = 'block';
-        btn.style.background = 'rgba(168,85,247,0.2)';
-        btn.textContent = '×';
         document.getElementById('qc-paste').focus();
-    } else {
-        panel.style.display = 'none';
-        btn.style.background = 'rgba(168,85,247,0.08)';
-        btn.textContent = '+';
+    } else if (_signalTab === 'threads') {
+        const panel = document.getElementById('thread-create-panel');
+        panel.style.display = 'block';
+        document.getElementById('tc-title').focus();
+    } else if (_signalTab === 'narratives') {
+        _closeAllAddPanels();
+        openNarrativeModal();
+    } else if (_signalTab === 'causal') {
+        const panel = document.getElementById('chain-create-panel');
+        panel.style.display = 'block';
+        document.getElementById('cc-name').focus();
     }
 }
 
@@ -16433,6 +16565,57 @@ function _qcRenderSession() {
             ${thread}
         </div>`;
     }).join('');
+}
+
+// ── Thread Creation ───────────────────────────────────────────────
+async function _tcCreate() {
+    const title = document.getElementById('tc-title').value.trim();
+    if (!title) { _showToast('Thread title required', 'error'); return; }
+    const btn = document.getElementById('tc-submit');
+    btn.disabled = true; btn.textContent = 'Creating…';
+    try {
+        const res = await fetch('/api/signals/threads/create', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ title, content: document.getElementById('tc-paste').value }),
+        });
+        const d = await res.json();
+        if (d.ok) {
+            const msg = d.signals_created > 0 ? `Thread created with ${d.signals_created} signals` : 'Empty thread created';
+            _showToast(msg, 'success');
+            document.getElementById('tc-title').value = '';
+            document.getElementById('tc-paste').value = '';
+            _closeAllAddPanels();
+            loadSignals();
+        } else {
+            _showToast(d.error || 'Failed', 'error');
+        }
+    } catch (e) { _showToast('Error: ' + e.message, 'error'); }
+    btn.disabled = false; btn.textContent = 'Create Thread';
+}
+
+// ── Chain Creation ────────────────────────────────────────────────
+async function _ccCreate() {
+    const name = document.getElementById('cc-name').value.trim();
+    if (!name) { _showToast('Chain name required', 'error'); return; }
+    const btn = document.getElementById('cc-submit');
+    btn.disabled = true; btn.textContent = 'Creating…';
+    try {
+        const res = await fetch('/api/causal-paths', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ name, thread_ids: [] }),
+        });
+        const d = await res.json();
+        if (d.ok) {
+            _showToast('Chain created', 'success');
+            document.getElementById('cc-name').value = '';
+            _closeAllAddPanels();
+            _activeCausalPathId = d.id;
+            loadCausalView();
+        } else {
+            _showToast(d.error || 'Failed', 'error');
+        }
+    } catch (e) { _showToast('Error: ' + e.message, 'error'); }
+    btn.disabled = false; btn.textContent = 'Create Chain';
 }
 
 function _runCustomSearch() {
@@ -17017,30 +17200,10 @@ function _brainstormHighlighted(matchFilter) {
 }
 
 function _highlightEntityOnBoard(entityType, entityValue) {
-    if (_signalTab !== 'graph') switchSignalTab('graph');
-    if (!_boardData) return;
-
-    const key = _hlKey('entity', entityValue);
-    // Toggle if already active
-    const existing = _boardHighlights.findIndex(h => h.key === key);
-    if (existing !== -1) { _removeBoardHighlight(existing); return; }
-
-    // Mark chip active
-    document.querySelectorAll(`.ent-chip[data-type="${entityType}"]`).forEach(c => {
-        if (c.textContent.includes(entityValue)) c.classList.add('ent-chip-active');
-    });
-
-    // Fetch and add
-    fetch(`/api/signals/entity-threads?type=${encodeURIComponent(entityType)}&value=${encodeURIComponent(entityValue)}`)
-        .then(r => r.json())
-        .then(data => {
-            _addBoardHighlight({
-                kind: 'entity', label: entityValue,
-                icon: _entIcon[entityType] || '🔹',
-                threadIds: new Set(data.thread_ids || []),
-                key
-            });
-        });
+    // Open Discovery Drawer to explore this entity
+    const crumbNode = { type: 'entity', entityType, entityValue, label: entityValue };
+    _openDiscoveryDrawer(crumbNode);
+    _fetchDiscoveryResults(crumbNode);
 }
 
 function _boardKeywordSearch(query) {
@@ -18253,125 +18416,11 @@ function _renderBrainstormLinks(text) {
     return html;
 }
 
-let _bsDrawerHistory = [];
-
 function _brainstormConceptClick(concept) {
-    fetch(`/api/signals/search?q=${encodeURIComponent(concept)}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-            if (!data || data.error) return;
-            // Add to board highlights
-            const key = _hlKey('keyword', concept);
-            if (_boardHighlights.findIndex(h => h.key === key) === -1) {
-                const threadIds = new Set((data.thread_matches || []).map(m => m.thread_id));
-                _boardHighlights.push({ kind: 'keyword', label: concept, icon: '🔍', threadIds, key });
-                _applyBoardHighlights();
-                _renderHighlightPills();
-            }
-            // If brainstorm overlay is open, use the drawer; otherwise switch to board
-            const overlay = document.getElementById('brainstorm-overlay');
-            if (overlay && overlay.classList.contains('visible')) {
-                _openBsDrawer(concept, data);
-            } else {
-                const matchCount = (data.thread_matches || []).length;
-                _showToast(`"${concept}" — ${matchCount} thread${matchCount !== 1 ? 's' : ''} matched`, 'info', 3000);
-                switchSignalTab('graph');
-            }
-        });
-}
-
-function _openBsDrawer(concept, data) {
-    const drawer = document.getElementById('bs-drawer');
-    const title = document.getElementById('bs-drawer-title');
-    const content = document.getElementById('bs-drawer-content');
-    if (!drawer) return;
-
-    // Push to history (but avoid duplicates at the end)
-    if (!_bsDrawerHistory.length || _bsDrawerHistory[_bsDrawerHistory.length - 1] !== concept) {
-        _bsDrawerHistory.push(concept);
-    }
-
-    drawer.style.display = '';
-
-    // Header: back button if history > 1
-    const backBtn = _bsDrawerHistory.length > 1
-        ? `<span onclick="_bsDrawerBack()" style="cursor:pointer;color:var(--text-muted);font-size:11px;margin-right:6px">←</span>`
-        : '';
-    title.innerHTML = `${backBtn}<span style="color:var(--accent)">${escHtml(concept)}</span>`;
-
-    const matches = (data && data.thread_matches) || [];
-    if (!matches.length) {
-        content.innerHTML = `<div style="font-size:11px;color:var(--text-muted);padding:8px 0">No threads match this concept</div>`;
-        return;
-    }
-
-    // Thread results — each with domain color, signal count, and entities
-    let html = `<div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">${data.total_signals} signals in ${matches.length} threads</div>`;
-
-    html += matches.slice(0, 10).map(m => {
-        // Find thread data for domain color
-        const thread = (_threadsCache || []).find(t => t.id === m.thread_id);
-        const domColor = thread ? (_DOMAIN_COLORS[_parseDomains(thread.domain)[0]] || '#6b7280') : '#6b7280';
-        const threadTitle = thread ? thread.title : (m.signals[0]?.title || 'Thread ' + m.thread_id);
-        const sigCount = thread ? (thread.signal_count || 0) : m.match_count;
-
-        return `<div style="padding:8px;margin-bottom:6px;background:var(--bg-secondary);border:1px solid var(--border);border-left:3px solid ${domColor};border-radius:6px">
-            <div onclick="closeBrainstorm();openThreadDetail(${m.thread_id})" style="font-size:11px;font-weight:600;color:var(--text-primary);cursor:pointer;margin-bottom:4px;line-height:1.3">${escHtml(threadTitle)}</div>
-            <div style="font-size:9px;color:var(--text-muted);margin-bottom:4px">${m.match_count} match${m.match_count > 1 ? 'es' : ''} · ${sigCount} signals</div>
-            <div style="display:flex;flex-wrap:wrap;gap:3px">
-                ${(m.signals || []).slice(0, 3).map(s =>
-                    `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%">${escHtml(s.title.substring(0, 40))}</span>`
-                ).join('')}
-            </div>
-        </div>`;
-    }).join('');
-
-    // Related concepts from matching threads' entities
-    const relatedEntities = new Set();
-    matches.forEach(m => {
-        const thread = (_threadsCache || []).find(t => t.id === m.thread_id);
-        // We don't have entities in cache, but signal titles give keyword clues
-        (m.signals || []).forEach(s => {
-            // Extract bracketed concepts from title if any (won't have many but future-proofs)
-            const title = s.title || '';
-            title.replace(/\[\[([^\]]+)\]\]/g, (_, c) => { if (c.toLowerCase() !== concept.toLowerCase()) relatedEntities.add(c); });
-        });
-    });
-
-    // Add "explore related" section if we have entities
-    if (relatedEntities.size) {
-        html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-            <div style="font-size:9px;font-weight:600;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Related</div>
-            <div style="display:flex;flex-wrap:wrap;gap:3px">
-                ${[...relatedEntities].slice(0, 8).map(e =>
-                    `<span onclick="_brainstormConceptClick('${escHtml(e.replace(/'/g, "\\'"))}')" style="font-size:9px;color:var(--accent);background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);padding:2px 6px;border-radius:10px;cursor:pointer">${escHtml(e)}</span>`
-                ).join('')}
-            </div>
-        </div>`;
-    }
-
-    content.innerHTML = html;
-}
-
-function _bsDrawerBack() {
-    if (_bsDrawerHistory.length <= 1) return;
-    _bsDrawerHistory.pop(); // remove current
-    const prev = _bsDrawerHistory[_bsDrawerHistory.length - 1];
-    // Re-fetch for previous concept
-    fetch(`/api/signals/search?q=${encodeURIComponent(prev)}`)
-        .then(r => r.ok ? r.json() : null)
-        .then(data => {
-            if (data) {
-                _bsDrawerHistory.pop(); // _openBsDrawer will re-push
-                _openBsDrawer(prev, data);
-            }
-        });
-}
-
-function _closeBsDrawer() {
-    const drawer = document.getElementById('bs-drawer');
-    if (drawer) drawer.style.display = 'none';
-    _bsDrawerHistory = [];
+    // Open Discovery Drawer with keyword search — works from any view
+    const crumbNode = { type: 'keyword', query: concept, label: concept };
+    _openDiscoveryDrawer(crumbNode);
+    _fetchDiscoveryResults(crumbNode);
 }
 
 function _investigateInline(btn, query) {
@@ -18492,7 +18541,6 @@ function openPastBrainstorm(brainstormId) {
 
 function closeBrainstorm() {
     document.getElementById('brainstorm-overlay').classList.remove('visible');
-    _closeBsDrawer();
     // Reload graph to show any new links
     if (_signalTab === 'graph') loadBoard();
     // Refresh brainstorm list in sidebar
@@ -18514,16 +18562,15 @@ function _prefillResearchChat(companyName) {
 function _toggleRawSelect(sigId) {
     if (_rawSelectedSignals.has(sigId)) _rawSelectedSignals.delete(sigId);
     else _rawSelectedSignals.add(sigId);
-    // Toggle visual directly
     const el = document.querySelector(`.sig-card-select[data-sig-id="${sigId}"]`);
     if (el) el.classList.toggle('checked');
-    // Update create pattern bar
-    renderSignalFeed();
+    _updateSelectionBar();
 }
 
 function _clearRawSelection() {
     _rawSelectedSignals.clear();
-    renderSignalFeed();
+    document.querySelectorAll('.sig-card-select.checked[data-sig-id]').forEach(el => el.classList.remove('checked'));
+    _updateSelectionBar();
 }
 
 function _createPatternFromSelection() {
@@ -18652,12 +18699,29 @@ function _loadReviewGroups() {
     const body = document.getElementById('sig-rq-body');
     const countEl = document.getElementById('sig-rq-count');
     if (!body) return;
+    // Ensure queue body is visible (not thread detail)
+    _switchRightPaneTab('queue');
 
-    // Step 1: Load fast one-by-one queue immediately for quick display
+    // If user is on list view, just render list
+    if (_rqView === 'list') {
+        _renderReviewList();
+        // Still update the count badge
+        fetch('/api/signals/review-queue?limit=1').then(r => r.json()).then(d => {
+            if (countEl) countEl.textContent = d.total || '';
+            const badge = document.getElementById('review-queue-count');
+            if (badge) badge.textContent = d.total || '';
+        }).catch(() => {});
+        return;
+    }
+
+    // Grouped view: load fast ungrouped first, then groups in background
     body.innerHTML = '<div style="padding:20px;color:var(--text-muted);font-size:12px;text-align:center">Loading...</div>';
     fetch('/api/signals/review-queue?limit=20').then(r => r.json()).then(fastData => {
-        if (countEl) countEl.textContent = fastData.total || '';
-        // Render fast ungrouped list while groups load
+        const total = fastData.total || 0;
+        if (countEl) countEl.textContent = total;
+        const badge = document.getElementById('review-queue-count');
+        if (badge) badge.textContent = total;
+
         const signals = fastData.signals || [];
         if (!signals.length) {
             _reviewGroupsCache = { groups: [], ungrouped: [], total_unassigned: 0 };
@@ -18665,21 +18729,21 @@ function _loadReviewGroups() {
             _updateReviewQueueVisibility();
             return;
         }
-        // Render quick ungrouped view
         _reviewGroupsCache = { groups: [], ungrouped: signals.map(s => ({
             id: s.id, title: s.title, source_name: s.source_name || '', published_at: s.published_at || '',
             domain: s.domain || '', confidence: s.confidence || 'low',
             suggestions: (s.suggestions || []).map(sg => ({ thread_id: sg.thread_id, thread_title: sg.thread_title, score: sg.score }))
-        })), total_unassigned: fastData.total };
-        _renderReviewGroups();
+        })), total_unassigned: total };
+        if (_rqView === 'grouped') _renderReviewGroups();
         _updateReviewQueueVisibility();
 
-        // Step 2: Load grouped version in background
+        // Load grouped version in background
         fetch('/api/signals/review-queue/groups').then(r => r.json()).then(groupData => {
             _reviewGroupsCache = groupData;
-            if (countEl) countEl.textContent = groupData.total_unassigned || '';
-            _renderReviewGroups();
-        }).catch(() => {}); // silent fail — ungrouped view is already showing
+            // Sync counts from the authoritative total
+            if (countEl) countEl.textContent = total;
+            if (_rqView === 'grouped') _renderReviewGroups();
+        }).catch(() => {});
     }).catch(() => {
         body.innerHTML = '<div style="padding:20px;color:var(--red);font-size:12px;text-align:center">Failed to load</div>';
     });
@@ -18706,7 +18770,7 @@ function _renderReviewGroups() {
             const isTop = si === 0 && pct > 15;
             return `<div onclick="_bulkAssignGroup(${gi},${s.thread_id})" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
                 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.thread_title)}</span>
-                <span style="font-size:10px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
+                <span style="font-size:11px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
             </div>`;
         }).join('');
 
@@ -18715,6 +18779,7 @@ function _renderReviewGroups() {
             <div class="sig-rq-group-header" onclick="document.getElementById('rq-group-signals-${gi}').style.display=document.getElementById('rq-group-signals-${gi}').style.display==='none'?'':'none'">
                 <div class="sig-rq-group-title">${escHtml(g.group_title)}</div>
                 <div class="sig-rq-group-count">${sigCount}</div>
+                <button onclick="event.stopPropagation();_dismissGroup(${gi})" style="margin-left:6px;padding:3px 8px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:10px;cursor:pointer;flex-shrink:0" title="Dismiss all as noise" onmouseenter="this.style.borderColor='#ef4444';this.style.color='#ef4444'" onmouseleave="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">✕</button>
             </div>
             <div class="sig-rq-group-signals" id="rq-group-signals-${gi}">
                 ${g.signals.map(s => `<div class="sig-rq-group-signal">
@@ -18746,13 +18811,13 @@ function _renderReviewGroups() {
                 const isTop = si === 0 && pct > 15;
                 return `<div onclick="_assignFromQueue(${sig.id},${s.thread_id},this);_onRqItemAssigned()" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
                     <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.thread_title)}</span>
-                    <span style="font-size:10px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
+                    <span style="font-size:11px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
                 </div>`;
             }).join('');
-            html += `<div id="rq-ungrouped-${sig.id}" style="padding:10px;margin-bottom:6px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
+            html += `<div id="rq-ungrouped-${sig.id}" style="padding:10px 12px;margin-bottom:6px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">
                 <div style="display:flex;justify-content:space-between;align-items:start;gap:8px;margin-bottom:6px">
-                    <div onclick="openSignalDetail(${sig.id})" style="font-size:12px;font-weight:600;color:var(--text-primary);cursor:pointer;line-height:1.3">${escHtml(sig.title)}</div>
-                    <button onclick="_dismissFromQueue(${sig.id},this);_onRqItemAssigned()" style="flex-shrink:0;width:20px;height:20px;display:flex;align-items:center;justify-content:center;background:none;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--text-muted);cursor:pointer" title="Dismiss">&#10005;</button>
+                    <div onclick="openSignalDetail(${sig.id})" style="font-size:13px;font-weight:600;color:var(--text-primary);cursor:pointer;line-height:1.3">${escHtml(sig.title)}</div>
+                    <button onclick="_dismissFromQueue(${sig.id},this);_onRqItemAssigned()" style="flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;background:none;border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text-muted);cursor:pointer" title="Dismiss">&#10005;</button>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:4px">${suggPills}</div>
             </div>`;
@@ -18760,6 +18825,8 @@ function _renderReviewGroups() {
     }
 
     body.innerHTML = html || '<div style="padding:20px;color:var(--text-muted);font-size:12px;text-align:center">No signals to review</div>';
+    // Show dismissed count footer
+    _renderNoiseFooter(body);
 }
 
 function _bulkAssignGroup(gi, threadId) {
@@ -18817,6 +18884,55 @@ function _dismissGroup(gi) {
     });
 }
 
+function _renderNoiseFooter(container) {
+    fetch('/api/signals/noise-count').then(r => r.json()).then(d => {
+        if (!d.count) return;
+        const footer = document.createElement('div');
+        footer.style.cssText = 'padding:10px 12px;border-top:1px solid var(--border);text-align:center';
+        footer.innerHTML = `<button onclick="_showNoiseSignals(this.parentElement)" style="background:none;border:none;color:var(--text-muted);font-size:11px;cursor:pointer">${d.count} dismissed · <span style="color:var(--accent)">review</span></button>`;
+        container.appendChild(footer);
+    }).catch(() => {});
+}
+
+function _showNoiseSignals(footerEl) {
+    footerEl.innerHTML = '<div style="padding:8px;color:var(--text-muted);font-size:11px;text-align:center">Loading…</div>';
+    fetch('/api/signals/noise?limit=50').then(r => r.json()).then(d => {
+        const signals = d.signals || [];
+        if (!signals.length) { footerEl.innerHTML = '<div style="padding:8px;color:var(--text-muted);font-size:11px;text-align:center">No dismissed signals</div>'; return; }
+        footerEl.innerHTML = `<div style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:flex;align-items:center;justify-content:space-between">
+            Dismissed (${signals.length})
+            <button onclick="_clearAllNoise()" style="padding:3px 8px;background:none;border:1px solid #ef4444;border-radius:4px;color:#ef4444;font-size:10px;cursor:pointer">Delete all</button>
+        </div>` + signals.map(s => `<div style="padding:6px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <span style="font-size:12px;color:var(--text-muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.title)}</span>
+            <button onclick="_restoreFromNoise(${s.id},this)" style="padding:2px 8px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--accent);font-size:10px;cursor:pointer;flex-shrink:0">Restore</button>
+        </div>`).join('');
+    });
+}
+
+function _restoreFromNoise(signalId, btn) {
+    fetch('/api/signals/review-queue/undismiss', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({signal_id: signalId})
+    }).then(r => r.json()).then(d => {
+        if (d.ok) {
+            const row = btn.closest('div');
+            if (row) row.remove();
+            _showToast('Signal restored', 'success');
+        }
+    });
+}
+
+function _clearAllNoise() {
+    _showConfirm('Permanently delete all dismissed signals?', () => {
+        fetch('/api/signals/noise', { method: 'DELETE' }).then(r => r.json()).then(d => {
+            if (d.ok) {
+                _showToast(`${d.deleted || 0} signals deleted`, 'success');
+                _loadReviewGroups();
+            }
+        });
+    });
+}
+
 function _onRqItemAssigned() {
     const countEl = document.getElementById('sig-rq-count');
     if (countEl) {
@@ -18830,7 +18946,104 @@ function _onRqItemAssigned() {
     }
 }
 
+let _rqView = 'grouped'; // 'grouped' or 'list'
+let _rqListOffset = 0;
+
+function _switchRqView(view) {
+    _rqView = view;
+    const gBtn = document.getElementById('rq-view-grouped');
+    const lBtn = document.getElementById('rq-view-list');
+    if (gBtn && lBtn) {
+        if (view === 'grouped') {
+            gBtn.style.background = 'rgba(168,85,247,0.1)';
+            gBtn.style.borderColor = 'rgba(168,85,247,0.3)';
+            gBtn.style.color = 'var(--purple)';
+            lBtn.style.background = 'none';
+            lBtn.style.borderColor = 'var(--border)';
+            lBtn.style.color = 'var(--text-muted)';
+        } else {
+            lBtn.style.background = 'rgba(168,85,247,0.1)';
+            lBtn.style.borderColor = 'rgba(168,85,247,0.3)';
+            lBtn.style.color = 'var(--purple)';
+            gBtn.style.background = 'none';
+            gBtn.style.borderColor = 'var(--border)';
+            gBtn.style.color = 'var(--text-muted)';
+        }
+    }
+    if (view === 'grouped') {
+        _renderReviewGroups();
+    } else {
+        _rqListOffset = 0;
+        _renderReviewList();
+    }
+}
+
+function _renderReviewList(offset) {
+    offset = offset || 0;
+    _rqListOffset = offset;
+    const body = document.getElementById('sig-rq-body');
+    if (!body) return;
+    body.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:12px;text-align:center">Loading…</div>';
+
+    fetch(`/api/signals/review-queue?limit=20&offset=${offset}`)
+        .then(r => r.json())
+        .then(data => {
+            const signals = data.signals || [];
+            const total = data.total || 0;
+            if (!signals.length) {
+                body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)"><div style="font-size:28px;margin-bottom:8px">✓</div><div style="font-size:13px">All signals assigned</div></div>';
+                return;
+            }
+            let html = `<div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:11px;color:var(--text-muted)">${offset + 1}–${Math.min(offset + signals.length, total)} of ${total}</span>
+                <div style="display:flex;gap:4px">
+                    ${offset > 0 ? `<button onclick="_renderReviewList(${offset - 20})" style="padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;cursor:pointer">← Prev</button>` : ''}
+                    ${offset + 20 < total ? `<button onclick="_renderReviewList(${offset + 20})" style="padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;cursor:pointer">Next →</button>` : ''}
+                </div>
+            </div>`;
+            html += signals.map(sig => {
+                const dateStr = sig.published_at ? sig.published_at.substring(0, 10) : '';
+                const suggHtml = (sig.suggestions || []).map((s, si) => {
+                    const pct = Math.round(s.score * 100);
+                    const isTop = si === 0 && pct > 15;
+                    return `<div onclick="_assignFromQueue(${sig.id},${s.thread_id},this);_onRqItemAssigned()" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
+                        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.thread_title)}</span>
+                        <span style="font-size:11px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
+                    </div>`;
+                }).join('');
+                const bodyPreview = sig.body ? _formatBody(sig.body) : '';
+                const urlLink = sig.url ? `<a href="${escHtml(sig.url)}" target="_blank" rel="noopener" style="font-size:10px;color:var(--accent);text-decoration:none;margin-top:4px;display:inline-block" onclick="event.stopPropagation()">Open source →</a>` : '';
+                return `<div id="rq-item-${sig.id}" style="padding:10px 12px;border-bottom:1px solid var(--border)">
+                    <div style="display:flex;align-items:start;justify-content:space-between;gap:8px;margin-bottom:6px">
+                        <div style="flex:1;min-width:0">
+                            <div onclick="const el=document.getElementById('rq-body-${sig.id}');el.style.display=el.style.display==='none'?'block':'none'" style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.3;cursor:pointer">${escHtml(sig.title)}</div>
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${escHtml(sig.source_name)} · ${escHtml(dateStr)}</div>
+                            <div id="rq-body-${sig.id}" style="display:none;margin-top:6px;padding:8px;background:var(--bg-tertiary);border-radius:6px;font-size:12px;color:var(--text-secondary);line-height:1.5;max-height:200px;overflow-y:auto">${bodyPreview || '<span style="color:var(--text-muted);font-style:italic">No body text</span>'}${urlLink ? '<br>' + urlLink : ''}</div>
+                        </div>
+                        <button onclick="_dismissFromQueue(${sig.id},this);_onRqItemAssigned()" style="flex-shrink:0;width:22px;height:22px;display:flex;align-items:center;justify-content:center;background:none;border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text-muted);cursor:pointer" title="Dismiss">✕</button>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                        ${suggHtml}
+                        <div style="position:relative">
+                            <div onclick="_toggleRqDropdown(${sig.id})" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                                <span>Other thread…</span><span style="font-size:9px">▼</span>
+                            </div>
+                            <div id="rq-dd-${sig.id}" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:20;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;margin-top:2px;box-shadow:0 4px 16px rgba(0,0,0,0.5);overflow:hidden">
+                                <input type="text" placeholder="Search or create thread…" id="rq-search-${sig.id}" oninput="_filterRqDropdown(${sig.id},this.value)" onkeydown="_rqSearchKeydown(event,${sig.id})" style="width:100%;padding:7px 12px;background:var(--bg-tertiary);border:none;border-bottom:1px solid var(--border);color:var(--text-primary);font-size:12px;outline:none;box-sizing:border-box">
+                                <div id="rq-list-${sig.id}" style="max-height:200px;overflow-y:auto"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+            body.innerHTML = html;
+            _renderNoiseFooter(body);
+        });
+}
+
 function _toggleReviewQueue() {
+    // Switch to Signals tab if not already there (RQ pane lives in raw tab)
+    if (_signalTab !== 'raw') { switchSignalTab('raw'); }
     const queue = document.getElementById('sig-review-queue');
     const collapsed = document.getElementById('sig-rq-collapsed');
     if (queue && collapsed) {
@@ -19058,7 +19271,9 @@ function loadCausalView() {
     Promise.all([
         fetch('/api/causal-links').then(r => r.json()),
         fetch('/api/causal-paths').then(r => r.json()),
-    ]).then(([linkData, pathData]) => {
+        fetch('/api/signals/threads').then(r => r.json()),
+    ]).then(([linkData, pathData, threadData]) => {
+        _threadsCache = threadData.threads || _threadsCache || [];
         _causalLinksCache = linkData.links || [];
         _causalPathsCache = pathData.paths || [];
         _renderCausalThreadPicker();
@@ -20306,27 +20521,58 @@ function _renderCbPills() {
 
 const _entIconMap = {company:'🏢',sector:'📊',geography:'📍',country:'📍',city:'📍',person:'👤',regulation:'⚖️',concept:'💡',event:'📅',index:'📈'};
 
+function _setDiscoveryMargin(open) {
+    // Toggle floating mode when brainstorm overlay is visible
+    const drawer = document.getElementById('discovery-drawer');
+    const overlay = document.getElementById('brainstorm-overlay');
+    if (drawer) {
+        const brainstormOpen = overlay && overlay.classList.contains('visible');
+        drawer.classList.toggle('floating', brainstormOpen && open);
+    }
+}
+
 function _openDiscoveryDrawer(crumbNode) {
     _discoveryDrawerOpen = true;
-    _discoveryBreadcrumb = [crumbNode];
-    _discoveryResults = [];
     const drawer = document.getElementById('discovery-drawer');
-    if (drawer) { drawer.style.display = ''; drawer.style.animation = 'disc-slide-in 0.2s ease-out'; }
-    _renderDiscoveryBreadcrumb();
-    _renderDiscoveryBody('<div style="text-align:center;padding:40px;color:var(--text-muted);font-size:13px">Searching...</div>');
-    _updateDiscoverySaveBtn();
+    const wasHidden = drawer && drawer.style.display === 'none';
+    if (drawer) { drawer.style.display = ''; if (wasHidden) drawer.style.animation = 'disc-slide-in 0.2s ease-out'; }
+    _setDiscoveryMargin(true);
+
+    if (crumbNode) {
+        if (_discoveryBreadcrumb.length === 0) {
+            _pendingCrumbNode = crumbNode;
+            _discoveryBreadcrumb = [crumbNode];
+        } else {
+            _discoveryNavigateTo(crumbNode);
+            return;
+        }
+        _renderDiscoveryBreadcrumb();
+        _renderDiscoveryBody('<div style="text-align:center;padding:40px;color:var(--text-muted);font-size:13px">Searching...</div>');
+        _updateDiscoverySaveBtn();
+    } else if (_discoveryBreadcrumb.length > 0) {
+        _renderDiscoveryBreadcrumb();
+        if (_discoveryResults.length) _renderDiscoveryResults(_discoveryResults);
+        _updateDiscoverySaveBtn();
+    }
 }
 
 function _closeDiscoveryDrawer() {
     _discoveryDrawerOpen = false;
-    _discoveryBreadcrumb = [];
-    _discoveryResults = [];
     const drawer = document.getElementById('discovery-drawer');
     if (drawer) drawer.style.display = 'none';
+    _setDiscoveryMargin(false);
+}
+
+function _clearDiscoveryTrail() {
+    _discoveryBreadcrumb = [];
+    _discoveryResults = [];
     // Remove discovery-specific board highlights
     for (let i = _boardHighlights.length - 1; i >= 0; i--) {
         if (_boardHighlights[i].key && _boardHighlights[i].key.startsWith('discovery:')) _removeBoardHighlight(i);
     }
+    _renderDiscoveryBreadcrumb();
+    _renderDiscoveryBody('<div class="discovery-drawer-empty"><div style="font-size:28px;margin-bottom:10px">🔍</div><div style="font-size:14px">Click a concept, entity, or "Find similar" to start exploring</div></div>');
+    _updateDiscoverySaveBtn();
 }
 
 function _renderDiscoveryBody(html) {
@@ -20334,12 +20580,16 @@ function _renderDiscoveryBody(html) {
     if (body) body.innerHTML = html;
 }
 
+// Track pending crumb so we can remove it if results are empty
+let _pendingCrumbNode = null;
+
 function _discoveryNavigateTo(crumbNode) {
     const last = _discoveryBreadcrumb[_discoveryBreadcrumb.length - 1];
     if (last && last.type === crumbNode.type &&
         ((crumbNode.type === 'thread' && last.threadId === crumbNode.threadId) ||
          (crumbNode.type === 'entity' && last.entityValue === crumbNode.entityValue) ||
          (crumbNode.type === 'keyword' && last.query === crumbNode.query))) return;
+    _pendingCrumbNode = crumbNode;
     _discoveryBreadcrumb.push(crumbNode);
     _renderDiscoveryBreadcrumb();
     _updateDiscoverySaveBtn();
@@ -20426,9 +20676,23 @@ function _renderDiscoveryResults(results) {
     const body = document.getElementById('discovery-drawer-body');
     if (!body) return;
     if (!results.length) {
-        body.innerHTML = '<div class="discovery-drawer-empty"><div style="font-size:24px;margin-bottom:8px">&#128269;</div><div style="font-size:13px">No related threads found</div></div>';
+        // Remove the pending crumb that produced no results
+        if (_pendingCrumbNode && _discoveryBreadcrumb.length > 0) {
+            const last = _discoveryBreadcrumb[_discoveryBreadcrumb.length - 1];
+            if (last === _pendingCrumbNode) {
+                _discoveryBreadcrumb.pop();
+                _renderDiscoveryBreadcrumb();
+                _updateDiscoverySaveBtn();
+            }
+        }
+        _pendingCrumbNode = null;
+        const label = _discoveryBreadcrumb.length > 0
+            ? escHtml((_discoveryBreadcrumb[_discoveryBreadcrumb.length - 1].label || _discoveryBreadcrumb[_discoveryBreadcrumb.length - 1].title || '').substring(0, 30))
+            : '';
+        body.innerHTML = `<div class="discovery-drawer-empty"><div style="font-size:24px;margin-bottom:8px">🔍</div><div style="font-size:13px">No related threads found</div>${label ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">for "${label}"</div>` : ''}</div>`;
         return;
     }
+    _pendingCrumbNode = null;
     let html = `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${results.length} thread${results.length !== 1 ? 's' : ''} found</div>`;
     html += results.slice(0, 25).map(r => {
         const thread = (_threadsCache || []).find(t => t.id === r.threadId);
@@ -20445,7 +20709,7 @@ function _renderDiscoveryResults(results) {
             }).join('')}</div>`;
         }
 
-        return `<div class="disc-result-card" style="border-left:3px solid ${domColor}" onclick="_discoveryClickThread(${r.threadId},'${safeTitle}')">
+        return `<div class="disc-result-card" style="border-left:3px solid ${domColor}" data-disc-tid="${r.threadId}" data-disc-title="${escHtml(r.title)}" onclick="_discoveryClickThread(${r.threadId},'${safeTitle}')">
             <div class="disc-result-title">${escHtml(r.title)}</div>
             <div class="disc-result-reason">${escHtml(r.reason)}</div>
             <div class="disc-result-meta">${_renderDomainBadges(r.domain || '', '11px')} <span>${sigCount} signals</span></div>
@@ -20457,16 +20721,100 @@ function _renderDiscoveryResults(results) {
 
 // ── Discovery Click Handlers ──
 
+function _showDiscoveryCtxMenu(event, threadId, title, breadcrumbIndex) {
+    document.querySelectorAll('.sv-ctx-menu').forEach(m => m.remove());
+    const isBreadcrumb = breadcrumbIndex !== undefined;
+    const menu = document.createElement('div');
+    menu.className = 'sv-ctx-menu';
+    menu.style.cssText = `position:fixed;left:${event.clientX}px;top:${event.clientY}px;z-index:10001;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.5);min-width:200px;padding:4px 0;font-size:12px`;
+
+    const itemStyle = 'padding:6px 12px;cursor:pointer;color:var(--text-secondary);display:flex;align-items:center;gap:6px';
+    const items = [
+        { icon: '📄', label: 'View thread detail', action: () => openThreadDetail(threadId) },
+        { icon: '🔭', label: 'Find related threads', action: () => _discoveryNavigateTo({type:'thread',threadId,title:title||'',method:'entities'}) },
+        { icon: '🔮', label: 'Highlight on board', action: () => _highlightThreadById(threadId, title) },
+        { icon: '⛓', label: 'Add to chain', action: () => _addThreadToChainFromDiscovery(threadId, title) },
+        null, // separator
+        { icon: '🔍', label: 'Search existing signals', action: () => { document.getElementById('signals-search').value = title || ''; renderActiveSignalTab(); } },
+        { icon: '📡', label: 'Search for new signals', action: () => _searchSignalsFor(title || '') },
+    ];
+    if (isBreadcrumb) {
+        items.push(null); // separator
+        items.push({ icon: '✕', label: 'Remove from trail', action: () => _discoveryRemoveCrumb(breadcrumbIndex), color: '#ef4444' });
+    }
+
+    const headerEl = document.createElement('div');
+    headerEl.style.cssText = 'padding:4px 12px;font-size:9px;color:var(--text-muted);font-weight:600;border-bottom:1px solid var(--border);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    headerEl.textContent = title || '';
+    menu.appendChild(headerEl);
+
+    items.forEach(item => {
+        if (!item) {
+            const sep = document.createElement('div');
+            sep.style.cssText = 'border-top:1px solid var(--border);margin:2px 0';
+            menu.appendChild(sep);
+            return;
+        }
+        const el = document.createElement('div');
+        el.style.cssText = itemStyle;
+        if (item.color) el.style.color = item.color;
+        el.innerHTML = `${item.icon} ${escHtml(item.label)}`;
+        el.onmouseenter = () => el.style.background = 'var(--bg-tertiary)';
+        el.onmouseleave = () => el.style.background = '';
+        el.onclick = () => { menu.remove(); item.action(); };
+        menu.appendChild(el);
+    });
+    document.body.appendChild(menu);
+    // Clamp to viewport
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+    if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+    setTimeout(() => document.addEventListener('click', function h() { menu.remove(); document.removeEventListener('click', h); }), 0);
+}
+
+function _highlightThreadById(threadId, title) {
+    const key = _hlKey('thread', String(threadId));
+    const existing = _boardHighlights.findIndex(h => h.key === key);
+    if (existing !== -1) { _removeBoardHighlight(existing); return; }
+    _addBoardHighlight({ kind: 'keyword', label: (title || '').substring(0, 25), icon: '🔮',
+        threadIds: new Set([threadId]), key });
+    if (_signalTab !== 'graph') switchSignalTab('graph');
+    _showToast(`"${(title || '').substring(0, 30)}" highlighted on board`, 'success', 3000);
+}
+
+function _addThreadToChainFromDiscovery(threadId, title) {
+    if (!_activeCausalPathId) {
+        _showToast('No chain selected — switch to Chains tab and select one', 'info');
+        return;
+    }
+    fetch(`/api/causal-paths/${_activeCausalPathId}`, { method: 'GET' }).catch(() => null);
+    // Add thread to the active chain
+    const path = (_causalPathsCache || []).find(p => p.id === _activeCausalPathId);
+    if (path) {
+        const ids = [...(path.thread_ids || []), threadId];
+        fetch(`/api/causal-paths/${_activeCausalPathId}`, {
+            method: 'PATCH', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ thread_ids: ids })
+        }).then(r => r.json()).then(d => {
+            if (d.ok) {
+                path.thread_ids = ids;
+                _showToast(`Added "${title}" to chain`, 'success');
+                if (_signalTab === 'causal') loadCausalView();
+            }
+        });
+    } else {
+        _showToast('Select a chain first', 'info');
+    }
+}
+
 function _discoveryClickThread(threadId, title) {
     _discoveryNavigateTo({ type: 'thread', threadId, title: title || `Thread #${threadId}`, method: 'entities' });
-    // Cross-tab integration
+    // Always open thread detail for context alongside the drawer
+    openThreadDetail(threadId);
+    // Also add board highlight if on graph tab
     if (_signalTab === 'graph') {
         _addBoardHighlight({ kind: 'keyword', label: (title || '').substring(0, 25), icon: '🔭',
             threadIds: new Set([threadId]), key: 'discovery:thread:' + threadId });
-    } else if (_signalTab === 'causal') {
-        _causalClickThread(threadId);
-    } else {
-        openThreadDetail(threadId);
     }
 }
 
@@ -20490,10 +20838,49 @@ function _renderDiscoveryBreadcrumb() {
         else if (node.type === 'entity') { icon = _entIconMap[node.entityType] || '🔹'; label = node.label || node.entityValue; }
         else if (node.type === 'keyword') { icon = '🔍'; label = (node.label || node.query || '').substring(0, 20); }
         const cls = isCurrent ? 'disc-crumb current' : 'disc-crumb';
-        const onclick = isCurrent ? '' : `onclick="_discoveryJumpTo(${i})"`;
-        return `<span class="${cls}" ${onclick} title="${escHtml(node.title || node.label || '')}"><span class="disc-crumb-icon">${icon}</span>${escHtml(label)}</span>`;
+        // All crumbs are clickable — current node opens thread detail, past nodes jump back
+        let onclick = '';
+        if (isCurrent && node.type === 'thread') {
+            onclick = `onclick="openThreadDetail(${node.threadId})"`;
+        } else if (isCurrent && node.type === 'keyword') {
+            onclick = `onclick="_discoveryJumpTo(${i})"`;
+        } else if (!isCurrent) {
+            onclick = `onclick="_discoveryJumpTo(${i})"`;
+        }
+        const safeJsonTitle = JSON.stringify(node.title || '').slice(1, -1); // escape for JS string without outer quotes
+        const ctxmenu = node.type === 'thread' ? `data-ctx-tid="${node.threadId}" data-ctx-idx="${i}" data-ctx-title="${escHtml(node.title || '')}"` : '';
+        return `<span class="${cls}" ${onclick} ${ctxmenu} title="${escHtml(node.title || node.label || '')}" style="cursor:pointer"><span class="disc-crumb-icon">${icon}</span>${escHtml(label)}</span>`;
     });
     el.innerHTML = crumbs.join('<span class="disc-crumb-sep">›</span>');
+}
+
+// Discovery right-click via event delegation (avoids inline handler quoting issues)
+document.addEventListener('contextmenu', function(e) {
+    // Breadcrumb crumbs
+    const crumb = e.target.closest('[data-ctx-tid]');
+    if (crumb) {
+        e.preventDefault();
+        _showDiscoveryCtxMenu(e, parseInt(crumb.dataset.ctxTid), crumb.dataset.ctxTitle || '', parseInt(crumb.dataset.ctxIdx));
+        return;
+    }
+    // Result cards
+    const card = e.target.closest('[data-disc-tid]');
+    if (card) {
+        e.preventDefault();
+        _showDiscoveryCtxMenu(e, parseInt(card.dataset.discTid), card.dataset.discTitle || '');
+        return;
+    }
+});
+
+function _discoveryRemoveCrumb(index) {
+    if (_discoveryBreadcrumb.length <= 1) { _clearDiscoveryTrail(); return; }
+    _discoveryBreadcrumb.splice(index, 1);
+    _renderDiscoveryBreadcrumb();
+    _updateDiscoverySaveBtn();
+    // Re-fetch for the new last crumb
+    if (_discoveryBreadcrumb.length > 0) {
+        _fetchDiscoveryResults(_discoveryBreadcrumb[_discoveryBreadcrumb.length - 1]);
+    }
 }
 
 function _discoveryJumpTo(index) {
@@ -22072,20 +22459,7 @@ function _toggleThreadForNarrative(threadId) {
     document.querySelectorAll(`.thread-card[data-id="${threadId}"] .sig-card-select`).forEach(el => {
         el.classList.toggle('checked', _selectedThreadsForNarrative.has(threadId));
     });
-    // Update action bar
-    const container = document.getElementById('sig-tab-threads');
-    const existing = container.querySelector('[data-thread-action-bar]');
-    if (existing) existing.remove();
-    const selCount = _selectedThreadsForNarrative.size;
-    if (selCount > 0) {
-        const bar = document.createElement('div');
-        bar.setAttribute('data-thread-action-bar', '1');
-        bar.style.cssText = 'position:sticky;top:0;z-index:5;padding:8px 12px;background:var(--bg-secondary);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px';
-        bar.innerHTML = `<span style="font-size:11px;color:var(--text-secondary);font-weight:600">${selCount} selected</span>` +
-            (selCount >= 2 ? `<button onclick="_createNarrativeFromThreads()" style="padding:5px 12px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:10px;font-weight:600;cursor:pointer;margin-left:auto">📖 Create Narrative</button>` : `<span style="font-size:10px;color:var(--text-muted);margin-left:auto">Select 1 more to create narrative</span>`) +
-            `<button onclick="_selectedThreadsForNarrative.clear();renderThreadFeed()" style="padding:5px 8px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:10px;cursor:pointer">Clear</button>`;
-        container.insertBefore(bar, container.firstChild);
-    }
+    _updateSelectionBar();
 }
 
 function _createNarrativeFromThreads() {
@@ -22131,7 +22505,11 @@ function renderNarrativesList() {
         </div>`;
         return;
     }
-    narrativesHtml = _narrativesCache.map(n => {
+    const nFilter = (document.getElementById('signals-search')?.value || '').toLowerCase();
+    const filteredNarratives = nFilter
+        ? _narrativesCache.filter(n => (n.title || '').toLowerCase().includes(nFilter) || (n.thesis || '').toLowerCase().includes(nFilter))
+        : _narrativesCache;
+    narrativesHtml = filteredNarratives.map(n => {
         const ev = n.evidence || {};
         const sup = ev.supporting || 0;
         const con = ev.contradicting || 0;
@@ -22936,13 +23314,7 @@ function deleteNarrative(narrativeId) {
             <div id="brainstorm-content" style="flex:1;padding:24px 0;overflow-y:auto">
                 <div style="text-align:center;color:var(--text-muted);padding:40px">Generating hypotheses...</div>
             </div>
-            <div id="bs-drawer" style="display:none;width:300px;flex-shrink:0;border-left:1px solid var(--border);background:var(--bg-primary);overflow-y:auto">
-                <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--bg-primary);z-index:1">
-                    <span id="bs-drawer-title" style="font-size:11px;font-weight:700;color:var(--text-secondary)">Explore</span>
-                    <button onclick="_closeBsDrawer()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:0 2px">✕</button>
-                </div>
-                <div id="bs-drawer-content" style="padding:10px 14px"></div>
-            </div>
+            <!-- bs-drawer removed: Discovery Drawer handles all exploration -->
         </div>
     </div>
 </div>
