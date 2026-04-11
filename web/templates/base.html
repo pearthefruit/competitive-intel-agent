@@ -515,7 +515,8 @@
         }
 
         /* Active suggestion pill within focused row */
-        .sig-rq-suggestion-pill.active-pill {
+        .sig-rq-suggestion-pill.active-pill,
+        .sig-rq-dropdown-toggle.active-pill {
             border-color: var(--accent) !important;
             box-shadow: 0 0 0 2px var(--accent-dim);
             transform: translateY(-1px);
@@ -16265,15 +16266,15 @@ function _updateRqNavHighlight() {
             // Ensure visible
             row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
             
-            // Highlight pills within this row
-            const pills = row.querySelectorAll('.sig-rq-suggestion-pill');
+            // Highlight pills + other toggle within this row
+            const pills = row.querySelectorAll('.sig-rq-suggestion-pill, .sig-rq-dropdown-toggle');
             pills.forEach((pill, pIdx) => {
                 if (pIdx === _rqActivePillIdx) pill.classList.add('active-pill');
                 else pill.classList.remove('active-pill');
             });
         } else {
             row.classList.remove('active-row');
-            row.querySelectorAll('.sig-rq-suggestion-pill').forEach(p => p.classList.remove('active-pill'));
+            row.querySelectorAll('.sig-rq-suggestion-pill, .sig-rq-dropdown-toggle').forEach(p => p.classList.remove('active-pill'));
         }
     });
 }
@@ -16291,56 +16292,73 @@ window.addEventListener('keydown', (e) => {
 
     let handled = true;
     switch (e.key) {
-        case 'j':
         case 'ArrowDown':
+        case 'j':
             _rqActiveSignalIdx = Math.min(rows.length - 1, _rqActiveSignalIdx + 1);
             _rqActivePillIdx = -1; // reset pill focus when moving rows
             break;
-        case 'k':
         case 'ArrowUp':
+        case 'k':
             _rqActiveSignalIdx = Math.max(0, _rqActiveSignalIdx - 1);
             _rqActivePillIdx = -1;
             break;
-        case 'l':
         case 'ArrowRight':
+        case 'l':
             if (_rqActiveSignalIdx >= 0) {
-                const pills = rows[_rqActiveSignalIdx].querySelectorAll('.sig-rq-suggestion-pill');
+                const pills = rows[_rqActiveSignalIdx].querySelectorAll('.sig-rq-suggestion-pill, .sig-rq-dropdown-toggle');
                 if (pills.length) _rqActivePillIdx = Math.min(pills.length - 1, _rqActivePillIdx + 1);
             }
             break;
-        case 'h':
         case 'ArrowLeft':
+        case 'h':
             if (_rqActiveSignalIdx >= 0) {
-                _rqActivePillIdx = Math.max(0, _rqActivePillIdx - 1);
+                // Allows going back to "no pill focus" (-1) from suggestions
+                _rqActivePillIdx = Math.max(-1, _rqActivePillIdx - 1);
             }
             break;
         case 'Enter':
-            if (_rqActiveSignalIdx >= 0 && _rqActivePillIdx >= 0) {
-                const pills = rows[_rqActiveSignalIdx].querySelectorAll('.sig-rq-suggestion-pill');
-                if (pills[_rqActivePillIdx]) {
+            if (_rqActiveSignalIdx >= 0) {
+                const pills = rows[_rqActiveSignalIdx].querySelectorAll('.sig-rq-suggestion-pill, .sig-rq-dropdown-toggle');
+                if (_rqActivePillIdx >= 0 && pills[_rqActivePillIdx]) {
                     pills[_rqActivePillIdx].click();
-                    // Optional: keep focus index for next item if this one disappears
+                    // If it was a dropdown toggle, focus the search input
+                    if (pills[_rqActivePillIdx].classList.contains('sig-rq-dropdown-toggle')) {
+                       setTimeout(() => {
+                           const sigIdMatch = rows[_rqActiveSignalIdx].id.match(/rq-item-(\d+)|rq-ungrouped-(\d+)/);
+                           const sigId = sigIdMatch ? (sigIdMatch[1] || sigIdMatch[2]) : null;
+                           const giMatch = rows[_rqActiveSignalIdx].id.match(/rq-group-(\d+)/);
+                           let input;
+                           if (sigId) input = document.getElementById(`rq-search-${sigId}`);
+                           else if (giMatch) input = document.getElementById(`rq-gsearch-${giMatch[1]}`);
+                           if (input) input.focus();
+                       }, 50);
+                    }
+                } else {
+                    // Enter on just the row: Toggle expand or open detail
+                    const titleArea = rows[_rqActiveSignalIdx].querySelector('[onclick^="const el=document.getElementById(\'rq-body-"]');
+                    const sigTitle = rows[_rqActiveSignalIdx].querySelector('[onclick^="openSignalDetail("]');
+                    const groupHeader = rows[_rqActiveSignalIdx].querySelector('.sig-rq-group-header');
+                    if (titleArea) titleArea.click();
+                    else if (sigTitle) sigTitle.click();
+                    else if (groupHeader) groupHeader.click();
                 }
             }
             break;
         case 'x':
         case 'Delete':
             if (_rqActiveSignalIdx >= 0) {
-                const dismissBtn = rows[_rqActiveSignalIdx].querySelector('button[title="Dismiss"]');
+                const dismissBtn = rows[_rqActiveSignalIdx].querySelector('button[title="Dismiss"], button[title="Dismiss all as noise"]');
                 if (dismissBtn) dismissBtn.click();
             }
             break;
         default:
-            // Check for number keys 1-9
+            // Check for number keys 1-9 for direct suggestion focus
             if (e.key >= '1' && e.key <= '9') {
                 const num = parseInt(e.key) - 1;
                 if (_rqActiveSignalIdx >= 0) {
                     const pills = rows[_rqActiveSignalIdx].querySelectorAll('.sig-rq-suggestion-pill');
                     if (pills[num]) {
                         _rqActivePillIdx = num;
-                        _updateRqNavHighlight();
-                        // wait a bit? No, user usually wants to see then enter, or we could just click.
-                        // User likely wants to see highlight first.
                     }
                 }
             } else {
@@ -18963,7 +18981,7 @@ function _renderReviewGroups() {
                 ${suggPills}
             </div>
             <div style="padding:0 10px 8px;position:relative">
-                <input type="text" placeholder="Search or type thread name..." id="rq-gsearch-${gi}"
+                <input type="text" placeholder="Search or type thread name..." id="rq-gsearch-${gi}" class="sig-rq-dropdown-toggle"
                     onfocus="_renderRqGroupList(${gi},this.value);document.getElementById('rq-glist-${gi}').style.display=''"
                     oninput="_renderRqGroupList(${gi},this.value)"
                     onkeydown="_rqGroupSearchKeydown(event,${gi})"
@@ -19003,7 +19021,7 @@ function _renderReviewGroups() {
                 <div style="display:flex;flex-direction:column;gap:4px">
                     ${suggPills}
                     <div style="position:relative">
-                        <div onclick="_toggleRqDropdown(${sig.id})" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                        <div onclick="_toggleRqDropdown(${sig.id})" class="sig-rq-dropdown-toggle" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:all 0.15s">
                             <span>Other thread…</span><span style="font-size:9px">▼</span>
                         </div>
                         <div id="rq-dd-${sig.id}" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:20;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;margin-top:2px;box-shadow:0 4px 16px rgba(0,0,0,0.5);overflow:hidden">
@@ -19246,7 +19264,7 @@ function _renderReviewList(offsetOrFromCache) {
                 <div style="display:flex;flex-direction:column;gap:4px">
                     ${suggHtml}
                     <div style="position:relative">
-                        <div onclick="_toggleRqDropdown(${sig.id})" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">
+                        <div onclick="_toggleRqDropdown(${sig.id})" class="sig-rq-dropdown-toggle" style="padding:6px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:all 0.15s">
                             <span>Other thread…</span><span style="font-size:9px">▼</span>
                         </div>
                         <div id="rq-dd-${sig.id}" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:20;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;margin-top:2px;box-shadow:0 4px 16px rgba(0,0,0,0.5);overflow:hidden">
