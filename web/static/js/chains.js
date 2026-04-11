@@ -910,6 +910,16 @@ let _causalViewMode = localStorage.getItem('causal_view_mode') || 'editor';
 let _chainBoardSim = null;
 let _chainBoardZoomTransform = null;
 
+// Swimlane board state
+let _cbPhysicsEnabled = false;
+let _cbSwimLayout = null;
+let _cbNodeData = null;
+let _cbThreadToNodeMap = null;
+let _cbEdgePathFn = null;
+let _cbPillarsG = null;
+let _cbNodeSel = null;
+let _cbLinkSel = null;
+
 function _switchCausalViewMode(mode) {
     _causalViewMode = mode;
     localStorage.setItem('causal_view_mode', mode);
@@ -937,7 +947,7 @@ function _renderChainBoard() {
     const width = container.clientWidth || 800;
     const height = container.clientHeight || 600;
     svg.selectAll('*').remove();
-    svg.attr('viewBox', null);
+    svg.attr('viewBox', null).attr('height', null);
     if (_chainBoardSim) { _chainBoardSim.stop(); _chainBoardSim = null; }
 
     if (!_causalPathsCache.length) {
@@ -947,70 +957,67 @@ function _renderChainBoard() {
         return;
     }
 
+    // ── Swimlane layout ──
+    const layout = _computeSwimlaneLayout(_causalPathsCache, width, height);
+    _cbSwimLayout = layout;
+    if (layout.totalH > height) svg.attr('height', layout.totalH);
+
     // ── Build nodes ──
     const nodes = [];
     const threadToNodes = {};
     const sharedColors = ['#f59e0b', '#06b6d4', '#a855f7', '#22c55e', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6'];
-    let colorIdx = 0;
 
     _causalPathsCache.forEach(path => {
-        const tids = path.thread_ids || [];
-        tids.forEach((tid, i) => {
+        (path.thread_ids || []).forEach((tid, i) => {
             const t = (_threadsCache || []).find(t => t.id === tid);
+            const pos = layout.positions[`p${path.id}_t${tid}`] || { x: width / 2, y: height / 2 };
             const node = {
                 id: `p${path.id}_t${tid}`,
-                threadId: tid, pathId: path.id, pathIndex: i, pathLength: tids.length,
+                threadId: tid, pathId: path.id, pathIndex: i,
+                pathLength: (path.thread_ids || []).length,
                 pathName: path.name || 'Untitled',
                 title: t?.title || `Thread #${tid}`,
                 domain: t?.domain || '', signal_count: t?.signal_count || 0,
                 shared: false, sharedColor: null,
+                x: pos.x, y: pos.y,
             };
             nodes.push(node);
             if (!threadToNodes[tid]) threadToNodes[tid] = [];
             threadToNodes[tid].push(node);
         });
     });
+    _cbNodeData = nodes;
+    _cbThreadToNodeMap = threadToNodes;
 
-    // Mark shared threads
-    Object.values(threadToNodes).forEach(copies => {
+    // ── Deterministic copy colors (hash threadId so same thread always gets same color) ──
+    Object.entries(threadToNodes).forEach(([tidStr, copies]) => {
         if (copies.length > 1) {
-            const color = sharedColors[colorIdx++ % sharedColors.length];
+            const color = sharedColors[parseInt(tidStr) % sharedColors.length];
             copies.forEach(n => { n.shared = true; n.sharedColor = color; });
         }
     });
 
-    // ── Build edges ──
+    // ── Build chain edges (object refs, not string IDs) ──
+    const nodeR = d => Math.sqrt(d.signal_count || 1) * 5 + 12;
     const chainEdges = [];
-    const sharedEdges = [];
-
     _causalPathsCache.forEach(path => {
         const tids = path.thread_ids || [];
         for (let i = 0; i < tids.length - 1; i++) {
-            const link = _causalLinksCache.find(l => l.cause_thread_id === tids[i] && l.effect_thread_id === tids[i + 1]);
-            chainEdges.push({
-                source: `p${path.id}_t${tids[i]}`, target: `p${path.id}_t${tids[i + 1]}`,
-                type: 'chain', status: link?.status || 'captured', label: link?.label || '',
+            const lnk = _causalLinksCache.find(l =>
+                l.cause_thread_id === tids[i] && l.effect_thread_id === tids[i + 1]);
+            const src = nodes.find(n => n.id === `p${path.id}_t${tids[i]}`);
+            const tgt = nodes.find(n => n.id === `p${path.id}_t${tids[i + 1]}`);
+            if (src && tgt) chainEdges.push({
+                source: src, target: tgt,
+                status: lnk?.status || 'captured', label: lnk?.label || '',
                 pathId: path.id,
             });
         }
     });
 
-    Object.values(threadToNodes).forEach(copies => {
-        if (copies.length > 1) {
-            for (let i = 0; i < copies.length - 1; i++) {
-                sharedEdges.push({
-                    source: copies[i].id, target: copies[i + 1].id,
-                    type: 'shared', sharedColor: copies[i].sharedColor,
-                });
-            }
-        }
-    });
-
-    const allEdges = [...chainEdges, ...sharedEdges];
-
-    // ── D3 setup ──
+    // ── D3 zoom setup ──
     const zoomGroup = svg.append('g').attr('class', 'cb-zoom-group');
-    const zoomBehavior = d3.zoom().scaleExtent([0.2, 4]).on('zoom', (event) => {
+    const zoomBehavior = d3.zoom().scaleExtent([0.15, 4]).on('zoom', (event) => {
         _chainBoardZoomTransform = event.transform;
         zoomGroup.attr('transform', event.transform);
     });
@@ -1020,166 +1027,306 @@ function _renderChainBoard() {
         zoomGroup.attr('transform', _chainBoardZoomTransform);
         svg.call(zoomBehavior.transform, _chainBoardZoomTransform);
     }
-
-    // Store zoom behavior for controls
     svg.node().__cbZoom = zoomBehavior;
 
-    // Arrow marker
-    svg.append('defs').append('marker')
-        .attr('id', 'cb-arrow').attr('viewBox', '0 0 10 6').attr('refX', 10).attr('refY', 3)
-        .attr('markerWidth', 8).attr('markerHeight', 6).attr('orient', 'auto')
-        .append('path').attr('d', 'M0,0 L10,3 L0,6 Z').attr('fill', '#6b7280');
-
-    // Status-colored arrow markers
+    // ── Arrow markers per status ──
+    const defs = svg.append('defs');
     Object.entries(_causalStatusColors).forEach(([status, color]) => {
-        svg.select('defs').append('marker')
-            .attr('id', `cb-arrow-${status}`).attr('viewBox', '0 0 10 6').attr('refX', 10).attr('refY', 3)
-            .attr('markerWidth', 8).attr('markerHeight', 6).attr('orient', 'auto')
+        defs.append('marker')
+            .attr('id', `cb-arrow-${status}`).attr('viewBox', '0 0 10 6')
+            .attr('refX', 9).attr('refY', 3)
+            .attr('markerWidth', 7).attr('markerHeight', 5).attr('orient', 'auto')
             .append('path').attr('d', 'M0,0 L10,3 L0,6 Z').attr('fill', color);
     });
 
-    // ── Render edges ──
-    const link = zoomGroup.append('g').selectAll('line').data(allEdges).join('line')
-        .attr('stroke', d => d.type === 'shared' ? (d.sharedColor || '#333') : (_causalStatusColors[d.status] || '#6b7280'))
-        .attr('stroke-width', d => d.type === 'shared' ? 1 : 2)
-        .attr('stroke-dasharray', d => d.type === 'shared' ? '4 4' : 'none')
-        .attr('stroke-opacity', d => d.type === 'shared' ? 0.4 : 0.8)
-        .attr('marker-end', d => d.type === 'chain' ? `url(#cb-arrow-${d.status || 'captured'})` : '');
+    // ── Lane backgrounds (alternating tint) ──
+    const lanesBg = zoomGroup.append('g').attr('class', 'cb-lanes').attr('pointer-events', 'none');
+    layout.sorted.forEach((_, row) => {
+        if (row % 2 === 0) return;
+        const y = layout.MARGIN_V + row * layout.LANE_HEIGHT;
+        lanesBg.append('rect')
+            .attr('x', -9999).attr('y', y - layout.LANE_HEIGHT / 2)
+            .attr('width', 19998).attr('height', layout.LANE_HEIGHT)
+            .attr('fill', 'rgba(255,255,255,0.018)');
+    });
 
-    // Edge labels (for chain edges with labels)
+    // ── Lane labels (left margin) ──
+    const labelsG = zoomGroup.append('g').attr('class', 'cb-lane-labels').attr('pointer-events', 'none');
+    layout.sorted.forEach((path, row) => {
+        const y = layout.MARGIN_V + row * layout.LANE_HEIGHT;
+        const name = path.name || 'Untitled';
+        labelsG.append('text')
+            .attr('x', 8).attr('y', y + 4)
+            .attr('fill', 'var(--accent)').attr('font-size', 10).attr('font-weight', 700).attr('opacity', 0.7)
+            .text(name.length > 26 ? name.substring(0, 24) + '\u2026' : name);
+    });
+
+    // ── Copy pillars (vertical dashed connectors between shared-thread copies) ──
+    const pillarsG = zoomGroup.append('g').attr('class', 'cb-pillars').attr('pointer-events', 'none');
+    _cbPillarsG = pillarsG;
+    _cbUpdatePillars();
+
+    // ── Edge path function (quadratic bezier, arcs above the lane) ──
+    const edgePath = (d) => {
+        const src = d.source, tgt = d.target;
+        const dx = tgt.x - src.x, dy = tgt.y - src.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const rSrc = nodeR(src), rTgt = nodeR(tgt);
+        const sx = src.x + (dx / dist) * rSrc;
+        const sy = src.y + (dy / dist) * rSrc;
+        const ex = tgt.x - (dx / dist) * (rTgt + 4);
+        const ey = tgt.y - (dy / dist) * (rTgt + 4);
+        const mx = (sx + ex) / 2;
+        const my = (sy + ey) / 2 - Math.max(18, Math.abs(dx) * 0.1);
+        return `M${sx},${sy} Q${mx},${my} ${ex},${ey}`;
+    };
+    _cbEdgePathFn = edgePath;
+
+    // ── Render edges ──
+    const linkG = zoomGroup.append('g').attr('class', 'cb-edges');
+    const link = linkG.selectAll('path').data(chainEdges).join('path')
+        .attr('fill', 'none')
+        .attr('stroke', d => _causalStatusColors[d.status] || '#6b7280')
+        .attr('stroke-width', 2)
+        .attr('stroke-opacity', 0.85)
+        .attr('marker-end', d => `url(#cb-arrow-${d.status || 'captured'})`)
+        .attr('d', edgePath);
+    _cbLinkSel = link;
+
     const linkLabel = zoomGroup.append('g').selectAll('text')
         .data(chainEdges.filter(e => e.label)).join('text')
         .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 9)
-        .text(d => d.label.length > 20 ? d.label.substring(0, 18) + '...' : d.label);
+        .attr('pointer-events', 'none')
+        .attr('x', d => (d.source.x + d.target.x) / 2)
+        .attr('y', d => (d.source.y + d.target.y) / 2 - Math.max(18, Math.abs(d.target.x - d.source.x) * 0.1) - 5)
+        .text(d => d.label.length > 20 ? d.label.substring(0, 18) + '\u2026' : d.label);
+
+    // ── Drag behavior ──
+    const drag = d3.drag()
+        .on('start', (event, d) => {
+            if (_cbPhysicsEnabled && _chainBoardSim) {
+                _chainBoardSim.alphaTarget(0.1).restart();
+                d.fx = d.x; d.fy = d.y;
+            }
+        })
+        .on('drag', (event, d) => {
+            d.x = event.x; d.y = event.y;
+            if (_cbPhysicsEnabled && _chainBoardSim) {
+                d.fx = event.x; d.fy = event.y;
+            } else {
+                _cbNodeSel?.filter(n => n.id === d.id).attr('transform', `translate(${d.x},${d.y})`);
+                link.attr('d', edgePath);
+                linkLabel
+                    .attr('x', e => (e.source.x + e.target.x) / 2)
+                    .attr('y', e => (e.source.y + e.target.y) / 2 - Math.max(18, Math.abs(e.target.x - e.source.x) * 0.1) - 5);
+                _cbUpdatePillars();
+            }
+        })
+        .on('end', (event, d) => {
+            if (_cbPhysicsEnabled && _chainBoardSim) {
+                _chainBoardSim.alphaTarget(0);
+                d.fx = null; d.fy = null;
+            }
+        });
 
     // ── Render nodes ──
-    const nodeR = d => Math.sqrt(d.signal_count || 1) * 5 + 12;
-
     const node = zoomGroup.append('g').selectAll('g').data(nodes).join('g')
         .attr('class', 'cb-node')
         .attr('data-thread-id', d => d.threadId)
-        .attr('cursor', 'pointer')
-        .call(d3.drag()
-            .on('start', (event, d) => { if (!event.active) _chainBoardSim.alphaTarget(0.1).restart(); d.fx = d.x; d.fy = d.y; })
-            .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
-            .on('end', (event, d) => { if (!event.active) _chainBoardSim.alphaTarget(0); d.fx = null; d.fy = null; })
-        )
+        .attr('transform', d => `translate(${d.x},${d.y})`)
+        .attr('cursor', 'grab')
+        .call(drag)
         .on('click', (event, d) => {
             event.stopPropagation();
-            // Show thread detail in the shared detail pane
             const detailPane = document.getElementById('signals-detail');
             if (detailPane) detailPane.style.display = '';
             _activeThreadId = d.threadId;
-            // Use shared pane directly (bypass raw tab check)
             const savedTab = _signalTab;
-            _signalTab = 'causal_board'; // temp override so openThreadDetail uses shared pane
+            _signalTab = 'causal_board';
             openThreadDetail(d.threadId);
             _signalTab = savedTab;
-            // Highlight shared copies
+            // Pulse shared copies on click
             if (d.shared) {
                 const copies = threadToNodes[d.threadId] || [];
-                node.select('.cb-shared-ring').attr('opacity', dd => copies.some(c => c.id === dd.id) ? 1 : (dd.shared ? 0.2 : 0));
-                setTimeout(() => node.select('.cb-shared-ring').attr('opacity', dd => dd.shared ? 0.6 : 0), 3000);
+                node.select('.cb-shared-ring').attr('opacity', dd =>
+                    copies.some(c => c.id === dd.id) ? 1 : (dd.shared ? 0.15 : 0));
+                setTimeout(() => node.select('.cb-shared-ring').attr('opacity', dd => dd.shared ? 0.6 : 0), 2500);
             }
-            // Highlight clicked node
             node.each(function(dd) {
-                d3.select(this).select('circle:not(.cb-shared-ring)').attr('stroke-width', dd.id === d.id ? 3.5 : 2);
+                d3.select(this).select('circle:not(.cb-shared-ring)')
+                    .attr('stroke-width', dd.id === d.id ? 3.5 : 2);
             });
         })
         .on('contextmenu', (event, d) => {
             event.preventDefault();
             event.stopPropagation();
-            _showContextMenu([
+            const items = [
                 { label: 'Inspect thread', icon: '🔍', action: `_cbClickNode(${d.threadId})` },
                 { label: 'Open chain in editor', icon: '✏️', action: `_selectCausalChain(${d.pathId});_switchCausalViewMode('editor')` },
-                { label: 'Find similar', icon: '🔎', submenu: [
-                    { label: 'By shared entities', icon: '🏢', action: `_findSimilarByEntities(${d.threadId})` },
-                    { label: 'By domain', icon: '🎯', action: `_findSimilarByDomain(${d.threadId})` },
-                    { label: 'By signal count', icon: '📊', action: `_findSimilarBySize(${d.threadId})` },
-                ]},
-            ], event.clientX, event.clientY, d.title.substring(0, 40));
+            ];
+            if (d.shared) items.push({ label: 'Align copies vertically', icon: '⬡', action: `_cbAlignCopies(${d.threadId})` });
+            _showContextMenu(items, event.clientX, event.clientY, d.title.substring(0, 40));
         });
+    _cbNodeSel = node;
 
-    // Draw nodes
     node.each(function(d) {
         const g = d3.select(this);
         const r = nodeR(d);
         const domColor = _DOMAIN_COLORS[_parseDomains(d.domain)[0]] || '#6b7280';
-
-        // Shared ring (outer glow)
         if (d.shared) {
             g.append('circle').attr('class', 'cb-shared-ring')
                 .attr('r', r + 5).attr('fill', 'none')
-                .attr('stroke', d.sharedColor).attr('stroke-width', 2.5)
+                .attr('stroke', d.sharedColor).attr('stroke-width', 2)
                 .attr('stroke-dasharray', '3 2').attr('opacity', 0.6);
         }
-
-        // Main circle
         g.append('circle').attr('r', r)
             .attr('fill', domColor + '33').attr('stroke', domColor).attr('stroke-width', 2);
-
-        // Signal count
         g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
             .attr('fill', '#fff').attr('font-size', Math.min(13, r * 0.7)).attr('font-weight', 700)
-            .attr('pointer-events', 'none')
-            .text(d.signal_count);
-
-        // Title below
+            .attr('pointer-events', 'none').text(d.signal_count);
         g.append('text').attr('text-anchor', 'middle').attr('y', r + 14)
             .attr('fill', 'var(--text-secondary)').attr('font-size', 10).attr('font-weight', 600)
             .attr('pointer-events', 'none')
-            .text(d.title.length > 25 ? d.title.substring(0, 23) + '...' : d.title);
-
-        // Chain name (only on first node of each chain)
-        if (d.pathIndex === 0) {
-            g.append('text').attr('text-anchor', 'middle').attr('y', -(r + 10))
-                .attr('fill', 'var(--accent)').attr('font-size', 10).attr('font-weight', 700)
-                .attr('pointer-events', 'none').attr('class', 'cb-chain-label')
-                .text(d.pathName.length > 30 ? d.pathName.substring(0, 28) + '...' : d.pathName);
-        }
-
-        // Store element ref
-        d._el = g;
+            .text(d.title.length > 25 ? d.title.substring(0, 23) + '\u2026' : d.title);
     });
 
-    // ── Force simulation ──
-    _chainBoardSim = d3.forceSimulation(nodes)
-        .force('chainX', d3.forceX(d => {
-            const progress = d.pathLength > 1 ? d.pathIndex / (d.pathLength - 1) : 0.5;
-            return 120 + progress * (width - 240);
-        }).strength(0.25))
-        .force('chainY', d3.forceY(d => {
-            const pathIdx = _causalPathsCache.findIndex(p => p.id === d.pathId);
-            const totalPaths = _causalPathsCache.length;
-            return 80 + (pathIdx / Math.max(1, totalPaths - 1)) * (height - 160);
-        }).strength(0.12))
-        .force('sharedLink', d3.forceLink(sharedEdges).id(d => d.id).distance(50).strength(0.5))
-        .force('chainLink', d3.forceLink(chainEdges).id(d => d.id).distance(120).strength(0.6))
-        .force('collide', d3.forceCollide().radius(d => nodeR(d) + 18))
-        .force('center', d3.forceCenter(width / 2, height / 2).strength(0.015))
-        .on('tick', () => {
-            node.attr('transform', d => `translate(${d.x},${d.y})`);
-            link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-                .attr('x2', d => {
-                    // Shorten line to not overlap arrowhead with node
-                    const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                    const r = d.type === 'chain' ? nodeR(d.target) + 4 : 0;
-                    return d.target.x - (dx / dist) * r;
-                })
-                .attr('y2', d => {
-                    const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                    const r = d.type === 'chain' ? nodeR(d.target) + 4 : 0;
-                    return d.target.y - (dy / dist) * r;
-                });
-            linkLabel.attr('x', d => (d.source.x + d.target.x) / 2)
-                     .attr('y', d => (d.source.y + d.target.y) / 2 - 6);
-        });
+    // ── Optional physics (weak forces that attract back to swimlane positions) ──
+    if (_cbPhysicsEnabled) {
+        _chainBoardSim = d3.forceSimulation(nodes)
+            .force('swimX', d3.forceX(d => (layout.positions[d.id] || { x: width / 2 }).x).strength(0.07))
+            .force('swimY', d3.forceY(d => (layout.positions[d.id] || { y: height / 2 }).y).strength(0.1))
+            .force('collide', d3.forceCollide().radius(d => nodeR(d) + 12))
+            .on('tick', () => {
+                node.attr('transform', d => `translate(${d.x},${d.y})`);
+                link.attr('d', edgePath);
+                linkLabel
+                    .attr('x', d => (d.source.x + d.target.x) / 2)
+                    .attr('y', d => (d.source.y + d.target.y) / 2 - 14);
+                _cbUpdatePillars();
+            });
+        _chainBoardSim.alpha(0.3).restart();
+    }
+}
 
-    // Run for 200 ticks then slow down
-    for (let i = 0; i < 100; i++) _chainBoardSim.tick();
-    _chainBoardSim.alpha(0.3).restart();
+// ── Swimlane Layout Engine ──
+function _computeSwimlaneLayout(paths, svgWidth, svgHeight) {
+    if (!paths.length) return { positions: {}, sorted: [], LANE_HEIGHT: 150, MARGIN_H: 110, MARGIN_V: 70, totalH: svgHeight };
+
+    const sorted = [...paths].sort((a, b) => (b.thread_ids || []).length - (a.thread_ids || []).length);
+    const threadX = {}; // threadId → fractional x [0..1]
+
+    // Anchor path (longest): evenly spaced
+    const anchor = sorted[0];
+    const anchorLen = (anchor.thread_ids || []).length;
+    (anchor.thread_ids || []).forEach((tid, i) => {
+        threadX[tid] = anchorLen > 1 ? i / (anchorLen - 1) : 0.5;
+    });
+
+    // Remaining paths: pin shared threads to their canonical x, interpolate non-shared
+    for (const path of sorted.slice(1)) {
+        const tids = path.thread_ids || [];
+        const n = tids.length;
+        if (!n) continue;
+        const slots = tids.map((tid, i) => ({ tid, i, x: threadX[tid] ?? null }));
+
+        for (let i = 0; i < n; i++) {
+            if (slots[i].x !== null) continue;
+            let prev = null, next = null;
+            for (let j = i - 1; j >= 0; j--) if (slots[j].x !== null) { prev = slots[j]; break; }
+            for (let j = i + 1; j < n; j++) if (slots[j].x !== null) { next = slots[j]; break; }
+
+            if (prev && next) {
+                // Interpolate between two anchors
+                slots[i].x = prev.x + ((i - prev.i) / (next.i - prev.i)) * (next.x - prev.x);
+            } else if (prev) {
+                // Extend right from last anchor
+                const step = (1 - prev.x) / Math.max(n - prev.i, 1);
+                slots[i].x = Math.min(1, prev.x + (i - prev.i) * step);
+            } else if (next) {
+                // Extend left from next anchor
+                const step = next.x / Math.max(next.i + 1, 1);
+                slots[i].x = Math.max(0, next.x - (next.i - i) * step);
+            } else {
+                slots[i].x = n > 1 ? i / (n - 1) : 0.5;
+            }
+            // Write back so later paths can use this as a shared anchor if needed
+            threadX[tids[i]] = slots[i].x;
+        }
+    }
+
+    // Pixel geometry
+    const MARGIN_H = 110, MARGIN_V = 70;
+    const usableW = Math.max(svgWidth - 2 * MARGIN_H, 300);
+
+    // Lane height: scale with max node radius so labels don't overlap
+    const allCounts = sorted.flatMap(p =>
+        (p.thread_ids || []).map(tid => (_threadsCache || []).find(t => t.id === tid)?.signal_count || 0)
+    );
+    const maxR = Math.sqrt(Math.max(...allCounts, 1)) * 5 + 12;
+    const LANE_HEIGHT = Math.max(maxR * 2 + 80, 150);
+
+    const positions = {};
+    sorted.forEach((path, row) => {
+        (path.thread_ids || []).forEach(tid => {
+            positions[`p${path.id}_t${tid}`] = {
+                x: MARGIN_H + (threadX[tid] ?? 0.5) * usableW,
+                y: MARGIN_V + row * LANE_HEIGHT,
+                row,
+            };
+        });
+    });
+
+    const totalH = MARGIN_V + Math.max(0, sorted.length - 1) * LANE_HEIGHT + maxR + MARGIN_V + 20;
+    return { positions, sorted, LANE_HEIGHT, MARGIN_H, MARGIN_V, totalH };
+}
+
+// Re-render vertical pillar connectors between shared thread copies
+function _cbUpdatePillars() {
+    if (!_cbPillarsG || !_cbThreadToNodeMap) return;
+    const sharedColors = ['#f59e0b', '#06b6d4', '#a855f7', '#22c55e', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6'];
+    _cbPillarsG.selectAll('*').remove();
+    Object.entries(_cbThreadToNodeMap).forEach(([tidStr, copies]) => {
+        if (copies.length < 2) return;
+        const color = sharedColors[parseInt(tidStr) % sharedColors.length];
+        const avgX = copies.reduce((s, c) => s + c.x, 0) / copies.length;
+        const yMin = Math.min(...copies.map(c => c.y));
+        const yMax = Math.max(...copies.map(c => c.y));
+        _cbPillarsG.append('line')
+            .attr('x1', avgX).attr('y1', yMin)
+            .attr('x2', avgX).attr('y2', yMax)
+            .attr('stroke', color).attr('stroke-width', 1.5)
+            .attr('stroke-dasharray', '5 3').attr('opacity', 0.4);
+    });
+}
+
+// Right-click → align all copies of a thread to same x position
+function _cbAlignCopies(threadId) {
+    if (!_cbNodeData || !_cbEdgePathFn || !_cbNodeSel || !_cbLinkSel) return;
+    const copies = _cbNodeData.filter(n => n.threadId === threadId);
+    if (copies.length < 2) return;
+    // Use the swimlane canonical x (average of computed positions) as the target
+    const targetX = copies.reduce((s, c) => s + c.x, 0) / copies.length;
+    copies.forEach(n => { n.x = targetX; });
+    _cbNodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+    _cbLinkSel.attr('d', _cbEdgePathFn);
+    _cbUpdatePillars();
+    _showToast(`Aligned ${copies.length} copies`, 'info');
+}
+
+// Reset all nodes to their computed swimlane positions
+function _cbResetLayout() {
+    _renderChainBoard();
+}
+
+// Toggle physics mode (weak forces that respect swimlane structure)
+function _cbTogglePhysics() {
+    _cbPhysicsEnabled = !_cbPhysicsEnabled;
+    const btn = document.getElementById('cb-physics-btn');
+    if (btn) {
+        btn.classList.toggle('active', _cbPhysicsEnabled);
+        btn.title = _cbPhysicsEnabled ? 'Physics ON — click to disable' : 'Toggle physics';
+    }
+    _renderChainBoard();
 }
 
 // ── Chain Board Controls ──
