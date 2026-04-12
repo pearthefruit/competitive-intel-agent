@@ -3109,6 +3109,125 @@ def delete_causal_path(conn, path_id):
     conn.commit()
 
 
+def get_temporal_audit(conn, path_id):
+    """Compute temporal coherence audit for each link in a causal chain.
+
+    Date selection:
+    - Use published_at when present (real article date from RSS / HN / FRED)
+    - For LinkedIn / manual captures (published_at empty), use created_at —
+      users paste these in real-time so scan date ≈ event date
+    - Skip signals with no usable date; report coverage so low-confidence
+      verdicts are flagged rather than silently trusted
+    """
+    from datetime import datetime as _dt
+
+    path_row = conn.execute(
+        "SELECT * FROM causal_paths WHERE id = ?", (path_id,)
+    ).fetchone()
+    if not path_row:
+        return None
+
+    thread_ids = json.loads(path_row["thread_ids_json"] or "[]")
+    if len(thread_ids) < 2:
+        return {"path_id": path_id, "overall": "coherent",
+                "coherent_count": 0, "total_links": 0, "links": []}
+
+    REALTIME_SOURCES = {"linkedin", "manual", "linkedin_news", "twitter", "x"}
+
+    def _thread_stats(thread_id):
+        rows = conn.execute("""
+            SELECT s.published_at, s.created_at, s.source
+            FROM signal_cluster_items sci
+            JOIN signals s ON s.id = sci.signal_id
+            WHERE sci.cluster_id = ?
+        """, (thread_id,)).fetchall()
+
+        dated, total = [], len(rows)
+        for row in rows:
+            pub = (row["published_at"] or "").strip()[:10]
+            if pub and pub > "1970-01-01":
+                dated.append(pub)
+            else:
+                src = (row["source"] or "").lower().split("/")[0]
+                if src in REALTIME_SOURCES:
+                    created = (row["created_at"] or "").strip()[:10]
+                    if created:
+                        dated.append(created)
+
+        dated.sort()
+        n = len(dated)
+        if not n:
+            return {"thread_id": thread_id, "total": total, "dated": 0,
+                    "coverage": 0.0, "min": None, "max": None,
+                    "median": None, "p25": None, "p75": None}
+        return {
+            "thread_id": thread_id, "total": total, "dated": n,
+            "coverage": round(n / max(total, 1), 2),
+            "min": dated[0], "max": dated[-1],
+            "median": dated[n // 2],
+            "p25": dated[n // 4],
+            "p75": dated[min(3 * n // 4, n - 1)],
+        }
+
+    def _verdict(cs, es):
+        if cs["dated"] < 3 or es["dated"] < 3:
+            return {"verdict": "insufficient_data", "severity": "low",
+                    "days_diff": None,
+                    "message": f"Too few dated signals (cause: {cs['dated']}, effect: {es['dated']})"}
+        try:
+            diff = (_dt.strptime(es["median"], "%Y-%m-%d") -
+                    _dt.strptime(cs["median"], "%Y-%m-%d")).days
+        except (ValueError, TypeError):
+            return {"verdict": "insufficient_data", "severity": "low",
+                    "days_diff": None, "message": "Could not parse dates"}
+
+        low_cov = cs["coverage"] < 0.3 or es["coverage"] < 0.3
+        note = " · low coverage" if low_cov else ""
+
+        if diff < -14:
+            return {"verdict": "reversed", "severity": "high",
+                    "days_diff": diff, "low_coverage": low_cov,
+                    "message": f"Effect peaks {abs(diff)}d before cause — consider reversing{note}"}
+        if diff <= 14:
+            return {"verdict": "simultaneous", "severity": "medium",
+                    "days_diff": diff, "low_coverage": low_cov,
+                    "message": f"Roughly contemporaneous (\u0394{diff}d) — may be correlated, not causal{note}"}
+        if diff > 365:
+            return {"verdict": "large_gap", "severity": "low",
+                    "days_diff": diff, "low_coverage": low_cov,
+                    "message": f"{diff}d gap — indirect mechanism?{note}"}
+        return {"verdict": "coherent", "severity": "none",
+                "days_diff": diff, "low_coverage": low_cov,
+                "message": f"+{diff}d — cause precedes effect{note}"}
+
+    stats_cache = {}
+    links_out = []
+    for i in range(len(thread_ids) - 1):
+        ct, et = thread_ids[i], thread_ids[i + 1]
+        if ct not in stats_cache:
+            stats_cache[ct] = _thread_stats(ct)
+        if et not in stats_cache:
+            stats_cache[et] = _thread_stats(et)
+        v = _verdict(stats_cache[ct], stats_cache[et])
+        links_out.append({
+            "cause_thread_id": ct, "effect_thread_id": et,
+            "cause_stats": stats_cache[ct], "effect_stats": stats_cache[et],
+            **v,
+        })
+
+    verdicts = [l["verdict"] for l in links_out]
+    coherent_n = verdicts.count("coherent")
+    overall = (
+        "warning" if "reversed" in verdicts else
+        "caution" if "simultaneous" in verdicts else
+        "coherent" if coherent_n == len(links_out) else
+        "mixed"
+    )
+    return {"path_id": path_id, "overall": overall,
+            "coherent_count": coherent_n, "total_links": len(links_out),
+            "links": links_out}
+
+
 def promote_chain_to_narrative(conn, path_id):
     """Promote a causal chain to a narrative. Returns narrative_id."""
     path = conn.execute("SELECT * FROM causal_paths WHERE id = ?", (path_id,)).fetchone()

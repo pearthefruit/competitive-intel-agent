@@ -4386,6 +4386,16 @@ Return JSON:
         conn.close()
         return jsonify({"ok": True})
 
+    @app.route("/api/causal-paths/<int:path_id>/temporal-audit", methods=["GET"])
+    def causal_path_temporal_audit_api(path_id):
+        from db import get_temporal_audit
+        conn = get_connection(db_path)
+        audit = get_temporal_audit(conn, path_id)
+        conn.close()
+        if audit is None:
+            return jsonify({"error": "Path not found"}), 404
+        return jsonify(audit)
+
     # ── Causal Discovery ──────────────────────────────────────────────
 
     @app.route("/api/causal-suggestions", methods=["GET"])

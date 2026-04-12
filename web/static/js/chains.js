@@ -10,6 +10,7 @@
 let _causalLinksCache = [];
 var _causalPathsCache = [];        // var: read from discovery drawer outside this module
 let _causalSuggestionsCache = [];
+let _causalAuditCache = {};        // pathId → temporal audit result
 let _causalDismissedPairs = JSON.parse(localStorage.getItem('causal_dismissed') || '[]');
 var _activeCausalPathId = null;    // var: written from signals/discovery code outside this module
 let _causalInspectedThreadId = null;
@@ -126,8 +127,15 @@ function _renderCausalChainsList() {
             const t = (_threadsCache || []).find(t => t.id === tid);
             return t ? t.title.substring(0, 15) : '#' + tid;
         });
+        const audit = _causalAuditCache[path.id];
+        const auditBadge = audit && audit.total_links
+            ? `<span id="chain-temporal-${path.id}" class="causal-chain-temporal ${audit.overall}" title="${audit.coherent_count}/${audit.total_links} links coherent">${{coherent:'✓',warning:'✗',caution:'⚠',mixed:'~'}[audit.overall]||''} ${audit.coherent_count}/${audit.total_links}</span>`
+            : `<span id="chain-temporal-${path.id}" class="causal-chain-temporal"></span>`;
         return `<div class="causal-chain-item ${isActive ? 'active' : ''}" onclick="_selectCausalChain(${path.id})" oncontextmenu="event.preventDefault();_showChainItemMenu(event,${path.id})">
-            <div class="causal-chain-item-title">${escHtml(path.name)}</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;min-width:0">
+                <div class="causal-chain-item-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(path.name)}</div>
+                ${auditBadge}
+            </div>
             <div class="causal-chain-item-meta">${tids.length} thread${tids.length !== 1 ? 's' : ''} · ${titles.join(' → ')}</div>
         </div>`;
     }).join('');
@@ -218,6 +226,48 @@ function _toggleSuggestionsCollapse() {
 
 // ── Top: Chain Editor ──
 
+// ── Temporal Audit ──
+
+function _fetchAndRenderTemporalAudit(pathId) {
+    const forPath = pathId;
+    fetch(`/api/causal-paths/${pathId}/temporal-audit`)
+        .then(r => r.json())
+        .then(audit => {
+            _causalAuditCache[pathId] = audit;
+            if (_activeCausalPathId !== forPath) return; // user switched chains
+            _injectTemporalBadges(audit);
+            _updateChainListBadge(pathId, audit);
+        })
+        .catch(() => {}); // non-critical — fail silently
+}
+
+function _injectTemporalBadges(audit) {
+    const arrows = document.querySelectorAll('#causal-editor-content .causal-arrow');
+    const ICONS = { coherent: '✓', reversed: '✗', simultaneous: '⚠', large_gap: '↔', insufficient_data: '—' };
+    (audit.links || []).forEach((link, i) => {
+        const arrow = arrows[i];
+        if (!arrow) return;
+        arrow.querySelector('.causal-arrow-temporal')?.remove();
+        const badge = document.createElement('div');
+        badge.className = `causal-arrow-temporal ${link.verdict}`;
+        badge.title = link.message || '';
+        const dayStr = link.days_diff != null
+            ? ` ${link.days_diff > 0 ? '+' : ''}${link.days_diff}d`
+            : '';
+        badge.textContent = (ICONS[link.verdict] || '?') + dayStr;
+        arrow.appendChild(badge);
+    });
+}
+
+function _updateChainListBadge(pathId, audit) {
+    const el = document.getElementById(`chain-temporal-${pathId}`);
+    if (!el || !audit.total_links) return;
+    const ICONS = { coherent: '✓', warning: '✗', caution: '⚠', mixed: '~' };
+    el.className = `causal-chain-temporal ${audit.overall}`;
+    el.title = `${audit.coherent_count}/${audit.total_links} links temporally coherent`;
+    el.textContent = `${ICONS[audit.overall] || ''} ${audit.coherent_count}/${audit.total_links}`;
+}
+
 function _renderCausalEditor() {
     const content = document.getElementById('causal-editor-content');
     const titleEl = document.getElementById('causal-editor-title');
@@ -292,6 +342,9 @@ function _renderCausalEditor() {
     nodesHtml += `<div class="causal-extend-zone" ondragover="event.preventDefault();this.classList.add('active')" ondragleave="this.classList.remove('active')" ondrop="this.classList.remove('active');_chainDropOnZone(event,${path.id},${tids.length})">+</div>`;
 
     content.innerHTML = nodesHtml;
+
+    // Fetch temporal audit and inject badges (async, non-blocking)
+    if (tids.length >= 2) _fetchAndRenderTemporalAudit(path.id);
 }
 
 function _reloadAfterChainRename() { loadCausalView(); }
