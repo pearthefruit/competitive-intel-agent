@@ -7,6 +7,11 @@
 let _labSortablesMounted = false;
 let _labSelected = new Set();  // signal IDs currently selected for mass-move
 
+// ─── Keyword groups ───────────────────────────────────────────────────────────
+// Each group: { label, color, key, signalIds: Set }
+let _labKeywordGroups = [];
+const _LAB_KG_COLORS = ['#06b6d4','#a855f7','#f59e0b','#10b981','#ec4899','#f97316','#8b5cf6','#14b8a6'];
+
 // ─── Entry points ────────────────────────────────────────────────────────────
 
 function _openThreadLab(threadId) {
@@ -19,6 +24,7 @@ function _openOrganizeLab() {
 
 function _labOpenModal(mode, url, threadId) {
     document.getElementById('thread-lab-modal')?.remove();
+    _labKeywordGroups = [];
     const isOrganize = mode === 'organize';
     const modal = document.createElement('div');
     modal.id = 'thread-lab-modal';
@@ -31,11 +37,14 @@ function _labOpenModal(mode, url, threadId) {
                     <span id="thread-lab-subtitle" style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
                 </div>
                 <div class="lab-search-wrap">
-                    <input id="lab-global-search" class="lab-search-bar" placeholder="Search to highlight across all columns…"
-                        oninput="_labSearch(this.value)" autocomplete="off" />
+                    <input id="lab-global-search" class="lab-search-bar" placeholder="Search to highlight… Enter to pin as group"
+                        oninput="_labSearch(this.value)"
+                        onkeydown="if(event.key==='Enter'&&this.value.trim())_labAddKeywordGroup(this.value.trim())"
+                        autocomplete="off" />
                     <button id="lab-select-all-btn" class="lab-select-all-btn" style="display:none"
                         onclick="_labSelectAllMatches()">Grab all</button>
                 </div>
+                <div id="lab-kg-tray" class="lab-kg-tray" style="display:none"></div>
                 <button class="thread-lab-close" onclick="document.getElementById('thread-lab-modal').remove()">×</button>
             </div>
             <div id="thread-lab-body" class="thread-lab-body">
@@ -239,7 +248,10 @@ function _labRenderKanban() {
             </button>
         </div>`;
 
-    requestAnimationFrame(_labInitSortables);
+    requestAnimationFrame(() => {
+        _labInitSortables();
+        if (_labKeywordGroups.length) _labUpdateAllCardDots();
+    });
 }
 
 function _labSigCard(s, isOrganize) {
@@ -258,6 +270,7 @@ function _labSigCard(s, isOrganize) {
         data-signal-body="${escHtml((s.body||'').slice(0,300))}"
         data-from-pool="${s.from_pool ? 'true' : 'false'}"
         ${s.original_thread_id ? `data-original-thread-id="${s.original_thread_id}"` : ''}>
+        <div class="lab-kg-dots"></div>
         <div class="lab-sig-title">${escHtml(s.title)}</div>
         <div class="lab-sig-meta">${meta}${dismissBtn}</div>
     </div>`;
@@ -437,6 +450,7 @@ function _labOnDragEnd(evt) {
     const badge = evt.item?.querySelector('.lab-drag-badge');
     if (badge) badge.remove();
     _labSyncAndRefreshCounts();
+    if (_labKeywordGroups.length) _labUpdateAllCardDots();
 }
 
 function _labCreateColFromDrop(evt) {
@@ -580,6 +594,87 @@ function _labSearch(query) {
         btn.textContent = `Grab all (${matchCount})`;
         btn.style.display = matchCount > 0 ? 'inline-block' : 'none';
     }
+}
+
+// ─── Keyword groups ───────────────────────────────────────────────────────────
+
+function _labAddKeywordGroup(label) {
+    const key = label.toLowerCase().trim();
+    // Toggle off if already exists
+    const existing = _labKeywordGroups.findIndex(g => g.key === key);
+    if (existing !== -1) {
+        _labRemoveKeywordGroup(existing);
+        return;
+    }
+    const color = _LAB_KG_COLORS[_labKeywordGroups.length % _LAB_KG_COLORS.length];
+    const words = key.split(/\s+/).filter(Boolean);
+
+    // Collect matching signal IDs
+    const signalIds = new Set();
+    document.querySelectorAll('.lab-sig-card').forEach(c => {
+        const text = ((c.dataset.signalTitle || '') + ' ' + (c.dataset.signalSource || '') + ' ' + (c.dataset.signalBody || '')).toLowerCase();
+        if (words.every(w => text.includes(w))) signalIds.add(parseInt(c.dataset.signalId));
+    });
+
+    _labKeywordGroups.push({ label, key, color, signalIds });
+
+    // Clear search bar + heatmap
+    const inp = document.getElementById('lab-global-search');
+    if (inp) { inp.value = ''; _labSearch(''); }
+
+    _labRenderKgTray();
+    _labUpdateAllCardDots();
+}
+
+function _labRemoveKeywordGroup(idx) {
+    _labKeywordGroups.splice(idx, 1);
+    _labRenderKgTray();
+    _labUpdateAllCardDots();
+}
+
+function _labGrabKeywordGroup(idx) {
+    const grp = _labKeywordGroups[idx];
+    if (!grp) return;
+    grp.signalIds.forEach(sid => {
+        _labSelected.add(sid);
+        const card = document.querySelector(`.lab-sig-card[data-signal-id="${sid}"]`);
+        if (card) card.classList.add('lab-sig-selected');
+    });
+    _labUpdateSelectionBar();
+}
+
+function _labRenderKgTray() {
+    const tray = document.getElementById('lab-kg-tray');
+    if (!tray) return;
+    if (!_labKeywordGroups.length) {
+        tray.style.display = 'none';
+        tray.innerHTML = '';
+        return;
+    }
+    tray.style.display = 'flex';
+    tray.innerHTML = _labKeywordGroups.map((g, i) =>
+        `<span class="lab-kg-pill" style="--kg-color:${g.color}">
+            <span class="lab-kg-swatch" style="background:${g.color}"></span>
+            ${escHtml(g.label)}
+            <span class="lab-kg-count">${g.signalIds.size}</span>
+            <button class="lab-kg-grab" onclick="_labGrabKeywordGroup(${i})" title="Select all matching signals">↗ Grab</button>
+            <button class="lab-kg-x" onclick="_labRemoveKeywordGroup(${i})" title="Remove group">×</button>
+        </span>`
+    ).join('') +
+    `<button class="lab-kg-clear-all" onclick="_labKeywordGroups=[];_labRenderKgTray();_labUpdateAllCardDots()">Clear all</button>`;
+}
+
+function _labUpdateAllCardDots() {
+    document.querySelectorAll('.lab-sig-card').forEach(card => {
+        const sid = parseInt(card.dataset.signalId);
+        const dots = card.querySelector('.lab-kg-dots');
+        if (!dots) return;
+        if (!_labKeywordGroups.length) { dots.innerHTML = ''; return; }
+        dots.innerHTML = _labKeywordGroups
+            .filter(g => g.signalIds.has(sid))
+            .map(g => `<span class="lab-kg-dot" style="background:${g.color}" title="${escHtml(g.label)}"></span>`)
+            .join('');
+    });
 }
 
 function _labSelectAllMatches() {

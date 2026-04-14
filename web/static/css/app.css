@@ -5561,6 +5561,45 @@
 }
 .lab-select-all-btn:hover { opacity: 0.85; }
 .lab-search-wrap { flex: 1; min-width: 0; position: relative; }
+/* Keyword group pill tray */
+.lab-kg-tray {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 6px 16px 0; min-height: 0;
+}
+.lab-kg-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 6px 3px 5px;
+    background: color-mix(in srgb, var(--kg-color) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--kg-color) 40%, transparent);
+    border-radius: 12px; font-size: 10px; font-weight: 600;
+    color: var(--kg-color); white-space: nowrap;
+}
+.lab-kg-swatch { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.lab-kg-count {
+    font-weight: 400; color: var(--text-muted); font-size: 9px;
+    background: var(--bg-tertiary); border-radius: 8px; padding: 0 4px;
+}
+.lab-kg-grab {
+    background: none; border: none; cursor: pointer; font-size: 9px; font-weight: 700;
+    color: var(--kg-color); padding: 0 2px; opacity: 0.8; transition: opacity 0.1s;
+}
+.lab-kg-grab:hover { opacity: 1; }
+.lab-kg-x {
+    background: none; border: none; cursor: pointer; font-size: 13px; line-height: 1;
+    color: var(--text-muted); padding: 0; margin-left: 1px;
+}
+.lab-kg-x:hover { color: #ef4444; }
+.lab-kg-clear-all {
+    background: none; border: 1px solid var(--border); border-radius: 10px;
+    font-size: 9px; color: var(--text-muted); cursor: pointer; padding: 2px 7px;
+}
+.lab-kg-clear-all:hover { color: #ef4444; border-color: rgba(239,68,68,0.4); }
+/* Per-card keyword dots */
+.lab-kg-dots { display: flex; gap: 3px; flex-wrap: wrap; min-height: 0; padding: 0 1px; }
+.lab-kg-dot {
+    width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+    box-shadow: 0 0 4px currentColor;
+}
 /* Selection — inline within health bar, no vertical displacement */
 .lab-selection-inline {
     margin-left: auto; display: flex; align-items: center; gap: 5px; flex-shrink: 0;
