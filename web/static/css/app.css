@@ -5836,12 +5836,6 @@
 }
 .lab-heatmap-dim { opacity: 0.2; }
 
-/* Signal preview state */
-.lab-sig-previewing {
-    border-color: rgba(255,255,255,0.3) !important;
-    box-shadow: 0 0 0 1px rgba(255,255,255,0.15);
-}
-
 /* Kanban + detail side panel wrapper */
 .thread-lab-kanban-wrap {
     flex: 1; display: flex; min-height: 0; overflow: hidden;

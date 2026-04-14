@@ -516,8 +516,15 @@ function _labCreateColFromDrop(evt) {
 function _labShowSignalDetail(card) {
     const panel = document.getElementById('lab-sig-detail');
     if (!panel) return;
-    document.querySelectorAll('.lab-sig-card.lab-sig-previewing').forEach(c => c.classList.remove('lab-sig-previewing'));
-    card.classList.add('lab-sig-previewing');
+    // Single-select: clear previous selection, select only this card
+    document.querySelectorAll('.lab-sig-card.lab-sig-selected').forEach(c => {
+        if (c !== card) { c.classList.remove('lab-sig-selected'); }
+    });
+    _labSelected.clear();
+    const sid = parseInt(card.dataset.signalId);
+    _labSelected.add(sid);
+    card.classList.add('lab-sig-selected');
+    _labUpdateSelectionBar();
     const title  = card.dataset.signalTitle  || '';
     const date   = card.dataset.signalDate   || '';
     const source = card.dataset.signalSource || '';
@@ -566,7 +573,10 @@ function _labHideDetail() {
     const panel = document.getElementById('lab-sig-detail');
     if (panel) panel.classList.remove('lab-detail-open');
     document.querySelector('.thread-lab-inner')?.classList.remove('lab-detail-expanded');
-    document.querySelectorAll('.lab-sig-card.lab-sig-previewing').forEach(c => c.classList.remove('lab-sig-previewing'));
+    // If only one card is "selected" (from single-click-to-view), deselect it on close
+    if (_labSelected.size === 1) {
+        _labClearSelection();
+    }
 }
 
 // ─── Heatmap search + selection ──────────────────────────────────────────────
