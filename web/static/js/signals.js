@@ -562,7 +562,9 @@ function _showThreadContextMenu(threadId, x, y) {
         const items = [
             { label: 'Rename', icon: '✏️', action: `_renameThread(${threadId})` },
         ];
-        if (sigCount >= 6) {
+        if (sigCount >= 20) {
+            items.push({ label: 'Thread Lab', icon: '🧪', action: `_openThreadLab(${threadId})` });
+        } else if (sigCount >= 6) {
             items.push({ label: 'Split thread', icon: '✂️', action: `_splitThreadFromMenu(${threadId})` });
         }
         items.push(
@@ -1632,8 +1634,11 @@ function _buildThreadActions(thread, entities) {
     actions.push(`<button onclick="_threadActionSearchInternal(${thread.id}, '${escHtml(thread.title.replace(/'/g, "\\'"))}')" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary)">🔍 Find in existing signals</button>`);
     actions.push(`<button onclick="_threadActionSearchMore('${escHtml(thread.title.replace(/'/g, "\\'"))}', ${thread.id})" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted)">📡 Search for more signals</button>`);
 
-    // Split thread (only for threads with 6+ signals)
-    if ((thread.signals || []).length >= 6) {
+    // Split / Thread Lab (6+ signals → split, 20+ signals → Thread Lab)
+    const sigCount = (thread.signals || []).length;
+    if (sigCount >= 20) {
+        actions.push(`<button onclick="_openThreadLab(${thread.id})" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--purple);color:var(--purple)">🧪 Thread Lab</button>`);
+    } else if (sigCount >= 6) {
         actions.push(`<button onclick="_proposeThreadSplit(${thread.id})" id="split-thread-btn" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--purple);color:var(--purple)">✂️ Split thread</button>`);
     }
 
@@ -1656,6 +1661,11 @@ function _loadReviewQueueCount() {
             const count = document.getElementById('review-queue-count');
             if (badge) badge.style.display = total > 0 ? '' : 'none';
             if (count) count.textContent = total;
+            // Organize lab badge
+            const orgBtn = document.getElementById('organize-lab-btn');
+            const orgCount = document.getElementById('organize-count');
+            if (orgBtn) orgBtn.style.display = total > 0 ? '' : 'none';
+            if (orgCount) orgCount.textContent = total;
             // Right-pane count (signals raw tab)
             const rqCount = document.getElementById('sig-rq-count');
             if (rqCount) rqCount.textContent = total || '';
@@ -1703,13 +1713,20 @@ function _openReviewQueue(offset) {
                     const pct = Math.round(s.score * 100);
                     const barWidth = Math.max(pct, 8);
                     const isTop = si === 0 && pct > 15;
-                    const borderColor = isTop ? 'var(--accent)' : 'var(--border)';
-                    const textColor = isTop ? 'var(--accent)' : 'var(--text-secondary)';
+                    const isOutlier = s.temporal_outlier;
+                    const borderColor = isOutlier ? 'rgba(245,158,11,0.5)' : isTop ? 'var(--accent)' : 'var(--border)';
+                    const textColor = isOutlier ? '#f59e0b' : isTop ? 'var(--accent)' : 'var(--text-secondary)';
+                    const outlierBadge = isOutlier
+                        ? `<span title="Signal date outside thread range ${s.thread_range || ''}" style="font-size:9px;color:#f59e0b;flex-shrink:0;margin-left:4px">⏱ ${s.thread_range || ''}</span>`
+                        : '';
                     return `<div onclick="_assignFromQueue(${sig.id}, ${s.thread_id}, this)" style="position:relative;padding:6px 10px;background:var(--bg-tertiary);border:1px solid ${borderColor};border-radius:6px;cursor:pointer;overflow:hidden;transition:all 0.15s" onmouseenter="this.style.borderColor='var(--accent)';this.style.background='rgba(59,130,246,0.08)'" onmouseleave="this.style.borderColor='${borderColor}';this.style.background='var(--bg-tertiary)'">
                         <div style="position:absolute;left:0;top:0;bottom:0;width:${barWidth}%;background:rgba(59,130,246,0.06);pointer-events:none"></div>
                         <div style="position:relative;display:flex;justify-content:space-between;align-items:center;gap:8px">
                             <span style="font-size:11px;color:${textColor};font-weight:${isTop ? '600' : '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.thread_title)}</span>
-                            <span style="font-size:10px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
+                            <div style="display:flex;align-items:center;flex-shrink:0;gap:2px">
+                                ${outlierBadge}
+                                <span style="font-size:10px;color:var(--text-muted);font-weight:600">${pct}%</span>
+                            </div>
                         </div>
                     </div>`;
                 }).join('');

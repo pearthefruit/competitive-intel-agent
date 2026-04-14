@@ -3109,16 +3109,60 @@ def delete_causal_path(conn, path_id):
     conn.commit()
 
 
-def get_temporal_audit(conn, path_id):
-    """Compute temporal coherence audit for each link in a causal chain.
+# --- Temporal analysis utilities (shared by assignment, audit, and Thread Lab) ---
 
-    Date selection:
-    - Use published_at when present (real article date from RSS / HN / FRED)
-    - For LinkedIn / manual captures (published_at empty), use created_at —
-      users paste these in real-time so scan date ≈ event date
-    - Skip signals with no usable date; report coverage so low-confidence
-      verdicts are flagged rather than silently trusted
+SIGNAL_REALTIME_SOURCES = {"linkedin", "manual", "linkedin_news", "twitter", "x"}
+
+
+def get_signal_effective_date(row):
+    """Return ISO date (YYYY-MM-DD) for a signal row/dict, or None.
+
+    Uses published_at (real article date from RSS/HN/FRED) when present.
+    Falls back to collected_at for realtime sources where scan date ≈ event date.
     """
+    if isinstance(row, dict):
+        pub = (row.get("published_at") or "").strip()[:10]
+        src = (row.get("source") or "").lower().split("/")[0]
+        collected = (row.get("collected_at") or "").strip()[:10]
+    else:
+        pub = (row["published_at"] or "").strip()[:10]
+        src = (row["source"] or "").lower().split("/")[0]
+        collected = (row["collected_at"] or "").strip()[:10]
+    if pub and pub > "1970-01-01":
+        return pub
+    if src in SIGNAL_REALTIME_SOURCES and collected:
+        return collected
+    return None
+
+
+def get_thread_date_range(conn, cluster_id, min_dated=3):
+    """Return (min_date, max_date, dated_count) for a thread's signals.
+
+    Uses get_signal_effective_date rules. Returns (None, None, count) if
+    fewer than min_dated signals have determinable dates.
+    """
+    rows = conn.execute("""
+        SELECT s.published_at, s.collected_at, s.source
+        FROM signal_cluster_items sci
+        JOIN signals s ON s.id = sci.signal_id
+        WHERE sci.cluster_id = ?
+    """, (cluster_id,)).fetchall()
+
+    dates = []
+    for row in rows:
+        d = get_signal_effective_date(dict(row))
+        if d:
+            dates.append(d)
+
+    if len(dates) < min_dated:
+        return None, None, len(dates)
+
+    dates.sort()
+    return dates[0], dates[-1], len(dates)
+
+
+def get_temporal_audit(conn, path_id):
+    """Compute temporal coherence audit for each link in a causal chain."""
     from datetime import datetime as _dt
 
     path_row = conn.execute(
@@ -3132,27 +3176,20 @@ def get_temporal_audit(conn, path_id):
         return {"path_id": path_id, "overall": "coherent",
                 "coherent_count": 0, "total_links": 0, "links": []}
 
-    REALTIME_SOURCES = {"linkedin", "manual", "linkedin_news", "twitter", "x"}
-
     def _thread_stats(thread_id):
         rows = conn.execute("""
-            SELECT s.published_at, s.created_at, s.source
+            SELECT s.published_at, s.collected_at, s.source
             FROM signal_cluster_items sci
             JOIN signals s ON s.id = sci.signal_id
             WHERE sci.cluster_id = ?
         """, (thread_id,)).fetchall()
 
-        dated, total = [], len(rows)
+        total = len(rows)
+        dated = []
         for row in rows:
-            pub = (row["published_at"] or "").strip()[:10]
-            if pub and pub > "1970-01-01":
-                dated.append(pub)
-            else:
-                src = (row["source"] or "").lower().split("/")[0]
-                if src in REALTIME_SOURCES:
-                    created = (row["created_at"] or "").strip()[:10]
-                    if created:
-                        dated.append(created)
+            d = get_signal_effective_date(dict(row))
+            if d:
+                dated.append(d)
 
         dated.sort()
         n = len(dated)

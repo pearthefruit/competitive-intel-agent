@@ -180,21 +180,47 @@ def keyword_assign(conn, signals, progress_cb=None):
             continue
 
         if sc["confidence"] == "high" and sc["top_thread_id"]:
-            # Auto-assign
-            link_signal_to_cluster(conn, sc["top_thread_id"], sc["signal_id"])
-            conn.execute(
-                "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (sc["top_thread_id"],),
-            )
-            top = sc["scores"][0] if sc["scores"] else {}
-            assigned.append({
-                "signal_id": sc["signal_id"],
-                "signal_title": sc["signal_title"],
-                "thread_id": sc["top_thread_id"],
-                "thread_title": top.get("thread_title", ""),
-                "score": sc["top_score"],
-                "margin": sc["margin"],
-            })
+            # Temporal isolation: don't auto-assign if signal date is outside
+            # the thread's existing date window by more than 30 days.
+            is_temporal_outlier = False
+            try:
+                from db import get_signal_effective_date, get_thread_date_range
+                from datetime import datetime as _dt, timedelta as _td
+                sig_date = get_signal_effective_date(sig)
+                if sig_date:
+                    tmin, tmax, _ = get_thread_date_range(conn, sc["top_thread_id"])
+                    if tmin and tmax:
+                        _w = _td(days=30)
+                        _sd = _dt.strptime(sig_date, "%Y-%m-%d")
+                        if (_sd < _dt.strptime(tmin, "%Y-%m-%d") - _w or
+                                _sd > _dt.strptime(tmax, "%Y-%m-%d") + _w):
+                            is_temporal_outlier = True
+            except Exception:
+                pass  # date check failure → allow auto-assign
+
+            if is_temporal_outlier:
+                top = sc["scores"][0] if sc["scores"] else {}
+                _sig = dict(sig)
+                _sig["_temporal_outlier"] = True
+                _sig["_outlier_thread_id"] = sc["top_thread_id"]
+                _sig["_outlier_thread_title"] = top.get("thread_title", "")
+                needs_review.append(_sig)
+            else:
+                # Auto-assign
+                link_signal_to_cluster(conn, sc["top_thread_id"], sc["signal_id"])
+                conn.execute(
+                    "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (sc["top_thread_id"],),
+                )
+                top = sc["scores"][0] if sc["scores"] else {}
+                assigned.append({
+                    "signal_id": sc["signal_id"],
+                    "signal_title": sc["signal_title"],
+                    "thread_id": sc["top_thread_id"],
+                    "thread_title": top.get("thread_title", ""),
+                    "score": sc["top_score"],
+                    "margin": sc["margin"],
+                })
         elif sc["confidence"] == "medium":
             needs_llm.append(sig)
         else:

@@ -657,6 +657,11 @@ function _deleteThread(threadId) {
     }, { danger: true, confirmText: 'Delete' });
 }
 
+// ─── Thread Lab — moved to thread-lab.js ─────────────────────────────────────
+// All _lab* functions, _openThreadLab, _openOrganizeLab now live in thread-lab.js
+
+// ─── Thread actions ───────────────────────────────────────────────────────────
+
 function _threadActionResearch(companyName) {
     switchModule('research');
     _prefillResearchChat(companyName);

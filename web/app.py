@@ -2237,22 +2237,410 @@ Return JSON: {{"title": "New directional title"}}"""
         for split in splits:
             title = split.get("title", "").strip()
             sig_ids = split.get("signal_ids", [])
+            external = split.get("external_signals", [])
             domain = sanitize_domain(split.get("domain", ""))
-            if not title or not sig_ids:
+            target_thread_id = split.get("target_thread_id")
+            if not title or (not sig_ids and not external):
                 continue
 
-            new_id = insert_signal_cluster(conn, {"domain": domain, "title": title, "synthesis": split.get("rationale", "")})
-            conn.execute("UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP WHERE id = ?", (new_id,))
-            for sid in sig_ids:
-                # Remove from old thread
-                conn.execute("DELETE FROM signal_cluster_items WHERE cluster_id = ? AND signal_id = ?", (thread_id, sid))
-                link_signal_to_cluster(conn, new_id, sid)
-            created.append({"id": new_id, "title": title, "signal_count": len(sig_ids)})
+            if target_thread_id:
+                # Merge into existing thread — move signals, don't create new
+                dest_id = int(target_thread_id)
+                for sid in sig_ids:
+                    conn.execute("DELETE FROM signal_cluster_items WHERE cluster_id = ? AND signal_id = ?", (thread_id, sid))
+                    link_signal_to_cluster(conn, dest_id, sid)
+                for ext in external:
+                    from_tid = ext.get("from_thread_id")
+                    ext_sid = ext.get("signal_id")
+                    if from_tid and ext_sid:
+                        conn.execute("DELETE FROM signal_cluster_items WHERE cluster_id = ? AND signal_id = ?", (from_tid, ext_sid))
+                        link_signal_to_cluster(conn, dest_id, ext_sid)
+                conn.execute("UPDATE signal_clusters SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (dest_id,))
+                created.append({"id": dest_id, "title": title, "signal_count": len(sig_ids) + len(external), "merged": True})
+            else:
+                # Create new thread
+                new_id = insert_signal_cluster(conn, {"domain": domain, "title": title, "synthesis": split.get("rationale", "")})
+                conn.execute("UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP WHERE id = ?", (new_id,))
+                for sid in sig_ids:
+                    conn.execute("DELETE FROM signal_cluster_items WHERE cluster_id = ? AND signal_id = ?", (thread_id, sid))
+                    link_signal_to_cluster(conn, new_id, sid)
+                for ext in external:
+                    from_tid = ext.get("from_thread_id")
+                    ext_sid = ext.get("signal_id")
+                    if from_tid and ext_sid:
+                        conn.execute("DELETE FROM signal_cluster_items WHERE cluster_id = ? AND signal_id = ?", (from_tid, ext_sid))
+                        link_signal_to_cluster(conn, new_id, ext_sid)
+                created.append({"id": new_id, "title": title, "signal_count": len(sig_ids) + len(external)})
 
         conn.execute("UPDATE signal_clusters SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (thread_id,))
         conn.commit()
         conn.close()
         return jsonify({"ok": True, "created": created})
+
+    @app.route("/api/signals/threads/<int:thread_id>/lab", methods=["GET"])
+    def signals_thread_lab_api(thread_id):
+        """Thread Lab: auto-cluster thread signals (TF-IDF KMeans) + find related signals from other threads."""
+        import numpy as np
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.cluster import KMeans
+        from sklearn.metrics.pairwise import cosine_similarity
+        from db import get_cluster_detail, get_thread_date_range
+        from datetime import datetime as _labdt
+
+        conn = get_connection(db_path)
+        detail = get_cluster_detail(conn, thread_id)
+        if not detail:
+            conn.close()
+            return jsonify({"error": "Thread not found"}), 404
+
+        signals = detail.get("signals", [])
+        n = len(signals)
+        if n < 4:
+            conn.close()
+            return jsonify({"error": "Thread needs at least 4 signals for Thread Lab"}), 400
+
+        titles = [s.get("title", "") or "" for s in signals]
+        try:
+            vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=2000,
+                                          stop_words="english", sublinear_tf=True)
+            X = vectorizer.fit_transform(titles)
+        except Exception as e:
+            conn.close()
+            return jsonify({"error": f"Vectorization failed: {e}"}), 500
+
+        k = max(2, min(6, round(n / 8)))
+        km = KMeans(n_clusters=k, random_state=42, n_init=10)
+        labels = km.fit_predict(X)
+
+        feature_names = vectorizer.get_feature_names_out()
+        sub_groups = []
+        for ci in range(k):
+            idxs = [i for i in range(n) if labels[i] == ci]
+            if not idxs:
+                continue
+            center = np.asarray(km.cluster_centers_[ci]).flatten()
+            top_idx = center.argsort()[::-1][:12]
+            # Filter out TLD fragments, year numbers, and generic news noise
+            _LAB_NOISE = {
+                "com", "org", "net", "www", "html", "says", "said", "new", "year",
+                "report", "says", "data", "use", "time", "day", "week", "month",
+                "bloomberg", "reuters", "cnbc", "wsj", "cnn", "bbc", "nyt", "ft",
+                "nationaltoday", "bitget", "stockstory", "bnnbloomberg", "biospace",
+                "investing", "finance", "yahoo", "google", "markets", "barrons",
+            }
+            key_terms = [
+                feature_names[j] for j in top_idx
+                if center[j] > 0
+                and feature_names[j] not in _LAB_NOISE
+                and not feature_names[j].isdigit()
+                and len(feature_names[j]) > 2
+            ]
+            # Prefer bigrams (contain a space) for the label — more descriptive
+            bigrams = [t for t in key_terms if ' ' in t]
+            label_terms = bigrams[:2] if bigrams else key_terms[:2]
+            cluster_sigs = [signals[i] for i in idxs]
+            sub_groups.append({
+                "cluster_idx": ci,
+                "label": " / ".join(label_terms).title() if label_terms else f"Group {ci + 1}",
+                "key_terms": key_terms[:5],
+                "signal_ids": [s["id"] for s in cluster_sigs],
+                "signals": [
+                    {"id": s["id"], "title": s.get("title", ""),
+                     "published_at": (s.get("published_at") or "")[:10],
+                     "source_name": s.get("source_name") or s.get("source") or "",
+                     "body": (s.get("body") or s.get("body_text") or "")[:300]}
+                    for s in cluster_sigs
+                ],
+            })
+        sub_groups.sort(key=lambda g: len(g["signal_ids"]), reverse=True)
+
+        # Auto-suggest existing threads for each group (keyword overlap via TF-IDF)
+        existing_threads = conn.execute(
+            "SELECT id, title FROM signal_clusters WHERE domain != 'narrative' AND id != ?"
+            " ORDER BY last_signal_at DESC LIMIT 200",
+            (thread_id,)
+        ).fetchall()
+        for g in sub_groups:
+            g["suggested_thread"] = None
+            if not existing_threads:
+                continue
+            # Try TF-IDF cosine similarity first
+            try:
+                ci = g["cluster_idx"]
+                center = np.asarray(km.cluster_centers_[ci]).flatten().reshape(1, -1)
+                et_titles = [r["title"] or "" for r in existing_threads]
+                et_vecs = vectorizer.transform(et_titles)
+                sims = cosine_similarity(center, et_vecs)[0]
+                best_idx = int(sims.argmax())
+                best_sim = float(sims[best_idx])
+                if best_sim >= 0.15:
+                    g["suggested_thread"] = {
+                        "id": int(existing_threads[best_idx]["id"]),
+                        "title": existing_threads[best_idx]["title"],
+                        "similarity": round(best_sim, 3),
+                    }
+                    continue
+            except Exception:
+                pass
+            # Fallback: keyword overlap between group key_terms and thread titles
+            try:
+                kw = set(t.lower() for t in g.get("key_terms", []))
+                if len(kw) < 2:
+                    continue
+                best_match, best_overlap = None, 0
+                for et in existing_threads:
+                    et_lower = (et["title"] or "").lower()
+                    overlap = sum(1 for k in kw if k in et_lower)
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_match = et
+                if best_match and best_overlap >= 2:
+                    g["suggested_thread"] = {
+                        "id": int(best_match["id"]),
+                        "title": best_match["title"],
+                        "similarity": round(best_overlap / max(len(kw), 1), 3),
+                    }
+            except Exception:
+                pass
+
+        # Coherence: average pairwise cosine similarity
+        if n > 1:
+            sim_mat = cosine_similarity(X)
+            np.fill_diagonal(sim_mat, 0)
+            coherence = float(sim_mat.sum() / (n * (n - 1)))
+        else:
+            coherence = 1.0
+
+        tmin, tmax, dated_count = get_thread_date_range(conn, thread_id)
+        date_span_days = None
+        if tmin and tmax:
+            date_span_days = (_labdt.strptime(tmax, "%Y-%m-%d") -
+                              _labdt.strptime(tmin, "%Y-%m-%d")).days
+
+        # Related signals from other threads (similarity >= 0.15 to thread centroid)
+        other_rows = conn.execute("""
+            SELECT s.id, s.title, s.published_at, s.source_name,
+                   sci.cluster_id as thread_id, sc.title as thread_title
+            FROM signals s
+            JOIN signal_cluster_items sci ON sci.signal_id = s.id
+            JOIN signal_clusters sc ON sc.id = sci.cluster_id
+            WHERE sci.cluster_id != ? AND sc.domain != 'narrative'
+            ORDER BY s.collected_at DESC LIMIT 600
+        """, (thread_id,)).fetchall()
+        conn.close()
+
+        related = []
+        if other_rows:
+            try:
+                other_titles = [r["title"] or "" for r in other_rows]
+                other_vecs = vectorizer.transform(other_titles)
+                centroid = np.asarray(X.mean(axis=0))
+                sims = cosine_similarity(centroid, other_vecs)[0]
+                for i, sim_score in enumerate(sims):
+                    if sim_score >= 0.15:
+                        related.append({
+                            "signal_id": other_rows[i]["id"],
+                            "title": other_rows[i]["title"],
+                            "published_at": (other_rows[i]["published_at"] or "")[:10],
+                            "source_name": other_rows[i]["source_name"] or "",
+                            "current_thread_id": other_rows[i]["thread_id"],
+                            "current_thread_title": other_rows[i]["thread_title"],
+                            "similarity": round(float(sim_score), 3),
+                        })
+            except Exception:
+                pass
+        related.sort(key=lambda x: x["similarity"], reverse=True)
+
+        # Pairwise similarity matrix for client-side per-column cohesion
+        sim_order = [s["id"] for s in signals]
+        sim_data = sim_mat.round(3).tolist() if n > 1 else []
+
+        return jsonify({
+            "thread_id": thread_id,
+            "title": detail["title"],
+            "health": {
+                "signal_count": n,
+                "date_span_days": date_span_days,
+                "date_min": tmin,
+                "date_max": tmax,
+                "coherence_score": round(coherence, 3),
+            },
+            "sub_groups": sub_groups,
+            "related_from_other_threads": related[:30],
+            "sim_order": sim_order,
+            "sim_matrix": sim_data,
+        })
+
+    @app.route("/api/signals/organize-lab", methods=["GET"])
+    def signals_organize_lab_api():
+        """Organize mode: cluster ALL unassigned signals for assignment to threads."""
+        import numpy as np
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.cluster import KMeans
+        from sklearn.metrics.pairwise import cosine_similarity
+
+        limit = int(request.args.get("limit", 200))
+        conn = get_connection(db_path)
+
+        # Fetch unassigned non-noise signals
+        rows = conn.execute("""
+            SELECT s.id, s.title, s.body, s.published_at, s.source_name, s.source, s.domain
+            FROM signals s
+            LEFT JOIN signal_cluster_items sci ON sci.signal_id = s.id
+            WHERE sci.id IS NULL AND COALESCE(s.signal_status, 'signal') != 'noise'
+            ORDER BY s.collected_at DESC LIMIT ?
+        """, (limit,)).fetchall()
+
+        signals = [dict(r) for r in rows]
+        n = len(signals)
+        total_unassigned = conn.execute("""
+            SELECT COUNT(*) FROM signals s
+            LEFT JOIN signal_cluster_items sci ON sci.signal_id = s.id
+            WHERE sci.id IS NULL AND COALESCE(s.signal_status, 'signal') != 'noise'
+        """).fetchone()[0]
+
+        if n < 3:
+            conn.close()
+            return jsonify({"error": f"Only {n} unassigned signals — not enough to cluster", "total_unassigned": total_unassigned}), 400
+
+        titles = [s.get("title", "") or "" for s in signals]
+        try:
+            vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=2000,
+                                          stop_words="english", sublinear_tf=True)
+            X = vectorizer.fit_transform(titles)
+        except Exception as e:
+            conn.close()
+            return jsonify({"error": f"Vectorization failed: {e}"}), 500
+
+        k = max(3, min(12, round(n / 12)))
+        km = KMeans(n_clusters=k, random_state=42, n_init=10)
+        labels = km.fit_predict(X)
+
+        feature_names = vectorizer.get_feature_names_out()
+        _LAB_NOISE = {
+            "com", "org", "net", "www", "html", "says", "said", "new", "year",
+            "report", "data", "use", "time", "day", "week", "month",
+            "bloomberg", "reuters", "cnbc", "wsj", "cnn", "bbc", "nyt", "ft",
+            "investing", "finance", "yahoo", "google", "markets", "barrons",
+        }
+        sub_groups = []
+        overflow_signals = []
+        for ci in range(k):
+            idxs = [i for i in range(n) if labels[i] == ci]
+            if len(idxs) < 2:
+                for i in idxs:
+                    overflow_signals.append({
+                        "id": signals[i]["id"], "title": signals[i].get("title", ""),
+                        "published_at": (signals[i].get("published_at") or "")[:10],
+                        "source_name": signals[i].get("source_name") or signals[i].get("source") or "",
+                        "body": (signals[i].get("body") or "")[:300],
+                    })
+                continue
+            center = np.asarray(km.cluster_centers_[ci]).flatten()
+            top_idx = center.argsort()[::-1][:12]
+            key_terms = [
+                feature_names[j] for j in top_idx
+                if center[j] > 0 and feature_names[j] not in _LAB_NOISE
+                and not feature_names[j].isdigit() and len(feature_names[j]) > 2
+            ]
+            bigrams = [t for t in key_terms if ' ' in t]
+            label_terms = bigrams[:2] if bigrams else key_terms[:2]
+            cluster_sigs = [signals[i] for i in idxs]
+
+            # Per-group cohesion
+            if len(idxs) > 1:
+                group_vecs = X[idxs]
+                sim_mat_g = cosine_similarity(group_vecs)
+                np.fill_diagonal(sim_mat_g, 0)
+                cohesion = round(float(sim_mat_g.sum() / (len(idxs) * (len(idxs) - 1))), 3)
+            else:
+                cohesion = 1.0
+
+            sub_groups.append({
+                "cluster_idx": ci,
+                "label": " / ".join(label_terms).title() if label_terms else f"Group {ci + 1}",
+                "key_terms": key_terms[:5],
+                "signal_ids": [s["id"] for s in cluster_sigs],
+                "cohesion": cohesion,
+                "signals": [
+                    {"id": s["id"], "title": s.get("title", ""),
+                     "published_at": (s.get("published_at") or "")[:10],
+                     "source_name": s.get("source_name") or s.get("source") or "",
+                     "body": (s.get("body") or "")[:300]}
+                    for s in cluster_sigs
+                ],
+            })
+        sub_groups.sort(key=lambda g: len(g["signal_ids"]), reverse=True)
+
+        # Auto-suggest existing threads for each group
+        existing_threads = conn.execute(
+            "SELECT id, title FROM signal_clusters WHERE domain != 'narrative'"
+            " ORDER BY last_signal_at DESC LIMIT 200"
+        ).fetchall()
+        for g in sub_groups:
+            g["suggested_thread"] = None
+            if not existing_threads:
+                continue
+            try:
+                ci = g["cluster_idx"]
+                center = np.asarray(km.cluster_centers_[ci]).flatten().reshape(1, -1)
+                et_titles = [r["title"] or "" for r in existing_threads]
+                et_vecs = vectorizer.transform(et_titles)
+                sims = cosine_similarity(center, et_vecs)[0]
+                best_idx = int(sims.argmax())
+                best_sim = float(sims[best_idx])
+                if best_sim >= 0.15:
+                    g["suggested_thread"] = {
+                        "id": int(existing_threads[best_idx]["id"]),
+                        "title": existing_threads[best_idx]["title"],
+                        "similarity": round(best_sim, 3),
+                    }
+                    continue
+            except Exception:
+                pass
+            # Fallback: keyword overlap
+            try:
+                kw = set(t.lower() for t in g.get("key_terms", []))
+                if len(kw) >= 2:
+                    best_match, best_overlap = None, 0
+                    for et in existing_threads:
+                        et_lower = (et["title"] or "").lower()
+                        overlap = sum(1 for kk in kw if kk in et_lower)
+                        if overlap > best_overlap:
+                            best_overlap = overlap
+                            best_match = et
+                    if best_match and best_overlap >= 2:
+                        g["suggested_thread"] = {
+                            "id": int(best_match["id"]),
+                            "title": best_match["title"],
+                            "similarity": round(best_overlap / max(len(kw), 1), 3),
+                        }
+            except Exception:
+                pass
+
+        conn.close()
+
+        # Overall coherence
+        if n > 1:
+            sim_mat = cosine_similarity(X)
+            np.fill_diagonal(sim_mat, 0)
+            coherence = round(float(sim_mat.sum() / (n * (n - 1))), 3)
+        else:
+            coherence = 1.0
+
+        return jsonify({
+            "mode": "organize",
+            "total_unassigned": total_unassigned,
+            "health": {
+                "signal_count": n,
+                "coherence_score": coherence,
+                "date_span_days": None,
+                "date_min": None,
+                "date_max": None,
+            },
+            "sub_groups": sub_groups,
+            "overflow_signals": overflow_signals,
+        })
 
     @app.route("/api/signals/search", methods=["GET"])
     def signals_keyword_search_api():
@@ -3000,12 +3388,41 @@ Return JSON: {{"title": "New directional title"}}"""
 
         profile = build_thread_profiles(conn)
         scored = score_signals(conn, unassigned, profile)
-        conn.close()
 
-        # Return signals with their top 3 thread suggestions
+        # Pre-compute temporal outlier info for each suggestion
+        from db import get_signal_effective_date, get_thread_date_range
+        from datetime import datetime as _rqdt, timedelta as _rqtd
+        _RQ_WINDOW = _rqtd(days=30)
+        _thread_range_cache = {}
+
+        def _rq_thread_range(tid):
+            if tid not in _thread_range_cache:
+                _thread_range_cache[tid] = get_thread_date_range(conn, tid)
+            return _thread_range_cache[tid]
+
         items = []
         for sc in scored:
             sig = next((s for s in unassigned if s["id"] == sc["signal_id"]), {})
+            sig_date = get_signal_effective_date(sig)
+
+            suggestions_out = []
+            for s in sc["scores"][:3]:
+                outlier = False
+                thread_range_str = None
+                if sig_date:
+                    try:
+                        tmin, tmax, _ = _rq_thread_range(s["thread_id"])
+                        if tmin and tmax:
+                            _sd = _rqdt.strptime(sig_date, "%Y-%m-%d")
+                            if (_sd < _rqdt.strptime(tmin, "%Y-%m-%d") - _RQ_WINDOW or
+                                    _sd > _rqdt.strptime(tmax, "%Y-%m-%d") + _RQ_WINDOW):
+                                outlier = True
+                                thread_range_str = f"{tmin[:7]}–{tmax[:7]}"
+                    except Exception:
+                        pass
+                suggestions_out.append({**s, "temporal_outlier": outlier,
+                                         "thread_range": thread_range_str})
+
             items.append({
                 "id": sc["signal_id"],
                 "title": sc["signal_title"],
@@ -3015,9 +3432,11 @@ Return JSON: {{"title": "New directional title"}}"""
                 "body": (sig.get("body") or "")[:500],
                 "url": sig.get("url", ""),
                 "confidence": sc["confidence"],
-                "suggestions": sc["scores"][:3],
+                "suggestions": suggestions_out,
+                "temporal_outlier": bool(suggestions_out and suggestions_out[0]["temporal_outlier"]),
             })
 
+        conn.close()
         return jsonify({"signals": items, "total": total_unassigned, "offset": offset, "limit": limit})
 
     @app.route("/api/signals/review-queue/assign", methods=["POST"])
