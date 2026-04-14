@@ -2020,7 +2020,7 @@ def create_app(db_path="intel.db"):
 
         url = row["url"]
         try:
-            text = fetch_page_text(url, max_chars=4000)
+            text = fetch_page_text(url, max_chars=8000)
             if text and len(text) > 200:
                 conn.execute("UPDATE signals SET body = ? WHERE id = ?", (text, sig_id))
                 conn.commit()

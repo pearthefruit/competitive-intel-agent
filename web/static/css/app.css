@@ -5806,7 +5806,7 @@
 .lab-detail-meta  { font-size: 10px; color: var(--text-muted); }
 .lab-detail-body  {
     font-size: 10px; color: var(--text-secondary); line-height: 1.5;
-    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical;
+    overflow-y: auto; max-height: calc(100% - 80px); white-space: pre-wrap; word-break: break-word;
 }
 .lab-detail-close {
     align-self: flex-end; background: none; border: none; color: var(--text-muted);

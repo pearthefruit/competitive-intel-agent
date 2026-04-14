@@ -508,7 +508,7 @@ function _labFetchArticle(sigId, btn) {
             // Update the detail panel body
             const bodyEl = document.getElementById('lab-detail-body-text');
             if (bodyEl) {
-                bodyEl.textContent = newBody.slice(0, 800);
+                bodyEl.textContent = newBody;
                 bodyEl.style.color = '';
                 bodyEl.style.fontStyle = '';
             }
