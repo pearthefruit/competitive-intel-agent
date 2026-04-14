@@ -427,6 +427,7 @@ def _migrate_db(conn):
         ("signals", "author_context", "TEXT"),
         ("signals", "engagement_json", "TEXT"),
         ("brainstorms", "thread_titles_json", "TEXT"),
+        ("llm_usage", "duration_ms", "INTEGER"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -447,13 +448,13 @@ def init_db(db_path="intel.db"):
 
 
 def log_llm_call(provider, model, key_hint, status, error=None, caller=None,
-                  input_tokens=None, output_tokens=None, db_path="intel.db"):
+                  input_tokens=None, output_tokens=None, duration_ms=None, db_path="intel.db"):
     """Log an LLM API call for usage tracking."""
     try:
         conn = get_connection(db_path)
         conn.execute(
-            "INSERT INTO llm_usage (provider, model, key_hint, status, error, caller, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (provider, model, key_hint, status, error, caller, input_tokens, output_tokens),
+            "INSERT INTO llm_usage (provider, model, key_hint, status, error, caller, input_tokens, output_tokens, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (provider, model, key_hint, status, error, caller, input_tokens, output_tokens, duration_ms),
         )
         conn.commit()
         conn.close()
@@ -497,6 +498,18 @@ def get_llm_usage_stats(db_path="intel.db"):
                FROM llm_usage"""
         ).fetchone()
 
+        # Per-caller breakdown (which functions are making LLM calls)
+        caller_rows = conn.execute(
+            """SELECT caller, COUNT(*) as cnt,
+                      SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) as success,
+                      COALESCE(SUM(input_tokens), 0) as input_tokens,
+                      COALESCE(SUM(output_tokens), 0) as output_tokens,
+                      COALESCE(AVG(duration_ms), 0) as avg_duration_ms
+               FROM llm_usage WHERE DATE(created_at, 'localtime') = ? AND caller IS NOT NULL
+               GROUP BY caller ORDER BY input_tokens + output_tokens DESC""",
+            (today,)
+        ).fetchall()
+
         # Recent errors
         recent_errors = conn.execute(
             """SELECT provider, model, key_hint, error, created_at
@@ -524,6 +537,7 @@ def get_llm_usage_stats(db_path="intel.db"):
                 "input_tokens": today_total["input_tokens"] if today_total else 0,
                 "output_tokens": today_total["output_tokens"] if today_total else 0,
                 "by_provider": [dict(r) for r in today_rows],
+                "by_caller": [dict(r) for r in caller_rows],
                 "hourly": [dict(r) for r in hourly],
             },
             "all_time": {

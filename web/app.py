@@ -2299,11 +2299,16 @@ Return JSON: {{"title": "New directional title"}}"""
             conn.close()
             return jsonify({"error": "Thread needs at least 4 signals for Thread Lab"}), 400
 
-        titles = [s.get("title", "") or "" for s in signals]
+        # Use title (weighted 2x) + body for richer TF-IDF features
+        docs = []
+        for s in signals:
+            t = s.get("title", "") or ""
+            b = (s.get("body") or s.get("body_text") or "")[:500]
+            docs.append(f"{t} {t} {b}")  # title repeated for 2x weight
         try:
-            vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=2000,
+            vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=3000,
                                           stop_words="english", sublinear_tf=True)
-            X = vectorizer.fit_transform(titles)
+            X = vectorizer.fit_transform(docs)
         except Exception as e:
             conn.close()
             return jsonify({"error": f"Vectorization failed: {e}"}), 500
@@ -2503,11 +2508,16 @@ Return JSON: {{"title": "New directional title"}}"""
             conn.close()
             return jsonify({"error": f"Only {n} unassigned signals — not enough to cluster", "total_unassigned": total_unassigned}), 400
 
-        titles = [s.get("title", "") or "" for s in signals]
+        # Use title (weighted 2x) + body for richer TF-IDF features
+        docs = []
+        for s in signals:
+            t = s.get("title", "") or ""
+            b = (s.get("body") or s.get("body_text") or "")[:500]
+            docs.append(f"{t} {t} {b}")  # title repeated for 2x weight
         try:
-            vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=2000,
+            vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=3000,
                                           stop_words="english", sublinear_tf=True)
-            X = vectorizer.fit_transform(titles)
+            X = vectorizer.fit_transform(docs)
         except Exception as e:
             conn.close()
             return jsonify({"error": f"Vectorization failed: {e}"}), 500

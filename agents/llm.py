@@ -352,6 +352,7 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
         frame = inspect.currentframe().f_back
         caller = f"{Path(frame.f_code.co_filename).stem}:{frame.f_code.co_name}" if frame else "unknown"
 
+    import time as _time
     expanded = _expand_chain(chain or REPORT_CHAIN)
     http = httpx.Client(timeout=timeout, follow_redirects=True)
 
@@ -363,6 +364,7 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
         provider = p["name"]
         model_id = f"{provider}/{p['model']}"
         key_hint = key[-4:] if len(key) >= 4 else '****'
+        _t0 = _time.time()  # latency tracking
 
         # [C] Skip providers known to reject this prompt size
         if provider in skip_providers:
@@ -389,8 +391,9 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
                     out_tok = um.candidates_token_count
                 except Exception:
                     pass
-                print(f"[llm] ✓ {model_id} (key …{key_hint})" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
-                log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
+                _dur = int((_time.time() - _t0) * 1000)
+                print(f"[llm] ✓ {model_id} (key …{key_hint}) {_dur}ms" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
+                log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok, duration_ms=_dur)
                 result_text = response.text if not json_mode else response.text
                 return (normalize_citations(result_text) if not json_mode else result_text), model_id
             else:
@@ -409,12 +412,14 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
                         in_tok = usage.get("prompt_tokens")
                         out_tok = usage.get("completion_tokens")
                     http.close()
-                    print(f"[llm] ✓ {model_id} (key …{key_hint})" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
-                    log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
+                    _dur = int((_time.time() - _t0) * 1000)
+                    print(f"[llm] ✓ {model_id} (key …{key_hint}) {_dur}ms" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
+                    log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok, duration_ms=_dur)
                     return (normalize_citations(text) if not json_mode else text), model_id
                 elif resp.status_code == 429:
-                    print(f"[llm] {model_id} (key …{key_hint}) rate limited — trying next key")
-                    log_llm_call(provider, p["model"], key_hint, "rate_limited", error="429", caller=caller)
+                    _dur = int((_time.time() - _t0) * 1000)
+                    print(f"[llm] {model_id} (key …{key_hint}) rate limited {_dur}ms — trying next key")
+                    log_llm_call(provider, p["model"], key_hint, "rate_limited", error="429", caller=caller, duration_ms=_dur)
                     mark_key_unhealthy(provider, key, "429")
                     continue
                 elif resp.status_code == 413:
@@ -450,8 +455,9 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
                         out_tok = um.candidates_token_count
                     except Exception:
                         pass
-                    print(f"[llm] ✓ {model_id} (key …{key_hint}) [schema fallback]" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
-                    log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok)
+                    _dur = int((_time.time() - _t0) * 1000)
+                    print(f"[llm] ✓ {model_id} (key …{key_hint}) [schema fallback] {_dur}ms" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
+                    log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok, duration_ms=_dur)
                     return response.text, model_id
                 except Exception as retry_e:
                     retry_err = str(retry_e)

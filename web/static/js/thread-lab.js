@@ -232,7 +232,7 @@ function _labRenderKanban() {
                 <button id="lab-recluster-btn" class="lab-recluster-btn" onclick="_labRecluster()" style="display:none">
                     Re-cluster remainder
                 </button>` : ''}
-            <span class="lab-hint">Shift+click multi-select · drag to move · click to preview</span>
+            <span class="lab-hint">Shift+click select · Ctrl+A grab matches · Ctrl+⌫ clear · drag to move · Esc close</span>
             <button onclick="document.getElementById('thread-lab-modal').remove()"
                 style="margin-left:auto;padding:8px 14px;background:none;border:1px solid var(--border);border-radius:7px;color:var(--text-muted);font-size:12px;cursor:pointer">
                 Cancel
@@ -303,21 +303,47 @@ function _labInitSortables() {
         });
     }
 
-    // Ctrl+A = grab all heatmap matches (when modal is open and search is active)
+    // Keyboard shortcuts (scoped to modal lifetime)
     document.addEventListener('keydown', function _labKeyHandler(e) {
         if (!document.getElementById('thread-lab-modal')) {
             document.removeEventListener('keydown', _labKeyHandler);
             return;
         }
-        // Don't intercept if typing in an input
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+        const isLabSearch = e.target.id === 'lab-global-search';
+
+        // Ctrl+A — grab all heatmap matches (works even when focused in the search bar)
         if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
             const matches = document.querySelectorAll('.lab-sig-card.lab-heatmap-match');
             if (matches.length > 0) {
                 e.preventDefault();
                 _labSelectAllMatches();
+                return;
             }
+            // If no heatmap matches, don't block default Ctrl+A in inputs
+            if (inInput) return;
         }
+
+        // Ctrl+Backspace — clear heatmap search + selection
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Backspace') {
+            e.preventDefault();
+            const searchInput = document.getElementById('lab-global-search');
+            if (searchInput) { searchInput.value = ''; _labSearch(''); }
+            _labClearSelection();
+            return;
+        }
+
+        // Escape — close detail panel, or clear selection, or close modal
+        if (e.key === 'Escape' && !inInput) {
+            const detail = document.getElementById('lab-sig-detail');
+            if (detail?.classList.contains('lab-detail-open')) { _labHideDetail(); return; }
+            if (_labSelected.size > 0) { _labClearSelection(); return; }
+            document.getElementById('thread-lab-modal')?.remove();
+            return;
+        }
+
+        // Block other shortcuts when in inputs (except lab search)
+        if (inInput && !isLabSearch) return;
     });
 
     // Prevent SortableJS from intercepting shift+click
@@ -1092,6 +1118,20 @@ function _labSyncAndRefreshCounts() {
             }
         }
     });
+
+    // Auto-remove empty user-created columns (cluster_idx >= 100 = created via "+ New" drop)
+    const origIdxs = new Set((state.originalData?.sub_groups || []).map(g => g.cluster_idx));
+    let removed = false;
+    for (let i = state.groups.length - 1; i >= 0; i--) {
+        const g = state.groups[i];
+        if (g.signals.length === 0 && !origIdxs.has(g.cluster_idx)) {
+            const col = document.querySelector(`[data-lab-col-gi="${i}"]`);
+            if (col) col.remove();
+            state.groups.splice(i, 1);
+            removed = true;
+        }
+    }
+    if (removed) { _labRenderKanban(); return; }  // re-render to fix indices
 
     const isOrganize = state.mode === 'organize';
     const activeCount = state.groups.filter(g => g.active && g.signals.length >= (isOrganize ? 1 : 2)).length;

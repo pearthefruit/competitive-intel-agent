@@ -255,6 +255,10 @@ async function refreshUsageBadge() {
         if (failed > 5) badge.classList.add('danger');
         else if (failed > 0) badge.classList.add('warning');
 
+        // Update global sidebar badge (visible in all modules)
+        const globalBadge = document.getElementById('global-llm-text');
+        if (globalBadge) globalBadge.textContent = totalTokens > 0 ? `${_fmtTok(totalTokens)}` : `${total}`;
+
         // Render panel content
         const panel = document.getElementById('llm-usage-content');
         if (!panel) return;
@@ -289,6 +293,21 @@ async function refreshUsageBadge() {
             });
         }
 
+        // Per-caller breakdown — which functions are making LLM calls
+        const callers = (t.by_caller || []);
+        if (callers.length) {
+            html += '<div class="llm-usage-divider"></div>';
+            html += '<div style="color:var(--accent);font-weight:600;margin-bottom:4px">By Function</div>';
+            callers.forEach(c => {
+                const name = (c.caller || 'unknown').split(':').pop().replace(/_/g, ' ');
+                const callerTok = (c.input_tokens || 0) + (c.output_tokens || 0);
+                const avgMs = Math.round(c.avg_duration_ms || 0);
+                const failCnt = (c.cnt || 0) - (c.success || 0);
+                const failStr = failCnt > 0 ? ` <span style="color:#ef4444">(${failCnt}✗)</span>` : '';
+                html += `<div class="llm-usage-row"><span>${escHtml(name)}</span><span class="cnt">${c.success || 0}${failStr} · ${_fmtTok(callerTok)} · ${avgMs}ms</span></div>`;
+            });
+        }
+
         // Recent errors
         const errors = data.recent_errors || [];
         if (errors.length) {
@@ -315,12 +334,36 @@ async function refreshUsageBadge() {
         }
 
         panel.innerHTML = html;
+        // Also update floating panel if it exists
+        const floatPanel = document.getElementById('llm-usage-content-float');
+        if (floatPanel) floatPanel.innerHTML = html;
     } catch {}
 }
 
 function toggleUsagePanel() {
-    const panel = document.getElementById('llm-usage-panel');
-    if (!panel) return;
+    let panel = document.getElementById('llm-usage-panel');
+    // If panel doesn't exist or is inside a hidden workspace, create a floating one
+    if (!panel || !panel.offsetParent) {
+        let floating = document.getElementById('llm-usage-floating');
+        if (!floating) {
+            floating = document.createElement('div');
+            floating.id = 'llm-usage-floating';
+            floating.className = 'llm-usage-panel llm-usage-floating';
+            floating.innerHTML = '<div class="llm-usage-title">API Usage Today</div><div id="llm-usage-content-float">Loading...</div>';
+            document.body.appendChild(floating);
+        }
+        const visible = floating.style.display === 'block';
+        floating.style.display = visible ? 'none' : 'block';
+        if (!visible) {
+            // Copy content from original panel if it exists
+            refreshUsageBadge().then(() => {
+                const orig = document.getElementById('llm-usage-content');
+                const dest = document.getElementById('llm-usage-content-float');
+                if (orig && dest) dest.innerHTML = orig.innerHTML;
+            });
+        }
+        return;
+    }
     const visible = panel.style.display !== 'none';
     panel.style.display = visible ? 'none' : 'block';
     if (!visible) refreshUsageBadge();
