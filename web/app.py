@@ -2479,27 +2479,30 @@ Return JSON: {{"title": "New directional title"}}"""
     @app.route("/api/signals/organize-lab", methods=["GET"])
     def signals_organize_lab_api():
         """
-        Organize mode: smart signal grouping via temporal event detection + thread-anchor matching.
+        Organize mode: semantic signal grouping via sentence embeddings + temporal event detection.
 
         Algorithm:
-          1. Build time-decayed TF-IDF representation of existing threads (title 3x +
-             recent signal titles — last-14d titles 2x, last-90d titles 1x).
-          2. Match each unassigned signal to its best thread (cosine >= MATCH_THRESH).
-             Column = real thread, cohesion = avg similarity to thread vector.
-          3. Remaining signals → DBSCAN event-burst detection.
-             Distance = 1 - (0.65 * cos_sim + 0.35 * temporal_sim).
+          1. Encode threads with all-MiniLM-L6-v2 (title + recent signal titles as context).
+          2. Encode each unassigned signal (title + body[:500]).
+          3. Match each signal to its best thread (cosine >= MATCH_THRESH = 0.28).
+             Column = real thread, cohesion = avg embedding similarity to thread.
+          4. Remaining signals → DBSCAN event-burst detection.
+             Distance = 1 - (0.65 * emb_cos_sim + 0.35 * temporal_sim).
              temporal_sim(i,j) = max(0, 1 - |days_apart| / 7).
-          4. Columns sorted: thread-matches by count desc, then event bursts chronologically.
+          5. Key terms extracted via lightweight TF-IDF on titles only (for labelling).
+          6. Columns sorted: thread-matches by count desc, event bursts chronologically.
         """
-        import numpy as np
+        import os, numpy as np
         from datetime import datetime, timedelta
-        from sklearn.feature_extraction.text import TfidfVectorizer
         from sklearn.cluster import DBSCAN
-        from sklearn.metrics.pairwise import cosine_similarity
+        from sklearn.feature_extraction.text import TfidfVectorizer
 
-        MATCH_THRESH = 0.13   # min cosine to assign signal → thread
-        DBSCAN_EPS   = 0.60   # max combined distance to be in same burst
-        DBSCAN_MIN   = 2      # min signals per burst
+        os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+        MATCH_THRESH  = 0.28  # min embedding cosine to assign signal → thread
+        THREAD_MIN    = 2     # min signals to show as a thread column (singletons → DBSCAN)
+        DBSCAN_EPS    = 0.55  # max combined distance to be in same burst
+        DBSCAN_MIN    = 2     # min signals per burst
 
         limit = int(request.args.get("limit", 200))
         conn = get_connection(db_path)
@@ -2585,40 +2588,58 @@ Return JSON: {{"title": "New directional title"}}"""
 
         conn.close()
 
-        # ── 4. Build TF-IDF on threads + signals in one shared space ──────────
+        # ── 4. Load sentence embedding model (cached globally) ─────────────────
+        if not hasattr(signals_organize_lab_api, "_st_model"):
+            try:
+                from sentence_transformers import SentenceTransformer
+                signals_organize_lab_api._st_model = SentenceTransformer("all-MiniLM-L6-v2")
+            except Exception as e:
+                return jsonify({"error": f"Embedding model unavailable: {e}. Run: pip install sentence-transformers"}), 500
+        model = signals_organize_lab_api._st_model
+
+        # ── 5. Build embedding documents ───────────────────────────────────────
         def _thread_doc(t):
+            # Thread title + up to 5 recent signal titles as semantic context
             ts = thread_signals.get(t["id"], {"recent_14d": [], "recent_90d": []})
-            title3 = " ".join([t["title"] or ""] * 3)
-            synth  = (t.get("synthesis") or "")[:200]
-            r14    = " ".join(ts["recent_14d"][:10]) + " " + \
-                     " ".join(ts["recent_14d"][:10])      # 2x weight
-            r90    = " ".join(ts["recent_90d"][:15])
-            return f"{title3} {synth} {r14} {r90}"
+            recent = (ts["recent_14d"] + ts["recent_90d"])[:5]
+            parts = [t["title"] or ""]
+            if recent:
+                parts.append(". ".join(recent))
+            return ". ".join(parts)
 
         def _sig_doc(s):
-            t = s.get("title") or ""
-            b = (s.get("body") or "")[:500]
-            return f"{t} {t} {b}"
+            title = s.get("title") or ""
+            body  = (s.get("body") or "")[:500]
+            return f"{title}. {body}" if body.strip() else title
 
         thread_docs = [_thread_doc(t) for t in threads]
         sig_docs    = [_sig_doc(s) for s in signals]
 
-        vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=4000,
-                                     stop_words="english", sublinear_tf=True)
+        # ── 6. Encode + compute similarity ─────────────────────────────────────
         try:
-            X_all = vectorizer.fit_transform(thread_docs + sig_docs)
+            t_embs = model.encode(thread_docs, normalize_embeddings=True,
+                                  show_progress_bar=False, batch_size=64) if threads \
+                     else np.zeros((0, 384))
+            s_embs = model.encode(sig_docs, normalize_embeddings=True,
+                                  show_progress_bar=False, batch_size=64)
         except Exception as e:
-            return jsonify({"error": f"Vectorization failed: {e}"}), 500
+            return jsonify({"error": f"Embedding failed: {e}"}), 500
 
-        nt = len(thread_docs)
-        X_threads = X_all[:nt]
-        X_signals = X_all[nt:]
-        feature_names = vectorizer.get_feature_names_out()
+        # Cosine similarity: normalized vectors → dot product
+        sim_st = (s_embs @ t_embs.T) if threads else np.zeros((n, 0))
 
-        # ── 5. Thread matching ─────────────────────────────────────────────────
+        # Lightweight TF-IDF on titles only — used for key term extraction / labelling
+        _tfidf = TfidfVectorizer(ngram_range=(1, 2), max_features=2000,
+                                 stop_words="english", sublinear_tf=True)
+        try:
+            _X_sig_titles = _tfidf.fit_transform([s.get("title") or "" for s in signals])
+            _feat = _tfidf.get_feature_names_out()
+        except Exception:
+            _X_sig_titles = None
+            _feat = []
+
+        # ── 7. Thread matching ─────────────────────────────────────────────────
         # sim_st[i, j] = cosine(signal_i, thread_j)
-        sim_st = cosine_similarity(X_signals, X_threads) if threads else \
-                 np.zeros((n, 0))
 
         thread_groups  = {}   # tid → {"thread": t, "items": [(sig_idx, sim)]}
         unmatched_idxs = []
@@ -2638,7 +2659,7 @@ Return JSON: {{"title": "New directional title"}}"""
             else:
                 unmatched_idxs.append(i)
 
-        # ── 6. Helpers ─────────────────────────────────────────────────────────
+        # ── 8. Helpers ─────────────────────────────────────────────────────────
         _NOISE = {
             "com", "org", "net", "www", "html", "says", "said", "new", "year",
             "report", "data", "use", "time", "day", "week", "month",
@@ -2647,14 +2668,15 @@ Return JSON: {{"title": "New directional title"}}"""
         }
 
         def _key_terms(sig_idxs):
-            if not sig_idxs:
+            """Extract key terms from signal titles via TF-IDF centroid."""
+            if not sig_idxs or _X_sig_titles is None or not len(_feat):
                 return []
-            centroid = np.asarray(X_signals[sig_idxs].mean(axis=0)).flatten()
+            centroid = np.asarray(_X_sig_titles[sig_idxs].mean(axis=0)).flatten()
             top_idx  = centroid.argsort()[::-1][:15]
             return [
-                feature_names[j] for j in top_idx
-                if centroid[j] > 0 and feature_names[j] not in _NOISE
-                and not feature_names[j].isdigit() and len(feature_names[j]) > 2
+                _feat[j] for j in top_idx
+                if centroid[j] > 0 and _feat[j] not in _NOISE
+                and not _feat[j].isdigit() and len(_feat[j]) > 2
             ]
 
         def _label(terms):
@@ -2689,9 +2711,14 @@ Return JSON: {{"title": "New directional title"}}"""
         overflow_signals = []
         cluster_idx    = 0
 
-        # ── 7. Build thread-match columns ──────────────────────────────────────
+        # ── 9. Build thread-match columns (≥ THREAD_MIN signals each) ────────
         for tid, grp in thread_groups.items():
-            items   = grp["items"]
+            items = grp["items"]
+            if len(items) < THREAD_MIN:
+                # Too few signals to warrant a column — push to DBSCAN pool
+                for i, _ in items:
+                    unmatched_idxs.append(i)
+                continue
             t       = grp["thread"]
             tj      = grp["thread_j"]
             sig_idxs = [i for i, _ in items]
@@ -2715,13 +2742,14 @@ Return JSON: {{"title": "New directional title"}}"""
             })
             cluster_idx += 1
 
-        # ── 8. DBSCAN event-burst on unmatched signals ─────────────────────────
+        # ── 10. DBSCAN event-burst on unmatched signals ────────────────────────
         um = len(unmatched_idxs)
         if um >= DBSCAN_MIN:
-            X_um  = X_signals[unmatched_idxs]
-            cs_um = cosine_similarity(X_um)  # (um, um)
+            # Embedding cosine similarity between unmatched signals
+            um_embs = s_embs[unmatched_idxs]
+            cs_um   = um_embs @ um_embs.T  # already normalized → dot = cosine
 
-            # Temporal similarity matrix: 1 - |days_apart| / 7, clamped [0,1]
+            # Temporal similarity: 1 - |days_apart| / 7, clamped [0,1]
             um_dates = [sig_dates[i] for i in unmatched_idxs]
             ts_um = np.zeros((um, um))
             for a in range(um):
@@ -2744,9 +2772,9 @@ Return JSON: {{"title": "New directional title"}}"""
                     continue
                 terms   = _key_terms(local_idxs)
                 dates_g = [sig_dates[i] for i in local_idxs]
-                # Cohesion = mean pairwise cosine within burst
-                grp_vecs = X_signals[local_idxs]
-                sm = cosine_similarity(grp_vecs)
+                # Cohesion = mean pairwise embedding cosine within burst
+                grp_embs = s_embs[local_idxs]
+                sm = grp_embs @ grp_embs.T
                 np.fill_diagonal(sm, 0)
                 cohesion = round(float(sm.sum() / (len(local_idxs) *
                                                     max(len(local_idxs) - 1, 1))), 3)
@@ -2770,14 +2798,14 @@ Return JSON: {{"title": "New directional title"}}"""
             for i in unmatched_idxs:
                 overflow_signals.append(_sig_payload(signals[i]))
 
-        # ── 9. Sort: thread-matches by size, event bursts chronologically ──────
+        # ── 11. Sort: thread-matches by size, event bursts chronologically ──────
         tm_groups = [g for g in sub_groups if g.get("group_type") == "thread_match"]
         eb_groups = [g for g in sub_groups if g.get("group_type") == "event_burst"]
         tm_groups.sort(key=lambda g: len(g["signals"]), reverse=True)
         eb_groups.sort(key=lambda g: g.get("_sort_date", ""))
         sub_groups = tm_groups + eb_groups
 
-        # Overall coherence = avg best-thread similarity across all signals
+        # Overall coherence = avg best embedding similarity across all signals
         coherence = round(float(sim_st.max(axis=1).mean()), 3) if sim_st.shape[1] else 0.0
 
         return jsonify({
