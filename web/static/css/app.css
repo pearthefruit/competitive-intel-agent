@@ -5674,6 +5674,19 @@
     border-right: 1px solid var(--border); overflow: hidden;
 }
 .lab-kanban-col:last-child { border-right: none; }
+/* thread_match = green left accent (confirmed thread assignment) */
+.lab-col-thread-match { border-left: 3px solid rgba(34,197,94,0.5); }
+.lab-col-thread-match .lab-col-header { background: rgba(34,197,94,0.04); }
+/* event_burst = cyan left accent (new story cluster) */
+.lab-col-event-burst { border-left: 3px solid rgba(6,182,212,0.5); }
+.lab-col-event-burst .lab-col-header { background: rgba(6,182,212,0.04); }
+/* Date range badge in col-terms row */
+.lab-col-date-range {
+    float: right; font-size: 9px; font-weight: 600;
+    color: var(--accent); background: rgba(59,130,246,0.12);
+    border: 1px solid rgba(59,130,246,0.25); border-radius: 8px;
+    padding: 1px 5px; white-space: nowrap; margin-left: 4px;
+}
 .lab-pool-col {
     min-width: 240px; max-width: 280px; flex-shrink: 0;
     background: rgba(0,0,0,0.15);

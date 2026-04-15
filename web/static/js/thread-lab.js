@@ -93,6 +93,8 @@ function _labBuildState(data, threadId, mode) {
             key_terms: g.key_terms,
             cohesion: g.cohesion ?? null,
             suggested_thread: g.suggested_thread || null,
+            group_type: g.group_type || null,       // 'thread_match' | 'event_burst' | null
+            date_range: g.date_range || null,        // e.g. 'Apr 9–13'
             // In organize mode, pre-accept suggestions (inverse of split mode)
             _accepted_thread_id: isOrganize && g.suggested_thread ? g.suggested_thread.id : null,
             _accepted_thread_title: isOrganize && g.suggested_thread ? g.suggested_thread.title : null,
@@ -129,14 +131,27 @@ function _labRenderKanban() {
     const isOrganize = state.mode === 'organize';
 
     const cs = health.coherence_score;
-    const cColor = cs < 0.15 ? '#ef4444' : cs < 0.30 ? '#f59e0b' : '#22c55e';
-    const cLabel = cs < 0.15 ? 'low cohesion' : cs < 0.30 ? 'medium cohesion' : 'high cohesion';
+    // In organize mode, coherence = avg best-thread match (0.2–0.6 is healthy)
+    const cColor = isOrganize
+        ? (cs < 0.15 ? '#ef4444' : cs < 0.30 ? '#f59e0b' : '#22c55e')
+        : (cs < 0.15 ? '#ef4444' : cs < 0.30 ? '#f59e0b' : '#22c55e');
+    const cLabel = isOrganize
+        ? (cs < 0.15 ? 'low match' : cs < 0.30 ? 'ok match' : 'good match')
+        : (cs < 0.15 ? 'low cohesion' : cs < 0.30 ? 'medium cohesion' : 'high cohesion');
 
     // Build each group column
     const groupCols = state.groups.map((g, gi) => {
         const cards = g.signals.map(s => _labSigCard(s, isOrganize)).join('');
         const isAccepted = !!g._accepted_thread_id;
-        const suggBadge = g.suggested_thread ? `
+
+        // group_type determines left-border color and cohesion label
+        const gtype = g.group_type;  // 'thread_match' | 'event_burst' | null
+        const colTypeClass = gtype === 'thread_match' ? ' lab-col-thread-match'
+                           : gtype === 'event_burst'  ? ' lab-col-event-burst'
+                           : '';
+
+        // Suggestion badge — in thread_match mode the suggestion IS the column, show it differently
+        const suggBadge = (g.suggested_thread && gtype !== 'thread_match') ? `
             <div class="lab-col-sugg-row">
                 <span class="lab-suggestion-badge${isAccepted ? ' lab-suggestion-accepted' : ''}" data-suggest-gi="${gi}"
                     data-suggest-tid="${g.suggested_thread.id}"
@@ -145,15 +160,22 @@ function _labRenderKanban() {
                 </span>
             </div>` : '';
 
-        // Cohesion badge — use server-side value if available, otherwise client-side
+        // Cohesion badge — label differs by group type
         const cohVal = g.cohesion ?? _labColCohesion(g.signals.map(s => s.id));
+        const cohLabel = gtype === 'thread_match' ? 'match' : 'cohesion';
         const cohHtml = cohVal !== null
-            ? `<span class="lab-col-cohesion" id="lab-coh-${g.cluster_idx}" title="Column cohesion"
+            ? `<span class="lab-col-cohesion" id="lab-coh-${g.cluster_idx}"
+                title="${cohLabel} score"
                 style="color:${cohVal < 0.15 ? '#ef4444' : cohVal < 0.30 ? '#f59e0b' : '#22c55e'}">${cohVal.toFixed(2)}</span>`
             : `<span class="lab-col-cohesion" id="lab-coh-${g.cluster_idx}"></span>`;
 
+        // Date range badge
+        const dateBadge = g.date_range
+            ? `<span class="lab-col-date-range">${escHtml(g.date_range)}</span>`
+            : '';
+
         return `
-            <div class="lab-kanban-col" data-lab-col-gi="${gi}">
+            <div class="lab-kanban-col${colTypeClass}" data-lab-col-gi="${gi}">
                 <div class="lab-col-header">
                     <input class="lab-col-name" value="${escHtml(isAccepted ? g._accepted_thread_title : g.label)}"
                         ${isAccepted ? 'readonly' : ''}
@@ -166,7 +188,7 @@ function _labRenderKanban() {
                         : `<button class="lab-col-toggle" title="Keep in original thread" onclick="_labToggleCol(${gi})">×</button>`}
                 </div>
                 ${suggBadge}
-                <div class="lab-col-terms">${escHtml(g.key_terms.slice(0,4).join(' · '))}</div>
+                <div class="lab-col-terms">${escHtml(g.key_terms.slice(0,4).join(' · '))}${dateBadge}</div>
                 <div class="lab-col-body" id="lab-col-${g.cluster_idx}">${cards}</div>
             </div>`;
     }).join('');
@@ -226,7 +248,7 @@ function _labRenderKanban() {
             <span class="lab-health-stat">${health.signal_count} signals</span>
             ${health.date_span_days != null ? `<span class="lab-health-stat">${health.date_span_days}d span</span>` : ''}
             ${health.date_min ? `<span class="lab-health-stat">${health.date_min.slice(0,7)} → ${health.date_max.slice(0,7)}</span>` : ''}
-            <span class="lab-health-stat" style="color:${cColor}">${cLabel} (${cs})</span>
+            <span class="lab-health-stat" style="color:${cColor}" title="${isOrganize ? 'avg similarity to best matching thread' : 'overall signal coherence'}">${cLabel} (${cs})</span>
         </div>
         <div class="thread-lab-kanban-wrap">
             <div class="thread-lab-kanban">${groupCols}${poolCol}${newColZone}</div>

@@ -2478,26 +2478,44 @@ Return JSON: {{"title": "New directional title"}}"""
 
     @app.route("/api/signals/organize-lab", methods=["GET"])
     def signals_organize_lab_api():
-        """Organize mode: cluster ALL unassigned signals for assignment to threads."""
+        """
+        Organize mode: smart signal grouping via temporal event detection + thread-anchor matching.
+
+        Algorithm:
+          1. Build time-decayed TF-IDF representation of existing threads (title 3x +
+             recent signal titles — last-14d titles 2x, last-90d titles 1x).
+          2. Match each unassigned signal to its best thread (cosine >= MATCH_THRESH).
+             Column = real thread, cohesion = avg similarity to thread vector.
+          3. Remaining signals → DBSCAN event-burst detection.
+             Distance = 1 - (0.65 * cos_sim + 0.35 * temporal_sim).
+             temporal_sim(i,j) = max(0, 1 - |days_apart| / 7).
+          4. Columns sorted: thread-matches by count desc, then event bursts chronologically.
+        """
         import numpy as np
+        from datetime import datetime, timedelta
         from sklearn.feature_extraction.text import TfidfVectorizer
-        from sklearn.cluster import KMeans
+        from sklearn.cluster import DBSCAN
         from sklearn.metrics.pairwise import cosine_similarity
+
+        MATCH_THRESH = 0.13   # min cosine to assign signal → thread
+        DBSCAN_EPS   = 0.60   # max combined distance to be in same burst
+        DBSCAN_MIN   = 2      # min signals per burst
 
         limit = int(request.args.get("limit", 200))
         conn = get_connection(db_path)
 
-        # Fetch unassigned non-noise signals
+        # ── 1. Fetch unassigned signals ────────────────────────────────────────
         rows = conn.execute("""
-            SELECT s.id, s.title, s.body, s.published_at, s.source_name, s.source, s.domain
+            SELECT s.id, s.title, s.body, s.published_at, s.collected_at,
+                   s.source_name, s.source
             FROM signals s
             LEFT JOIN signal_cluster_items sci ON sci.signal_id = s.id
             WHERE sci.id IS NULL AND COALESCE(s.signal_status, 'signal') != 'noise'
-            ORDER BY s.collected_at DESC LIMIT ?
+            ORDER BY s.published_at DESC LIMIT ?
         """, (limit,)).fetchall()
-
         signals = [dict(r) for r in rows]
         n = len(signals)
+
         total_unassigned = conn.execute("""
             SELECT COUNT(*) FROM signals s
             LEFT JOIN signal_cluster_items sci ON sci.signal_id = s.id
@@ -2506,137 +2524,261 @@ Return JSON: {{"title": "New directional title"}}"""
 
         if n < 3:
             conn.close()
-            return jsonify({"error": f"Only {n} unassigned signals — not enough to cluster", "total_unassigned": total_unassigned}), 400
+            return jsonify({"error": f"Only {n} unassigned signals — not enough to cluster",
+                            "total_unassigned": total_unassigned}), 400
 
-        # Use title (weighted 2x) + body for richer TF-IDF features
-        docs = []
-        for s in signals:
-            t = s.get("title", "") or ""
-            b = (s.get("body") or s.get("body_text") or "")[:500]
-            docs.append(f"{t} {t} {b}")  # title repeated for 2x weight
+        # ── 2. Parse signal publish dates ──────────────────────────────────────
+        now = datetime.now()
+
+        def _parse_date(s):
+            for src in [s.get("published_at"), s.get("collected_at")]:
+                if not src:
+                    continue
+                src = str(src).strip()
+                if len(src) >= 10 and src[4:5] == "-":
+                    try:
+                        return datetime.fromisoformat(src[:10])
+                    except Exception:
+                        pass
+                for fmt in ("%a, %d %b %Y", "%d %b %Y"):
+                    try:
+                        return datetime.strptime(src[:len(fmt) + 2], fmt)
+                    except Exception:
+                        pass
+            return now
+
+        sig_dates = [_parse_date(s) for s in signals]
+
+        # ── 3. Fetch existing threads + recent signal content for time decay ───
+        threads = conn.execute("""
+            SELECT sc.id, sc.title, sc.synthesis
+            FROM signal_clusters sc
+            WHERE sc.domain != 'narrative' AND sc.status = 'active'
+            ORDER BY sc.last_signal_at DESC LIMIT 300
+        """).fetchall()
+        threads = [dict(t) for t in threads]
+        thread_ids = [t["id"] for t in threads]
+
+        thread_signals = {}  # tid → {recent_14d: [...], recent_90d: [...]}
+        if thread_ids:
+            cutoff_90 = (now - timedelta(days=90)).strftime("%Y-%m-%d")
+            cutoff_14 = (now - timedelta(days=14)).strftime("%Y-%m-%d")
+            placeholders = ",".join("?" * len(thread_ids))
+            ts_rows = conn.execute(f"""
+                SELECT sci.cluster_id, s.title, s.published_at
+                FROM signal_cluster_items sci
+                JOIN signals s ON s.id = sci.signal_id
+                WHERE sci.cluster_id IN ({placeholders})
+                  AND COALESCE(s.published_at, '2000-01-01') >= ?
+                ORDER BY s.published_at DESC
+            """, thread_ids + [cutoff_90]).fetchall()
+            for r in ts_rows:
+                cid = r["cluster_id"]
+                if cid not in thread_signals:
+                    thread_signals[cid] = {"recent_14d": [], "recent_90d": []}
+                pa = str(r["published_at"] or "")[:10]
+                title = r["title"] or ""
+                if pa >= cutoff_14:
+                    thread_signals[cid]["recent_14d"].append(title)
+                else:
+                    thread_signals[cid]["recent_90d"].append(title)
+
+        conn.close()
+
+        # ── 4. Build TF-IDF on threads + signals in one shared space ──────────
+        def _thread_doc(t):
+            ts = thread_signals.get(t["id"], {"recent_14d": [], "recent_90d": []})
+            title3 = " ".join([t["title"] or ""] * 3)
+            synth  = (t.get("synthesis") or "")[:200]
+            r14    = " ".join(ts["recent_14d"][:10]) + " " + \
+                     " ".join(ts["recent_14d"][:10])      # 2x weight
+            r90    = " ".join(ts["recent_90d"][:15])
+            return f"{title3} {synth} {r14} {r90}"
+
+        def _sig_doc(s):
+            t = s.get("title") or ""
+            b = (s.get("body") or "")[:500]
+            return f"{t} {t} {b}"
+
+        thread_docs = [_thread_doc(t) for t in threads]
+        sig_docs    = [_sig_doc(s) for s in signals]
+
+        vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=4000,
+                                     stop_words="english", sublinear_tf=True)
         try:
-            vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=3000,
-                                          stop_words="english", sublinear_tf=True)
-            X = vectorizer.fit_transform(docs)
+            X_all = vectorizer.fit_transform(thread_docs + sig_docs)
         except Exception as e:
-            conn.close()
             return jsonify({"error": f"Vectorization failed: {e}"}), 500
 
-        k = max(3, min(12, round(n / 12)))
-        km = KMeans(n_clusters=k, random_state=42, n_init=10)
-        labels = km.fit_predict(X)
-
+        nt = len(thread_docs)
+        X_threads = X_all[:nt]
+        X_signals = X_all[nt:]
         feature_names = vectorizer.get_feature_names_out()
-        _LAB_NOISE = {
+
+        # ── 5. Thread matching ─────────────────────────────────────────────────
+        # sim_st[i, j] = cosine(signal_i, thread_j)
+        sim_st = cosine_similarity(X_signals, X_threads) if threads else \
+                 np.zeros((n, 0))
+
+        thread_groups  = {}   # tid → {"thread": t, "items": [(sig_idx, sim)]}
+        unmatched_idxs = []
+
+        for i in range(n):
+            if sim_st.shape[1] == 0:
+                unmatched_idxs.append(i)
+                continue
+            best_j   = int(sim_st[i].argmax())
+            best_sim = float(sim_st[i, best_j])
+            if best_sim >= MATCH_THRESH:
+                tid = threads[best_j]["id"]
+                if tid not in thread_groups:
+                    thread_groups[tid] = {"thread": threads[best_j],
+                                          "thread_j": best_j, "items": []}
+                thread_groups[tid]["items"].append((i, best_sim))
+            else:
+                unmatched_idxs.append(i)
+
+        # ── 6. Helpers ─────────────────────────────────────────────────────────
+        _NOISE = {
             "com", "org", "net", "www", "html", "says", "said", "new", "year",
             "report", "data", "use", "time", "day", "week", "month",
             "bloomberg", "reuters", "cnbc", "wsj", "cnn", "bbc", "nyt", "ft",
             "investing", "finance", "yahoo", "google", "markets", "barrons",
         }
-        sub_groups = []
-        overflow_signals = []
-        for ci in range(k):
-            idxs = [i for i in range(n) if labels[i] == ci]
-            if len(idxs) < 2:
-                for i in idxs:
-                    overflow_signals.append({
-                        "id": signals[i]["id"], "title": signals[i].get("title", ""),
-                        "published_at": (signals[i].get("published_at") or "")[:10],
-                        "source_name": signals[i].get("source_name") or signals[i].get("source") or "",
-                        "body": (signals[i].get("body") or "")[:300],
-                    })
-                continue
-            center = np.asarray(km.cluster_centers_[ci]).flatten()
-            top_idx = center.argsort()[::-1][:12]
-            key_terms = [
+
+        def _key_terms(sig_idxs):
+            if not sig_idxs:
+                return []
+            centroid = np.asarray(X_signals[sig_idxs].mean(axis=0)).flatten()
+            top_idx  = centroid.argsort()[::-1][:15]
+            return [
                 feature_names[j] for j in top_idx
-                if center[j] > 0 and feature_names[j] not in _LAB_NOISE
+                if centroid[j] > 0 and feature_names[j] not in _NOISE
                 and not feature_names[j].isdigit() and len(feature_names[j]) > 2
             ]
-            bigrams = [t for t in key_terms if ' ' in t]
-            label_terms = bigrams[:2] if bigrams else key_terms[:2]
-            cluster_sigs = [signals[i] for i in idxs]
 
-            # Per-group cohesion
-            if len(idxs) > 1:
-                group_vecs = X[idxs]
-                sim_mat_g = cosine_similarity(group_vecs)
-                np.fill_diagonal(sim_mat_g, 0)
-                cohesion = round(float(sim_mat_g.sum() / (len(idxs) * (len(idxs) - 1))), 3)
-            else:
-                cohesion = 1.0
+        def _label(terms):
+            bigrams = [t for t in terms if " " in t]
+            parts   = bigrams[:2] if bigrams else terms[:2]
+            return " / ".join(parts).title() if parts else "Group"
 
+        def _fmt_date(dt):
+            return dt.strftime("%b") + " " + str(dt.day)
+
+        def _date_range(dates):
+            valid = sorted([d for d in dates if d])
+            if not valid:
+                return ""
+            mn, mx = valid[0], valid[-1]
+            if mn.date() == mx.date():
+                return _fmt_date(mn)
+            if mn.month == mx.month:
+                return f"{_fmt_date(mn)}–{mx.day}"
+            return f"{_fmt_date(mn)} – {_fmt_date(mx)}"
+
+        def _sig_payload(s):
+            return {
+                "id": s["id"],
+                "title": s.get("title") or "",
+                "published_at": (s.get("published_at") or "")[:10],
+                "source_name": s.get("source_name") or s.get("source") or "",
+                "body": (s.get("body") or "")[:300],
+            }
+
+        sub_groups     = []
+        overflow_signals = []
+        cluster_idx    = 0
+
+        # ── 7. Build thread-match columns ──────────────────────────────────────
+        for tid, grp in thread_groups.items():
+            items   = grp["items"]
+            t       = grp["thread"]
+            tj      = grp["thread_j"]
+            sig_idxs = [i for i, _ in items]
+            avg_sim  = round(float(np.mean([s for _, s in items])), 3)
+            dates_g  = [sig_dates[i] for i in sig_idxs]
+            terms    = _key_terms(sig_idxs)
+            # Sort signals best-match first within column
+            items_sorted = sorted(items, key=lambda x: -x[1])
             sub_groups.append({
-                "cluster_idx": ci,
-                "label": " / ".join(label_terms).title() if label_terms else f"Group {ci + 1}",
-                "key_terms": key_terms[:5],
-                "signal_ids": [s["id"] for s in cluster_sigs],
-                "cohesion": cohesion,
-                "signals": [
-                    {"id": s["id"], "title": s.get("title", ""),
-                     "published_at": (s.get("published_at") or "")[:10],
-                     "source_name": s.get("source_name") or s.get("source") or "",
-                     "body": (s.get("body") or "")[:300]}
-                    for s in cluster_sigs
-                ],
+                "cluster_idx": cluster_idx,
+                "label": t["title"] or _label(terms),
+                "key_terms": terms[:5],
+                "cohesion": avg_sim,
+                "date_range": _date_range(dates_g),
+                "group_type": "thread_match",
+                "suggested_thread": {
+                    "id": int(tid), "title": t["title"], "similarity": avg_sim,
+                },
+                "signals": [_sig_payload(signals[i]) for i, _ in items_sorted],
+                "signal_ids": [signals[i]["id"] for i, _ in items_sorted],
             })
-        sub_groups.sort(key=lambda g: len(g["signal_ids"]), reverse=True)
+            cluster_idx += 1
 
-        # Auto-suggest existing threads for each group
-        existing_threads = conn.execute(
-            "SELECT id, title FROM signal_clusters WHERE domain != 'narrative'"
-            " ORDER BY last_signal_at DESC LIMIT 200"
-        ).fetchall()
-        for g in sub_groups:
-            g["suggested_thread"] = None
-            if not existing_threads:
-                continue
-            try:
-                ci = g["cluster_idx"]
-                center = np.asarray(km.cluster_centers_[ci]).flatten().reshape(1, -1)
-                et_titles = [r["title"] or "" for r in existing_threads]
-                et_vecs = vectorizer.transform(et_titles)
-                sims = cosine_similarity(center, et_vecs)[0]
-                best_idx = int(sims.argmax())
-                best_sim = float(sims[best_idx])
-                if best_sim >= 0.15:
-                    g["suggested_thread"] = {
-                        "id": int(existing_threads[best_idx]["id"]),
-                        "title": existing_threads[best_idx]["title"],
-                        "similarity": round(best_sim, 3),
-                    }
+        # ── 8. DBSCAN event-burst on unmatched signals ─────────────────────────
+        um = len(unmatched_idxs)
+        if um >= DBSCAN_MIN:
+            X_um  = X_signals[unmatched_idxs]
+            cs_um = cosine_similarity(X_um)  # (um, um)
+
+            # Temporal similarity matrix: 1 - |days_apart| / 7, clamped [0,1]
+            um_dates = [sig_dates[i] for i in unmatched_idxs]
+            ts_um = np.zeros((um, um))
+            for a in range(um):
+                for b in range(um):
+                    days = abs((um_dates[a] - um_dates[b]).days)
+                    ts_um[a, b] = max(0.0, 1.0 - days / 7.0)
+
+            dist = 1.0 - np.clip(0.65 * cs_um + 0.35 * ts_um, 0, 1)
+            np.fill_diagonal(dist, 0.0)
+
+            db_labels = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN,
+                               metric="precomputed").fit_predict(dist)
+
+            for lbl in sorted(set(db_labels)):
+                local_idxs = [unmatched_idxs[j] for j in range(um)
+                               if db_labels[j] == lbl]
+                if lbl == -1 or len(local_idxs) < DBSCAN_MIN:
+                    for i in local_idxs:
+                        overflow_signals.append(_sig_payload(signals[i]))
                     continue
-            except Exception:
-                pass
-            # Fallback: keyword overlap
-            try:
-                kw = set(t.lower() for t in g.get("key_terms", []))
-                if len(kw) >= 2:
-                    best_match, best_overlap = None, 0
-                    for et in existing_threads:
-                        et_lower = (et["title"] or "").lower()
-                        overlap = sum(1 for kk in kw if kk in et_lower)
-                        if overlap > best_overlap:
-                            best_overlap = overlap
-                            best_match = et
-                    if best_match and best_overlap >= 2:
-                        g["suggested_thread"] = {
-                            "id": int(best_match["id"]),
-                            "title": best_match["title"],
-                            "similarity": round(best_overlap / max(len(kw), 1), 3),
-                        }
-            except Exception:
-                pass
-
-        conn.close()
-
-        # Overall coherence
-        if n > 1:
-            sim_mat = cosine_similarity(X)
-            np.fill_diagonal(sim_mat, 0)
-            coherence = round(float(sim_mat.sum() / (n * (n - 1))), 3)
+                terms   = _key_terms(local_idxs)
+                dates_g = [sig_dates[i] for i in local_idxs]
+                # Cohesion = mean pairwise cosine within burst
+                grp_vecs = X_signals[local_idxs]
+                sm = cosine_similarity(grp_vecs)
+                np.fill_diagonal(sm, 0)
+                cohesion = round(float(sm.sum() / (len(local_idxs) *
+                                                    max(len(local_idxs) - 1, 1))), 3)
+                median_date = sorted(dates_g)[len(dates_g) // 2]
+                sub_groups.append({
+                    "cluster_idx": cluster_idx,
+                    "label": _label(terms),
+                    "key_terms": terms[:5],
+                    "cohesion": cohesion,
+                    "date_range": _date_range(dates_g),
+                    "group_type": "event_burst",
+                    "suggested_thread": None,
+                    "_sort_date": median_date.isoformat(),
+                    "signals": [_sig_payload(signals[i])
+                                for i in sorted(local_idxs,
+                                                key=lambda x: sig_dates[x])],
+                    "signal_ids": [signals[i]["id"] for i in local_idxs],
+                })
+                cluster_idx += 1
         else:
-            coherence = 1.0
+            for i in unmatched_idxs:
+                overflow_signals.append(_sig_payload(signals[i]))
+
+        # ── 9. Sort: thread-matches by size, event bursts chronologically ──────
+        tm_groups = [g for g in sub_groups if g.get("group_type") == "thread_match"]
+        eb_groups = [g for g in sub_groups if g.get("group_type") == "event_burst"]
+        tm_groups.sort(key=lambda g: len(g["signals"]), reverse=True)
+        eb_groups.sort(key=lambda g: g.get("_sort_date", ""))
+        sub_groups = tm_groups + eb_groups
+
+        # Overall coherence = avg best-thread similarity across all signals
+        coherence = round(float(sim_st.max(axis=1).mean()), 3) if sim_st.shape[1] else 0.0
 
         return jsonify({
             "mode": "organize",
