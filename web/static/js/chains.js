@@ -964,6 +964,12 @@ const _CB_CHAIN_COLORS = [
     '#ef4444', '#ec4899', '#06b6d4', '#8b5cf6',
 ];
 
+// Persists node positions across re-renders (legend toggles, subtab switches, etc.)
+// Keyed by threadId. Cleared only by _cbResetLayout().
+let _cbNodePositions = new Map();
+// Closure set after each render — recomputes bezier paths for a moved node live
+let _cbPathUpdateFn  = null;
+
 // Which chains are currently dimmed (toggled via legend)
 let _cbDimmedChains = new Set();
 
@@ -1076,27 +1082,48 @@ function _renderChainBoard() {
         if (!depthMap.has(n.id)) depthMap.set(n.id, Math.floor(maxDepth / 2));
     });
 
-    // ── 4. Initial positions ──────────────────────────────────────────────
+    // ── 4. Positions: restore saved or compute via force sim ──────────────
     const MARGIN = 90;
     const usableW = width - MARGIN * 2;
-    nodes.forEach(function(n) {
-        const depth = depthMap.get(n.id) || 0;
-        n.x = MARGIN + (depth / maxDepth) * usableW;
-        n.y = height * 0.2 + Math.random() * height * 0.6;
-    });
-
     const nodeR = function(n) { return Math.sqrt(n.signal_count || 1) * 4.5 + 10; };
 
-    // ── 5. Force simulation (sync ticks) ─────────────────────────────────
-    _chainBoardSim = d3.forceSimulation(nodes)
-        .force('depth', d3.forceX(function(n) {
-            return MARGIN + ((depthMap.get(n.id) || 0) / maxDepth) * usableW;
-        }).strength(0.45))
-        .force('centerY', d3.forceY(height / 2).strength(0.08))
-        .force('collide', d3.forceCollide(function(n) { return nodeR(n) + 22; }).strength(0.85))
-        .force('charge', d3.forceManyBody().strength(-220))
-        .stop();
-    for (var tick = 0; tick < 150; tick++) _chainBoardSim.tick();
+    // Nodes with saved positions get restored; new nodes need the sim.
+    const needsSim = nodes.filter(function(n) { return !_cbNodePositions.has(n.id); });
+
+    if (needsSim.length > 0) {
+        // Set random start for unsaved nodes
+        nodes.forEach(function(n) {
+            const saved = _cbNodePositions.get(n.id);
+            if (saved) {
+                n.x = saved.x; n.y = saved.y;
+                n.fx = saved.x; n.fy = saved.y; // pin during sim
+            } else {
+                const depth = depthMap.get(n.id) || 0;
+                n.x = MARGIN + (depth / maxDepth) * usableW;
+                n.y = height * 0.2 + Math.random() * height * 0.6;
+            }
+        });
+        _chainBoardSim = d3.forceSimulation(nodes)
+            .force('depth', d3.forceX(function(n) {
+                return MARGIN + ((depthMap.get(n.id) || 0) / maxDepth) * usableW;
+            }).strength(0.45))
+            .force('centerY', d3.forceY(height / 2).strength(0.08))
+            .force('collide', d3.forceCollide(function(n) { return nodeR(n) + 22; }).strength(0.85))
+            .force('charge', d3.forceManyBody().strength(-220))
+            .stop();
+        for (var tick = 0; tick < 150; tick++) _chainBoardSim.tick();
+        // Unpin all nodes after sim
+        nodes.forEach(function(n) { n.fx = null; n.fy = null; });
+    } else {
+        // All positions known — restore directly, skip sim
+        nodes.forEach(function(n) {
+            var saved = _cbNodePositions.get(n.id);
+            n.x = saved.x; n.y = saved.y;
+        });
+    }
+
+    // Persist all positions for next render
+    nodes.forEach(function(n) { _cbNodePositions.set(n.id, { x: n.x, y: n.y }); });
 
     // ── 6. D3 zoom ────────────────────────────────────────────────────────
     const zoomG = svg.append('g').attr('class', 'cb-zoom-group');
@@ -1139,83 +1166,112 @@ function _renderChainBoard() {
     // ── 9. Draw chain routes (segment by segment) ─────────────────────────
     const chainPathsG = zoomG.append('g').attr('class', 'cb-chain-paths');
 
+    // Helper: compute the bezier path string for one segment
+    function _segPathD(src, tgt, offset) {
+        var rSrc = nodeR(src) + 2, rTgt = nodeR(tgt) + 5;
+        var dx = tgt.x - src.x, dy = tgt.y - src.y;
+        var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        var sx = src.x + (dx / dist) * rSrc, sy = src.y + (dy / dist) * rSrc;
+        var ex = tgt.x - (dx / dist) * rTgt, ey = tgt.y - (dy / dist) * rTgt;
+        var ox = -dy / dist * offset, oy = dx / dist * offset;
+        var mx = (sx + ex) / 2 + ox;
+        var my = (sy + ey) / 2 + oy - Math.max(12, Math.abs(dx) * 0.08);
+        return 'M' + (sx+ox) + ',' + (sy+oy) + ' Q' + mx + ',' + my + ' ' + (ex+ox) + ',' + (ey+oy);
+    }
+
     _causalPathsCache.forEach(function(path, pi) {
-        const color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
-        const tids  = path.thread_ids || [];
-        const chainNodes = tids.map(function(tid) { return nodeMap.get(tid); }).filter(Boolean);
+        var color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
+        var tids  = path.thread_ids || [];
+        var chainNodes = tids.map(function(tid) { return nodeMap.get(tid); }).filter(Boolean);
         if (chainNodes.length < 2) return;
 
         for (var i = 0; i < chainNodes.length - 1; i++) {
-            const src = chainNodes[i], tgt = chainNodes[i + 1];
-            const edgeKey = src.id + '-' + tgt.id;
-            const total   = edgeChainCount.get(edgeKey) || 1;
-            const idx     = edgeChainIdx.get(edgeKey + '-' + path.id) !== undefined
-                            ? edgeChainIdx.get(edgeKey + '-' + path.id) : 0;
-            const offset  = total > 1 ? (idx - (total - 1) / 2) * 9 : 0;
-
-            const rSrc = nodeR(src) + 2, rTgt = nodeR(tgt) + 5;
-            const dx = tgt.x - src.x, dy = tgt.y - src.y;
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            const sx = src.x + (dx / dist) * rSrc;
-            const sy = src.y + (dy / dist) * rSrc;
-            const ex = tgt.x - (dx / dist) * rTgt;
-            const ey = tgt.y - (dy / dist) * rTgt;
-            const ox = -dy / dist * offset, oy = dx / dist * offset;
-            const mx = (sx + ex) / 2 + ox;
-            const my = (sy + ey) / 2 + oy - Math.max(12, Math.abs(dx) * 0.08);
-            const d  = 'M' + (sx+ox) + ',' + (sy+oy) + ' Q' + mx + ',' + my + ' ' + (ex+ox) + ',' + (ey+oy);
-            const dimmed = _cbDimmedChains.has(path.id);
+            var src = chainNodes[i], tgt = chainNodes[i + 1];
+            var edgeKey = src.id + '-' + tgt.id;
+            var total   = edgeChainCount.get(edgeKey) || 1;
+            var idx     = edgeChainIdx.get(edgeKey + '-' + path.id) !== undefined
+                          ? edgeChainIdx.get(edgeKey + '-' + path.id) : 0;
+            var offset  = total > 1 ? (idx - (total - 1) / 2) * 9 : 0;
+            var dimmed  = _cbDimmedChains.has(path.id);
 
             chainPathsG.append('path')
                 .attr('data-chain', path.id)
+                .attr('data-src', src.id)
+                .attr('data-tgt', tgt.id)
+                .attr('data-offset', offset)
                 .attr('fill', 'none')
                 .attr('stroke', color)
                 .attr('stroke-width', 2.5)
                 .attr('stroke-opacity', dimmed ? 0.07 : 0.82)
                 .attr('marker-end', 'url(#cbarrow-' + pi + ')')
-                .attr('d', d)
+                .attr('d', _segPathD(src, tgt, offset))
                 .style('cursor', 'pointer')
-                .on('mouseenter', function() {
-                    if (_cbDimmedChains.has(path.id)) return;
+                .on('mouseenter', (function(pid) { return function() {
+                    if (_cbDimmedChains.has(pid)) return;
                     d3.select(this).attr('stroke-width', 4.5).attr('stroke-opacity', 1);
-                })
+                }; })(path.id))
                 .on('mouseleave', function() {
                     d3.select(this).attr('stroke-width', 2.5).attr('stroke-opacity', 0.82);
                 })
-                .on('click', function(event) {
+                .on('click', (function(pid) { return function(event) {
                     event.stopPropagation();
-                    _selectCausalChain(path.id);
+                    _selectCausalChain(pid);
                     switchSignalTab('causal');
-                });
+                }; })(path.id));
         }
     });
 
     // ── 10. Edge labels ───────────────────────────────────────────────────
-    const labelG = zoomG.append('g').attr('pointer-events', 'none');
+    var labelG = zoomG.append('g').attr('pointer-events', 'none');
     edges.forEach(function(e) {
         if (!e.label) return;
-        const mx = (e.source.x + e.target.x) / 2;
-        const my = (e.source.y + e.target.y) / 2 - 16;
         labelG.append('text')
-            .attr('x', mx).attr('y', my)
+            .attr('data-src', e.source.id).attr('data-tgt', e.target.id)
+            .attr('x', (e.source.x + e.target.x) / 2)
+            .attr('y', (e.source.y + e.target.y) / 2 - 16)
             .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)')
             .attr('font-size', 9)
             .text(e.label.length > 22 ? e.label.slice(0, 20) + '\u2026' : e.label);
     });
 
-    // ── 11. Node drag ─────────────────────────────────────────────────────
-    const drag = d3.drag()
-        .on('start', function(ev, d) { d.fx = d.x; d.fy = d.y; })
-        .on('drag',  function(ev, d) {
-            d.x = ev.x; d.y = ev.y; d.fx = ev.x; d.fy = ev.y;
-            nodeG.filter(function(n) { return n.id === d.id; })
-                 .attr('transform', 'translate(' + d.x + ',' + d.y + ')');
-            // Lightweight path refresh: update just this node's segments
-            chainPathsG.selectAll('path[data-chain]').each(function() {
-                // Full re-render on drag end is fine at this scale
-            });
+    // ── 11. Path-update closure (used by drag — avoids full re-render) ────
+    _cbPathUpdateFn = function(movedId) {
+        // Recompute bezier for every path segment touching the moved node
+        chainPathsG.selectAll('path').each(function() {
+            var el  = d3.select(this);
+            var sid = +el.attr('data-src'), tid = +el.attr('data-tgt');
+            if (sid !== movedId && tid !== movedId) return;
+            var src = nodeMap.get(sid), tgt = nodeMap.get(tid);
+            if (!src || !tgt) return;
+            el.attr('d', _segPathD(src, tgt, +el.attr('data-offset') || 0));
+        });
+        // Move edge labels
+        labelG.selectAll('text').each(function() {
+            var el  = d3.select(this);
+            var sid = +el.attr('data-src'), tid = +el.attr('data-tgt');
+            if (sid !== movedId && tid !== movedId) return;
+            var src = nodeMap.get(sid), tgt = nodeMap.get(tid);
+            if (!src || !tgt) return;
+            el.attr('x', (src.x + tgt.x) / 2).attr('y', (src.y + tgt.y) / 2 - 16);
+        });
+    };
+
+    // ── 12. Node drag — live path update, no re-render on end ────────────
+    var drag = d3.drag()
+        .on('start', function(ev, d) {
+            d3.select(this).attr('cursor', 'grabbing');
         })
-        .on('end', function() { _renderChainBoard(); });
+        .on('drag', function(ev, d) {
+            d.x = ev.x; d.y = ev.y;
+            _cbNodePositions.set(d.id, { x: d.x, y: d.y });
+            d3.select(this).attr('transform', 'translate(' + d.x + ',' + d.y + ')');
+            if (_cbPathUpdateFn) _cbPathUpdateFn(d.id);
+        })
+        .on('end', function(ev, d) {
+            // Save final position — no re-render (positions persist in _cbNodePositions)
+            _cbNodePositions.set(d.id, { x: d.x, y: d.y });
+            d3.select(this).attr('cursor', 'grab');
+        });
 
     // ── 12. Render nodes ──────────────────────────────────────────────────
     var nodeG = zoomG.append('g').selectAll('g').data(nodes).join('g')
@@ -1362,6 +1418,8 @@ function _cbResetZoom() {
 
 function _cbResetLayout() {
     _chainBoardZoomTransform = null;
+    _cbNodePositions.clear();  // force fresh layout
+    _cbPathUpdateFn = null;
     _renderChainBoard();
 }
 
