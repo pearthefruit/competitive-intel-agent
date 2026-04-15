@@ -2189,14 +2189,24 @@ def insert_signal(conn, signal_dict):
 
 
 def insert_signals_batch(conn, signals):
-    """Insert a batch of signals, returning count of new inserts."""
+    """Insert a batch of signals.
+
+    Returns (count, to_scrape) where to_scrape is a list of (id, url) for
+    newly inserted signals that have a URL but thin body text (< 200 chars) —
+    these are candidates for background article scraping.
+    """
     new_count = 0
+    to_scrape = []
     for sig in signals:
         sid = insert_signal(conn, sig)
         if sid:
             new_count += 1
+            url = sig.get("url", "") or ""
+            body = sig.get("body", "") or ""
+            if url.startswith("http") and len(body) < 200:
+                to_scrape.append((sid, url))
     conn.commit()
-    return new_count
+    return new_count, to_scrape
 
 
 def get_signals(conn, domain=None, days_back=7, limit=200):

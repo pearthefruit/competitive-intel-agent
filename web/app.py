@@ -3,10 +3,41 @@
 import os
 import sys
 import json
+import sqlite3
 import threading
 import queue
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+
+# ── Background body-scraping pool ────────────────────────────────────────────
+# Fetches full article text for newly ingested signals with thin body (<200 chars).
+# 3 workers — light I/O, no GPU contention, daemon so it doesn't block shutdown.
+_body_scrape_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="body_scrape")
+
+
+def _scrape_and_update_body(db_path, sig_id, url):
+    """Fetch full article text for a signal and update body in DB.
+
+    Runs in a background thread. Opens its own DB connection (cross-thread safe).
+    Only updates if body is still thin (<200 chars) to avoid overwriting enriched rows.
+    """
+    try:
+        from scraper.web_search import fetch_page_text
+        text = fetch_page_text(url, max_chars=4000)
+        if not text or len(text) < 100:
+            return
+        conn = sqlite3.connect(db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "UPDATE signals SET body = ? WHERE id = ? AND (body IS NULL OR length(body) < 200)",
+            (text, sig_id),
+        )
+        conn.commit()
+        conn.close()
+        print(f"[body_scrape] sig {sig_id}: {len(text)} chars from {url[:70]}")
+    except Exception as e:
+        print(f"[body_scrape] failed sig {sig_id} ({url[:60]}): {e}")
 
 from flask import Flask, render_template, request, jsonify, Response
 
@@ -1925,7 +1956,13 @@ def create_app(db_path="intel.db"):
 
             # Persist to DB
             conn = get_connection(db_path)
-            new_count = insert_signals_batch(conn, signals)
+            new_count, to_scrape = insert_signals_batch(conn, signals)
+
+            # Background: fetch full article text for signals with thin body
+            if to_scrape:
+                for _sid, _url in to_scrape:
+                    _body_scrape_pool.submit(_scrape_and_update_body, db_path, _sid, _url)
+                print(f"[signals] Queued {len(to_scrape)} signals for background body scraping")
 
             yield f"data: {json.dumps({'type': 'scan_complete', 'total_collected': len(signals), 'new_inserted': new_count})}\n\n"
 
@@ -3229,6 +3266,7 @@ Return JSON: {{"title": "New directional title"}}"""
         conn = get_connection(db_path)
         new_count = 0
         linked_count = 0
+        _search_to_scrape = []
         for sig in results:
             sig_id = insert_signal(conn, sig)
             if sig_id:
@@ -3236,6 +3274,11 @@ Return JSON: {{"title": "New directional title"}}"""
                 if pattern_id:
                     link_signal_to_cluster(conn, pattern_id, sig_id)
                     linked_count += 1
+                # Queue body scraping if body is thin
+                url = sig.get("url", "") or ""
+                body = sig.get("body", "") or ""
+                if url.startswith("http") and len(body) < 200:
+                    _search_to_scrape.append((sig_id, url))
             elif pattern_id:
                 existing = conn.execute(
                     "SELECT id FROM signals WHERE content_hash = ?", (sig["content_hash"],)
@@ -3244,6 +3287,11 @@ Return JSON: {{"title": "New directional title"}}"""
                     link_signal_to_cluster(conn, pattern_id, existing["id"])
                     linked_count += 1
         conn.commit()
+
+        # Background: fetch full article text for thin-body new signals
+        if _search_to_scrape:
+            for _sid, _url in _search_to_scrape:
+                _body_scrape_pool.submit(_scrape_and_update_body, db_path, _sid, _url)
 
         if pattern_id and linked_count > 0:
             conn.execute(
