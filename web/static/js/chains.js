@@ -983,21 +983,24 @@ function _renderChainBoard() {
     svg.selectAll('*').remove();
     if (_chainBoardSim) { _chainBoardSim.stop(); _chainBoardSim = null; }
 
-    // If cache empty, fetch then re-render
+    // Chain cache empty — fetch regardless of whether threads are cached.
+    // (_threadsCache may be populated from the Threads tab without chain data.)
     if (!_causalPathsCache || !_causalPathsCache.length) {
-        if (!_threadsCache || !_threadsCache.length) {
-            Promise.all([
-                fetch('/api/causal-links').then(r => r.json()),
-                fetch('/api/causal-paths').then(r => r.json()),
-                fetch('/api/signal-threads').then(r => r.json()),
-            ]).then(([linkData, pathData, threadData]) => {
-                _causalLinksCache = linkData.links || [];
-                _causalPathsCache = pathData.paths || [];
-                _threadsCache = threadData.threads || [];
-                _renderChainBoard();
-            }).catch(() => {});
-            return;
-        }
+        Promise.all([
+            fetch('/api/causal-links').then(r => r.json()),
+            fetch('/api/causal-paths').then(r => r.json()),
+            fetch('/api/signal-threads').then(r => r.json()),
+        ]).then(function(results) {
+            _causalLinksCache = results[0].links || [];
+            _causalPathsCache = results[1].paths || [];
+            _threadsCache     = results[2].threads || [];
+            _renderChainBoard();
+        }).catch(function() {});
+        return;
+    }
+
+    // Chains fetched but genuinely empty
+    if (!_causalPathsCache.length) {
         svg.append('text')
             .attr('x', container.clientWidth / 2).attr('y', container.clientHeight / 2)
             .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 14)
