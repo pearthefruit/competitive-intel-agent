@@ -174,18 +174,23 @@ function _labRenderKanban() {
             ? `<span class="lab-col-date-range">${escHtml(g.date_range)}</span>`
             : '';
 
+        const titleVal = escHtml(isAccepted ? g._accepted_thread_title : g.label);
         return `
             <div class="lab-kanban-col${colTypeClass}" data-lab-col-gi="${gi}">
                 <div class="lab-col-header">
-                    <input class="lab-col-name" value="${escHtml(isAccepted ? g._accepted_thread_title : g.label)}"
-                        ${isAccepted ? 'readonly' : ''}
-                        oninput="window._threadLabState.groups[${gi}].label=this.value" />
-                    <span class="lab-col-count" id="lab-cnt-${g.cluster_idx}">${g.signals.length}</span>
-                    ${cohHtml}
-                    <button class="lab-col-approve" title="${isOrganize ? 'Assign to thread' : 'Approve & split off'}" onclick="_labApproveCol(${gi})">✓</button>
-                    ${isOrganize
-                        ? `<button class="lab-col-dismiss-all" title="Dismiss all as noise" onclick="_labDismissCol(${gi})">🗑</button>`
-                        : `<button class="lab-col-toggle" title="Keep in original thread" onclick="_labToggleCol(${gi})">×</button>`}
+                    <div class="lab-col-title-row">
+                        <input class="lab-col-name" value="${titleVal}" title="${titleVal}"
+                            ${isAccepted ? 'readonly' : ''}
+                            oninput="window._threadLabState.groups[${gi}].label=this.value;this.title=this.value" />
+                    </div>
+                    <div class="lab-col-action-row">
+                        <span class="lab-col-count" id="lab-cnt-${g.cluster_idx}">${g.signals.length}</span>
+                        ${cohHtml}
+                        <button class="lab-col-approve" title="${isOrganize ? 'Assign to thread' : 'Approve & split off'}" onclick="_labApproveCol(${gi})">✓</button>
+                        ${isOrganize
+                            ? `<button class="lab-col-dismiss-all" title="Dismiss all as noise" onclick="_labDismissCol(${gi})">🗑</button>`
+                            : `<button class="lab-col-toggle" title="Keep in original thread" onclick="_labToggleCol(${gi})">×</button>`}
+                    </div>
                 </div>
                 ${suggBadge}
                 <div class="lab-col-terms">${escHtml(g.key_terms.slice(0,4).join(' · '))}${dateBadge}</div>
@@ -743,18 +748,25 @@ function _labUpdateSelectionBar() {
     }
     const state = window._threadLabState;
     if (!state) return;
-    const colBtns = state.groups.map((g, gi) =>
+    const isOrganize = state.mode === 'organize';
+
+    // In organize mode: thread search is the primary assignment tool — skip the
+    // per-column buttons (there can be 30+) and make the search box prominent.
+    // In split mode: show per-column buttons (typically 3-6 columns).
+    const colBtns = isOrganize ? '' : state.groups.map((g, gi) =>
         `<button class="lab-moveto-btn" onclick="_labMoveSelectedTo(${gi})">${escHtml(g.label.slice(0, 18))}</button>`
     ).join('');
-    const dismissBtn = state.mode === 'organize'
+
+    const dismissBtn = isOrganize
         ? `<button class="lab-moveto-btn" onclick="_labDismissSelected()" style="color:#ef4444">Dismiss</button>` : '';
+
     bar.innerHTML = `
         <span class="lab-sel-count">${_labSelected.size} selected</span>
-        <span style="font-size:9px;color:var(--text-muted)">→</span>
+        <span style="font-size:9px;color:var(--text-muted)">→ assign to:</span>
         ${colBtns}
         <span class="lab-thread-search-wrap">
             <input id="lab-thread-search" class="lab-thread-search" type="text"
-                placeholder="Find thread…" autocomplete="off"
+                placeholder="Search threads…" autocomplete="off"
                 oninput="_labThreadSearchFilter(this.value)"
                 onkeydown="_labThreadSearchKey(event)"
                 onfocus="_labThreadSearchFilter(this.value)" />

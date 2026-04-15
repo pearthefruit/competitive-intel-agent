@@ -5623,11 +5623,11 @@
 /* Thread search in selection bar */
 .lab-thread-search-wrap { position: relative; flex-shrink: 0; }
 .lab-thread-search {
-    background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 5px;
+    background: var(--bg-tertiary); border: 1px solid var(--accent); border-radius: 5px;
     color: var(--text-primary); font-size: 10px; padding: 3px 8px; outline: none;
-    width: 140px; transition: width 0.15s, border-color 0.15s;
+    width: 200px; transition: width 0.15s, border-color 0.15s;
 }
-.lab-thread-search:focus { width: 220px; border-color: var(--accent); }
+.lab-thread-search:focus { width: 280px; border-color: var(--purple); }
 .lab-thread-dropdown {
     display: none; position: absolute; top: 100%; left: 0; margin-top: 4px;
     width: 320px; max-height: 260px; overflow-y: auto;
@@ -5693,8 +5693,15 @@
 }
 
 .lab-col-header {
-    padding: 8px 10px 4px; display: flex; align-items: center; gap: 5px; flex-shrink: 0;
-    border-bottom: 1px solid var(--border);
+    padding: 6px 10px 4px; display: flex; flex-direction: column; gap: 3px;
+    flex-shrink: 0; border-bottom: 1px solid var(--border);
+}
+/* Title row: input spans full width so the thread name is fully visible */
+.lab-col-title-row { display: flex; align-items: center; width: 100%; }
+.lab-col-title-row .lab-col-name { width: 100%; }
+/* Action row: count · cohesion · buttons all small, below title */
+.lab-col-action-row {
+    display: flex; align-items: center; gap: 5px;
 }
 .lab-col-approve {
     flex-shrink: 0; background: none; border: none; color: var(--green);
