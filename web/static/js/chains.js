@@ -989,13 +989,19 @@ function _renderChainBoard() {
         Promise.all([
             fetch('/api/causal-links').then(r => r.json()),
             fetch('/api/causal-paths').then(r => r.json()),
-            fetch('/api/signal-threads').then(r => r.json()),
+            fetch('/api/signals/threads').then(r => r.json()),
+            fetch('/api/signals/threads/names').then(r => r.json()),
         ]).then(function(results) {
             _causalLinksCache = results[0].links || [];
             _causalPathsCache = results[1].paths || [];
-            _threadsCache     = results[2].threads || [];
+            var activeThreads = results[2].threads || [];
+            var activeIds = new Set(activeThreads.map(function(t) { return t.id; }));
+            (results[3].threads || []).forEach(function(nt) {
+                if (!activeIds.has(nt.id)) activeThreads.push(nt);
+            });
+            _threadsCache = activeThreads;
             _renderChainBoard();
-        }).catch(function() {});
+        }).catch(function(e) { console.warn('[chain-board] data load failed:', e); });
         return;
     }
 
