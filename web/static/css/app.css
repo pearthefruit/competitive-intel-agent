@@ -3846,20 +3846,32 @@
         #sig-tab-graph.active { display: flex !important; flex-direction: column; }
         #sig-tab-causal.active { display: flex !important; flex-direction: column; }
 
-        /* Chain Board view toggle + container */
-        .causal-view-bar { padding: 6px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-        .causal-view-btn { padding: 5px 14px; border-radius: 5px; border: 1px solid var(--border); background: none; color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-        .causal-view-btn:hover { color: var(--text-secondary); border-color: var(--text-muted); }
-        .causal-view-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
-        #causal-board-container { flex: 1; overflow: hidden; position: relative; display: none; }
-        #causal-board-container.active { display: flex; }
+        /* Board tab subtabs: Graph | Chains */
+        .board-subtab-bar { display: flex; align-items: center; gap: 4px; padding: 5px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+        .board-subtab-btn { padding: 4px 12px; border-radius: 5px; border: 1px solid var(--border); background: none; color: var(--text-muted); font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+        .board-subtab-btn:hover { color: var(--text-secondary); border-color: var(--text-muted); }
+        .board-subtab-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+        #sig-tab-graph.active { display: flex !important; flex-direction: column; }
+        #board-subtab-graph { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+        #board-subtab-chains { flex: 1; min-height: 0; display: none; position: relative; }
+
+        /* Chain Board (subway map) */
+        #causal-board-container { width: 100%; height: 100%; position: relative; display: flex; }
         .cb-node { transition: filter 0.15s; }
         .cb-node:hover { filter: brightness(1.4) drop-shadow(0 0 12px rgba(255,255,255,0.3)) !important; }
         .cb-node.cb-dimmed:hover { filter: brightness(0.6) drop-shadow(0 0 6px rgba(255,255,255,0.15)) !important; }
         #causal-board-controls { position: absolute; bottom: 12px; left: 12px; display: flex; gap: 4px; z-index: 5; }
         .cb-control-btn { height: 28px; padding: 0 10px; border-radius: 5px; background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-secondary); font-size: 10px; font-weight: 600; cursor: pointer; backdrop-filter: blur(8px); }
         .cb-control-btn:hover { border-color: var(--accent); color: var(--accent); }
-        #causal-board-legend { position: absolute; bottom: 12px; right: 12px; display: flex; gap: 8px; font-size: 10px; color: var(--text-muted); z-index: 5; }
+        /* Chain legend (bottom-right, vertical stack) */
+        #causal-board-legend { position: absolute; bottom: 12px; right: 12px; display: flex; flex-direction: column; gap: 4px; z-index: 5; max-width: 200px; }
+        .cb-legend-item { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: rgba(10,10,10,0.8); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; transition: opacity 0.15s; backdrop-filter: blur(8px); }
+        .cb-legend-item:hover { border-color: var(--text-muted); }
+        .cb-legend-item.cb-legend-dimmed { opacity: 0.35; }
+        .cb-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .cb-legend-name { font-size: 10px; color: var(--text-secondary); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        /* Tooltip */
+        #chain-node-tooltip { display: none; position: absolute; pointer-events: none; z-index: 20; padding: 7px 10px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; color: var(--text-primary); max-width: 260px; line-height: 1.45; box-shadow: 0 4px 20px rgba(0,0,0,0.55); }
 
         /* ── Causal View Layout ── */
         .causal-layout { display: flex; height: 100%; overflow: hidden; }

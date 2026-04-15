@@ -1460,6 +1460,9 @@ let _boardSelectedIds = new Set(); // shift-click multi-select for narrative cre
 let _expandedNarratives = new Set(); // narrative IDs that are expanded to show child threads
 
 function loadBoard() {
+    // Restore Board subtab (Graph | Chains) — defined in chains.js
+    if (typeof _restoreBoardSubtab === 'function') _restoreBoardSubtab();
+
     // Collapse detail pane in board view for full width
     const detailPane = document.getElementById('signals-detail');
     if (detailPane && !_activeThreadId && !_activeNarrativeId) detailPane.style.display = 'none';

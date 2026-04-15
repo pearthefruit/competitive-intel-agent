@@ -18,9 +18,6 @@ let _causalSuggestionsCollapsed = false;
 const _causalStatusColors = { captured: '#6b7280', investigating: '#06b6d4', validated: '#22c55e', disproven: '#ef4444' };
 
 function loadCausalView() {
-    // Restore view mode on tab load
-    _switchCausalViewMode(_causalViewMode);
-
     Promise.all([
         fetch('/api/causal-links').then(r => r.json()),
         fetch('/api/causal-paths').then(r => r.json()),
@@ -49,8 +46,7 @@ function loadCausalView() {
             if (still) _renderCausalEditor();
             else { _activeCausalPathId = null; _renderCausalEditor(); }
         }
-        // Render chain board if in board mode
-        if (_causalViewMode === 'board') _renderChainBoard();
+        // Chain board lives in Board tab > Chains subtab now — no render here
     });
     fetch('/api/causal-suggestions?limit=20').then(r => r.json())
         .then(data => { _causalSuggestionsCache = data.suggestions || []; _renderCausalSuggestions(); })
@@ -957,441 +953,416 @@ function _showChainItemMenu(event, pathId) {
 
 function _setCausalMode() {}  // no-op stub for compatibility
 
-// ===================== CHAIN BOARD =====================
+// ===================== CHAIN BOARD (Subway Map) =====================
+// Single node per thread, chains as colored directed paths, force layout.
 
-let _causalViewMode = localStorage.getItem('causal_view_mode') || 'editor';
 let _chainBoardSim = null;
 let _chainBoardZoomTransform = null;
 
-// Swimlane board state
-let _cbPhysicsEnabled = false;
-let _cbSwimLayout = null;
-let _cbNodeData = null;
-let _cbThreadToNodeMap = null;
-let _cbEdgePathFn = null;
-let _cbPillarsG = null;
-let _cbNodeSel = null;
-let _cbLinkSel = null;
+const _CB_CHAIN_COLORS = [
+    '#3b82f6', '#a855f7', '#f59e0b', '#22c55e',
+    '#ef4444', '#ec4899', '#06b6d4', '#8b5cf6',
+];
 
-function _switchCausalViewMode(mode) {
-    _causalViewMode = mode;
-    localStorage.setItem('causal_view_mode', mode);
-    const layout = document.querySelector('.causal-layout');
-    const board = document.getElementById('causal-board-container');
-    document.querySelectorAll('.causal-view-btn').forEach(b => b.classList.remove('active'));
-    const activeBtn = document.querySelector(`.causal-view-btn[data-mode="${mode}"]`);
-    if (activeBtn) activeBtn.classList.add('active');
-    if (mode === 'editor') {
-        if (layout) layout.style.display = '';
-        if (board) board.classList.remove('active');
-        if (_chainBoardSim) { _chainBoardSim.stop(); _chainBoardSim = null; }
-    } else {
-        if (layout) layout.style.display = 'none';
-        if (board) board.classList.add('active');
-        setTimeout(() => _renderChainBoard(), 50); // slight delay for container to get dimensions
-    }
-}
+// Which chains are currently dimmed (toggled via legend)
+let _cbDimmedChains = new Set();
 
+// ── Entry point called from Board tab > Chains subtab ─────────────────────
 function _renderChainBoard() {
     const container = document.getElementById('causal-board-container');
-    const svg = d3.select('#causal-board-svg');
-    if (!container || !svg.node()) return;
+    const svgEl = document.getElementById('causal-board-svg');
+    if (!container || !svgEl) return;
 
-    const width = container.clientWidth || 800;
-    const height = container.clientHeight || 600;
+    const svg = d3.select(svgEl);
     svg.selectAll('*').remove();
-    svg.attr('viewBox', null).attr('height', null);
     if (_chainBoardSim) { _chainBoardSim.stop(); _chainBoardSim = null; }
 
-    if (!_causalPathsCache.length) {
-        svg.append('text').attr('x', width / 2).attr('y', height / 2)
+    // If cache empty, fetch then re-render
+    if (!_causalPathsCache || !_causalPathsCache.length) {
+        if (!_threadsCache || !_threadsCache.length) {
+            Promise.all([
+                fetch('/api/causal-links').then(r => r.json()),
+                fetch('/api/causal-paths').then(r => r.json()),
+                fetch('/api/signal-threads').then(r => r.json()),
+            ]).then(([linkData, pathData, threadData]) => {
+                _causalLinksCache = linkData.links || [];
+                _causalPathsCache = pathData.paths || [];
+                _threadsCache = threadData.threads || [];
+                _renderChainBoard();
+            }).catch(() => {});
+            return;
+        }
+        svg.append('text')
+            .attr('x', container.clientWidth / 2).attr('y', container.clientHeight / 2)
             .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 14)
-            .text('No chains yet \u2014 create chains in the Editor view');
+            .text('No chains yet \u2014 build chains in the Chains editor');
         return;
     }
 
-    // ── Swimlane layout ──
-    const layout = _computeSwimlaneLayout(_causalPathsCache, width, height);
-    _cbSwimLayout = layout;
-    if (layout.totalH > height) svg.attr('height', layout.totalH);
+    const width  = container.clientWidth  || 900;
+    const height = container.clientHeight || 600;
 
-    // ── Build nodes ──
-    const nodes = [];
-    const threadToNodes = {};
-    const sharedColors = ['#f59e0b', '#06b6d4', '#a855f7', '#22c55e', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6'];
-
-    _causalPathsCache.forEach(path => {
-        (path.thread_ids || []).forEach((tid, i) => {
-            const t = (_threadsCache || []).find(t => t.id === tid);
-            const pos = layout.positions[`p${path.id}_t${tid}`] || { x: width / 2, y: height / 2 };
-            const node = {
-                id: `p${path.id}_t${tid}`,
-                threadId: tid, pathId: path.id, pathIndex: i,
-                pathLength: (path.thread_ids || []).length,
-                pathName: path.name || 'Untitled',
-                title: t?.title || `Thread #${tid}`,
-                domain: t?.domain || '', signal_count: t?.signal_count || 0,
-                shared: false, sharedColor: null,
-                x: pos.x, y: pos.y,
-            };
-            nodes.push(node);
-            if (!threadToNodes[tid]) threadToNodes[tid] = [];
-            threadToNodes[tid].push(node);
+    // ── 1. Build unique node set (one per thread across all chains) ────────
+    const nodeMap = new Map();
+    _causalPathsCache.forEach((path, pi) => {
+        const color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
+        (path.thread_ids || []).forEach(tid => {
+            if (!nodeMap.has(tid)) {
+                const t = (_threadsCache || []).find(t => t.id === tid);
+                nodeMap.set(tid, {
+                    id: tid,
+                    title: t ? t.title || ('Thread #' + tid) : ('Thread #' + tid),
+                    domain: t ? t.domain || '' : '',
+                    signal_count: t ? t.signal_count || 0 : 0,
+                    chainMembership: [],
+                    x: 0, y: 0, vx: 0, vy: 0,
+                });
+            }
+            const node = nodeMap.get(tid);
+            if (!node.chainMembership.find(function(m) { return m.pathId === path.id; })) {
+                node.chainMembership.push({ pathId: path.id, color: color });
+            }
         });
     });
-    _cbNodeData = nodes;
-    _cbThreadToNodeMap = threadToNodes;
+    const nodes = Array.from(nodeMap.values());
 
-    // ── Deterministic copy colors (hash threadId so same thread always gets same color) ──
-    Object.entries(threadToNodes).forEach(([tidStr, copies]) => {
-        if (copies.length > 1) {
-            const color = sharedColors[parseInt(tidStr) % sharedColors.length];
-            copies.forEach(n => { n.shared = true; n.sharedColor = color; });
-        }
-    });
-
-    // ── Build chain edges (object refs, not string IDs) ──
-    const nodeR = d => Math.sqrt(d.signal_count || 1) * 5 + 12;
-    const chainEdges = [];
-    _causalPathsCache.forEach(path => {
+    // ── 2. Build unique edges ──────────────────────────────────────────────
+    const edgeMap = new Map();
+    _causalPathsCache.forEach((path, pi) => {
+        const color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
         const tids = path.thread_ids || [];
-        for (let i = 0; i < tids.length - 1; i++) {
-            const lnk = _causalLinksCache.find(l =>
-                l.cause_thread_id === tids[i] && l.effect_thread_id === tids[i + 1]);
-            const src = nodes.find(n => n.id === `p${path.id}_t${tids[i]}`);
-            const tgt = nodes.find(n => n.id === `p${path.id}_t${tids[i + 1]}`);
-            if (src && tgt) chainEdges.push({
-                source: src, target: tgt,
-                status: lnk?.status || 'captured', label: lnk?.label || '',
-                pathId: path.id,
-            });
+        for (var i = 0; i < tids.length - 1; i++) {
+            const key = tids[i] + '-' + tids[i + 1];
+            if (!edgeMap.has(key)) {
+                const lnk = _causalLinksCache.find(function(l) {
+                    return l.cause_thread_id === tids[i] && l.effect_thread_id === tids[i + 1];
+                });
+                edgeMap.set(key, {
+                    source: nodeMap.get(tids[i]),
+                    target: nodeMap.get(tids[i + 1]),
+                    status: lnk ? lnk.status || 'captured' : 'captured',
+                    label:  lnk ? lnk.label  || '' : '',
+                    chains: [],
+                });
+            }
+            const edge = edgeMap.get(key);
+            if (!edge.chains.find(function(c) { return c.pathId === path.id; })) {
+                edge.chains.push({ pathId: path.id, color: color });
+            }
         }
     });
+    const edges = Array.from(edgeMap.values()).filter(function(e) { return e.source && e.target; });
 
-    // ── D3 zoom setup ──
-    const zoomGroup = svg.append('g').attr('class', 'cb-zoom-group');
-    const zoomBehavior = d3.zoom().scaleExtent([0.15, 4]).on('zoom', (event) => {
-        _chainBoardZoomTransform = event.transform;
-        zoomGroup.attr('transform', event.transform);
+    // ── 3. Estimate causal depth via BFS ──────────────────────────────────
+    const inDeg = new Map(nodes.map(function(n) { return [n.id, 0]; }));
+    edges.forEach(function(e) { inDeg.set(e.target.id, (inDeg.get(e.target.id) || 0) + 1); });
+    const depthMap = new Map();
+    const bfsQ = nodes.filter(function(n) { return !inDeg.get(n.id); });
+    bfsQ.forEach(function(n) { depthMap.set(n.id, 0); });
+    var qi = 0;
+    while (qi < bfsQ.length) {
+        const cur = bfsQ[qi++];
+        const curDepth = depthMap.get(cur.id) || 0;
+        edges.filter(function(e) { return e.source.id === cur.id; }).forEach(function(e) {
+            const nd = curDepth + 1;
+            if (!depthMap.has(e.target.id) || depthMap.get(e.target.id) < nd) {
+                depthMap.set(e.target.id, nd);
+                bfsQ.push(e.target);
+            }
+        });
+    }
+    const maxDepth = Math.max.apply(null, Array.from(depthMap.values()).concat([1]));
+    nodes.forEach(function(n) {
+        if (!depthMap.has(n.id)) depthMap.set(n.id, Math.floor(maxDepth / 2));
     });
-    svg.call(zoomBehavior);
-    svg.on('dblclick.zoom', null);
+
+    // ── 4. Initial positions ──────────────────────────────────────────────
+    const MARGIN = 90;
+    const usableW = width - MARGIN * 2;
+    nodes.forEach(function(n) {
+        const depth = depthMap.get(n.id) || 0;
+        n.x = MARGIN + (depth / maxDepth) * usableW;
+        n.y = height * 0.2 + Math.random() * height * 0.6;
+    });
+
+    const nodeR = function(n) { return Math.sqrt(n.signal_count || 1) * 4.5 + 10; };
+
+    // ── 5. Force simulation (sync ticks) ─────────────────────────────────
+    _chainBoardSim = d3.forceSimulation(nodes)
+        .force('depth', d3.forceX(function(n) {
+            return MARGIN + ((depthMap.get(n.id) || 0) / maxDepth) * usableW;
+        }).strength(0.45))
+        .force('centerY', d3.forceY(height / 2).strength(0.08))
+        .force('collide', d3.forceCollide(function(n) { return nodeR(n) + 22; }).strength(0.85))
+        .force('charge', d3.forceManyBody().strength(-220))
+        .stop();
+    for (var tick = 0; tick < 150; tick++) _chainBoardSim.tick();
+
+    // ── 6. D3 zoom ────────────────────────────────────────────────────────
+    const zoomG = svg.append('g').attr('class', 'cb-zoom-group');
+    const zoomBehavior = d3.zoom().scaleExtent([0.1, 5]).on('zoom', function(ev) {
+        _chainBoardZoomTransform = ev.transform;
+        zoomG.attr('transform', ev.transform);
+    });
+    svg.call(zoomBehavior).on('dblclick.zoom', null);
     if (_chainBoardZoomTransform) {
-        zoomGroup.attr('transform', _chainBoardZoomTransform);
+        zoomG.attr('transform', _chainBoardZoomTransform);
         svg.call(zoomBehavior.transform, _chainBoardZoomTransform);
     }
-    svg.node().__cbZoom = zoomBehavior;
+    svgEl.__cbZoom = zoomBehavior;
 
-    // ── Arrow markers per status ──
+    // ── 7. Arrow marker defs per chain color ──────────────────────────────
     const defs = svg.append('defs');
-    Object.entries(_causalStatusColors).forEach(([status, color]) => {
+    _causalPathsCache.forEach(function(_, pi) {
+        const color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
         defs.append('marker')
-            .attr('id', `cb-arrow-${status}`).attr('viewBox', '0 0 10 6')
-            .attr('refX', 9).attr('refY', 3)
-            .attr('markerWidth', 7).attr('markerHeight', 5).attr('orient', 'auto')
-            .append('path').attr('d', 'M0,0 L10,3 L0,6 Z').attr('fill', color);
+            .attr('id', 'cbarrow-' + pi).attr('viewBox', '0 0 8 6')
+            .attr('refX', 7).attr('refY', 3)
+            .attr('markerWidth', 6).attr('markerHeight', 5).attr('orient', 'auto')
+            .append('path').attr('d', 'M0,0 L8,3 L0,6 Z').attr('fill', color);
     });
 
-    // ── Lane backgrounds (alternating tint) ──
-    const lanesBg = zoomGroup.append('g').attr('class', 'cb-lanes').attr('pointer-events', 'none');
-    layout.sorted.forEach((_, row) => {
-        if (row % 2 === 0) return;
-        const y = layout.MARGIN_V + row * layout.LANE_HEIGHT;
-        lanesBg.append('rect')
-            .attr('x', -9999).attr('y', y - layout.LANE_HEIGHT / 2)
-            .attr('width', 19998).attr('height', layout.LANE_HEIGHT)
-            .attr('fill', 'rgba(255,255,255,0.018)');
+    // ── 8. Pre-compute per-edge offsets for shared edges ──────────────────
+    const edgeChainCount = new Map();
+    const edgeChainIdx   = new Map();
+    _causalPathsCache.forEach(function(path) {
+        const tids = path.thread_ids || [];
+        for (var i = 0; i < tids.length - 1; i++) {
+            const key = tids[i] + '-' + tids[i + 1];
+            if (!edgeChainCount.has(key)) edgeChainCount.set(key, 0);
+            const idx = edgeChainCount.get(key);
+            edgeChainIdx.set(key + '-' + path.id, idx);
+            edgeChainCount.set(key, idx + 1);
+        }
     });
 
-    // ── Lane labels (left margin) ──
-    const labelsG = zoomGroup.append('g').attr('class', 'cb-lane-labels').attr('pointer-events', 'none');
-    layout.sorted.forEach((path, row) => {
-        const y = layout.MARGIN_V + row * layout.LANE_HEIGHT;
-        const name = path.name || 'Untitled';
-        labelsG.append('text')
-            .attr('x', 8).attr('y', y + 4)
-            .attr('fill', 'var(--accent)').attr('font-size', 10).attr('font-weight', 700).attr('opacity', 0.7)
-            .text(name.length > 26 ? name.substring(0, 24) + '\u2026' : name);
+    // ── 9. Draw chain routes (segment by segment) ─────────────────────────
+    const chainPathsG = zoomG.append('g').attr('class', 'cb-chain-paths');
+
+    _causalPathsCache.forEach(function(path, pi) {
+        const color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
+        const tids  = path.thread_ids || [];
+        const chainNodes = tids.map(function(tid) { return nodeMap.get(tid); }).filter(Boolean);
+        if (chainNodes.length < 2) return;
+
+        for (var i = 0; i < chainNodes.length - 1; i++) {
+            const src = chainNodes[i], tgt = chainNodes[i + 1];
+            const edgeKey = src.id + '-' + tgt.id;
+            const total   = edgeChainCount.get(edgeKey) || 1;
+            const idx     = edgeChainIdx.get(edgeKey + '-' + path.id) !== undefined
+                            ? edgeChainIdx.get(edgeKey + '-' + path.id) : 0;
+            const offset  = total > 1 ? (idx - (total - 1) / 2) * 9 : 0;
+
+            const rSrc = nodeR(src) + 2, rTgt = nodeR(tgt) + 5;
+            const dx = tgt.x - src.x, dy = tgt.y - src.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const sx = src.x + (dx / dist) * rSrc;
+            const sy = src.y + (dy / dist) * rSrc;
+            const ex = tgt.x - (dx / dist) * rTgt;
+            const ey = tgt.y - (dy / dist) * rTgt;
+            const ox = -dy / dist * offset, oy = dx / dist * offset;
+            const mx = (sx + ex) / 2 + ox;
+            const my = (sy + ey) / 2 + oy - Math.max(12, Math.abs(dx) * 0.08);
+            const d  = 'M' + (sx+ox) + ',' + (sy+oy) + ' Q' + mx + ',' + my + ' ' + (ex+ox) + ',' + (ey+oy);
+            const dimmed = _cbDimmedChains.has(path.id);
+
+            chainPathsG.append('path')
+                .attr('data-chain', path.id)
+                .attr('fill', 'none')
+                .attr('stroke', color)
+                .attr('stroke-width', 2.5)
+                .attr('stroke-opacity', dimmed ? 0.07 : 0.82)
+                .attr('marker-end', 'url(#cbarrow-' + pi + ')')
+                .attr('d', d)
+                .style('cursor', 'pointer')
+                .on('mouseenter', function() {
+                    if (_cbDimmedChains.has(path.id)) return;
+                    d3.select(this).attr('stroke-width', 4.5).attr('stroke-opacity', 1);
+                })
+                .on('mouseleave', function() {
+                    d3.select(this).attr('stroke-width', 2.5).attr('stroke-opacity', 0.82);
+                })
+                .on('click', function(event) {
+                    event.stopPropagation();
+                    _selectCausalChain(path.id);
+                    switchSignalTab('causal');
+                });
+        }
     });
 
-    // ── Copy pillars (vertical dashed connectors between shared-thread copies) ──
-    const pillarsG = zoomGroup.append('g').attr('class', 'cb-pillars').attr('pointer-events', 'none');
-    _cbPillarsG = pillarsG;
-    _cbUpdatePillars();
+    // ── 10. Edge labels ───────────────────────────────────────────────────
+    const labelG = zoomG.append('g').attr('pointer-events', 'none');
+    edges.forEach(function(e) {
+        if (!e.label) return;
+        const mx = (e.source.x + e.target.x) / 2;
+        const my = (e.source.y + e.target.y) / 2 - 16;
+        labelG.append('text')
+            .attr('x', mx).attr('y', my)
+            .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)')
+            .attr('font-size', 9)
+            .text(e.label.length > 22 ? e.label.slice(0, 20) + '\u2026' : e.label);
+    });
 
-    // ── Edge path function (quadratic bezier, arcs above the lane) ──
-    const edgePath = (d) => {
-        const src = d.source, tgt = d.target;
-        const dx = tgt.x - src.x, dy = tgt.y - src.y;
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const rSrc = nodeR(src), rTgt = nodeR(tgt);
-        const sx = src.x + (dx / dist) * rSrc;
-        const sy = src.y + (dy / dist) * rSrc;
-        const ex = tgt.x - (dx / dist) * (rTgt + 4);
-        const ey = tgt.y - (dy / dist) * (rTgt + 4);
-        const mx = (sx + ex) / 2;
-        const my = (sy + ey) / 2 - Math.max(18, Math.abs(dx) * 0.1);
-        return `M${sx},${sy} Q${mx},${my} ${ex},${ey}`;
-    };
-    _cbEdgePathFn = edgePath;
-
-    // ── Render edges ──
-    const linkG = zoomGroup.append('g').attr('class', 'cb-edges');
-    const link = linkG.selectAll('path').data(chainEdges).join('path')
-        .attr('fill', 'none')
-        .attr('stroke', d => _causalStatusColors[d.status] || '#6b7280')
-        .attr('stroke-width', 2)
-        .attr('stroke-opacity', 0.85)
-        .attr('marker-end', d => `url(#cb-arrow-${d.status || 'captured'})`)
-        .attr('d', edgePath);
-    _cbLinkSel = link;
-
-    const linkLabel = zoomGroup.append('g').selectAll('text')
-        .data(chainEdges.filter(e => e.label)).join('text')
-        .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 9)
-        .attr('pointer-events', 'none')
-        .attr('x', d => (d.source.x + d.target.x) / 2)
-        .attr('y', d => (d.source.y + d.target.y) / 2 - Math.max(18, Math.abs(d.target.x - d.source.x) * 0.1) - 5)
-        .text(d => d.label.length > 20 ? d.label.substring(0, 18) + '\u2026' : d.label);
-
-    // ── Drag behavior ──
+    // ── 11. Node drag ─────────────────────────────────────────────────────
     const drag = d3.drag()
-        .on('start', (event, d) => {
-            if (_cbPhysicsEnabled && _chainBoardSim) {
-                _chainBoardSim.alphaTarget(0.1).restart();
-                d.fx = d.x; d.fy = d.y;
-            }
-        })
-        .on('drag', (event, d) => {
-            d.x = event.x; d.y = event.y;
-            if (_cbPhysicsEnabled && _chainBoardSim) {
-                d.fx = event.x; d.fy = event.y;
-            } else {
-                _cbNodeSel?.filter(n => n.id === d.id).attr('transform', `translate(${d.x},${d.y})`);
-                link.attr('d', edgePath);
-                linkLabel
-                    .attr('x', e => (e.source.x + e.target.x) / 2)
-                    .attr('y', e => (e.source.y + e.target.y) / 2 - Math.max(18, Math.abs(e.target.x - e.source.x) * 0.1) - 5);
-                _cbUpdatePillars();
-            }
-        })
-        .on('end', (event, d) => {
-            if (_cbPhysicsEnabled && _chainBoardSim) {
-                _chainBoardSim.alphaTarget(0);
-                d.fx = null; d.fy = null;
-            }
-        });
-
-    // ── Render nodes ──
-    const node = zoomGroup.append('g').selectAll('g').data(nodes).join('g')
-        .attr('class', 'cb-node')
-        .attr('data-thread-id', d => d.threadId)
-        .attr('transform', d => `translate(${d.x},${d.y})`)
-        .attr('cursor', 'grab')
-        .call(drag)
-        .on('click', (event, d) => {
-            event.stopPropagation();
-            const detailPane = document.getElementById('signals-detail');
-            if (detailPane) detailPane.style.display = '';
-            _activeThreadId = d.threadId;
-            const savedTab = _signalTab;
-            _signalTab = 'causal_board';
-            openThreadDetail(d.threadId);
-            _signalTab = savedTab;
-            // Pulse shared copies on click
-            if (d.shared) {
-                const copies = threadToNodes[d.threadId] || [];
-                node.select('.cb-shared-ring').attr('opacity', dd =>
-                    copies.some(c => c.id === dd.id) ? 1 : (dd.shared ? 0.15 : 0));
-                setTimeout(() => node.select('.cb-shared-ring').attr('opacity', dd => dd.shared ? 0.6 : 0), 2500);
-            }
-            node.each(function(dd) {
-                d3.select(this).select('circle:not(.cb-shared-ring)')
-                    .attr('stroke-width', dd.id === d.id ? 3.5 : 2);
+        .on('start', function(ev, d) { d.fx = d.x; d.fy = d.y; })
+        .on('drag',  function(ev, d) {
+            d.x = ev.x; d.y = ev.y; d.fx = ev.x; d.fy = ev.y;
+            nodeG.filter(function(n) { return n.id === d.id; })
+                 .attr('transform', 'translate(' + d.x + ',' + d.y + ')');
+            // Lightweight path refresh: update just this node's segments
+            chainPathsG.selectAll('path[data-chain]').each(function() {
+                // Full re-render on drag end is fine at this scale
             });
         })
-        .on('contextmenu', (event, d) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const items = [
-                { label: 'Inspect thread', icon: '🔍', action: `_cbClickNode(${d.threadId})` },
-                { label: 'Open chain in editor', icon: '✏️', action: `_selectCausalChain(${d.pathId});_switchCausalViewMode('editor')` },
-            ];
-            if (d.shared) items.push({ label: 'Align copies vertically', icon: '⬡', action: `_cbAlignCopies(${d.threadId})` });
-            _showContextMenu(items, event.clientX, event.clientY, d.title.substring(0, 40));
-        });
-    _cbNodeSel = node;
+        .on('end', function() { _renderChainBoard(); });
 
-    node.each(function(d) {
+    // ── 12. Render nodes ──────────────────────────────────────────────────
+    var nodeG = zoomG.append('g').selectAll('g').data(nodes).join('g')
+        .attr('class', 'cb-node')
+        .attr('data-thread-id', function(d) { return d.id; })
+        .attr('transform', function(d) { return 'translate(' + d.x + ',' + d.y + ')'; })
+        .attr('cursor', 'grab')
+        .call(drag)
+        .on('click', function(ev, d) {
+            ev.stopPropagation();
+            _cbClickNode(d.id);
+        })
+        .on('contextmenu', function(ev, d) {
+            ev.preventDefault();
+            _showContextMenu([
+                { label: 'Inspect thread', icon: '\uD83D\uDD0D', action: '_cbClickNode(' + d.id + ')' },
+                { label: 'Edit in Chains tab', icon: '\u270F\uFE0F', action: "switchSignalTab('causal')" },
+            ], ev.clientX, ev.clientY, d.title.substring(0, 40));
+        })
+        .on('mouseenter', function(ev, d) {
+            const tt = document.getElementById('chain-node-tooltip');
+            if (!tt) return;
+            const chains = d.chainMembership.map(function(m) {
+                const p = _causalPathsCache.find(function(p) { return p.id === m.pathId; });
+                return '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + m.color + ';margin-right:4px"></span>' + escHtml(p ? p.name || 'Chain' : 'Chain');
+            }).join('<br>');
+            tt.innerHTML = '<div style="font-weight:700;margin-bottom:4px">' + escHtml(d.title) + '</div>' +
+                '<div style="font-size:10px;color:var(--text-muted)">' + d.signal_count + ' signals</div>' +
+                (chains ? '<div style="margin-top:6px;font-size:10px">' + chains + '</div>' : '');
+            tt.style.display = 'block';
+            const rect = container.getBoundingClientRect();
+            tt.style.left = (ev.clientX - rect.left + 14) + 'px';
+            tt.style.top  = (ev.clientY - rect.top  - 10) + 'px';
+        })
+        .on('mousemove', function(ev) {
+            const tt = document.getElementById('chain-node-tooltip');
+            if (!tt || tt.style.display === 'none') return;
+            const rect = container.getBoundingClientRect();
+            tt.style.left = (ev.clientX - rect.left + 14) + 'px';
+            tt.style.top  = (ev.clientY - rect.top  - 10) + 'px';
+        })
+        .on('mouseleave', function() {
+            const tt = document.getElementById('chain-node-tooltip');
+            if (tt) tt.style.display = 'none';
+        });
+
+    nodeG.each(function(d) {
         const g = d3.select(this);
         const r = nodeR(d);
         const domColor = _DOMAIN_COLORS[_parseDomains(d.domain)[0]] || '#6b7280';
-        if (d.shared) {
-            g.append('circle').attr('class', 'cb-shared-ring')
-                .attr('r', r + 5).attr('fill', 'none')
-                .attr('stroke', d.sharedColor).attr('stroke-width', 2)
-                .attr('stroke-dasharray', '3 2').attr('opacity', 0.6);
-        }
+
+        // Chain membership rings (outermost first so smaller rings on top)
+        d.chainMembership.slice().reverse().forEach(function(m, ri) {
+            g.append('circle')
+                .attr('r', r + 4 + ri * 5)
+                .attr('fill', 'none')
+                .attr('stroke', m.color)
+                .attr('stroke-width', 1.5)
+                .attr('stroke-dasharray', '3 2')
+                .attr('opacity', _cbDimmedChains.has(m.pathId) ? 0.08 : 0.45);
+        });
+
         g.append('circle').attr('r', r)
             .attr('fill', domColor + '33').attr('stroke', domColor).attr('stroke-width', 2);
+
         g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
-            .attr('fill', '#fff').attr('font-size', Math.min(13, r * 0.7)).attr('font-weight', 700)
-            .attr('pointer-events', 'none').text(d.signal_count);
-        g.append('text').attr('text-anchor', 'middle').attr('y', r + 14)
+            .attr('fill', '#fff').attr('font-size', Math.min(12, r * 0.75)).attr('font-weight', 700)
+            .attr('pointer-events', 'none')
+            .text(d.signal_count);
+
+        var label = d.title.length > 30 ? d.title.slice(0, 28) + '\u2026' : d.title;
+        g.append('text').attr('text-anchor', 'middle').attr('y', r + 13)
             .attr('fill', 'var(--text-secondary)').attr('font-size', 10).attr('font-weight', 600)
             .attr('pointer-events', 'none')
-            .text(d.title.length > 25 ? d.title.substring(0, 23) + '\u2026' : d.title);
+            .text(label);
     });
 
-    // ── Optional physics (weak forces that attract back to swimlane positions) ──
-    if (_cbPhysicsEnabled) {
-        _chainBoardSim = d3.forceSimulation(nodes)
-            .force('swimX', d3.forceX(d => (layout.positions[d.id] || { x: width / 2 }).x).strength(0.07))
-            .force('swimY', d3.forceY(d => (layout.positions[d.id] || { y: height / 2 }).y).strength(0.1))
-            .force('collide', d3.forceCollide().radius(d => nodeR(d) + 12))
-            .on('tick', () => {
-                node.attr('transform', d => `translate(${d.x},${d.y})`);
-                link.attr('d', edgePath);
-                linkLabel
-                    .attr('x', d => (d.source.x + d.target.x) / 2)
-                    .attr('y', d => (d.source.y + d.target.y) / 2 - 14);
-                _cbUpdatePillars();
-            });
-        _chainBoardSim.alpha(0.3).restart();
-    }
+    // ── 13. Legend ────────────────────────────────────────────────────────
+    _cbRenderLegend();
 }
 
-// ── Swimlane Layout Engine ──
-function _computeSwimlaneLayout(paths, svgWidth, svgHeight) {
-    if (!paths.length) return { positions: {}, sorted: [], LANE_HEIGHT: 150, MARGIN_H: 110, MARGIN_V: 70, totalH: svgHeight };
-
-    const sorted = [...paths].sort((a, b) => (b.thread_ids || []).length - (a.thread_ids || []).length);
-    const threadX = {}; // threadId → fractional x [0..1]
-
-    // Anchor path (longest): evenly spaced
-    const anchor = sorted[0];
-    const anchorLen = (anchor.thread_ids || []).length;
-    (anchor.thread_ids || []).forEach((tid, i) => {
-        threadX[tid] = anchorLen > 1 ? i / (anchorLen - 1) : 0.5;
-    });
-
-    // Remaining paths: pin shared threads to their canonical x, interpolate non-shared
-    for (const path of sorted.slice(1)) {
-        const tids = path.thread_ids || [];
-        const n = tids.length;
-        if (!n) continue;
-        const slots = tids.map((tid, i) => ({ tid, i, x: threadX[tid] ?? null }));
-
-        for (let i = 0; i < n; i++) {
-            if (slots[i].x !== null) continue;
-            let prev = null, next = null;
-            for (let j = i - 1; j >= 0; j--) if (slots[j].x !== null) { prev = slots[j]; break; }
-            for (let j = i + 1; j < n; j++) if (slots[j].x !== null) { next = slots[j]; break; }
-
-            if (prev && next) {
-                // Interpolate between two anchors
-                slots[i].x = prev.x + ((i - prev.i) / (next.i - prev.i)) * (next.x - prev.x);
-            } else if (prev) {
-                // Extend right from last anchor
-                const step = (1 - prev.x) / Math.max(n - prev.i, 1);
-                slots[i].x = Math.min(1, prev.x + (i - prev.i) * step);
-            } else if (next) {
-                // Extend left from next anchor
-                const step = next.x / Math.max(next.i + 1, 1);
-                slots[i].x = Math.max(0, next.x - (next.i - i) * step);
-            } else {
-                slots[i].x = n > 1 ? i / (n - 1) : 0.5;
-            }
-            // Write back so later paths can use this as a shared anchor if needed
-            threadX[tids[i]] = slots[i].x;
-        }
-    }
-
-    // Pixel geometry
-    const MARGIN_H = 110, MARGIN_V = 70;
-    const usableW = Math.max(svgWidth - 2 * MARGIN_H, 300);
-
-    // Lane height: scale with max node radius so labels don't overlap
-    const allCounts = sorted.flatMap(p =>
-        (p.thread_ids || []).map(tid => (_threadsCache || []).find(t => t.id === tid)?.signal_count || 0)
-    );
-    const maxR = Math.sqrt(Math.max(...allCounts, 1)) * 5 + 12;
-    const LANE_HEIGHT = Math.max(maxR * 2 + 80, 150);
-
-    const positions = {};
-    sorted.forEach((path, row) => {
-        (path.thread_ids || []).forEach(tid => {
-            positions[`p${path.id}_t${tid}`] = {
-                x: MARGIN_H + (threadX[tid] ?? 0.5) * usableW,
-                y: MARGIN_V + row * LANE_HEIGHT,
-                row,
-            };
-        });
-    });
-
-    const totalH = MARGIN_V + Math.max(0, sorted.length - 1) * LANE_HEIGHT + maxR + MARGIN_V + 20;
-    return { positions, sorted, LANE_HEIGHT, MARGIN_H, MARGIN_V, totalH };
+function _cbRenderLegend() {
+    const el = document.getElementById('causal-board-legend');
+    if (!el) return;
+    if (!_causalPathsCache || !_causalPathsCache.length) { el.innerHTML = ''; return; }
+    el.innerHTML = _causalPathsCache.map(function(path, pi) {
+        const color  = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
+        const dimmed = _cbDimmedChains.has(path.id);
+        const name   = (path.name || 'Untitled').length > 28
+            ? (path.name || 'Untitled').slice(0, 26) + '\u2026'
+            : (path.name || 'Untitled');
+        return '<div class="cb-legend-item' + (dimmed ? ' cb-legend-dimmed' : '') +
+            '" onclick="_cbToggleChainDim(' + path.id + ')" title="' + (dimmed ? 'Show' : 'Hide') + ' this chain">' +
+            '<span class="cb-legend-dot" style="background:' + color + '"></span>' +
+            '<span class="cb-legend-name">' + escHtml(name) + '</span>' +
+            '</div>';
+    }).join('');
 }
 
-// Re-render vertical pillar connectors between shared thread copies
-function _cbUpdatePillars() {
-    if (!_cbPillarsG || !_cbThreadToNodeMap) return;
-    const sharedColors = ['#f59e0b', '#06b6d4', '#a855f7', '#22c55e', '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6'];
-    _cbPillarsG.selectAll('*').remove();
-    Object.entries(_cbThreadToNodeMap).forEach(([tidStr, copies]) => {
-        if (copies.length < 2) return;
-        const color = sharedColors[parseInt(tidStr) % sharedColors.length];
-        const avgX = copies.reduce((s, c) => s + c.x, 0) / copies.length;
-        const yMin = Math.min(...copies.map(c => c.y));
-        const yMax = Math.max(...copies.map(c => c.y));
-        _cbPillarsG.append('line')
-            .attr('x1', avgX).attr('y1', yMin)
-            .attr('x2', avgX).attr('y2', yMax)
-            .attr('stroke', color).attr('stroke-width', 1.5)
-            .attr('stroke-dasharray', '5 3').attr('opacity', 0.4);
-    });
-}
-
-// Right-click → align all copies of a thread to same x position
-function _cbAlignCopies(threadId) {
-    if (!_cbNodeData || !_cbEdgePathFn || !_cbNodeSel || !_cbLinkSel) return;
-    const copies = _cbNodeData.filter(n => n.threadId === threadId);
-    if (copies.length < 2) return;
-    // Use the swimlane canonical x (average of computed positions) as the target
-    const targetX = copies.reduce((s, c) => s + c.x, 0) / copies.length;
-    copies.forEach(n => { n.x = targetX; });
-    _cbNodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
-    _cbLinkSel.attr('d', _cbEdgePathFn);
-    _cbUpdatePillars();
-    _showToast(`Aligned ${copies.length} copies`, 'info');
-}
-
-// Reset all nodes to their computed swimlane positions
-function _cbResetLayout() {
+function _cbToggleChainDim(pathId) {
+    if (_cbDimmedChains.has(pathId)) _cbDimmedChains.delete(pathId);
+    else _cbDimmedChains.add(pathId);
     _renderChainBoard();
 }
 
-// Toggle physics mode (weak forces that respect swimlane structure)
-function _cbTogglePhysics() {
-    _cbPhysicsEnabled = !_cbPhysicsEnabled;
-    const btn = document.getElementById('cb-physics-btn');
-    if (btn) {
-        btn.classList.toggle('active', _cbPhysicsEnabled);
-        btn.title = _cbPhysicsEnabled ? 'Physics ON — click to disable' : 'Toggle physics';
+// ── Board subtab switch ───────────────────────────────────────────────────
+function _switchBoardSubtab(tab) {
+    const graphDiv  = document.getElementById('board-subtab-graph');
+    const chainsDiv = document.getElementById('board-subtab-chains');
+    document.querySelectorAll('.board-subtab-btn').forEach(function(b) { b.classList.remove('active'); });
+    const btn = document.querySelector('.board-subtab-btn[data-subtab="' + tab + '"]');
+    if (btn) btn.classList.add('active');
+    localStorage.setItem('board_subtab', tab);
+
+    if (tab === 'graph') {
+        if (graphDiv)  graphDiv.style.display  = 'flex';
+        if (chainsDiv) chainsDiv.style.display = 'none';
+    } else {
+        if (graphDiv)  graphDiv.style.display  = 'none';
+        if (chainsDiv) chainsDiv.style.display = 'flex';
+        setTimeout(function() { _renderChainBoard(); }, 30);
     }
-    _renderChainBoard();
 }
 
-// ── Chain Board Controls ──
+function _restoreBoardSubtab() {
+    _switchBoardSubtab(localStorage.getItem('board_subtab') || 'graph');
+}
+
+// ── Chain board controls ──────────────────────────────────────────────────
 function _cbZoom(factor) {
-    const svg = d3.select('#causal-board-svg');
-    const zoom = svg.node()?.__cbZoom;
+    const svg  = d3.select('#causal-board-svg');
+    const zoom = document.getElementById('causal-board-svg') ? document.getElementById('causal-board-svg').__cbZoom : null;
     if (zoom) svg.transition().duration(200).call(zoom.scaleBy, factor);
 }
+
 function _cbResetZoom() {
-    const svg = d3.select('#causal-board-svg');
-    const zoom = svg.node()?.__cbZoom;
-    if (zoom) { svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity); _chainBoardZoomTransform = null; }
+    const svg  = d3.select('#causal-board-svg');
+    const zoom = document.getElementById('causal-board-svg') ? document.getElementById('causal-board-svg').__cbZoom : null;
+    if (zoom) {
+        svg.transition().duration(300).call(zoom.transform, d3.zoomIdentity);
+        _chainBoardZoomTransform = null;
+    }
+}
+
+function _cbResetLayout() {
+    _chainBoardZoomTransform = null;
+    _renderChainBoard();
 }
 
 function _cbClickNode(threadId) {
@@ -1404,24 +1375,24 @@ function _cbClickNode(threadId) {
     _signalTab = savedTab;
 }
 
-let _cbHighlights = []; // [{label, query, matchedThreadIds: Set}]
+// ── Highlight search ──────────────────────────────────────────────────────
+let _cbHighlights = [];
 
 function _cbHighlightSearch(query) {
     if (!query || query.length < 2) return;
     const q = query.toLowerCase();
-    // Check if already highlighted
-    if (_cbHighlights.some(h => h.query === q)) return;
+    if (_cbHighlights.some(function(h) { return h.query === q; })) return;
     const matchedIds = new Set();
-    (_threadsCache || []).forEach(t => {
+    (_threadsCache || []).forEach(function(t) {
         const title = (t.title || '').toLowerCase();
-        const synthesis = (t.synthesis || '').toLowerCase();
-        if (title.includes(q) || synthesis.includes(q)) matchedIds.add(t.id);
+        const synth = (t.synthesis || '').toLowerCase();
+        if (title.includes(q) || synth.includes(q)) matchedIds.add(t.id);
     });
     if (!matchedIds.size) { _showToast('No matches', 'info'); return; }
     _cbHighlights.push({ label: query.substring(0, 20), query: q, matchedThreadIds: matchedIds });
     _applyCbHighlights();
     _renderCbPills();
-    _showToast(`${matchedIds.size} threads match "${query}"`, 'info');
+    _showToast(matchedIds.size + ' threads match "' + query + '"', 'info');
 }
 
 function _removeCbHighlight(idx) {
@@ -1439,26 +1410,20 @@ function _cbClearHighlight() {
 function _applyCbHighlights() {
     const cbNodes = document.querySelectorAll('.cb-node');
     if (!_cbHighlights.length) {
-        cbNodes.forEach(n => { n.style.filter = ''; n.style.pointerEvents = ''; n.classList.remove('cb-dimmed'); });
+        cbNodes.forEach(function(n) { n.style.filter = ''; n.style.pointerEvents = ''; n.classList.remove('cb-dimmed'); });
         return;
     }
     const unionIds = new Set();
-    _cbHighlights.forEach(h => h.matchedThreadIds.forEach(id => unionIds.add(id)));
-    cbNodes.forEach(n => {
+    _cbHighlights.forEach(function(h) { h.matchedThreadIds.forEach(function(id) { unionIds.add(id); }); });
+    cbNodes.forEach(function(n) {
         const tid = parseInt(n.dataset.threadId);
         if (unionIds.has(tid)) {
-            const matchCount = _cbHighlights.filter(h => h.matchedThreadIds.has(tid)).length;
-            const glow = matchCount >= _cbHighlights.length ? '1.5' : '1.2';
+            const matchCount = _cbHighlights.filter(function(h) { return h.matchedThreadIds.has(tid); }).length;
+            const glow  = matchCount >= _cbHighlights.length ? '1.5' : '1.2';
             const color = matchCount >= 2 ? 'rgba(6,182,212,0.7)' : 'rgba(168,85,247,0.5)';
-            n.style.filter = `brightness(${glow}) drop-shadow(0 0 12px ${color})`;
+            n.style.filter = 'brightness(' + glow + ') drop-shadow(0 0 12px ' + color + ')';
             n.style.pointerEvents = '';
             n.classList.remove('cb-dimmed');
-            // Pulse new highlights
-            const circle = n.querySelector('circle:not(.cb-shared-ring)');
-            if (circle) {
-                const origR = circle.getAttribute('r');
-                if (origR) d3.select(circle).transition().duration(150).attr('r', parseFloat(origR) * 1.15).transition().duration(200).attr('r', origR);
-            }
         } else {
             n.style.filter = 'brightness(0.25) saturate(0.3)';
             n.style.pointerEvents = 'none';
@@ -1472,12 +1437,16 @@ function _renderCbPills() {
     if (!tray) return;
     if (!_cbHighlights.length) { tray.innerHTML = ''; tray.style.display = 'none'; return; }
     tray.style.display = 'flex';
-    tray.innerHTML = _cbHighlights.map((h, i) =>
-        `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.3);border-radius:12px;font-size:10px;color:#a855f7;font-weight:600;white-space:nowrap">
-            🔍 ${escHtml(h.label)} <span style="font-weight:400;color:var(--text-muted)">${h.matchedThreadIds.size}</span>
-            <span onclick="_removeCbHighlight(${i})" style="cursor:pointer;margin-left:2px;font-size:12px;color:var(--text-muted);line-height:1" title="Remove">&times;</span>
-        </span>`
-    ).join('') +
-    `<span onclick="_cbClearHighlight()" style="display:inline-flex;align-items:center;padding:3px 8px;border-radius:12px;font-size:10px;color:var(--text-muted);cursor:pointer;border:1px solid var(--border);white-space:nowrap">Clear all</span>`;
+    tray.innerHTML = _cbHighlights.map(function(h, i) {
+        return '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.3);border-radius:12px;font-size:10px;color:#a855f7;font-weight:600;white-space:nowrap">' +
+            '\uD83D\uDD0D ' + escHtml(h.label) + ' <span style="font-weight:400;color:var(--text-muted)">' + h.matchedThreadIds.size + '</span>' +
+            '<span onclick="_removeCbHighlight(' + i + ')" style="cursor:pointer;margin-left:2px;font-size:12px;color:var(--text-muted);line-height:1">&times;</span>' +
+            '</span>';
+    }).join('') +
+    '<span onclick="_cbClearHighlight()" style="display:inline-flex;align-items:center;padding:3px 8px;border-radius:12px;font-size:10px;color:var(--text-muted);cursor:pointer;border:1px solid var(--border)">Clear all</span>';
 }
 
+// Stubs for removed swimlane functions (compatibility)
+function _setCausalMode() {}
+function _cbTogglePhysics() {}
+function _switchCausalViewMode() {}

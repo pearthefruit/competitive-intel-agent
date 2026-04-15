@@ -425,6 +425,13 @@
                 </div>
                 <!-- Graph view -->
                 <div class="sig-tab-content" id="sig-tab-graph" style="padding:0">
+                    <!-- Board subtabs: Graph | Chains -->
+                    <div class="board-subtab-bar">
+                        <button class="board-subtab-btn active" data-subtab="graph" onclick="_switchBoardSubtab('graph')">Graph</button>
+                        <button class="board-subtab-btn" data-subtab="chains" onclick="_switchBoardSubtab('chains')">Chains</button>
+                    </div>
+                    <!-- Graph subtab -->
+                    <div id="board-subtab-graph" style="flex:1;min-height:0;display:flex;flex-direction:column">
                     <div id="sig-graph-container" style="width:100%;flex:1;position:relative;min-height:0">
                         <div class="signals-empty" id="signals-graph-empty">
                             <div style="font-size:32px;margin-bottom:12px">&#128476;</div>
@@ -469,6 +476,29 @@
                         </div>
                         <div id="timeline-content" style="height:120px;overflow-x:auto;overflow-y:hidden;padding:0 12px 8px"></div>
                     </div>
+                    </div><!-- end #board-subtab-graph -->
+                    <!-- Chains subtab -->
+                    <div id="board-subtab-chains" style="flex:1;min-height:0;display:none;position:relative">
+                        <div id="causal-board-container" style="width:100%;height:100%;position:relative;display:flex">
+                            <svg id="causal-board-svg" style="width:100%;height:100%"></svg>
+                            <!-- Highlight search (top-right) -->
+                            <div style="position:absolute;top:12px;right:12px;z-index:5;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+                                <input id="cb-search" type="text" placeholder="Highlight threads..." onkeydown="if(event.key==='Enter'){_cbHighlightSearch(this.value);this.value=''}else if(event.key==='Escape'){this.value='';this.blur();_cbClearHighlight()}" style="width:200px;padding:6px 10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:11px;outline:none;backdrop-filter:blur(8px)" />
+                                <div id="cb-highlight-pills" style="display:none;flex-wrap:wrap;gap:4px;max-width:360px;padding:6px 8px;background:rgba(10,10,10,0.85);backdrop-filter:blur(8px);border-radius:8px;border:1px solid var(--border)"></div>
+                            </div>
+                            <!-- Zoom + reset controls (bottom-left) -->
+                            <div id="causal-board-controls">
+                                <button class="cb-control-btn" onclick="_cbZoom(1.3)" title="Zoom in">+</button>
+                                <button class="cb-control-btn" onclick="_cbZoom(0.7)" title="Zoom out">-</button>
+                                <button class="cb-control-btn" onclick="_cbResetZoom()" title="Reset view">&#8634;</button>
+                                <button class="cb-control-btn" onclick="_cbResetLayout()" title="Re-run layout">&#9707;</button>
+                            </div>
+                            <!-- Chain legend (bottom-right) -->
+                            <div id="causal-board-legend"></div>
+                            <!-- Floating tooltip -->
+                            <div id="chain-node-tooltip" style="display:none;position:absolute;pointer-events:none;z-index:20;padding:6px 10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--text-primary);max-width:280px;line-height:1.4;box-shadow:0 4px 16px rgba(0,0,0,0.5)"></div>
+                        </div>
+                    </div>
                 </div>
                 <!-- Execution view -->
                 <div class="sig-tab-content" id="sig-tab-execution">
@@ -479,14 +509,9 @@
                     </div>
                 </div>
 
-                <!-- Causal/Temporal View — Redesigned 4-zone layout -->
+                <!-- Causal/Temporal View — Editor only (board view moved to Board tab > Chains subtab) -->
                 <div class="sig-tab-content" id="sig-tab-causal" style="padding:0">
-                    <!-- View toggle -->
-                    <div class="causal-view-bar">
-                        <button class="causal-view-btn active" data-mode="editor" onclick="_switchCausalViewMode('editor')">Editor</button>
-                        <button class="causal-view-btn" data-mode="board" onclick="_switchCausalViewMode('board')">Board</button>
-                    </div>
-                    <!-- Editor layout (existing) -->
+                    <!-- Editor layout -->
                     <div class="causal-layout">
                         <!-- LEFT: Thread Picker -->
                         <div class="causal-threads-panel" id="causal-thread-picker"
@@ -542,27 +567,6 @@
                                 </div>
                                 <div id="causal-suggestions-list"></div>
                             </div>
-                        </div>
-                    </div>
-                    <!-- Chain Board (D3 canvas, shown in board mode) -->
-                    <div id="causal-board-container">
-                        <svg id="causal-board-svg" style="width:100%;height:100%"></svg>
-                        <div style="position:absolute;top:12px;right:12px;z-index:5;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-                            <input id="cb-search" type="text" placeholder="Highlight threads..." onkeydown="if(event.key==='Enter'){_cbHighlightSearch(this.value);this.value=''}else if(event.key==='Escape'){this.value='';this.blur();_cbClearHighlight()}" style="width:200px;padding:6px 10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:11px;outline:none;backdrop-filter:blur(8px)" />
-                            <div id="cb-highlight-pills" style="display:none;flex-wrap:wrap;gap:4px;max-width:360px;padding:6px 8px;background:rgba(10,10,10,0.85);backdrop-filter:blur(8px);border-radius:8px;border:1px solid var(--border)"></div>
-                        </div>
-                        <div id="causal-board-controls">
-                            <button class="cb-control-btn" onclick="_cbZoom(1.3)" title="Zoom in">+</button>
-                            <button class="cb-control-btn" onclick="_cbZoom(0.7)" title="Zoom out">-</button>
-                            <button class="cb-control-btn" onclick="_cbResetZoom()" title="Reset view">&#8634;</button>
-                            <button class="cb-control-btn" onclick="_cbResetLayout()" title="Reset to swimlane layout">&#9707;</button>
-                            <button class="cb-control-btn" id="cb-physics-btn" onclick="_cbTogglePhysics()" title="Toggle physics">&#9883;</button>
-                        </div>
-                        <div id="causal-board-legend">
-                            <span><span style="display:inline-block;width:12px;height:2px;background:#6b7280;vertical-align:middle;margin-right:3px"></span>captured</span>
-                            <span><span style="display:inline-block;width:12px;height:2px;background:#06b6d4;vertical-align:middle;margin-right:3px"></span>investigating</span>
-                            <span><span style="display:inline-block;width:12px;height:2px;background:#22c55e;vertical-align:middle;margin-right:3px"></span>validated</span>
-                            <span><span style="display:inline-block;width:12px;height:2px;background:#ef4444;vertical-align:middle;margin-right:3px"></span>disproven</span>
                         </div>
                     </div>
                 </div>
