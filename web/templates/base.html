@@ -241,6 +241,7 @@
 
             <!-- Quick Capture panel (collapsed by default) -->
             <div id="quick-capture-panel" style="display:none;padding:8px 12px;border-bottom:1px solid var(--border)">
+                <input type="text" id="qc-title" placeholder="Title (optional — auto-extracted if blank)" style="width:100%;padding:6px 8px;margin-bottom:6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:11px;outline:none;box-sizing:border-box">
                 <textarea id="qc-paste" placeholder="Paste a LinkedIn post, tweet, or signal…" style="width:100%;min-height:80px;max-height:180px;padding:8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:10px;font-family:inherit;line-height:1.4;resize:vertical;outline:none;box-sizing:border-box"></textarea>
                 <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap">
                     <button class="qc-source active" data-source="linkedin" onclick="_qcSelectSource(this)" style="padding:2px 8px;font-size:9px;font-weight:600;border-radius:10px;border:1px solid rgba(168,85,247,0.3);background:rgba(168,85,247,0.1);color:var(--purple);cursor:pointer">LinkedIn</button>

@@ -39,7 +39,6 @@ function _labOpenModal(mode, url, threadId) {
                 <div class="lab-search-wrap">
                     <input id="lab-global-search" class="lab-search-bar" placeholder="Search to highlight… Enter to pin as group"
                         oninput="_labSearch(this.value)"
-                        onkeydown="if(event.key==='Enter'&&this.value.trim())_labAddKeywordGroup(this.value.trim())"
                         autocomplete="off" />
                     <button id="lab-select-all-btn" class="lab-select-all-btn" style="display:none"
                         onclick="_labSelectAllMatches()">Grab all</button>
@@ -52,6 +51,21 @@ function _labOpenModal(mode, url, threadId) {
             </div>
         </div>`;
     document.body.appendChild(modal);
+
+    // Enter in search bar creates keyword pill — set up here so it works
+    // even before kanban renders (independent of SortableJS CDN)
+    var searchInput = document.getElementById('lab-global-search');
+    if (searchInput) {
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                var val = e.target.value.trim();
+                if (val) {
+                    e.preventDefault();
+                    _labAddKeywordGroup(val);
+                }
+            }
+        });
+    }
 
     fetch(url)
         .then(r => r.json())

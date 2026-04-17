@@ -3058,6 +3058,7 @@ Return JSON: {{"title": "New directional title"}}"""
 
         source_tag = data.get("source", "linkedin")  # linkedin, twitter, manual, etc.
         source_url = (data.get("url") or "").strip()
+        user_title = (data.get("title") or "").strip()
         user_author = (data.get("author") or "").strip()
         user_author_context = (data.get("author_context") or "").strip()
         user_date = (data.get("published_at") or "").strip()
@@ -3154,9 +3155,12 @@ Return JSON: {{"title": "New directional title"}}"""
         clean_content = re.sub(r"\s*#\w+", "", parsed_content).strip()
 
         # ── Build signal dict ──────────────────────────────────────
-        title = clean_content[:120].split("\n")[0].rstrip(".")
-        if len(clean_content) > 120:
-            title = title.rsplit(" ", 1)[0] + "…"
+        if user_title:
+            title = user_title[:200]
+        else:
+            title = clean_content[:120].split("\n")[0].rstrip(".")
+            if len(clean_content) > 120:
+                title = title.rsplit(" ", 1)[0] + "…"
 
         domain = _classify_domain(title, clean_content)
         content_hash = hashlib.sha256(

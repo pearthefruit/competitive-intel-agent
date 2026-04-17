@@ -2167,6 +2167,7 @@ async function _qcCapture() {
                 content: ta.value,
                 source: _qcSource,
                 url: document.getElementById('qc-url').value.trim(),
+                title: (document.getElementById('qc-title').value || '').trim(),
             }),
         });
         const data = await res.json();
@@ -2175,6 +2176,7 @@ async function _qcCapture() {
             _qcRenderSession();
             _showToast('Captured' + (data.thread_assignment ? ' → ' + data.thread_assignment.thread_title : ''), 'success');
             ta.value = '';
+            document.getElementById('qc-title').value = '';
             document.getElementById('qc-url').value = '';
             document.getElementById('qc-parsed').style.display = 'none';
             btn.style.opacity = '0.4';

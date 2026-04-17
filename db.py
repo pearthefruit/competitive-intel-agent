@@ -2210,19 +2210,26 @@ def insert_signals_batch(conn, signals):
 
 
 def get_signals(conn, domain=None, days_back=7, limit=200):
-    """Fetch signals with optional domain filter and recency window."""
+    """Fetch signals with optional domain filter and recency window.
+
+    Includes thread assignment info (thread_id, thread_title) via subquery.
+    """
+    thread_sub = """(SELECT GROUP_CONCAT(sc.id || '::' || REPLACE(sc.title, '|||', ''), '|||')
+        FROM signal_cluster_items sci
+        JOIN signal_clusters sc ON sc.id = sci.cluster_id
+        WHERE sci.signal_id = s.id) AS thread_info"""
     if domain:
         rows = conn.execute(
-            """SELECT * FROM signals
-               WHERE domain = ? AND collected_at >= datetime('now', ?)
-               ORDER BY collected_at DESC LIMIT ?""",
+            f"""SELECT s.*, {thread_sub} FROM signals s
+               WHERE s.domain = ? AND s.collected_at >= datetime('now', ?)
+               ORDER BY s.collected_at DESC LIMIT ?""",
             (domain, f"-{days_back} days", limit),
         ).fetchall()
     else:
         rows = conn.execute(
-            """SELECT * FROM signals
-               WHERE collected_at >= datetime('now', ?)
-               ORDER BY collected_at DESC LIMIT ?""",
+            f"""SELECT s.*, {thread_sub} FROM signals s
+               WHERE s.collected_at >= datetime('now', ?)
+               ORDER BY s.collected_at DESC LIMIT ?""",
             (f"-{days_back} days", limit),
         ).fetchall()
     return [dict(r) for r in rows]

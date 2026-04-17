@@ -718,38 +718,131 @@ function _threadActionSearchMore(query, patternId) {
     });
 }
 
+function _parseThreadInfo(sig) {
+    if (!sig.thread_info) return [];
+    return sig.thread_info.split('|||').map(function(chunk) {
+        var parts = chunk.split('::');
+        return { id: parseInt(parts[0]), title: parts.slice(1).join('::') };
+    }).filter(function(t) { return t.id; });
+}
+
 function _threadActionSearchInternal(threadId, threadTitle) {
-    const btn = event.target.closest('button');
-    const actionsDiv = btn ? btn.parentElement : null;
+    var btn = event.target.closest('button');
+    var actionsDiv = btn ? btn.parentElement : null;
     if (btn) { btn.disabled = true; }
 
-    const stopWords = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'are', 'was', 'has', 'have', 'will', 'not', 'but', 'all', 'its', 'into', 'amid', 'over', 'under', 'about', 'between', 'after', 'before', 'during', 'while', 'amid']);
-    const keywords = threadTitle.toLowerCase()
+    var stopWords = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'are', 'was', 'has', 'have', 'will', 'not', 'but', 'all', 'its', 'into', 'amid', 'over', 'under', 'about', 'between', 'after', 'before', 'during', 'while', 'amid']);
+    var keywords = threadTitle.toLowerCase()
         .split(/[\s\-_,./]+/)
-        .filter(w => w.length >= 3 && !stopWords.has(w));
+        .filter(function(w) { return w.length >= 3 && !stopWords.has(w); });
 
     if (!keywords.length) {
-        if (btn) btn.textContent = '🔍 No keywords extracted';
+        if (btn) btn.textContent = 'No keywords extracted';
         return;
     }
 
-    const matches = (_signalsCache || []).filter(sig => {
-        const text = ((sig.title || '') + ' ' + (sig.body || '')).toLowerCase();
-        return keywords.some(kw => text.includes(kw));
-    }).slice(0, 15);
+    var matches = (_signalsCache || []).filter(function(sig) {
+        var text = ((sig.title || '') + ' ' + (sig.body || '')).toLowerCase();
+        return keywords.some(function(kw) { return text.includes(kw); });
+    });
 
-    if (btn) btn.textContent = matches.length ? `🔍 ${matches.length} matching signals found` : '🔍 No matches in existing signals';
+    // Sort: unassigned first, then assigned (exclude signals already in THIS thread)
+    matches = matches.filter(function(s) {
+        var threads = _parseThreadInfo(s);
+        return !threads.some(function(t) { return t.id === threadId; });
+    });
+    matches.sort(function(a, b) {
+        var aAssigned = a.thread_info ? 1 : 0;
+        var bAssigned = b.thread_info ? 1 : 0;
+        return aAssigned - bAssigned;
+    });
+    matches = matches.slice(0, 30);
+
+    var unassignedCount = matches.filter(function(s) { return !s.thread_info; }).length;
+    var label = matches.length
+        ? matches.length + ' matches (' + unassignedCount + ' unassigned)'
+        : 'No matches in existing signals';
+    if (btn) btn.textContent = label;
 
     if (!matches.length || !actionsDiv) return;
 
-    const resultsEl = document.createElement('div');
+    var resultsEl = document.createElement('div');
+    resultsEl.id = 'isig-results-' + threadId;
     resultsEl.style.cssText = 'margin-top:8px;padding:10px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px';
-    resultsEl.innerHTML = `<div style="font-weight:700;color:var(--text-secondary);margin-bottom:6px;font-size:10px">Matching existing signals</div>` +
-        matches.map(s => `<div id="isig-${threadId}-${s.id}" style="display:flex;align-items:start;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
-            <span style="font-size:11px;color:var(--text-secondary);line-height:1.4;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(s.title)}">${escHtml(s.title)}</span>
-            <button onclick="_addSingleSignalToThread(${s.id},${threadId},this)" style="flex-shrink:0;padding:2px 8px;background:var(--accent);border:none;border-radius:4px;color:white;font-size:10px;font-weight:700;cursor:pointer">+</button>
-        </div>`).join('');
+
+    var headerHtml = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+        '<span style="font-weight:700;color:var(--text-secondary);font-size:10px">Matching existing signals</span>' +
+        '<div style="display:flex;gap:4px">' +
+        '<button onclick="_isigSelectAll(' + threadId + ')" style="padding:2px 6px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:9px;cursor:pointer">Select all</button>' +
+        '<button id="isig-bulk-btn-' + threadId + '" onclick="_isigBulkAdd(' + threadId + ')" style="padding:2px 8px;background:var(--accent);border:none;border-radius:4px;color:white;font-size:9px;font-weight:700;cursor:pointer;display:none">Add selected</button>' +
+        '</div></div>';
+
+    var rowsHtml = matches.map(function(s) {
+        var threads = _parseThreadInfo(s);
+        var threadBadge = '';
+        if (threads.length) {
+            var names = threads.map(function(t) { return escHtml(t.title); }).join(', ');
+            threadBadge = '<span style="flex-shrink:0;padding:1px 5px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.2);border-radius:4px;color:var(--purple);font-size:8px;font-weight:600;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + names + '">' + names + '</span>';
+        } else {
+            threadBadge = '<span style="flex-shrink:0;padding:1px 5px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:4px;color:var(--green);font-size:8px;font-weight:600">unassigned</span>';
+        }
+        return '<div id="isig-' + threadId + '-' + s.id + '" style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border)">' +
+            '<input type="checkbox" class="isig-cb" data-sig-id="' + s.id + '" onchange="_isigUpdateBulk(' + threadId + ')" style="accent-color:var(--accent);cursor:pointer;flex-shrink:0">' +
+            '<span style="font-size:11px;color:var(--text-secondary);line-height:1.4;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(s.title) + '">' + escHtml(s.title) + '</span>' +
+            threadBadge +
+            '<button onclick="_addSingleSignalToThread(' + s.id + ',' + threadId + ',this)" style="flex-shrink:0;padding:2px 8px;background:var(--accent);border:none;border-radius:4px;color:white;font-size:10px;font-weight:700;cursor:pointer">+</button>' +
+        '</div>';
+    }).join('');
+
+    resultsEl.innerHTML = headerHtml + rowsHtml;
     actionsDiv.appendChild(resultsEl);
+}
+
+function _isigUpdateBulk(threadId) {
+    var container = document.getElementById('isig-results-' + threadId);
+    if (!container) return;
+    var checked = container.querySelectorAll('.isig-cb:checked');
+    var bulkBtn = document.getElementById('isig-bulk-btn-' + threadId);
+    if (bulkBtn) {
+        bulkBtn.style.display = checked.length > 0 ? '' : 'none';
+        bulkBtn.textContent = 'Add ' + checked.length + ' selected';
+    }
+}
+
+function _isigSelectAll(threadId) {
+    var container = document.getElementById('isig-results-' + threadId);
+    if (!container) return;
+    var boxes = container.querySelectorAll('.isig-cb');
+    var allChecked = Array.from(boxes).every(function(cb) { return cb.checked; });
+    boxes.forEach(function(cb) { cb.checked = !allChecked; });
+    _isigUpdateBulk(threadId);
+}
+
+function _isigBulkAdd(threadId) {
+    var container = document.getElementById('isig-results-' + threadId);
+    if (!container) return;
+    var checked = container.querySelectorAll('.isig-cb:checked');
+    var ids = Array.from(checked).map(function(cb) { return parseInt(cb.dataset.sigId); });
+    if (!ids.length) return;
+
+    var bulkBtn = document.getElementById('isig-bulk-btn-' + threadId);
+    if (bulkBtn) { bulkBtn.disabled = true; bulkBtn.textContent = 'Adding…'; }
+
+    fetch('/api/signals/review-queue/bulk-assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signal_ids: ids, thread_id: threadId })
+    }).then(function(r) { return r.json(); }).then(function() {
+        ids.forEach(function(id) {
+            var row = document.getElementById('isig-' + threadId + '-' + id);
+            if (row) { row.style.opacity = '0.4'; row.querySelector('.isig-cb').disabled = true; }
+        });
+        if (bulkBtn) { bulkBtn.textContent = 'Added ' + ids.length; bulkBtn.style.background = 'var(--green)'; }
+        loadSignals();
+        if (_signalTab === 'graph') loadBoard();
+    }).catch(function() {
+        if (bulkBtn) { bulkBtn.textContent = 'Failed'; bulkBtn.disabled = false; }
+    });
 }
 
 function _addSingleSignalToThread(sigId, threadId, btn) {
@@ -761,7 +854,11 @@ function _addSingleSignalToThread(sigId, threadId, btn) {
     }).then(r => r.json()).then(() => {
         if (btn) { btn.textContent = '✓'; btn.style.background = 'var(--green)'; }
         const row = document.getElementById(`isig-${threadId}-${sigId}`);
-        if (row) row.style.opacity = '0.5';
+        if (row) {
+            row.style.opacity = '0.4';
+            var cb = row.querySelector('.isig-cb');
+            if (cb) { cb.checked = false; cb.disabled = true; }
+        }
         loadSignals();
         if (_signalTab === 'graph') loadBoard();
     }).catch(() => {
