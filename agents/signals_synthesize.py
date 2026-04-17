@@ -91,10 +91,11 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
     existing_thread_ids = {t["id"] for t in existing_threads}
 
     assigned_count = 0
+    batch_signal_ids = {s["id"] for s in new_signals}
     for a in assignments:
         sig_id = a.get("signal_id")
         thread_id = a.get("thread_id")
-        if sig_id and thread_id and thread_id in existing_thread_ids:
+        if sig_id and thread_id and thread_id in existing_thread_ids and sig_id in batch_signal_ids:
             link_signal_to_cluster(conn, thread_id, sig_id)
             # Update last_signal_at
             conn.execute(
@@ -135,7 +136,8 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
         title = td.get("title", "").strip()
         if not title:
             continue
-        sig_ids = td.get("signal_ids", [])
+        # Filter to only signal IDs that are actually in this batch
+        sig_ids = [sid for sid in td.get("signal_ids", []) if isinstance(sid, int) and sid in batch_signal_ids]
         if len(sig_ids) < 2:
             continue
 
@@ -146,8 +148,7 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
             if SequenceMatcher(None, title_lower, etitle).ratio() >= 0.75:
                 print(f"[synthesize] Merging near-duplicate thread '{title}' into existing #{eid} '{etitle}'")
                 for sid in sig_ids:
-                    if isinstance(sid, int):
-                        link_signal_to_cluster(conn, eid, sid)
+                    link_signal_to_cluster(conn, eid, sid)
                 # Merge domains (e.g. economics + geopolitics → economics|geopolitics)
                 new_domain = td.get("domain", "")
                 merged_domain = merge_domains(existing_domains.get(eid, ""), new_domain)
@@ -156,7 +157,7 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
                     (merged_domain, eid),
                 )
                 existing_domains[eid] = merged_domain
-                assigned_count += len([s for s in sig_ids if isinstance(s, int)])
+                assigned_count += len(sig_ids)
                 merged = True
                 break
         if merged:
@@ -176,8 +177,7 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
         )
 
         for sid in sig_ids:
-            if isinstance(sid, int):
-                link_signal_to_cluster(conn, cluster_id, sid)
+            link_signal_to_cluster(conn, cluster_id, sid)
 
         # Add to existing titles so subsequent new threads in this batch also dedup
         existing_titles[cluster_id] = title_lower
@@ -186,7 +186,11 @@ def synthesize_into_threads(conn, new_signals, progress_cb=None):
 
     conn.commit()
 
-    unassigned = len(new_signals) - assigned_count - sum(len(td.get("signal_ids", [])) for td in new_thread_defs)
+    new_thread_signal_count = sum(
+        len([sid for sid in td.get("signal_ids", []) if isinstance(sid, int) and sid in batch_signal_ids])
+        for td in new_thread_defs
+    )
+    unassigned = len(new_signals) - assigned_count - new_thread_signal_count
     _cb("synthesize_complete", {
         "assigned": assigned_count,
         "new_threads": new_thread_count,
