@@ -227,19 +227,8 @@ function _filterSourceType(srcType) {
 }
 
 function _renderFeedFilters(tab) {
-    var container = document.getElementById('feed-filters');
-    if (!container) {
-        // Create the container after the search input
-        var bar = document.getElementById('signals-filter-bar');
-        if (!bar) return;
-        var el = document.createElement('div');
-        el.id = 'feed-filters';
-        el.style.cssText = 'display:flex;align-items:center;gap:4px;flex-shrink:0';
-        // Insert before the organize/review buttons (after search input)
-        var orgBtn = document.getElementById('organize-lab-btn');
-        bar.insertBefore(el, orgBtn);
-        container = el;
-    }
+    var container = document.getElementById('feed-filters-row');
+    if (!container) return;
 
     if (tab === 'raw') {
         container.innerHTML =
