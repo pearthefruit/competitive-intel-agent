@@ -4110,6 +4110,25 @@
             cursor: pointer; outline: none;
         }
 
+        /* Signal detail — thread assignments */
+        .sig-detail-thread-row {
+            display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            padding: 4px 0; border-bottom: 1px solid var(--border);
+        }
+        .sig-detail-thread-row:last-child { border-bottom: none; }
+        .sig-detail-thread-name {
+            font-size: 12px; color: var(--purple); font-weight: 600; cursor: pointer;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            flex: 1; min-width: 0;
+        }
+        .sig-detail-thread-name:hover { text-decoration: underline; }
+        .sig-detail-thread-remove {
+            flex-shrink: 0; padding: 2px 8px; font-size: 10px; font-weight: 600;
+            background: none; border: 1px solid rgba(239,68,68,0.3); border-radius: 4px;
+            color: var(--text-muted); cursor: pointer; transition: all 0.12s;
+        }
+        .sig-detail-thread-remove:hover { color: #ef4444; border-color: #ef4444; background: rgba(239,68,68,0.08); }
+
         .sig-thread-badges {
             display: flex; gap: 4px; flex-wrap: wrap; margin: 3px 0 1px;
         }

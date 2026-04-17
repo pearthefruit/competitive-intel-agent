@@ -1230,6 +1230,7 @@ function openSignalDetail(signalId) {
                     <span style="font-size:11px;color:var(--text-muted)">${escHtml(dateStr)}</span>
                 </div>
             </div>
+            <div id="sig-detail-threads-${s.id}" class="sig-detail-threads"></div>
             <div class="sig-detail-body-text" id="sig-detail-text-${s.id}">${s.body ? _formatBody(s.body) : '<span style="color:var(--text-muted);font-style:italic">No article text yet</span>'}</div>
             <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 ${s.url && (!s.body || s.body.length < 500) ? `<button id="sig-fetch-btn-${s.id}" onclick="fetchArticleText(${s.id})" style="padding:6px 14px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer">Load full article</button>` : ''}
@@ -1237,6 +1238,54 @@ function openSignalDetail(signalId) {
             </div>
         </div>
     `;
+
+    // Populate thread assignments section
+    _renderSignalDetailThreads(s);
+}
+
+function _renderSignalDetailThreads(s) {
+    var container = document.getElementById('sig-detail-threads-' + s.id);
+    if (!container) return;
+    var threads = typeof _parseThreadInfo === 'function' ? _parseThreadInfo(s) : [];
+    if (!threads.length) {
+        container.innerHTML = '<div style="padding:8px 20px;font-size:11px;color:var(--text-muted);font-style:italic">Unassigned</div>';
+        return;
+    }
+    container.innerHTML =
+        '<div style="padding:8px 20px;border-top:1px solid var(--border)">' +
+        '<div style="font-size:10px;font-weight:600;color:var(--text-muted);margin-bottom:6px">Assigned to</div>' +
+        threads.map(function(t) {
+            return '<div class="sig-detail-thread-row" data-thread-id="' + t.id + '">' +
+                '<span class="sig-detail-thread-name" onclick="openThreadDetail(' + t.id + ')" title="View thread">' + escHtml(t.title) + '</span>' +
+                '<button class="sig-detail-thread-remove" onclick="_unassignSignalFromThread(' + s.id + ',' + t.id + ')" title="Remove from this thread">Remove</button>' +
+            '</div>';
+        }).join('') +
+        '</div>';
+}
+
+function _unassignSignalFromThread(signalId, threadId) {
+    fetch('/api/signals/review-queue/unassign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signal_id: signalId, thread_id: threadId })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+        if (data.ok) {
+            // Update cache: remove this thread from the signal's thread_info
+            var cached = _signalsCache.find(function(x) { return x.id == signalId; });
+            if (cached && cached.thread_info) {
+                var parts = cached.thread_info.split('|||').filter(function(chunk) {
+                    return !chunk.startsWith(threadId + '::');
+                });
+                cached.thread_info = parts.length ? parts.join('|||') : null;
+            }
+            // Fade out the row in detail pane
+            var row = document.querySelector('.sig-detail-thread-row[data-thread-id="' + threadId + '"]');
+            if (row) { row.style.opacity = '0.3'; row.querySelector('.sig-detail-thread-remove').textContent = 'Removed'; }
+            // Re-render the feed card's thread badges
+            renderSignalFeed();
+            _showToast('Removed from thread', 'success');
+        }
+    }).catch(function() { _showToast('Failed to unassign', 'error'); });
 }
 
 function _editSignalTitle(signalId, h2El) {
