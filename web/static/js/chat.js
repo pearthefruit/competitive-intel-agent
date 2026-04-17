@@ -3094,7 +3094,7 @@ function _buildBriefingDashboard(content) {
             const badges = sources.map(s =>
                 _renderSourceBadge(s)
             ).join(' ');
-            rationaleHtml += `<div class="dash-rationale-entry"><div class="dash-rationale-label">${escHtml(d.label)}</div><div class="dash-rationale-text" onclick="this.classList.toggle('expanded')" title="Click to expand">${_stripCitations(sub.rationale)}</div>${badges ? `<div style="margin-top:4px">${badges}</div>` : ''}</div>`;
+            rationaleHtml += `<div class="dash-rationale-entry"><div class="dash-rationale-label">${escHtml(d.label)}</div><div class="dash-rationale-text expanded">${_stripCitations(sub.rationale)}</div>${badges ? `<div style="margin-top:4px">${badges}</div>` : ''}</div>`;
         }
     });
 
