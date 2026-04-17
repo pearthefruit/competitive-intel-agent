@@ -227,8 +227,16 @@ function _filterSourceType(srcType) {
 }
 
 function _renderFeedFilters(tab) {
-    var container = document.getElementById('feed-filters-row');
-    if (!container) return;
+    var row = document.getElementById('feed-filters-row');
+    if (!row) return;
+    // Use a stable sub-element for pills so we don't clobber organize/review buttons
+    var container = document.getElementById('feed-filter-pills');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'feed-filter-pills';
+        container.style.cssText = 'display:flex;align-items:center;gap:6px';
+        row.insertBefore(container, row.firstChild);
+    }
 
     if (tab === 'raw') {
         container.innerHTML =
