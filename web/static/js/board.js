@@ -1,3 +1,66 @@
+// ── Board filters (momentum, size) ──
+let _boardMomentumFilter = 'all';  // 'all' | 'accelerating' | 'fading' | 'dormant'
+let _boardSizeMin = 0;
+
+function _boardNodePassesFilter(d) {
+    if (d.type === 'narrative') return true; // always show narratives
+    if (_boardMomentumFilter !== 'all') {
+        var m = d.momentum || {};
+        if (_boardMomentumFilter === 'dormant') { if (m.lifecycle !== 'dormant') return false; }
+        else { if (m.direction !== _boardMomentumFilter) return false; }
+    }
+    if (_boardSizeMin > 0 && (d.signal_count || 0) < _boardSizeMin) return false;
+    return true;
+}
+
+function _setBoardFilter(type, value) {
+    if (type === 'momentum') _boardMomentumFilter = value;
+    else if (type === 'size') _boardSizeMin = +value;
+    _applyBoardFilters();
+    _renderBoardFilterBar();
+}
+
+function _applyBoardFilters() {
+    var hasFilter = _boardMomentumFilter !== 'all' || _boardSizeMin > 0;
+    document.querySelectorAll('.graph-node').forEach(function(el) {
+        if (!hasFilter) { el.classList.remove('board-filter-dim'); return; }
+        var nid = el.getAttribute('data-node-id');
+        var ntype = el.getAttribute('data-node-type');
+        var d = (_boardData && _boardData.nodes || []).find(function(n) {
+            if (ntype === 'narrative') return n.node_id == nid;
+            return n.id == nid;
+        });
+        if (!d) return;
+        el.classList.toggle('board-filter-dim', !_boardNodePassesFilter(d));
+    });
+}
+
+function _renderBoardFilterBar() {
+    var container = document.getElementById('board-filter-bar');
+    if (!container) return;
+    var anyActive = _boardMomentumFilter !== 'all' || _boardSizeMin > 0;
+    container.style.display = 'flex';
+
+    container.innerHTML =
+        '<div class="feed-filter-group">' +
+            _boardFilterPill('all', 'All', _boardMomentumFilter, 'momentum') +
+            _boardFilterPill('accelerating', '↑ Accel', _boardMomentumFilter, 'momentum') +
+            _boardFilterPill('fading', '↓ Fading', _boardMomentumFilter, 'momentum') +
+            _boardFilterPill('dormant', '💤 Dormant', _boardMomentumFilter, 'momentum') +
+        '</div>' +
+        '<select onchange="_setBoardFilter(\'size\',this.value)" class="feed-filter-select">' +
+            '<option value="0"' + (_boardSizeMin === 0 ? ' selected' : '') + '>Any size</option>' +
+            '<option value="2"' + (_boardSizeMin === 2 ? ' selected' : '') + '>2+</option>' +
+            '<option value="5"' + (_boardSizeMin === 5 ? ' selected' : '') + '>5+</option>' +
+            '<option value="10"' + (_boardSizeMin === 10 ? ' selected' : '') + '>10+</option>' +
+        '</select>';
+}
+
+function _boardFilterPill(value, label, activeValue, filterType) {
+    var active = value === activeValue;
+    return '<button class="feed-filter-pill' + (active ? ' active' : '') + '" onclick="_setBoardFilter(\'' + filterType + '\',\'' + value + '\')">' + label + '</button>';
+}
+
 // ── Stacked board highlights ──
 // Each highlight: {kind: 'entity'|'keyword', label, icon, threadIds: Set, key}
 var _boardHighlights = [];  // var: accessible from base.html scripts outside this module
@@ -79,6 +142,8 @@ function _applyBoardHighlights() {
             const glowIntensity = matchCount >= total ? '1.5' : '1.2';
             const glowColor = matchCount >= 2 ? 'rgba(6,182,212,0.7)' : 'rgba(168,85,247,0.5)';
             n.style.filter = `brightness(${glowIntensity}) drop-shadow(0 0 12px ${glowColor})`;
+            n.style.pointerEvents = '';
+            n.classList.remove('board-dimmed');
             n.classList.add('board-highlighted');
 
             // Entrance animation for newly highlighted nodes
@@ -1396,8 +1461,10 @@ function _zoomIntoPattern(patternId) {
     _graphMode = 'signals';
     _zoomedPatternId = patternId;
 
-    // Show back button and pattern label
+    // Show back button, hide filter bar, show pattern label
     document.getElementById('sig-graph-back').style.display = 'block';
+    var filterBar = document.getElementById('board-filter-bar');
+    if (filterBar) filterBar.style.display = 'none';
     const label = document.getElementById('sig-graph-pattern-label');
     const patternNode = _graphData?.nodes.find(n => n.id === patternId);
     label.textContent = (patternNode ? patternNode.title : `Thread ${patternId}`) + ' — Signals';
@@ -1421,6 +1488,7 @@ function _zoomOutToPatterns() {
     document.getElementById('sig-graph-pattern-label').style.display = 'none';
     document.getElementById('sig-graph-container').style.boxShadow = '';
     document.getElementById('sig-graph-container').style.borderRadius = '';
+    _renderBoardFilterBar();
     if (_zoomedFromBoard && _boardData) {
         _zoomedFromBoard = false;
         renderBoard(_boardData);
@@ -1581,10 +1649,11 @@ function loadBoard() {
                 edges: data.edges // edges filtered by renderBoard's visibleThreadIds
             };
             renderBoard(filtered);
-            // Re-apply any active highlights after board re-render
-            if (_boardHighlights.length) {
-                setTimeout(() => { _applyBoardHighlights(); _renderHighlightPills(); }, 50);
-            }
+            // Re-apply filters and highlights after board re-render
+            setTimeout(() => {
+                _applyBoardFilters();
+                if (_boardHighlights.length) { _applyBoardHighlights(); _renderHighlightPills(); }
+            }, 50);
         });
 }
 
@@ -1599,6 +1668,7 @@ function renderBoard(data) {
     controls.style.display = 'flex';
     const searchBar2 = document.getElementById('board-search-bar');
     if (searchBar2) searchBar2.style.display = 'flex';
+    _renderBoardFilterBar();
     // Show timeline if was visible
     const tlPanel = document.getElementById('board-timeline');
     if (tlPanel) tlPanel.style.display = _timelineVisible ? '' : 'none';

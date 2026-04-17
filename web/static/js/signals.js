@@ -168,6 +168,11 @@ var _threadsCache = [];  // var: accessed from board.js (separate script scope)
 let _signalsDomainFilter = 'all'; // kept for backward compat — derived from _activeDomains
 let _signalsSourceTypeFilter = 'all';
 
+// ── Feed filters ────────────────────────────────────────────────────────────
+let _sigAssignmentFilter = 'all';   // 'all' | 'assigned' | 'unassigned'
+let _threadMomentumFilter = 'all';  // 'all' | 'accelerating' | 'fading' | 'dormant'
+let _threadSizeMin = 0;             // minimum signal count
+
 // Unified domain toggle — all domains active by default
 var _ALL_DOMAINS = ['economics', 'finance', 'geopolitics', 'tech_ai', 'labor', 'regulatory'];  // var: accessed from board.js (separate script scope)
 var _activeDomains = new Set(_ALL_DOMAINS);  // var: accessed from board.js (separate script scope)
@@ -220,6 +225,70 @@ function _filterSourceType(srcType) {
     _signalsSourceTypeFilter = srcType;
     renderActiveSignalTab();
 }
+
+function _renderFeedFilters(tab) {
+    var container = document.getElementById('feed-filters');
+    if (!container) {
+        // Create the container after the search input
+        var bar = document.getElementById('signals-filter-bar');
+        if (!bar) return;
+        var el = document.createElement('div');
+        el.id = 'feed-filters';
+        el.style.cssText = 'display:flex;align-items:center;gap:4px;flex-shrink:0';
+        // Insert before the organize/review buttons (after search input)
+        var orgBtn = document.getElementById('organize-lab-btn');
+        bar.insertBefore(el, orgBtn);
+        container = el;
+    }
+
+    if (tab === 'raw') {
+        container.innerHTML =
+            '<div class="feed-filter-group">' +
+                _feedFilterPill('all', 'All', _sigAssignmentFilter, '_setSigAssignment') +
+                _feedFilterPill('assigned', 'Assigned', _sigAssignmentFilter, '_setSigAssignment') +
+                _feedFilterPill('unassigned', 'Unassigned', _sigAssignmentFilter, '_setSigAssignment') +
+            '</div>';
+    } else if (tab === 'threads') {
+        container.innerHTML =
+            '<div class="feed-filter-group">' +
+                _feedFilterPill('all', 'All', _threadMomentumFilter, '_setThreadMomentum') +
+                _feedFilterPill('accelerating', '↑ Accel', _threadMomentumFilter, '_setThreadMomentum') +
+                _feedFilterPill('fading', '↓ Fading', _threadMomentumFilter, '_setThreadMomentum') +
+                _feedFilterPill('dormant', '💤 Dormant', _threadMomentumFilter, '_setThreadMomentum') +
+            '</div>' +
+            '<select onchange="_setThreadSizeMin(+this.value)" class="feed-filter-select">' +
+                '<option value="0"' + (_threadSizeMin === 0 ? ' selected' : '') + '>Any size</option>' +
+                '<option value="2"' + (_threadSizeMin === 2 ? ' selected' : '') + '>2+ signals</option>' +
+                '<option value="5"' + (_threadSizeMin === 5 ? ' selected' : '') + '>5+ signals</option>' +
+                '<option value="10"' + (_threadSizeMin === 10 ? ' selected' : '') + '>10+ signals</option>' +
+            '</select>';
+    } else {
+        container.innerHTML = '';
+    }
+}
+
+function _feedFilterPill(value, label, activeValue, fnName) {
+    var active = value === activeValue;
+    return '<button class="feed-filter-pill' + (active ? ' active' : '') + '" onclick="' + fnName + '(\'' + value + '\')">' + label + '</button>';
+}
+
+function _setSigAssignment(value) {
+    _sigAssignmentFilter = value;
+    _renderFeedFilters('raw');
+    renderSignalFeed();
+}
+
+function _setThreadMomentum(value) {
+    _threadMomentumFilter = value;
+    _renderFeedFilters('threads');
+    renderThreadFeed();
+}
+
+function _setThreadSizeMin(value) {
+    _threadSizeMin = value;
+    _renderFeedFilters('threads');
+    renderThreadFeed();
+}
 var _activeSignalId = null;  // var: accessed from board.js (separate script scope)
 var _activeThreadId = null;  // var: accessed from board.js (separate script scope)
 var _signalTab = 'raw';  // var: accessed from board.js (separate script scope)
@@ -255,6 +324,7 @@ function switchSignalTab(tab) {
         const searchInput = document.getElementById('signals-search');
         if (searchInput) searchInput.placeholder = `Filter ${(_TAB_TITLES[tab] || 'signals').toLowerCase()}…`;
     }
+    _renderFeedFilters(tab);
     // Toggle shared detail pane — raw tab has its own inline detail, causal has inspector
     const sharedDetail = document.getElementById('signals-detail');
     if (tab === 'raw' || tab === 'graph' || tab === 'causal') {
@@ -299,6 +369,7 @@ function loadSignals() {
     ]).then(([sigData, threadData, brainstormData]) => {
         _signalsCache = sigData.signals || [];
         _threadsCache = threadData.threads || [];
+        _renderFeedFilters(_signalTab);
         renderSignalFeed();
         renderThreadFeed();
         _renderBrainstormList(brainstormData.brainstorms || []);
@@ -408,6 +479,11 @@ function renderSignalFeed() {
     if (_signalsSourceTypeFilter !== 'all') {
         filtered = filtered.filter(s => (s.source_type || 'news') === _signalsSourceTypeFilter);
     }
+    if (_sigAssignmentFilter === 'assigned') {
+        filtered = filtered.filter(s => !!s.thread_info);
+    } else if (_sigAssignmentFilter === 'unassigned') {
+        filtered = filtered.filter(s => !s.thread_info);
+    }
     if (search) {
         filtered = filtered.filter(s =>
             (s.title || '').toLowerCase().includes(search) ||
@@ -430,6 +506,10 @@ function renderSignalFeed() {
         const sPrimaryDom = _parseDomains(s.domain)[0];
         const dateStr = s.published_at ? s.published_at.substring(0, 10) : '';
         const checked = _rawSelectedSignals.has(s.id) ? ' checked' : '';
+        const threads = typeof _parseThreadInfo === 'function' ? _parseThreadInfo(s) : [];
+        const threadBadges = threads.length
+            ? threads.map(t => `<span class="sig-thread-badge" onclick="event.stopPropagation();openThreadDetail(${t.id})" title="${escHtml(t.title)}">${escHtml(t.title)}</span>`).join('')
+            : '';
         return `<div class="sig-card sig-domain-${escHtml(sPrimaryDom)} ${s.id === _activeSignalId ? 'active' : ''}"
                      data-id="${s.id}">
             <div style="display:flex;gap:8px;align-items:start">
@@ -441,6 +521,7 @@ function renderSignalFeed() {
                         <span class="sig-card-date">${escHtml(dateStr)}</span>
                     </div>
                     <div class="sig-card-title">${escHtml(s.title)}</div>
+                    ${threadBadges ? `<div class="sig-thread-badges">${threadBadges}</div>` : ''}
                     ${s.body ? `<div class="sig-card-body">${escHtml(s.body.substring(0, 200))}</div>` : ''}
                 </div>
             </div>
@@ -1057,6 +1138,16 @@ function renderThreadFeed() {
     let filtered = _threadsCache;
     if (_activeDomains.size < _ALL_DOMAINS.length) {
         filtered = filtered.filter(t => _parseDomains(t.domain).some(d => _activeDomains.has(d)));
+    }
+    if (_threadMomentumFilter !== 'all') {
+        filtered = filtered.filter(t => {
+            var m = t.momentum || {};
+            if (_threadMomentumFilter === 'dormant') return m.lifecycle === 'dormant';
+            return m.direction === _threadMomentumFilter;
+        });
+    }
+    if (_threadSizeMin > 0) {
+        filtered = filtered.filter(t => (t.signal_count || 0) >= _threadSizeMin);
     }
     if (search) {
         filtered = filtered.filter(t =>

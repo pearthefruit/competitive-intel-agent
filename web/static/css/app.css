@@ -4095,6 +4095,32 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
+        /* Feed filter pills */
+        .feed-filter-group { display: flex; gap: 2px; }
+        .feed-filter-pill {
+            padding: 2px 8px; font-size: 10px; font-weight: 600; border-radius: 10px;
+            border: 1px solid var(--border); background: none; color: var(--text-muted);
+            cursor: pointer; transition: all 0.12s; white-space: nowrap;
+        }
+        .feed-filter-pill:hover { border-color: var(--accent); color: var(--text-secondary); }
+        .feed-filter-pill.active { background: rgba(59,130,246,0.1); border-color: var(--accent); color: var(--accent); }
+        .feed-filter-select {
+            padding: 2px 6px; font-size: 10px; font-weight: 600; border-radius: 6px;
+            border: 1px solid var(--border); background: var(--bg-tertiary); color: var(--text-muted);
+            cursor: pointer; outline: none;
+        }
+
+        .sig-thread-badges {
+            display: flex; gap: 4px; flex-wrap: wrap; margin: 3px 0 1px;
+        }
+        .sig-thread-badge {
+            font-size: 10px; font-weight: 600; color: var(--purple);
+            background: rgba(168,85,247,0.08); border: 1px solid rgba(168,85,247,0.2);
+            border-radius: 4px; padding: 1px 6px; cursor: pointer;
+            max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            transition: background 0.1s;
+        }
+        .sig-thread-badge:hover { background: rgba(168,85,247,0.18); }
 
         /* Domain colors for card borders and badges */
         .sig-domain-economics { border-left-color: #3b82f6; }
@@ -4354,6 +4380,7 @@
         .graph-node { cursor: pointer; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); transition: filter 0.2s; }
         .graph-node:hover { filter: drop-shadow(0 0 12px rgba(255,255,255,0.3)) brightness(1.4) !important; }
         .graph-node.board-dimmed:hover { filter: brightness(0.9) drop-shadow(0 0 8px rgba(255,255,255,0.2)) !important; }
+        .graph-node.board-filter-dim { opacity: 0.12; pointer-events: none; transition: opacity 0.25s; }
         .graph-node.board-highlighted:hover { filter: brightness(1.6) drop-shadow(0 0 16px rgba(168,85,247,0.8)) !important; }
         .graph-node circle.node-circle { transition: all 0.15s; }
         .graph-node .select-ring { opacity: 0; transition: opacity 0.2s; }
