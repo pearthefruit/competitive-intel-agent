@@ -234,8 +234,8 @@ function _renderFeedFilters(tab) {
     if (!container) {
         container = document.createElement('div');
         container.id = 'feed-filter-pills';
-        container.style.cssText = 'display:flex;align-items:center;gap:6px';
-        row.insertBefore(container, row.firstChild);
+        container.style.cssText = 'display:contents';
+        row.appendChild(container);
     }
 
     if (tab === 'raw') {
