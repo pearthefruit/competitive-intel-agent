@@ -5725,8 +5725,6 @@
 }
 .lab-kanban-col:last-child { border-right: none; }
 /* thread_match = green left accent (confirmed thread assignment) */
-.lab-col-original { border-left: 3px solid rgba(59,130,246,0.6); }
-.lab-col-original .lab-col-header { background: rgba(59,130,246,0.06); }
 .lab-col-original .lab-col-name-text { color: var(--accent); }
 .lab-col-thread-match { border-left: 3px solid rgba(34,197,94,0.5); }
 .lab-col-thread-match .lab-col-header { background: rgba(34,197,94,0.04); }
@@ -5747,8 +5745,10 @@
 
 .lab-col-header {
     padding: 6px 10px 4px; display: flex; flex-direction: column; gap: 3px;
-    flex-shrink: 0; border-bottom: 1px solid var(--border);
+    flex-shrink: 0; border-bottom: 1px solid var(--border); cursor: grab;
 }
+.lab-col-header:active { cursor: grabbing; }
+.lab-col-ghost { opacity: 0.3; }
 /* Title row: input spans full width so the thread name is fully visible */
 .lab-col-title-row { display: flex; align-items: center; width: 100%; }
 .lab-col-title-row .lab-col-name { width: 100%; }

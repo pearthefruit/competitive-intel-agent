@@ -384,6 +384,19 @@ function _labInitSortables() {
         });
     }
 
+    // Column reordering — drag columns by their header
+    const kanbanEl = document.querySelector('.thread-lab-kanban');
+    if (kanbanEl) {
+        new Sortable(kanbanEl, {
+            animation: 150,
+            handle: '.lab-col-header',
+            draggable: '.lab-kanban-col',
+            ghostClass: 'lab-col-ghost',
+            filter: '.lab-pool-col,.lab-overflow-col,.lab-new-col',
+            onEnd: function() { /* columns reordered — purely visual, no state update needed */ },
+        });
+    }
+
     // Keyboard shortcuts (scoped to modal lifetime)
     document.addEventListener('keydown', function _labKeyHandler(e) {
         if (!document.getElementById('thread-lab-modal')) {
