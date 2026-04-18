@@ -371,7 +371,6 @@ function _labInitSortables() {
         new Sortable(poolEl, {
             ...sharedCfg,
             group: { name: 'lab-signals', pull: true, put: true },
-            sort: false,
         });
     }
 
@@ -473,6 +472,10 @@ function _labInitSortables() {
                 _labUpdateSelectionBar();
                 return;
             }
+            // Don't clear multi-selection when clicking a card that's part of it
+            // (the user might be about to drag the group)
+            const clickedSid = parseInt(card.dataset.signalId);
+            if (_labSelected.size > 1 && _labSelected.has(clickedSid)) return;
             _labShowSignalDetail(card);
         });
     }
