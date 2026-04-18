@@ -2316,10 +2316,12 @@ Return JSON: {{"title": "New directional title"}}"""
 
     @app.route("/api/signals/threads/<int:thread_id>/lab", methods=["GET"])
     def signals_thread_lab_api(thread_id):
-        """Thread Lab: auto-cluster thread signals (TF-IDF KMeans) + find related signals from other threads."""
+        """Thread Lab: auto-cluster thread signals (sentence embeddings + DBSCAN)
+        + find related signals from other threads."""
         import numpy as np
         from sklearn.feature_extraction.text import TfidfVectorizer
         from sklearn.metrics.pairwise import cosine_similarity
+        from sklearn.cluster import DBSCAN
         from db import get_cluster_detail, get_thread_date_range
         from datetime import datetime as _labdt
 
@@ -2335,32 +2337,39 @@ Return JSON: {{"title": "New directional title"}}"""
             conn.close()
             return jsonify({"error": "Thread needs at least 4 signals for Thread Lab"}), 400
 
-        # Use title (weighted 2x) + body for richer TF-IDF features
+        # ── Sentence embeddings for semantic clustering ───────────────
         docs = []
         for s in signals:
             t = s.get("title", "") or ""
-            b = (s.get("body") or s.get("body_text") or "")[:500]
-            docs.append(f"{t} {t} {b}")  # title repeated for 2x weight
+            b = (s.get("body") or s.get("body_text") or "")[:300]
+            docs.append(f"{t}. {b}" if b else t)
+
         try:
-            vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=3000,
-                                          stop_words="english", sublinear_tf=True)
-            X = vectorizer.fit_transform(docs)
+            from sentence_transformers import SentenceTransformer
+            _st_model = SentenceTransformer("all-MiniLM-L6-v2")
+            embeddings = _st_model.encode(docs, normalize_embeddings=True)
         except Exception as e:
             conn.close()
-            return jsonify({"error": f"Vectorization failed: {e}"}), 500
+            return jsonify({"error": f"Embedding failed: {e}"}), 500
 
-        # ── DBSCAN clustering (threshold-based, no forced grouping) ───
-        # Unlike KMeans, DBSCAN only groups signals that are genuinely
-        # similar. Outliers go to overflow instead of polluting clusters.
-        from sklearn.cluster import DBSCAN
-        from sklearn.metrics.pairwise import cosine_distances
+        # Cosine distance matrix (clamped for float precision)
+        dist_matrix = np.clip(1.0 - (embeddings @ embeddings.T), 0, None)
 
-        dist_matrix = cosine_distances(X)
-        # eps=0.70 → minimum cosine similarity of 0.30 to be neighbors
-        db = DBSCAN(eps=0.70, min_samples=2, metric="precomputed")
+        # DBSCAN: eps=0.50 → minimum cosine similarity of 0.50 to be neighbors
+        db = DBSCAN(eps=0.50, min_samples=2, metric="precomputed")
         labels = db.fit_predict(dist_matrix)
 
+        # ── TF-IDF for key term extraction (labels come from embeddings) ──
+        tfidf_docs = []
+        for s in signals:
+            t = s.get("title", "") or ""
+            b = (s.get("body") or s.get("body_text") or "")[:500]
+            tfidf_docs.append(f"{t} {t} {b}")
+        vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=3000,
+                                      stop_words="english", sublinear_tf=True)
+        X = vectorizer.fit_transform(tfidf_docs)
         feature_names = vectorizer.get_feature_names_out()
+
         _LAB_NOISE = {
             "com", "org", "net", "www", "html", "says", "said", "new", "year",
             "report", "says", "data", "use", "time", "day", "week", "month",
@@ -2369,13 +2378,13 @@ Return JSON: {{"title": "New directional title"}}"""
             "investing", "finance", "yahoo", "google", "markets", "barrons",
         }
 
-        unique_labels = sorted(set(labels) - {-1})  # -1 = noise/overflow
+        unique_labels = sorted(set(labels) - {-1})
         sub_groups = []
         for ci in unique_labels:
             idxs = [i for i in range(n) if labels[i] == ci]
             if len(idxs) < 2:
                 continue
-            # Compute cluster centroid for key term extraction
+            # Key terms from TF-IDF centroid of cluster members
             cluster_vecs = X[idxs]
             center = np.asarray(cluster_vecs.mean(axis=0)).flatten()
             top_idx = center.argsort()[::-1][:12]
@@ -2390,7 +2399,7 @@ Return JSON: {{"title": "New directional title"}}"""
             label_terms = bigrams[:2] if bigrams else key_terms[:2]
             cluster_sigs = [signals[i] for i in idxs]
             sub_groups.append({
-                "cluster_idx": ci,
+                "cluster_idx": int(ci),
                 "label": " / ".join(label_terms).title() if label_terms else f"Group {ci + 1}",
                 "key_terms": key_terms[:5],
                 "signal_ids": [s["id"] for s in cluster_sigs],
@@ -2404,7 +2413,7 @@ Return JSON: {{"title": "New directional title"}}"""
             })
         sub_groups.sort(key=lambda g: len(g["signal_ids"]), reverse=True)
 
-        # Overflow: signals that DBSCAN labeled as noise (-1)
+        # Overflow: signals DBSCAN labeled as noise (-1)
         overflow_signals = [
             {"id": signals[i]["id"], "title": signals[i].get("title", ""),
              "published_at": (signals[i].get("published_at") or "")[:10],
@@ -2423,17 +2432,17 @@ Return JSON: {{"title": "New directional title"}}"""
             g["suggested_thread"] = None
             if not existing_threads:
                 continue
-            # Try TF-IDF cosine similarity first
+            # Try embedding similarity first
             try:
-                # Compute centroid from cluster signal vectors
                 c_idxs = [i for i in range(n) if labels[i] == g["cluster_idx"]]
-                center = np.asarray(X[c_idxs].mean(axis=0)).reshape(1, -1)
+                center = embeddings[c_idxs].mean(axis=0, keepdims=True)
+                center = center / np.linalg.norm(center)
                 et_titles = [r["title"] or "" for r in existing_threads]
-                et_vecs = vectorizer.transform(et_titles)
-                sims = cosine_similarity(center, et_vecs)[0]
+                et_embs = _st_model.encode(et_titles, normalize_embeddings=True)
+                sims = (center @ et_embs.T)[0]
                 best_idx = int(sims.argmax())
                 best_sim = float(sims[best_idx])
-                if best_sim >= 0.15:
+                if best_sim >= 0.45:
                     g["suggested_thread"] = {
                         "id": int(existing_threads[best_idx]["id"]),
                         "title": existing_threads[best_idx]["title"],
@@ -2463,11 +2472,12 @@ Return JSON: {{"title": "New directional title"}}"""
             except Exception:
                 pass
 
-        # Coherence: average pairwise cosine similarity
+        # Coherence: average pairwise cosine similarity (embedding-based)
+        sim_mat = embeddings @ embeddings.T
         if n > 1:
-            sim_mat = cosine_similarity(X)
-            np.fill_diagonal(sim_mat, 0)
-            coherence = float(sim_mat.sum() / (n * (n - 1)))
+            sim_copy = sim_mat.copy()
+            np.fill_diagonal(sim_copy, 0)
+            coherence = float(sim_copy.sum() / (n * (n - 1)))
         else:
             coherence = 1.0
 
@@ -2477,9 +2487,9 @@ Return JSON: {{"title": "New directional title"}}"""
             date_span_days = (_labdt.strptime(tmax, "%Y-%m-%d") -
                               _labdt.strptime(tmin, "%Y-%m-%d")).days
 
-        # Related signals from other threads (similarity >= 0.15 to thread centroid)
+        # Related signals from other threads (embedding similarity >= 0.40)
         other_rows = conn.execute("""
-            SELECT s.id, s.title, s.published_at, s.source_name,
+            SELECT s.id, s.title, s.published_at, s.source_name, s.body,
                    sci.cluster_id as thread_id, sc.title as thread_title
             FROM signals s
             JOIN signal_cluster_items sci ON sci.signal_id = s.id
@@ -2492,12 +2502,13 @@ Return JSON: {{"title": "New directional title"}}"""
         related = []
         if other_rows:
             try:
-                other_titles = [r["title"] or "" for r in other_rows]
-                other_vecs = vectorizer.transform(other_titles)
-                centroid = np.asarray(X.mean(axis=0))
-                sims = cosine_similarity(centroid, other_vecs)[0]
+                other_docs = [(r["title"] or "") + ". " + ((r["body"] or "")[:300]) for r in other_rows]
+                other_emb = _st_model.encode(other_docs, normalize_embeddings=True)
+                centroid = embeddings.mean(axis=0, keepdims=True)
+                centroid = centroid / np.linalg.norm(centroid)
+                sims = (centroid @ other_emb.T)[0]
                 for i, sim_score in enumerate(sims):
-                    if sim_score >= 0.15:
+                    if sim_score >= 0.40:
                         related.append({
                             "signal_id": other_rows[i]["id"],
                             "title": other_rows[i]["title"],
