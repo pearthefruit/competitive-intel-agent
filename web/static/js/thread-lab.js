@@ -95,26 +95,52 @@ function _labBuildState(data, threadId, mode) {
     (data.sim_order || []).forEach((id, i) => simIdxMap[id] = i);
     const isOrganize = mode === 'organize';
 
+    var groups = data.sub_groups.map(g => ({
+        cluster_idx: g.cluster_idx,
+        label: g.label,
+        key_terms: g.key_terms,
+        cohesion: g.cohesion ?? null,
+        suggested_thread: g.suggested_thread || null,
+        group_type: g.group_type || null,       // 'thread_match' | 'event_burst' | null
+        date_range: g.date_range || null,        // e.g. 'Apr 9–13'
+        // In organize mode, pre-accept suggestions (inverse of split mode)
+        _accepted_thread_id: isOrganize && g.suggested_thread ? g.suggested_thread.id : null,
+        _accepted_thread_title: isOrganize && g.suggested_thread ? g.suggested_thread.title : null,
+        active: true,
+        signals: g.signals.map(s => ({ ...s, from_pool: false, original_thread_id: null })),
+    }));
+
+    // In split mode, add a pinned "Keep in original" column as the first group
+    // Pre-populated with overflow signals (didn't fit any cluster well)
+    if (!isOrganize && threadId) {
+        var maxIdx = groups.reduce(function(m, g) { return Math.max(m, g.cluster_idx); }, -1);
+        var overflowSigs = (data.overflow_signals || []).map(function(s) {
+            return { id: s.id, title: s.title, published_at: s.published_at,
+                     source_name: s.source_name || '', body: s.body || '',
+                     from_pool: false, original_thread_id: null };
+        });
+        groups.unshift({
+            cluster_idx: maxIdx + 1,
+            label: data.title || 'Original thread',
+            key_terms: [],
+            cohesion: null,
+            suggested_thread: null,
+            group_type: 'original',
+            date_range: null,
+            _accepted_thread_id: threadId,
+            _accepted_thread_title: data.title,
+            active: true,
+            signals: overflowSigs,
+        });
+    }
+
     window._threadLabState = {
         mode: mode || 'split',
         threadId,
         originalData: data,
         simMatrix: data.sim_matrix || [],
         simIdxMap,
-        groups: data.sub_groups.map(g => ({
-            cluster_idx: g.cluster_idx,
-            label: g.label,
-            key_terms: g.key_terms,
-            cohesion: g.cohesion ?? null,
-            suggested_thread: g.suggested_thread || null,
-            group_type: g.group_type || null,       // 'thread_match' | 'event_burst' | null
-            date_range: g.date_range || null,        // e.g. 'Apr 9–13'
-            // In organize mode, pre-accept suggestions (inverse of split mode)
-            _accepted_thread_id: isOrganize && g.suggested_thread ? g.suggested_thread.id : null,
-            _accepted_thread_title: isOrganize && g.suggested_thread ? g.suggested_thread.title : null,
-            active: true,
-            signals: g.signals.map(s => ({ ...s, from_pool: false, original_thread_id: null })),
-        })),
+        groups: groups,
         overflowSignals: data.overflow_signals || [],
     };
 }
@@ -160,7 +186,8 @@ function _labRenderKanban() {
 
         // group_type determines left-border color and cohesion label
         const gtype = g.group_type;  // 'thread_match' | 'event_burst' | null
-        const colTypeClass = gtype === 'thread_match' ? ' lab-col-thread-match'
+        const colTypeClass = gtype === 'original'      ? ' lab-col-original'
+                           : gtype === 'thread_match' ? ' lab-col-thread-match'
                            : gtype === 'event_burst'  ? ' lab-col-event-burst'
                            : '';
 
@@ -1016,10 +1043,25 @@ function _labApproveColSplit(gi) {
     const g = state.groups[gi];
     if (!g) return;
 
+    const isOriginalCol = g.group_type === 'original';
     const selectedInCol = g.signals.filter(s => _labSelected.has(s.id));
     const isPartial = selectedInCol.length > 0 && selectedInCol.length < g.signals.length;
     const signalsToApprove = isPartial ? selectedInCol : g.signals;
-    if (signalsToApprove.length < 2) { _showToast('Need at least 2 signals to approve', 'error'); return; }
+    const minSignals = isOriginalCol ? 1 : 2;
+    if (signalsToApprove.length < minSignals) { _showToast(isOriginalCol ? 'Drag signals here first' : 'Need at least 2 signals to approve', 'error'); return; }
+
+    // For original column: only send pool signals (non-pool are already in this thread)
+    if (isOriginalCol) {
+        var poolSignals = signalsToApprove.filter(s => s.from_pool && s.original_thread_id);
+        if (!poolSignals.length) {
+            // All signals are already in this thread — just remove the column visually
+            _showToast('Signals already in this thread', 'success');
+            state.groups.splice(gi, 1);
+            _labClearSelection();
+            _labRenderKanban();
+            return;
+        }
+    }
 
     const split = {
         title: g._accepted_thread_title || g.label,
@@ -1041,7 +1083,7 @@ function _labApproveColSplit(gi) {
     .then(r => r.json())
     .then(data => {
         if (data.ok) {
-            const action = data.created?.[0]?.merged ? 'Merged' : 'Split off';
+            const action = isOriginalCol ? 'Added to' : (data.created?.[0]?.merged ? 'Merged into' : 'Split off');
             _showToast(`${action}: ${split.title} (${signalsToApprove.length})`, 'success');
             if (isPartial) {
                 const colBody = document.getElementById(`lab-col-${g.cluster_idx}`);

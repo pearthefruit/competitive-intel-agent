@@ -2396,6 +2396,27 @@ Return JSON: {{"title": "New directional title"}}"""
             })
         sub_groups.sort(key=lambda g: len(g["signal_ids"]), reverse=True)
 
+        # ── Post-clustering quality gate ──────────────────────────────
+        # Validate each signal against its cluster's key terms.
+        # Signals matching fewer than 2 key terms get pushed to overflow.
+        overflow_signals = []
+        for g in sub_groups:
+            kw = [t.lower() for t in g.get("key_terms", []) if t]
+            if len(kw) < 2:
+                continue
+            keep = []
+            for s in g["signals"]:
+                text = ((s.get("title") or "") + " " + (s.get("body") or "")).lower()
+                matches = sum(1 for k in kw if k in text)
+                if matches >= 2:
+                    keep.append(s)
+                else:
+                    overflow_signals.append(s)
+            g["signals"] = keep
+            g["signal_ids"] = [s["id"] for s in keep]
+        # Remove empty groups
+        sub_groups = [g for g in sub_groups if len(g["signal_ids"]) >= 2]
+
         # Auto-suggest existing threads for each group (keyword overlap via TF-IDF)
         existing_threads = conn.execute(
             "SELECT id, title FROM signal_clusters WHERE domain != 'narrative' AND id != ?"
@@ -2508,6 +2529,7 @@ Return JSON: {{"title": "New directional title"}}"""
                 "coherence_score": round(coherence, 3),
             },
             "sub_groups": sub_groups,
+            "overflow_signals": overflow_signals,
             "related_from_other_threads": related[:30],
             "sim_order": sim_order,
             "sim_matrix": sim_data,
