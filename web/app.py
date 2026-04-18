@@ -2319,7 +2319,6 @@ Return JSON: {{"title": "New directional title"}}"""
         """Thread Lab: auto-cluster thread signals (TF-IDF KMeans) + find related signals from other threads."""
         import numpy as np
         from sklearn.feature_extraction.text import TfidfVectorizer
-        from sklearn.cluster import KMeans
         from sklearn.metrics.pairwise import cosine_similarity
         from db import get_cluster_detail, get_thread_date_range
         from datetime import datetime as _labdt
@@ -2350,26 +2349,36 @@ Return JSON: {{"title": "New directional title"}}"""
             conn.close()
             return jsonify({"error": f"Vectorization failed: {e}"}), 500
 
-        k = max(2, min(6, round(n / 8)))
-        km = KMeans(n_clusters=k, random_state=42, n_init=10)
-        labels = km.fit_predict(X)
+        # ── DBSCAN clustering (threshold-based, no forced grouping) ───
+        # Unlike KMeans, DBSCAN only groups signals that are genuinely
+        # similar. Outliers go to overflow instead of polluting clusters.
+        from sklearn.cluster import DBSCAN
+        from sklearn.metrics.pairwise import cosine_distances
+
+        dist_matrix = cosine_distances(X)
+        # eps=0.70 → minimum cosine similarity of 0.30 to be neighbors
+        db = DBSCAN(eps=0.70, min_samples=2, metric="precomputed")
+        labels = db.fit_predict(dist_matrix)
 
         feature_names = vectorizer.get_feature_names_out()
+        _LAB_NOISE = {
+            "com", "org", "net", "www", "html", "says", "said", "new", "year",
+            "report", "says", "data", "use", "time", "day", "week", "month",
+            "bloomberg", "reuters", "cnbc", "wsj", "cnn", "bbc", "nyt", "ft",
+            "nationaltoday", "bitget", "stockstory", "bnnbloomberg", "biospace",
+            "investing", "finance", "yahoo", "google", "markets", "barrons",
+        }
+
+        unique_labels = sorted(set(labels) - {-1})  # -1 = noise/overflow
         sub_groups = []
-        for ci in range(k):
+        for ci in unique_labels:
             idxs = [i for i in range(n) if labels[i] == ci]
-            if not idxs:
+            if len(idxs) < 2:
                 continue
-            center = np.asarray(km.cluster_centers_[ci]).flatten()
+            # Compute cluster centroid for key term extraction
+            cluster_vecs = X[idxs]
+            center = np.asarray(cluster_vecs.mean(axis=0)).flatten()
             top_idx = center.argsort()[::-1][:12]
-            # Filter out TLD fragments, year numbers, and generic news noise
-            _LAB_NOISE = {
-                "com", "org", "net", "www", "html", "says", "said", "new", "year",
-                "report", "says", "data", "use", "time", "day", "week", "month",
-                "bloomberg", "reuters", "cnbc", "wsj", "cnn", "bbc", "nyt", "ft",
-                "nationaltoday", "bitget", "stockstory", "bnnbloomberg", "biospace",
-                "investing", "finance", "yahoo", "google", "markets", "barrons",
-            }
             key_terms = [
                 feature_names[j] for j in top_idx
                 if center[j] > 0
@@ -2377,7 +2386,6 @@ Return JSON: {{"title": "New directional title"}}"""
                 and not feature_names[j].isdigit()
                 and len(feature_names[j]) > 2
             ]
-            # Prefer bigrams (contain a space) for the label — more descriptive
             bigrams = [t for t in key_terms if ' ' in t]
             label_terms = bigrams[:2] if bigrams else key_terms[:2]
             cluster_sigs = [signals[i] for i in idxs]
@@ -2396,26 +2404,14 @@ Return JSON: {{"title": "New directional title"}}"""
             })
         sub_groups.sort(key=lambda g: len(g["signal_ids"]), reverse=True)
 
-        # ── Post-clustering quality gate ──────────────────────────────
-        # Validate each signal against its cluster's key terms.
-        # Signals matching fewer than 2 key terms get pushed to overflow.
-        overflow_signals = []
-        for g in sub_groups:
-            kw = [t.lower() for t in g.get("key_terms", []) if t]
-            if len(kw) < 2:
-                continue
-            keep = []
-            for s in g["signals"]:
-                text = ((s.get("title") or "") + " " + (s.get("body") or "")).lower()
-                matches = sum(1 for k in kw if k in text)
-                if matches >= 2:
-                    keep.append(s)
-                else:
-                    overflow_signals.append(s)
-            g["signals"] = keep
-            g["signal_ids"] = [s["id"] for s in keep]
-        # Remove empty groups
-        sub_groups = [g for g in sub_groups if len(g["signal_ids"]) >= 2]
+        # Overflow: signals that DBSCAN labeled as noise (-1)
+        overflow_signals = [
+            {"id": signals[i]["id"], "title": signals[i].get("title", ""),
+             "published_at": (signals[i].get("published_at") or "")[:10],
+             "source_name": signals[i].get("source_name") or signals[i].get("source") or "",
+             "body": (signals[i].get("body") or signals[i].get("body_text") or "")[:300]}
+            for i in range(n) if labels[i] == -1
+        ]
 
         # Auto-suggest existing threads for each group (keyword overlap via TF-IDF)
         existing_threads = conn.execute(
@@ -2429,8 +2425,9 @@ Return JSON: {{"title": "New directional title"}}"""
                 continue
             # Try TF-IDF cosine similarity first
             try:
-                ci = g["cluster_idx"]
-                center = np.asarray(km.cluster_centers_[ci]).flatten().reshape(1, -1)
+                # Compute centroid from cluster signal vectors
+                c_idxs = [i for i in range(n) if labels[i] == g["cluster_idx"]]
+                center = np.asarray(X[c_idxs].mean(axis=0)).reshape(1, -1)
                 et_titles = [r["title"] or "" for r in existing_threads]
                 et_vecs = vectorizer.transform(et_titles)
                 sims = cosine_similarity(center, et_vecs)[0]
