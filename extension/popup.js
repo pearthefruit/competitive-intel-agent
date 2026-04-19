@@ -72,6 +72,10 @@ async function init() {
 
     if (selection) {
         $('content').value = selection;
+        $('content').placeholder = 'Selection captured — edit or add a note';
+    } else if (pageData?.articleText) {
+        $('content').value = pageData.articleText;
+        $('content').placeholder = 'Article body extracted — edit or clear as needed';
     } else if (pageData?.ogDesc || pageData?.metaDesc) {
         $('content').value = pageData.ogDesc || pageData.metaDesc;
         $('content').placeholder = 'Description pre-filled — edit or clear as needed';
