@@ -57,6 +57,95 @@ function resolveThreadId() {
     return match ? match.id : null;
 }
 
+// Self-contained inline extractor used as a fallback when the persistent
+// content script isn't on the tab (e.g., tab opened before extension install).
+// Must be self-contained — runs in the tab's isolated world, no closures.
+function _inlineExtract() {
+    const EXCLUDE = [
+        'aside', 'nav', 'footer', 'header',
+        '[role="complementary"]', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
+        '.msg-overlay', '.msg-overlay-list-bubble', '.msg-conversations',
+        '[aria-label*="messaging" i]', '[data-id="msg-overlay"]',
+        '.comments', '.comment-list', '.chat', '.chat-window',
+    ].join(',');
+    const excluded = (el) => !!el.closest(EXCLUDE);
+    const clean = (t) => (t || '').replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').trim();
+
+    const scoreContainer = (el) => {
+        const texts = [];
+        el.querySelectorAll('p').forEach(p => {
+            if (excluded(p)) return;
+            const t = (p.innerText || '').trim();
+            if (t.length > 30) texts.push(t);
+        });
+        return texts.join('\n\n');
+    };
+
+    let articleText = '';
+    try {
+        const articles = Array.from(document.querySelectorAll('article')).filter(a => !excluded(a));
+        if (articles.length) {
+            articles.sort((a, b) => (b.innerText?.length || 0) - (a.innerText?.length || 0));
+            const t = (articles[0].innerText || '').trim();
+            if (t.length >= 200) articleText = clean(t);
+        }
+        if (!articleText) {
+            const h1 = document.querySelector('main h1, [role="main"] h1, h1');
+            if (h1 && !excluded(h1)) {
+                let node = h1.parentElement;
+                while (node && node !== document.body) {
+                    const t = scoreContainer(node);
+                    if (t.length >= 300) { articleText = clean(t); break; }
+                    node = node.parentElement;
+                }
+            }
+        }
+        if (!articleText) {
+            let best = null, bestScore = 0;
+            document.querySelectorAll('main, [role="main"], [role="article"], section, div').forEach(el => {
+                if (excluded(el)) return;
+                const paras = el.querySelectorAll('p');
+                if (paras.length < 2) return;
+                let score = 0;
+                paras.forEach(p => {
+                    if (excluded(p)) return;
+                    const len = (p.innerText || '').trim().length;
+                    if (len > 30) score += len;
+                });
+                if (score > bestScore) { bestScore = score; best = el; }
+            });
+            if (best && bestScore >= 200) articleText = clean(scoreContainer(best));
+        }
+        if (!articleText) {
+            const ps = [];
+            document.querySelectorAll('p').forEach(p => {
+                if (excluded(p)) return;
+                const t = (p.innerText || '').trim();
+                if (t.length > 50) ps.push(t);
+            });
+            if (ps.length >= 3) articleText = clean(ps.join('\n\n'));
+        }
+    } catch (e) {}
+
+    const ogTitle = document.querySelector('meta[property="og:title"]')?.content || '';
+    const twTitle = document.querySelector('meta[name="twitter:title"]')?.content || '';
+    const h1text = document.querySelector('article h1, main h1, h1')?.textContent?.trim() || '';
+    const articleTitle = ogTitle || twTitle || h1text || document.title;
+
+    const ogDesc = document.querySelector('meta[property="og:description"]')?.content || '';
+    const metaDesc = document.querySelector('meta[name="description"]')?.content || '';
+    const author = document.querySelector('meta[name="author"]')?.content
+        || document.querySelector('meta[property="article:author"]')?.content || '';
+    const publishedTime = document.querySelector('meta[property="article:published_time"]')?.content
+        || document.querySelector('meta[name="pubdate"]')?.content || '';
+    const selection = window.getSelection()?.toString() || '';
+
+    return {
+        selection, articleTitle, articleText,
+        ogDesc, metaDesc, author, publishedTime,
+    };
+}
+
 // After a successful capture, tell any open SignalVault tabs to refresh.
 async function refreshSignalVaultTabs() {
     try {
@@ -99,7 +188,7 @@ async function init() {
     $('url-display').textContent = tab.url || '';
     setSource(detectSource(tab.url));
 
-    // Ask the content script for page data (article title, meta, last selection)
+    // Ask the content script for page data (fast path — preserves selection)
     let pageData = null;
     try {
         pageData = await new Promise((resolve) => {
@@ -107,9 +196,24 @@ async function init() {
                 if (chrome.runtime.lastError) resolve(null);
                 else resolve(resp);
             });
-            setTimeout(() => resolve(null), 500);
+            setTimeout(() => resolve(null), 400);
         });
     } catch (e) { /* ignore */ }
+
+    // Fallback: if no response (tab was opened before extension installed
+    // or content script blocked), inject an inline extractor. This loses
+    // the cached selection but recovers title/body on any tab without a reload.
+    if (!pageData) {
+        try {
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: _inlineExtract,
+            });
+            pageData = results?.[0]?.result || null;
+        } catch (e) {
+            console.warn('[clipper] inline extract failed:', e);
+        }
+    }
 
     // Title — prefer page article title (og:title / h1) over tab title
     const articleTitle = pageData?.articleTitle || tab.title || '';
