@@ -255,13 +255,14 @@ def create_app(db_path="intel.db"):
 
     init_db(db_path)
 
-    # CORS — allow browser extension (chrome-extension://) to POST to capture endpoints.
-    # Scoped to /api/signals/manual only; everything else stays same-origin.
+    # CORS — allow browser extension (chrome-extension://) to hit capture + thread list.
+    _CORS_PATHS = {"/api/signals/manual", "/api/signals/threads", "/api/signals/threads/names"}
+
     @app.after_request
     def _add_extension_cors(response):
-        if request.path == "/api/signals/manual":
+        if request.path in _CORS_PATHS:
             response.headers["Access-Control-Allow-Origin"] = "*"
-            response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
             response.headers["Access-Control-Allow-Headers"] = "Content-Type"
         return response
 
@@ -3247,39 +3248,61 @@ Return JSON: {{"title": "New directional title"}}"""
 
         conn.commit()
 
-        # ── Immediate TF-IDF thread assignment ─────────────────────
+        # ── Thread assignment ──────────────────────────────────────
+        # If the caller specified thread_id explicitly (browser extension),
+        # honor it. Otherwise fall back to TF-IDF auto-assignment.
         thread_assignment = None
-        try:
-            from agents.signals_classify import score_signals
-            sig_row = conn.execute("SELECT id, title FROM signals WHERE id = ?", (sig_id,)).fetchone()
-            if sig_row:
-                scored = score_signals(conn, [{"id": sig_row["id"], "title": sig_row["title"]}])
-                if scored and scored[0]["confidence"] == "high" and scored[0]["top_thread_id"]:
-                    tid = scored[0]["top_thread_id"]
+        explicit_thread_id = data.get("thread_id")
+        if explicit_thread_id:
+            try:
+                tid = int(explicit_thread_id)
+                row = conn.execute("SELECT id, title FROM signal_clusters WHERE id = ?", (tid,)).fetchone()
+                if row:
                     link_signal_to_cluster(conn, tid, sig_id)
                     conn.execute(
                         "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                         (tid,),
                     )
                     conn.commit()
-                    top = scored[0]["scores"][0] if scored[0]["scores"] else {}
                     thread_assignment = {
                         "thread_id": tid,
-                        "thread_title": top.get("thread_title", ""),
-                        "score": scored[0]["top_score"],
-                        "confidence": "high",
+                        "thread_title": row["title"],
+                        "confidence": "explicit",
                     }
-                elif scored and scored[0]["confidence"] == "medium" and scored[0]["top_thread_id"]:
-                    top = scored[0]["scores"][0] if scored[0]["scores"] else {}
-                    thread_assignment = {
-                        "thread_id": scored[0]["top_thread_id"],
-                        "thread_title": top.get("thread_title", ""),
-                        "score": scored[0]["top_score"],
-                        "confidence": "medium",
-                        "suggestion": True,
-                    }
-        except Exception as e:
-            print(f"[capture] TF-IDF assignment error: {e}")
+            except Exception as e:
+                print(f"[capture] explicit thread assignment error: {e}")
+        else:
+            try:
+                from agents.signals_classify import score_signals
+                sig_row = conn.execute("SELECT id, title FROM signals WHERE id = ?", (sig_id,)).fetchone()
+                if sig_row:
+                    scored = score_signals(conn, [{"id": sig_row["id"], "title": sig_row["title"]}])
+                    if scored and scored[0]["confidence"] == "high" and scored[0]["top_thread_id"]:
+                        tid = scored[0]["top_thread_id"]
+                        link_signal_to_cluster(conn, tid, sig_id)
+                        conn.execute(
+                            "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                            (tid,),
+                        )
+                        conn.commit()
+                        top = scored[0]["scores"][0] if scored[0]["scores"] else {}
+                        thread_assignment = {
+                            "thread_id": tid,
+                            "thread_title": top.get("thread_title", ""),
+                            "score": scored[0]["top_score"],
+                            "confidence": "high",
+                        }
+                    elif scored and scored[0]["confidence"] == "medium" and scored[0]["top_thread_id"]:
+                        top = scored[0]["scores"][0] if scored[0]["scores"] else {}
+                        thread_assignment = {
+                            "thread_id": scored[0]["top_thread_id"],
+                            "thread_title": top.get("thread_title", ""),
+                            "score": scored[0]["top_score"],
+                            "confidence": "medium",
+                            "suggestion": True,
+                        }
+            except Exception as e:
+                print(f"[capture] TF-IDF assignment error: {e}")
 
         conn.close()
 

@@ -2,10 +2,13 @@
 // Grabs page URL + title + selected text and POSTs to local SignalVault.
 
 const DEFAULT_ENDPOINT = 'http://localhost:5001/api/signals/manual';
+const DEFAULT_THREADS_ENDPOINT = 'http://localhost:5001/api/signals/threads';
 
 let selectedSource = 'news';
 let currentTab = null;
 let pageSelection = '';
+let threads = []; // [{id, title}]
+let selectedThreadId = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -27,11 +30,41 @@ function setSource(src) {
     });
 }
 
+// ── Thread picker ──────────────────────────────────────────────────────
+function threadsEndpoint() {
+    // Derive /api/signals/threads from /api/signals/manual endpoint
+    const ep = window._endpoint || DEFAULT_ENDPOINT;
+    return ep.replace(/\/manual\/?$/, '/threads');
+}
+
+async function loadThreads() {
+    try {
+        const res = await fetch(threadsEndpoint());
+        if (!res.ok) return;
+        const data = await res.json();
+        threads = (data.threads || []).map(t => ({ id: t.id, title: t.title }));
+        const dl = $('thread-list');
+        dl.innerHTML = threads.map(t => `<option value="${t.title.replace(/"/g, '&quot;')}" data-id="${t.id}"></option>`).join('');
+    } catch (e) {
+        console.warn('[clipper] failed to load threads:', e);
+    }
+}
+
+function resolveThreadId() {
+    const val = $('thread-input').value.trim();
+    if (!val) return null;
+    const match = threads.find(t => t.title === val);
+    return match ? match.id : null;
+}
+
 // ── Init: grab tab info + selected text ────────────────────────────────
 async function init() {
     // Load endpoint override from storage
     const stored = await chrome.storage.local.get(['endpoint', 'lastSelection']);
     window._endpoint = stored.endpoint || DEFAULT_ENDPOINT;
+
+    // Kick off threads fetch in parallel
+    loadThreads();
 
     // Get active tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -118,6 +151,8 @@ async function save() {
         author: window._author || '',
         published_at: window._publishedTime || '',
     };
+    const threadId = resolveThreadId();
+    if (threadId) body.thread_id = threadId;
 
     try {
         const res = await fetch(window._endpoint, {
@@ -155,6 +190,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     $('save-btn').addEventListener('click', save);
+
+    const threadInput = $('thread-input');
+    const threadClear = $('thread-clear');
+    threadInput?.addEventListener('input', () => {
+        threadClear.classList.toggle('visible', !!threadInput.value.trim());
+    });
+    threadClear?.addEventListener('click', () => {
+        threadInput.value = '';
+        threadClear.classList.remove('visible');
+        threadInput.focus();
+    });
 
     document.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {

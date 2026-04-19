@@ -43,7 +43,25 @@
     transition: border-color 0.15s;
   }
   input:focus, textarea:focus, select:focus { border-color: var(--accent); }
-  textarea { resize: vertical; min-height: 60px; max-height: 140px; line-height: 1.4; }
+  textarea { resize: vertical; min-height: 60px; max-height: 260px; line-height: 1.4; }
+  /* Themed, minimal scrollbar — only visible when content overflows */
+  textarea::-webkit-scrollbar { width: 6px; }
+  textarea::-webkit-scrollbar-track { background: transparent; }
+  textarea::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+  textarea::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+  textarea { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.12) transparent; }
+  /* Thread assignment row */
+  .thread-picker { position: relative; }
+  .thread-picker input {
+    padding-right: 24px;
+  }
+  .thread-picker-clear {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font-size: 14px; padding: 2px 6px; line-height: 1; display: none;
+  }
+  .thread-picker-clear.visible { display: block; }
+  .thread-picker-clear:hover { color: var(--red); }
   .url-display {
     font-size: 10px; color: var(--muted); word-break: break-all;
     padding: 4px 0; max-height: 28px; overflow: hidden;
@@ -90,6 +108,13 @@
     <button class="src-pill" data-source="twitter">X / Twitter</button>
     <button class="src-pill" data-source="reddit">Reddit</button>
     <button class="src-pill" data-source="manual">Other</button>
+  </div>
+
+  <label>Thread <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(optional — leave blank for auto-assign)</span></label>
+  <div class="thread-picker">
+    <input type="text" id="thread-input" list="thread-list" placeholder="Type to search or leave blank…" autocomplete="off" />
+    <button type="button" class="thread-picker-clear" id="thread-clear" title="Clear">×</button>
+    <datalist id="thread-list"></datalist>
   </div>
 
   <label>Notes / selected text</label>

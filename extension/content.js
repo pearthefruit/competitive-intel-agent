@@ -86,11 +86,11 @@ function extractArticleText() {
 }
 
 function cleanArticleText(text) {
+    // No length cap — full article, scrollbar handles overflow in the popup.
     return (text || '')
         .replace(/\n{3,}/g, '\n\n')
         .replace(/[ \t]+/g, ' ')
-        .trim()
-        .slice(0, 4000);
+        .trim();
 }
 
 // Reply to popup requests with latest selection + article meta + extracted body
