@@ -32,31 +32,62 @@ document.addEventListener('keyup', (e) => {
     if (e.shiftKey || e.key === 'End' || e.key === 'Home') captureSelection();
 });
 
+// Elements we never want to pull text from — sidebars, nav, messaging widgets, etc.
+const _EXCLUDE_SELECTOR = [
+    'aside', 'nav', 'footer', 'header',
+    '[role="complementary"]', '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
+    // LinkedIn-specific: the messaging overlay + feed chrome
+    '.msg-overlay', '.msg-overlay-list-bubble', '.msg-conversations',
+    '[aria-label*="messaging" i]', '[data-id="msg-overlay"]',
+    // Common chat/comment containers
+    '.comments', '.comment-list', '.chat', '.chat-window',
+].join(',');
+
+function _insideExcluded(el) {
+    return !!el.closest(_EXCLUDE_SELECTOR);
+}
+
 // Find the main article text on the page.
 // Strategy:
-//   1. If <article> exists, use the one with most text.
-//   2. Else find the DOM element whose descendant <p> tags have the most total text.
-//   3. Last resort: concatenate all substantial <p> tags on the page.
+//   1. If <article> exists (not inside excluded chrome), use the longest.
+//   2. Localize to the subtree around the page's <h1> when possible.
+//   3. Else score containers by <p> text, ignoring excluded subtrees.
+//   4. Last resort: concat all substantial <p> tags outside excluded chrome.
 function extractArticleText() {
     try {
-        // Candidate 1: <article> tags (deep descendants, not just direct children)
-        const articles = Array.from(document.querySelectorAll('article'));
+        // Candidate 1: <article> tags outside chrome
+        const articles = Array.from(document.querySelectorAll('article'))
+            .filter(a => !_insideExcluded(a));
         if (articles.length) {
             articles.sort((a, b) => (b.innerText?.length || 0) - (a.innerText?.length || 0));
             const text = (articles[0].innerText || '').trim();
             if (text.length >= 200) return cleanArticleText(text);
         }
 
-        // Candidate 2: find the element containing the most substantive <p> text (descendants)
+        // Candidate 2: localize near the first <h1> (which usually titles the article)
+        const h1 = document.querySelector('main h1, [role="main"] h1, h1');
+        if (h1 && !_insideExcluded(h1)) {
+            // Walk up until we find an ancestor with substantial paragraph text
+            let node = h1.parentElement;
+            while (node && node !== document.body) {
+                const text = _scoreContainer(node);
+                if (text && text.length >= 300) return cleanArticleText(text);
+                node = node.parentElement;
+            }
+        }
+
+        // Candidate 3: scan all containers, excluding chrome
         let best = null;
         let bestScore = 0;
         document.querySelectorAll('main, [role="main"], [role="article"], section, div').forEach(el => {
+            if (_insideExcluded(el)) return;
             const paras = el.querySelectorAll('p');
             if (paras.length < 2) return;
             let score = 0;
             paras.forEach(p => {
+                if (_insideExcluded(p)) return;
                 const len = (p.innerText || '').trim().length;
-                if (len > 30) score += len;  // only count article-like paragraphs
+                if (len > 30) score += len;
             });
             if (score > bestScore) {
                 bestScore = score;
@@ -64,17 +95,14 @@ function extractArticleText() {
             }
         });
         if (best && bestScore >= 200) {
-            const texts = [];
-            best.querySelectorAll('p').forEach(p => {
-                const t = (p.innerText || '').trim();
-                if (t.length > 30) texts.push(t);
-            });
-            if (texts.length) return cleanArticleText(texts.join('\n\n'));
+            const text = _scoreContainer(best);
+            if (text) return cleanArticleText(text);
         }
 
-        // Candidate 3 (last resort): collect all substantial <p> tags document-wide
+        // Candidate 4 (last resort): all substantial <p> tags outside excluded chrome
         const allPs = [];
         document.querySelectorAll('p').forEach(p => {
+            if (_insideExcluded(p)) return;
             const t = (p.innerText || '').trim();
             if (t.length > 50) allPs.push(t);
         });
@@ -83,6 +111,17 @@ function extractArticleText() {
         }
     } catch (e) { /* ignore */ }
     return '';
+}
+
+// Collect article-like paragraphs from a container, skipping excluded subtrees.
+function _scoreContainer(el) {
+    const texts = [];
+    el.querySelectorAll('p').forEach(p => {
+        if (_insideExcluded(p)) return;
+        const t = (p.innerText || '').trim();
+        if (t.length > 30) texts.push(t);
+    });
+    return texts.length ? texts.join('\n\n') : '';
 }
 
 function cleanArticleText(text) {
