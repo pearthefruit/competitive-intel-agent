@@ -188,31 +188,25 @@ async function init() {
     $('url-display').textContent = tab.url || '';
     setSource(detectSource(tab.url));
 
-    // Ask the content script for page data (fast path — preserves selection)
+    // Always inject fresh — works on any tab regardless of whether the
+    // persistent content script was previously loaded. No per-tab reload.
     let pageData = null;
     try {
-        pageData = await new Promise((resolve) => {
-            chrome.tabs.sendMessage(tab.id, { type: 'get-page-data' }, (resp) => {
-                if (chrome.runtime.lastError) resolve(null);
-                else resolve(resp);
-            });
-            setTimeout(() => resolve(null), 400);
+        const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: _inlineExtract,
         });
-    } catch (e) { /* ignore */ }
+        pageData = results?.[0]?.result || null;
+    } catch (e) {
+        console.warn('[clipper] inline extract failed:', e);
+    }
 
-    // Fallback: if no response (tab was opened before extension installed
-    // or content script blocked), inject an inline extractor. This loses
-    // the cached selection but recovers title/body on any tab without a reload.
-    if (!pageData) {
-        try {
-            const results = await chrome.scripting.executeScript({
-                target: { tabId: tab.id },
-                func: _inlineExtract,
-            });
-            pageData = results?.[0]?.result || null;
-        } catch (e) {
-            console.warn('[clipper] inline extract failed:', e);
-        }
+    // If the inline extract got no selection (site cleared it on focus change)
+    // fall back to the cached selection from the content script, if any.
+    if (pageData && !pageData.selection && stored.lastSelection
+        && stored.lastSelection.url === tab.url
+        && Date.now() - (stored.lastSelection.at || 0) < 5 * 60 * 1000) {
+        pageData.selection = stored.lastSelection.text || '';
     }
 
     // Title — prefer page article title (og:title / h1) over tab title
