@@ -4669,18 +4669,15 @@ Return ONLY the JSON."""
             for sid in sids:
                 centrality[sid] = centrality.get(sid, 0) + 1
 
-        # Only show signals that participate in at least one story.
-        # Un-storied signals live in the Signals tab for now.
-        if not centrality:
-            sig_rows = []
-        else:
-            ph = ",".join("?" * len(centrality))
-            sig_rows = conn.execute(f"""
-                SELECT id, title, domain, source, url, body, published_at, collected_at
-                FROM signals
-                WHERE id IN ({ph})
-                  AND (signal_status IS NULL OR signal_status != 'noise')
-            """, list(centrality.keys())).fetchall()
+        # Show all non-noise signals. Nodes participating in a story get
+        # visually bigger via centrality; disconnected signals stay small.
+        sig_rows = conn.execute("""
+            SELECT id, title, domain, source, url, body, published_at, collected_at
+            FROM signals
+            WHERE signal_status IS NULL OR signal_status != 'noise'
+            ORDER BY collected_at DESC
+            LIMIT 500
+        """).fetchall()
 
         nodes = []
         for s in sig_rows:

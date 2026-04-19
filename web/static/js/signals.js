@@ -295,7 +295,7 @@ var _discoveryBreadcrumb = [];  // var: accessed from board.js (separate script 
 var _discoveryResults = [];  // var: read/written from base.html outside this module
 var _rawSelectedSignals = new Set(); // selected signal IDs in Raw tab for pattern creation
 
-const _TAB_TITLES = { raw: 'Signals', threads: 'Threads', stories: 'Stories', narratives: 'Narratives', graph: 'Board', causal: 'Chains', execution: 'Execution' };
+const _TAB_TITLES = { raw: 'Signals', threads: 'Legacy Threads', stories: 'Threads', narratives: 'Narratives', graph: 'Board', causal: 'Chains', execution: 'Execution' };
 const _TAB_HAS_ADD = { raw: true, threads: true, narratives: true, causal: true };
 
 function switchSignalTab(tab) {

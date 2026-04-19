@@ -283,13 +283,13 @@ function _renderCausalEditor() {
     if (!path) { _activeCausalPathId = null; _renderCausalEditor(); return; }
     if (emptyEl) emptyEl.style.display = 'none';
 
-    // Header
-    if (titleEl) titleEl.innerHTML = _editableTitle(path.name, '/api/causal-paths/' + path.id, 'name', '_reloadAfterChainRename()', '13px');
+    // Header with back button to Threads list
+    if (titleEl) {
+        titleEl.innerHTML = '<button onclick="switchSignalTab(\'stories\')" title="Back to threads" style="padding:4px 8px;margin-right:6px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;cursor:pointer">← Back</button>'
+            + _editableTitle(path.name, '/api/causal-paths/' + path.id, 'name', '_reloadAfterChainRename()', '13px');
+    }
     if (actions) {
-        const canPromote = (path.thread_ids || []).length >= 2;
-        actions.innerHTML = `
-            ${canPromote ? `<button onclick="_promoteChainToNarrative(${path.id})" style="padding:4px 10px;background:none;border:1px solid var(--purple);border-radius:4px;color:var(--purple);font-size:11px;cursor:pointer" title="Creates a narrative from this chain and links all threads as evidence">&#10132; Move to Narratives</button>` : ''}
-            <button onclick="_deleteChain(${path.id})" style="padding:4px 8px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;cursor:pointer" title="Delete chain">&times;</button>`;
+        actions.innerHTML = `<button onclick="_deleteChain(${path.id})" style="padding:4px 8px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:11px;cursor:pointer" title="Delete thread">&times;</button>`;
     }
 
     // Card nodes
@@ -984,14 +984,13 @@ function _renderChainBoard() {
     svg.selectAll('*').remove();
     if (_chainBoardSim) { _chainBoardSim.stop(); _chainBoardSim = null; }
 
-    // Board uses a dedicated cache (stories = chains + narratives normalized).
-    // Kept separate from _causalPathsCache (chain editor only) to avoid collisions.
+    // Phase 3: nodes on the chain board are SIGNALS (events), not clusters.
+    // stories contain signal IDs; signals table provides the node metadata.
     if (!_boardStoriesCache || !_boardStoriesCache.length) {
         Promise.all([
             fetch('/api/causal-links').then(r => r.json()),
             fetch('/api/stories').then(r => r.json()),
-            fetch('/api/signals/threads').then(r => r.json()),
-            fetch('/api/signals/threads/names').then(r => r.json()),
+            fetch('/api/signals?days_back=3650&limit=500').then(r => r.json()),
         ]).then(function(results) {
             _causalLinksCache = results[0].links || [];
             var stories = (results[1].stories || []).filter(function(s) { return (s.thread_ids || []).length >= 2; });
@@ -999,18 +998,16 @@ function _renderChainBoard() {
                 return {
                     id: s.type + ':' + s.id,
                     name: s.title,
-                    thread_ids: s.thread_ids || [],
+                    thread_ids: s.thread_ids || [],  // values are signal IDs
                     origin: s.origin,
                     type: s.type,
                     raw_id: s.id,
                 };
             });
-            var activeThreads = results[2].threads || [];
-            var activeIds = new Set(activeThreads.map(function(t) { return t.id; }));
-            (results[3].threads || []).forEach(function(nt) {
-                if (!activeIds.has(nt.id)) activeThreads.push(nt);
-            });
-            _threadsCache = activeThreads;
+            // Store signals keyed by ID as the node-metadata source. We keep
+            // using _threadsCache as the variable name to minimize churn; it
+            // holds signals now.
+            _threadsCache = results[2].signals || [];
             _renderChainBoard();
         }).catch(function(e) { console.warn('[chain-board] data load failed:', e); });
         return;
@@ -1028,18 +1025,19 @@ function _renderChainBoard() {
     const width  = container.clientWidth  || 900;
     const height = container.clientHeight || 600;
 
-    // ── 1. Build unique node set (one per thread across all stories) ───────
+    // ── 1. Build unique node set (one per signal across all stories) ───────
     const nodeMap = new Map();
     _boardStoriesCache.forEach((path, pi) => {
         const color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
         (path.thread_ids || []).forEach(tid => {
             if (!nodeMap.has(tid)) {
+                // _threadsCache now holds signals. Match by id.
                 const t = (_threadsCache || []).find(t => t.id === tid);
                 nodeMap.set(tid, {
                     id: tid,
-                    title: t ? t.title || ('Thread #' + tid) : ('Thread #' + tid),
-                    domain: t ? t.domain || '' : '',
-                    signal_count: t ? t.signal_count || 0 : 0,
+                    title: t ? (t.title || ('Signal #' + tid)) : ('Signal #' + tid),
+                    domain: t ? (t.domain || '') : '',
+                    signal_count: 1, // one event per node — sized by centrality instead
                     chainMembership: [],
                     x: 0, y: 0, vx: 0, vy: 0,
                 });
@@ -1050,6 +1048,8 @@ function _renderChainBoard() {
             }
         });
     });
+    // After building, size each node by its chain membership count (centrality).
+    nodeMap.forEach(function(n) { n.signal_count = n.chainMembership.length; });
     const nodes = Array.from(nodeMap.values());
 
     // ── 2. Build unique edges ──────────────────────────────────────────────

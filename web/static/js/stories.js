@@ -31,10 +31,10 @@ function renderStoriesList() {
         container.innerHTML = `
             <div class="signals-empty" style="padding:40px 20px;text-align:center">
                 <div style="font-size:32px;margin-bottom:12px">🧵</div>
-                <div>No stories yet</div>
+                <div>No threads yet</div>
                 <div style="color:var(--text-muted);font-size:12px;margin-top:6px">
-                    Stories connect signals into narratives or cause/effect chains.
-                    Create one from the board by selecting threads, or write a hypothesis.
+                    A thread connects signals into a story — either as a cause/effect chain
+                    or a hypothesis to test.
                 </div>
             </div>`;
         return;
@@ -46,10 +46,10 @@ function renderStoriesList() {
 
     var html = '';
     if (empirical.length) {
-        html += _storiesSectionHtml('Empirical (chains)', '🔗', empirical);
+        html += _storiesSectionHtml('Chains', '🔗', empirical);
     }
     if (hypothesis.length) {
-        html += _storiesSectionHtml('Hypotheses (narratives)', '💭', hypothesis);
+        html += _storiesSectionHtml('Hypotheses', '💭', hypothesis);
     }
     container.innerHTML = html;
 }
@@ -88,17 +88,10 @@ function _storyCardHtml(s) {
 }
 
 function _openStory(type, id) {
-    if (type === 'chain') {
-        // Switch to causal tab and select the chain
-        switchSignalTab('causal');
-        setTimeout(function() {
-            if (typeof _selectCausalChain === 'function') _selectCausalChain(id);
-        }, 50);
-    } else if (type === 'narrative') {
-        // Switch to narratives tab and open the detail
-        switchSignalTab('narratives');
-        setTimeout(function() {
-            if (typeof openNarrativeDetail === 'function') openNarrativeDetail(id);
-        }, 50);
-    }
+    // Phase 3: both chains and hypothesis narratives live in causal_paths.
+    // Route both to the chain editor.
+    switchSignalTab('causal');
+    setTimeout(function() {
+        if (typeof _selectCausalChain === 'function') _selectCausalChain(id);
+    }, 50);
 }
