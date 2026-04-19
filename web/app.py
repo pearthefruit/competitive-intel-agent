@@ -39,7 +39,7 @@ def _scrape_and_update_body(db_path, sig_id, url):
     except Exception as e:
         print(f"[body_scrape] failed sig {sig_id} ({url[:60]}): {e}")
 
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify, Response, make_response
 
 # Add parent dir to path so we can import agents/scraper/etc.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -254,6 +254,16 @@ def create_app(db_path="intel.db"):
     app.config["DB_PATH"] = db_path
 
     init_db(db_path)
+
+    # CORS — allow browser extension (chrome-extension://) to POST to capture endpoints.
+    # Scoped to /api/signals/manual only; everything else stays same-origin.
+    @app.after_request
+    def _add_extension_cors(response):
+        if request.path == "/api/signals/manual":
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        return response
 
     # --- Single page ---
 
@@ -3068,13 +3078,20 @@ Return JSON: {{"title": "New directional title"}}"""
     def capture_page():
         return render_template("capture.html")
 
-    @app.route("/api/signals/manual", methods=["POST"])
+    @app.route("/api/signals/manual", methods=["POST", "OPTIONS"])
     def signals_manual_capture():
         """Manually capture a signal from pasted content (LinkedIn, X, etc.).
 
         Accepts raw text, auto-parses LinkedIn format, classifies domain,
         runs TF-IDF for immediate thread assignment.
+
+        Permissive CORS — this endpoint is used by the browser extension
+        (chrome-extension:// origins) as well as the web UI.
+        CORS headers are added by the @app.after_request hook.
         """
+        # CORS preflight
+        if request.method == "OPTIONS":
+            return make_response("", 204)
         import hashlib
         import re
         import json as _json

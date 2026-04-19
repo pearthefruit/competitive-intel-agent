@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-2: #141414;
+    --bg-3: #1e1e1e;
+    --border: #2a2a2a;
+    --text: #e5e5e5;
+    --muted: #888;
+    --accent: #3b82f6;
+    --purple: #a855f7;
+    --green: #22c55e;
+    --red: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    width: 380px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 12px;
+  }
+  .wrap { padding: 14px; }
+  .header {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 12px;
+    font-size: 13px; font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  label {
+    display: block; font-size: 10px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.5px; margin: 10px 0 4px;
+  }
+  input[type="text"], textarea, select {
+    width: 100%; padding: 7px 10px;
+    background: var(--bg-3); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-size: 12px; font-family: inherit; outline: none;
+    transition: border-color 0.15s;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 60px; max-height: 140px; line-height: 1.4; }
+  .url-display {
+    font-size: 10px; color: var(--muted); word-break: break-all;
+    padding: 4px 0; max-height: 28px; overflow: hidden;
+  }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .sources { display: flex; gap: 4px; flex-wrap: wrap; }
+  .src-pill {
+    padding: 3px 8px; font-size: 10px; font-weight: 600;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: none; color: var(--muted); cursor: pointer;
+  }
+  .src-pill.active { background: rgba(168,85,247,0.15); border-color: rgba(168,85,247,0.4); color: var(--purple); }
+  button.primary {
+    width: 100%; margin-top: 12px;
+    padding: 9px; font-size: 12px; font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    border: none; border-radius: 6px; color: white; cursor: pointer;
+  }
+  button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .status { font-size: 11px; padding: 8px 0 0; min-height: 16px; }
+  .status.success { color: var(--green); }
+  .status.error { color: var(--red); }
+  .settings-link {
+    display: block; text-align: center; margin-top: 8px;
+    font-size: 10px; color: var(--muted); text-decoration: none;
+  }
+  .settings-link:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">📎 SignalVault Clipper</div>
+
+  <label>Title</label>
+  <input type="text" id="title" placeholder="Page title" />
+
+  <label>URL</label>
+  <div class="url-display" id="url-display"></div>
+
+  <label>Source</label>
+  <div class="sources" id="sources">
+    <button class="src-pill active" data-source="news">News</button>
+    <button class="src-pill" data-source="linkedin">LinkedIn</button>
+    <button class="src-pill" data-source="twitter">X / Twitter</button>
+    <button class="src-pill" data-source="reddit">Reddit</button>
+    <button class="src-pill" data-source="manual">Other</button>
+  </div>
+
+  <label>Notes / selected text</label>
+  <textarea id="content" placeholder="Selected text will appear here, or add a note…"></textarea>
+
+  <button class="primary" id="save-btn">Capture to SignalVault</button>
+  <div class="status" id="status"></div>
+
+  <a href="#" id="settings-link" class="settings-link">⚙ Settings</a>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>

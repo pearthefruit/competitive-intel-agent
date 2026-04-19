@@ -298,9 +298,9 @@
             <!-- Actions — bottom of sidebar -->
             <div class="signals-actions">
                 <div style="display:flex;gap:6px;align-items:center">
-                    <button class="signals-scan-btn" id="signals-scan-btn" onclick="runSignalScan()" style="flex:1">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
-                        Scan Now
+                    <button class="signals-scan-btn" id="signals-scan-btn" onclick="runSignalScan()" style="flex:1" title="Hunt for signals across news/Reddit/HN">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        Search for more signals
                     </button>
                     <div style="position:relative">
                         <button onclick="_toggleSignalTools()" id="signal-tools-btn" style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:16px;cursor:pointer;transition:all 0.15s" title="Tools">⋯</button>
@@ -381,8 +381,8 @@
                         <div class="sig-raw-feed" id="sig-raw-feed">
                             <div class="signals-empty" id="signals-empty">
                                 <div style="font-size:32px;margin-bottom:12px">&#128225;</div>
-                                <div>No signals collected yet</div>
-                                <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click <strong>Scan Now</strong> to collect signals across all domains.</div>
+                                <div>No signals yet</div>
+                                <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Install the browser extension to capture articles as you read, or paste content with <strong>+</strong> above.</div>
                             </div>
                         </div>
                         <!-- MIDDLE: Signal detail -->
