@@ -13,8 +13,8 @@ Chrome/Edge/Brave extension for one-click capture of articles and posts into you
 ## Use
 
 - **Toolbar button** — click the pin icon to open the capture popup
-- **Keyboard shortcut** — `Ctrl+Shift+S` (or `Cmd+Shift+S` on Mac)
 - **Right-click menu** — "Capture selection to SignalVault" or "Capture page to SignalVault"
+- **Keyboard shortcut** — set your own at `chrome://extensions/shortcuts` (find "SignalVault Clipper" → "Open SignalVault capture popup" → click the edit icon and bind any key combo you like). No default is set so nothing conflicts with site "Save" hotkeys.
 
 The popup pre-fills:
 - Page title (editable)
