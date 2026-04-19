@@ -6,13 +6,21 @@
 var _storiesCache = [];  // var: shared across module boundaries
 
 function loadStories() {
+    var container = document.getElementById('stories-list');
+    if (container) container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-muted);font-size:12px">Loading stories…</div>';
     fetch('/api/stories')
-        .then(r => r.json())
-        .then(data => {
+        .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function(data) {
             _storiesCache = data.stories || [];
             renderStoriesList();
         })
-        .catch(e => console.error('[stories] load error:', e));
+        .catch(function(e) {
+            console.error('[stories] load error:', e);
+            if (container) container.innerHTML = '<div style="padding:24px;text-align:center;color:#ef4444;font-size:12px">Failed to load stories: ' + (e.message || e) + '</div>';
+        });
 }
 
 function renderStoriesList() {
