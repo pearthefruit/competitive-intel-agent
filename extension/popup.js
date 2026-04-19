@@ -156,8 +156,12 @@ async function refreshSignalVaultTabs() {
         const tabs = await chrome.tabs.query({ url: pattern });
         for (const t of tabs) {
             try {
+                // world: 'MAIN' is required — default 'ISOLATED' has its own
+                // window, so window._signalVaultRefresh (defined by the page's
+                // signals.js) isn't reachable from the isolated world.
                 await chrome.scripting.executeScript({
                     target: { tabId: t.id },
+                    world: 'MAIN',
                     func: () => { window._signalVaultRefresh?.(); }
                 });
             } catch (e) { /* tab may be restricted — ignore */ }
@@ -190,15 +194,19 @@ async function init() {
 
     // Always inject fresh — works on any tab regardless of whether the
     // persistent content script was previously loaded. No per-tab reload.
+    // Skip chrome://, edge://, about:, and other restricted URLs.
     let pageData = null;
-    try {
-        const results = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: _inlineExtract,
-        });
-        pageData = results?.[0]?.result || null;
-    } catch (e) {
-        console.warn('[clipper] inline extract failed:', e);
+    const restricted = /^(chrome|edge|about|chrome-extension|devtools|view-source):/i;
+    if (tab.url && !restricted.test(tab.url)) {
+        try {
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: _inlineExtract,
+            });
+            pageData = results?.[0]?.result || null;
+        } catch (e) {
+            // Chrome blocks scripting on certain URLs — silent skip.
+        }
     }
 
     // If the inline extract got no selection (site cleared it on focus change)
