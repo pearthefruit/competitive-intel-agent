@@ -5077,6 +5077,82 @@ Return JSON:
         conn.close()
         return jsonify({"paths": paths})
 
+    # ── Phase 2: Unified Stories (chains + narratives) ───────────────────
+    @app.route("/api/stories", methods=["GET"])
+    def stories_list_api():
+        """Return chains and narratives in a unified shape.
+
+        Each item:
+          { id, type, title, thesis, origin, status, thread_ids,
+            thread_count, signal_count, confidence_score, created_at }
+        type: 'chain' | 'narrative'
+        origin: 'empirical' (chains) | 'hypothesis' (narratives)
+        """
+        import json as _json
+        from db import get_causal_paths, get_narratives
+
+        conn = get_connection(db_path)
+        stories = []
+
+        # Chains
+        for p in get_causal_paths(conn):
+            tids = p.get("thread_ids") or []
+            if isinstance(tids, str):
+                try: tids = _json.loads(tids)
+                except: tids = []
+            # Count signals across these threads
+            sig_count = 0
+            if tids:
+                ph = ",".join("?" * len(tids))
+                row = conn.execute(
+                    f"SELECT COUNT(DISTINCT signal_id) as n FROM signal_cluster_items WHERE cluster_id IN ({ph})",
+                    list(tids)
+                ).fetchone()
+                sig_count = row["n"] if row else 0
+            stories.append({
+                "id": p["id"],
+                "type": "chain",
+                "title": p.get("name", ""),
+                "thesis": "",
+                "origin": "empirical",
+                "status": p.get("status", "active"),
+                "thread_ids": tids,
+                "thread_count": len(tids),
+                "signal_count": sig_count,
+                "confidence_score": None,
+                "created_at": p.get("created_at", ""),
+                "updated_at": p.get("updated_at", ""),
+            })
+
+        # Narratives
+        for n in get_narratives(conn, status="all"):
+            # Collect child thread IDs from signal_clusters where narrative_id matches
+            child_rows = conn.execute(
+                "SELECT id FROM signal_clusters WHERE narrative_id = ?",
+                (n["id"],)
+            ).fetchall()
+            child_tids = [r["id"] for r in child_rows]
+            stories.append({
+                "id": n["id"],
+                "type": "narrative",
+                "title": n.get("title", ""),
+                "thesis": n.get("thesis", "") or "",
+                "origin": "hypothesis",
+                "status": n.get("status", "active"),
+                "thread_ids": child_tids,
+                "thread_count": n.get("thread_count", 0),
+                "signal_count": n.get("signal_count", 0),
+                "confidence_score": n.get("confidence_score"),
+                "created_at": n.get("created_at", ""),
+                "updated_at": n.get("updated_at", ""),
+            })
+
+        # Sort newest first (use updated_at if present, else created_at)
+        stories.sort(key=lambda s: s.get("updated_at") or s.get("created_at") or "", reverse=True)
+
+        conn.close()
+        return jsonify({"stories": stories})
+
     @app.route("/api/causal-paths", methods=["POST"])
     def causal_path_create_api():
         from db import create_causal_path

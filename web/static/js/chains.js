@@ -9,6 +9,7 @@
 // ===================== CAUSAL VIEW (Redesigned) =====================
 let _causalLinksCache = [];
 var _causalPathsCache = [];        // var: read from discovery drawer outside this module
+var _boardStoriesCache = [];       // chains + narratives normalized for board rendering
 let _causalSuggestionsCache = [];
 let _causalAuditCache = {};        // pathId → temporal audit result
 let _causalDismissedPairs = JSON.parse(localStorage.getItem('causal_dismissed') || '[]');
@@ -983,17 +984,27 @@ function _renderChainBoard() {
     svg.selectAll('*').remove();
     if (_chainBoardSim) { _chainBoardSim.stop(); _chainBoardSim = null; }
 
-    // Chain cache empty — fetch regardless of whether threads are cached.
-    // (_threadsCache may be populated from the Threads tab without chain data.)
-    if (!_causalPathsCache || !_causalPathsCache.length) {
+    // Board uses a dedicated cache (stories = chains + narratives normalized).
+    // Kept separate from _causalPathsCache (chain editor only) to avoid collisions.
+    if (!_boardStoriesCache || !_boardStoriesCache.length) {
         Promise.all([
             fetch('/api/causal-links').then(r => r.json()),
-            fetch('/api/causal-paths').then(r => r.json()),
+            fetch('/api/stories').then(r => r.json()),
             fetch('/api/signals/threads').then(r => r.json()),
             fetch('/api/signals/threads/names').then(r => r.json()),
         ]).then(function(results) {
             _causalLinksCache = results[0].links || [];
-            _causalPathsCache = results[1].paths || [];
+            var stories = (results[1].stories || []).filter(function(s) { return (s.thread_ids || []).length >= 2; });
+            _boardStoriesCache = stories.map(function(s) {
+                return {
+                    id: s.type + ':' + s.id,
+                    name: s.title,
+                    thread_ids: s.thread_ids || [],
+                    origin: s.origin,
+                    type: s.type,
+                    raw_id: s.id,
+                };
+            });
             var activeThreads = results[2].threads || [];
             var activeIds = new Set(activeThreads.map(function(t) { return t.id; }));
             (results[3].threads || []).forEach(function(nt) {
@@ -1005,21 +1016,21 @@ function _renderChainBoard() {
         return;
     }
 
-    // Chains fetched but genuinely empty
-    if (!_causalPathsCache.length) {
+    // Board stories fetched but genuinely empty
+    if (!_boardStoriesCache.length) {
         svg.append('text')
             .attr('x', container.clientWidth / 2).attr('y', container.clientHeight / 2)
             .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 14)
-            .text('No chains yet \u2014 build chains in the Chains editor');
+            .text('No stories yet \u2014 build chains or narratives to see them here');
         return;
     }
 
     const width  = container.clientWidth  || 900;
     const height = container.clientHeight || 600;
 
-    // ── 1. Build unique node set (one per thread across all chains) ────────
+    // ── 1. Build unique node set (one per thread across all stories) ───────
     const nodeMap = new Map();
-    _causalPathsCache.forEach((path, pi) => {
+    _boardStoriesCache.forEach((path, pi) => {
         const color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
         (path.thread_ids || []).forEach(tid => {
             if (!nodeMap.has(tid)) {
@@ -1043,7 +1054,7 @@ function _renderChainBoard() {
 
     // ── 2. Build unique edges ──────────────────────────────────────────────
     const edgeMap = new Map();
-    _causalPathsCache.forEach((path, pi) => {
+    _boardStoriesCache.forEach((path, pi) => {
         const color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
         const tids = path.thread_ids || [];
         for (var i = 0; i < tids.length - 1; i++) {
@@ -1147,9 +1158,9 @@ function _renderChainBoard() {
     }
     svgEl.__cbZoom = zoomBehavior;
 
-    // ── 7. Arrow marker defs per chain color ──────────────────────────────
+    // ── 7. Arrow marker defs per story color ──────────────────────────────
     const defs = svg.append('defs');
-    _causalPathsCache.forEach(function(_, pi) {
+    _boardStoriesCache.forEach(function(_, pi) {
         const color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
         defs.append('marker')
             .attr('id', 'cbarrow-' + pi).attr('viewBox', '0 0 8 6')
@@ -1161,7 +1172,7 @@ function _renderChainBoard() {
     // ── 8. Pre-compute per-edge offsets for shared edges ──────────────────
     const edgeChainCount = new Map();
     const edgeChainIdx   = new Map();
-    _causalPathsCache.forEach(function(path) {
+    _boardStoriesCache.forEach(function(path) {
         const tids = path.thread_ids || [];
         for (var i = 0; i < tids.length - 1; i++) {
             const key = tids[i] + '-' + tids[i + 1];
@@ -1188,7 +1199,7 @@ function _renderChainBoard() {
         return 'M' + (sx+ox) + ',' + (sy+oy) + ' Q' + mx + ',' + my + ' ' + (ex+ox) + ',' + (ey+oy);
     }
 
-    _causalPathsCache.forEach(function(path, pi) {
+    _boardStoriesCache.forEach(function(path, pi) {
         var color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
         var tids  = path.thread_ids || [];
         var chainNodes = tids.map(function(tid) { return nodeMap.get(tid); }).filter(Boolean);
@@ -1304,8 +1315,8 @@ function _renderChainBoard() {
             const tt = document.getElementById('chain-node-tooltip');
             if (!tt) return;
             const chains = d.chainMembership.map(function(m) {
-                const p = _causalPathsCache.find(function(p) { return p.id === m.pathId; });
-                return '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + m.color + ';margin-right:4px"></span>' + escHtml(p ? p.name || 'Chain' : 'Chain');
+                const p = _boardStoriesCache.find(function(p) { return p.id === m.pathId; });
+                return '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + m.color + ';margin-right:4px"></span>' + escHtml(p ? p.name || 'Story' : 'Story');
             }).join('<br>');
             tt.innerHTML = '<div style="font-weight:700;margin-bottom:4px">' + escHtml(d.title) + '</div>' +
                 '<div style="font-size:10px;color:var(--text-muted)">' + d.signal_count + ' signals</div>' +
@@ -1365,17 +1376,21 @@ function _renderChainBoard() {
 function _cbRenderLegend() {
     const el = document.getElementById('causal-board-legend');
     if (!el) return;
-    if (!_causalPathsCache || !_causalPathsCache.length) { el.innerHTML = ''; return; }
-    el.innerHTML = _causalPathsCache.map(function(path, pi) {
+    if (!_boardStoriesCache || !_boardStoriesCache.length) { el.innerHTML = ''; return; }
+    el.innerHTML = _boardStoriesCache.map(function(path, pi) {
         const color  = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
         const dimmed = _cbDimmedChains.has(path.id);
         const name   = (path.name || 'Untitled').length > 28
             ? (path.name || 'Untitled').slice(0, 26) + '\u2026'
             : (path.name || 'Untitled');
+        const originBadge = path.origin === 'hypothesis'
+            ? '<span style="font-size:8px;padding:1px 4px;border-radius:6px;background:rgba(168,85,247,0.15);color:var(--purple);margin-left:4px">hyp</span>'
+            : '';
         return '<div class="cb-legend-item' + (dimmed ? ' cb-legend-dimmed' : '') +
-            '" onclick="_cbToggleChainDim(' + path.id + ')" title="' + (dimmed ? 'Show' : 'Hide') + ' this chain">' +
+            '" onclick="_cbToggleChainDim(\'' + path.id + '\')" title="' + (dimmed ? 'Show' : 'Hide') + ' this story">' +
             '<span class="cb-legend-dot" style="background:' + color + '"></span>' +
             '<span class="cb-legend-name">' + escHtml(name) + '</span>' +
+            originBadge +
             '</div>';
     }).join('');
 }

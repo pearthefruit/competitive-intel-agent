@@ -295,7 +295,7 @@ var _discoveryBreadcrumb = [];  // var: accessed from board.js (separate script 
 var _discoveryResults = [];  // var: read/written from base.html outside this module
 var _rawSelectedSignals = new Set(); // selected signal IDs in Raw tab for pattern creation
 
-const _TAB_TITLES = { raw: 'Signals', threads: 'Threads', narratives: 'Narratives', graph: 'Board', causal: 'Chains', execution: 'Execution' };
+const _TAB_TITLES = { raw: 'Signals', threads: 'Threads', stories: 'Stories', narratives: 'Narratives', graph: 'Board', causal: 'Chains', execution: 'Execution' };
 const _TAB_HAS_ADD = { raw: true, threads: true, narratives: true, causal: true };
 
 function switchSignalTab(tab) {
@@ -304,9 +304,16 @@ function switchSignalTab(tab) {
     document.querySelector(`.sig-feed-tab[data-tab="${tab}"]`).classList.add('active');
     document.querySelectorAll('.sig-tab-content').forEach(c => c.classList.remove('active'));
     document.getElementById(`sig-tab-${tab}`).classList.add('active');
-    if (tab === 'graph') loadBoard();
+    if (tab === 'graph') {
+        if (typeof _boardStoriesCache !== 'undefined') _boardStoriesCache = [];
+        loadBoard();
+    }
     if (tab === 'narratives') loadNarratives();
     if (tab === 'causal') loadCausalView();
+    if (tab === 'stories') {
+        if (typeof _boardStoriesCache !== 'undefined') _boardStoriesCache = [];
+        loadStories();
+    }
     // Update sidebar title + add button
     const titleEl = document.querySelector('.signals-sidebar-title');
     if (titleEl) titleEl.textContent = _TAB_TITLES[tab] || 'Signals';
@@ -388,9 +395,11 @@ function loadSignals() {
 //    where extension-triggered refresh didn't fire or tab was hidden).
 window._signalVaultRefresh = function() {
     if (typeof loadSignals === 'function') loadSignals();
-    // If board or chains subtab is visible, reload that too
-    if (typeof _signalTab !== 'undefined' && _signalTab === 'graph' && typeof loadBoard === 'function') {
-        loadBoard();
+    // Invalidate derived caches so board/stories re-fetch when visited
+    if (typeof _boardStoriesCache !== 'undefined') _boardStoriesCache = [];
+    if (typeof _signalTab !== 'undefined') {
+        if (_signalTab === 'graph' && typeof loadBoard === 'function') loadBoard();
+        if (_signalTab === 'stories' && typeof loadStories === 'function') loadStories();
     }
     _lastSignalsLoadAt = Date.now();
 };
