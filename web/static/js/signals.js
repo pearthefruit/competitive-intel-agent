@@ -1812,13 +1812,22 @@ function _buildThreadActions(thread, entities) {
 let _reviewQueueData = [];
 
 function _loadReviewQueueCount() {
-    // Phase 1 of refactor: review queue + organize lab are hidden.
-    // Capture is deliberate now (browser extension), no bulk triage needed.
-    // Code preserved; UI entry points hidden.
-    const badge = document.getElementById('review-queue-badge');
-    if (badge) badge.style.display = 'none';
-    const orgBtn = document.getElementById('organize-lab-btn');
-    if (orgBtn) orgBtn.style.display = 'none';
+    fetch('/api/signals/review-queue?limit=1')
+        .then(r => r.json())
+        .then(data => {
+            const total = data.total || 0;
+            const badge = document.getElementById('review-queue-badge');
+            const count = document.getElementById('review-queue-count');
+            if (badge) badge.style.display = total > 0 ? '' : 'none';
+            if (count) count.textContent = total;
+            const orgBtn = document.getElementById('organize-lab-btn');
+            const orgCount = document.getElementById('organize-count');
+            if (orgBtn) orgBtn.style.display = total > 0 ? '' : 'none';
+            if (orgCount) orgCount.textContent = total;
+            const rqCount = document.getElementById('sig-rq-count');
+            if (rqCount) rqCount.textContent = total || '';
+        })
+        .catch(() => {});
 }
 
 function _openReviewQueue(offset) {
