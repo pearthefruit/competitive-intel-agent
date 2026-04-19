@@ -30,7 +30,7 @@ function setSource(src) {
 // ── Init: grab tab info + selected text ────────────────────────────────
 async function init() {
     // Load endpoint override from storage
-    const stored = await chrome.storage.local.get(['endpoint']);
+    const stored = await chrome.storage.local.get(['endpoint', 'lastSelection']);
     window._endpoint = stored.endpoint || DEFAULT_ENDPOINT;
 
     // Get active tab
@@ -42,42 +42,43 @@ async function init() {
     }
     currentTab = tab;
 
-    $('title').value = tab.title || '';
     $('url-display').textContent = tab.url || '';
     setSource(detectSource(tab.url));
 
-    // Grab selected text + og:description from the page
+    // Ask the content script for page data (article title, meta, last selection)
+    let pageData = null;
     try {
-        const results = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: () => {
-                const sel = window.getSelection()?.toString() || '';
-                const ogDesc = document.querySelector('meta[property="og:description"]')?.content || '';
-                const metaDesc = document.querySelector('meta[name="description"]')?.content || '';
-                const author = document.querySelector('meta[name="author"]')?.content
-                    || document.querySelector('meta[property="article:author"]')?.content
-                    || '';
-                const publishedTime = document.querySelector('meta[property="article:published_time"]')?.content
-                    || document.querySelector('meta[name="pubdate"]')?.content
-                    || '';
-                return { sel, ogDesc, metaDesc, author, publishedTime };
-            }
+        pageData = await new Promise((resolve) => {
+            chrome.tabs.sendMessage(tab.id, { type: 'get-page-data' }, (resp) => {
+                if (chrome.runtime.lastError) resolve(null);
+                else resolve(resp);
+            });
+            setTimeout(() => resolve(null), 500);
         });
-        const r = results?.[0]?.result || {};
-        pageSelection = r.sel || '';
-        // Fill content with selection OR og:description as a preview
-        if (pageSelection) {
-            $('content').value = pageSelection;
-        } else if (r.ogDesc || r.metaDesc) {
-            $('content').value = r.ogDesc || r.metaDesc;
-            $('content').placeholder = 'Description pre-filled — edit or clear as needed';
+    } catch (e) { /* ignore */ }
+
+    // Title — prefer page article title (og:title / h1) over tab title
+    const articleTitle = pageData?.articleTitle || tab.title || '';
+    $('title').value = articleTitle;
+
+    // Selection — prefer content script's live capture; fall back to storage cache
+    let selection = pageData?.selection || '';
+    if (!selection && stored.lastSelection && stored.lastSelection.url === tab.url) {
+        // Accept cached selection if recorded in the last 5 minutes
+        if (Date.now() - (stored.lastSelection.at || 0) < 5 * 60 * 1000) {
+            selection = stored.lastSelection.text || '';
         }
-        // Stash author/date for POST
-        window._author = r.author || '';
-        window._publishedTime = r.publishedTime ? r.publishedTime.substring(0, 10) : '';
-    } catch (e) {
-        console.warn('[clipper] scripting failed:', e);
     }
+
+    if (selection) {
+        $('content').value = selection;
+    } else if (pageData?.ogDesc || pageData?.metaDesc) {
+        $('content').value = pageData.ogDesc || pageData.metaDesc;
+        $('content').placeholder = 'Description pre-filled — edit or clear as needed';
+    }
+
+    window._author = pageData?.author || '';
+    window._publishedTime = pageData?.publishedTime ? pageData.publishedTime.substring(0, 10) : '';
 
     $('title').focus();
     $('title').select();
