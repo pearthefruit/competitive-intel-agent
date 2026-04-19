@@ -1838,6 +1838,9 @@ function renderBoard(data) {
                 _updateBoardSelectionBar(nodes);
             } else if (d.type === 'narrative') {
                 _showNarrativeInBoardPane(d.node_id);
+            } else if (d.type === 'signal') {
+                // Phase 3: nodes are individual signals now
+                if (typeof openSignalDetail === 'function') openSignalDetail(d.id);
             } else {
                 openThreadDetail(d.id);
             }
@@ -1850,10 +1853,11 @@ function renderBoard(data) {
             } else if (d.type === 'narrative_thread') {
                 _expandedNarratives.delete(d.narrative_id);
                 loadBoard();
+            } else if (d.type === 'signal') {
+                if (typeof openSignalDetail === 'function') openSignalDetail(d.id);
             } else {
                 // Regular thread node — zoom into signal sub-graph
                 _zoomedFromBoard = true;
-                // Ensure _graphData has this node so _zoomIntoPattern can find the title
                 if (!_graphData) _graphData = { nodes: [] };
                 if (!_graphData.nodes.find(n => n.id === d.id)) {
                     _graphData.nodes.push({ id: d.id, title: d.title, domain: d.domain, signal_count: d.signal_count });

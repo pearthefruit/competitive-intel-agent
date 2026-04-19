@@ -2083,33 +2083,47 @@ def create_app(db_path="intel.db"):
 
     @app.route("/api/signals/threads", methods=["GET"])
     def signals_threads_api():
-        """Fetch signal threads with momentum data."""
-        domain = request.args.get("domain")
-        status = request.args.get("status", "active")
-        limit = int(request.args.get("limit", 50))
-
-        from db import get_signal_clusters
-        from agents.signals_synthesize import compute_thread_momentum
-
+        """Phase 3: signal_clusters table removed. This endpoint now returns
+        causal_paths in a thread-like shape so legacy callers (browser extension
+        thread picker) keep working. Each 'thread' is really a story/chain now."""
+        import json as _json
         conn = get_connection(db_path)
-        # Exclude narrative threads from the Threads tab (they live in their narrative)
-        exclude = None if domain else "narrative"
-        threads = get_signal_clusters(conn, domain=domain, status=status, limit=limit, exclude_domain=exclude)
-
-        # Enrich with momentum
-        for t in threads:
-            t["momentum"] = compute_thread_momentum(conn, t["id"])
-
+        rows = conn.execute("""
+            SELECT id, name, thread_ids_json, status, origin, created_at, updated_at
+            FROM causal_paths
+            WHERE status != 'deleted' OR status IS NULL
+            ORDER BY COALESCE(updated_at, created_at) DESC
+        """).fetchall()
+        threads = []
+        for r in rows:
+            try: sids = _json.loads(r["thread_ids_json"]) if r["thread_ids_json"] else []
+            except: sids = []
+            threads.append({
+                "id": r["id"],
+                "title": r["name"] or "",
+                "domain": "",
+                "signal_count": len(sids),
+                "status": r["status"] or "active",
+                "origin": r["origin"] or "empirical",
+                "momentum": {"direction": "stable", "lifecycle": "active", "this_period": 0, "last_period": 0, "days_since_last": 0},
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            })
         conn.close()
         return jsonify({"threads": threads})
 
     @app.route("/api/signals/threads/names", methods=["GET"])
     def signals_threads_names_api():
-        """Fetch all thread IDs and titles lightweight."""
+        """Phase 3: lightweight causal_paths list (signal_clusters removed)."""
+        import json as _json
         conn = get_connection(db_path)
-        rows = conn.execute("SELECT id, title, domain, (SELECT COUNT(1) FROM signal_cluster_items WHERE cluster_id = signal_clusters.id) as signal_count FROM signal_clusters").fetchall()
+        rows = conn.execute("SELECT id, name, thread_ids_json FROM causal_paths").fetchall()
         conn.close()
-        threads = [{"id": r["id"], "title": r["title"], "domain": r["domain"], "signal_count": r["signal_count"]} for r in rows]
+        threads = []
+        for r in rows:
+            try: sids = _json.loads(r["thread_ids_json"]) if r["thread_ids_json"] else []
+            except: sids = []
+            threads.append({"id": r["id"], "title": r["name"] or "", "domain": "", "signal_count": len(sids)})
         return jsonify({"threads": threads})
 
     @app.route("/api/signals/clusters", methods=["GET"])
@@ -3249,60 +3263,32 @@ Return JSON: {{"title": "New directional title"}}"""
         conn.commit()
 
         # ── Thread assignment ──────────────────────────────────────
-        # If the caller specified thread_id explicitly (browser extension),
-        # honor it. Otherwise fall back to TF-IDF auto-assignment.
+        # Phase 3: no more signal_clusters. Signals are the atoms.
+        # A caller can attach the new signal to an existing story (causal_paths)
+        # via story_id, but that's optional — mostly the user organizes manually.
         thread_assignment = None
-        explicit_thread_id = data.get("thread_id")
-        if explicit_thread_id:
+        story_id = data.get("story_id") or data.get("thread_id")  # thread_id kept for back-compat
+        if story_id:
             try:
-                tid = int(explicit_thread_id)
-                row = conn.execute("SELECT id, title FROM signal_clusters WHERE id = ?", (tid,)).fetchone()
+                sid_int = int(story_id)
+                row = conn.execute("SELECT id, name, thread_ids_json FROM causal_paths WHERE id = ?", (sid_int,)).fetchone()
                 if row:
-                    link_signal_to_cluster(conn, tid, sig_id)
-                    conn.execute(
-                        "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (tid,),
-                    )
+                    import json as _json
+                    try: sids = _json.loads(row["thread_ids_json"]) if row["thread_ids_json"] else []
+                    except: sids = []
+                    if sig_id not in sids:
+                        sids.append(sig_id)
+                    conn.execute("UPDATE causal_paths SET thread_ids_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                 (_json.dumps(sids), sid_int))
                     conn.commit()
                     thread_assignment = {
-                        "thread_id": tid,
-                        "thread_title": row["title"],
+                        "thread_id": sid_int,  # legacy key
+                        "story_id": sid_int,
+                        "thread_title": row["name"],
                         "confidence": "explicit",
                     }
             except Exception as e:
-                print(f"[capture] explicit thread assignment error: {e}")
-        else:
-            try:
-                from agents.signals_classify import score_signals
-                sig_row = conn.execute("SELECT id, title FROM signals WHERE id = ?", (sig_id,)).fetchone()
-                if sig_row:
-                    scored = score_signals(conn, [{"id": sig_row["id"], "title": sig_row["title"]}])
-                    if scored and scored[0]["confidence"] == "high" and scored[0]["top_thread_id"]:
-                        tid = scored[0]["top_thread_id"]
-                        link_signal_to_cluster(conn, tid, sig_id)
-                        conn.execute(
-                            "UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                            (tid,),
-                        )
-                        conn.commit()
-                        top = scored[0]["scores"][0] if scored[0]["scores"] else {}
-                        thread_assignment = {
-                            "thread_id": tid,
-                            "thread_title": top.get("thread_title", ""),
-                            "score": scored[0]["top_score"],
-                            "confidence": "high",
-                        }
-                    elif scored and scored[0]["confidence"] == "medium" and scored[0]["top_thread_id"]:
-                        top = scored[0]["scores"][0] if scored[0]["scores"] else {}
-                        thread_assignment = {
-                            "thread_id": scored[0]["top_thread_id"],
-                            "thread_title": top.get("thread_title", ""),
-                            "score": scored[0]["top_score"],
-                            "confidence": "medium",
-                            "suggestion": True,
-                        }
-            except Exception as e:
-                print(f"[capture] TF-IDF assignment error: {e}")
+                print(f"[capture] story attach error: {e}")
 
         conn.close()
 
@@ -4658,85 +4644,64 @@ Return ONLY the JSON."""
 
     @app.route("/api/board", methods=["GET"])
     def board_state_api():
-        """Get full board state: positions, notes, threads, narratives, connections."""
-        from db import get_board_state, get_signal_clusters, get_thread_links, get_narratives
-        from agents.signals_synthesize import compute_thread_momentum
+        """Get board state: signals as nodes, causal_paths as stories.
+
+        Phase 3 model: one signal = one event. Node size = centrality (count of
+        stories that reference this signal).
+        """
+        import json as _json
+        from db import get_board_state, get_thread_links
 
         conn = get_connection(db_path)
         board = get_board_state(conn)
-        # Threads NOT in any narrative (active only — exclude merged/deleted)
-        threads = get_signal_clusters(conn, status="active", limit=200, exclude_domain="narrative")
-        orphan_threads = [t for t in threads if not t.get("narrative_id")]
-        links = get_thread_links(conn)
-        narratives = get_narratives(conn, status="all")
+        links = get_thread_links(conn)  # manual board-connect links (still signal↔signal)
 
-        from db import get_pattern_signal_noise_counts
+        # Compute centrality: how many stories reference each signal
+        path_rows = conn.execute(
+            "SELECT thread_ids_json, origin FROM causal_paths WHERE status != 'deleted' OR status IS NULL"
+        ).fetchall()
+        centrality = {}
+        for p in path_rows:
+            try:
+                sids = _json.loads(p["thread_ids_json"]) if p["thread_ids_json"] else []
+            except Exception:
+                sids = []
+            for sid in sids:
+                centrality[sid] = centrality.get(sid, 0) + 1
+
+        # Only show signals that participate in at least one story.
+        # Un-storied signals live in the Signals tab for now.
+        if not centrality:
+            sig_rows = []
+        else:
+            ph = ",".join("?" * len(centrality))
+            sig_rows = conn.execute(f"""
+                SELECT id, title, domain, source, url, body, published_at, collected_at
+                FROM signals
+                WHERE id IN ({ph})
+                  AND (signal_status IS NULL OR signal_status != 'noise')
+            """, list(centrality.keys())).fetchall()
+
         nodes = []
-
-        # Narrative super-nodes
-        for n in narratives:
-            key = f"narrative:{n['id']}"
+        for s in sig_rows:
+            key = f"signal:{s['id']}"
             pos = board["positions"].get(key)
-            ev = {}
-            # Get evidence counts across all narrative threads
-            stance_rows = conn.execute(
-                """SELECT sci.evidence_stance, COUNT(*) as cnt
-                   FROM signal_cluster_items sci
-                   JOIN signal_clusters sc ON sc.id = sci.cluster_id
-                   WHERE sc.narrative_id = ? GROUP BY sci.evidence_stance""",
-                (n["id"],),
-            ).fetchall()
-            for sr in stance_rows:
-                ev[sr["evidence_stance"]] = sr["cnt"]
+            c = centrality.get(s["id"], 0)
             nodes.append({
-                "id": f"n:{n['id']}", "node_id": n["id"], "type": "narrative",
-                "title": n["title"], "thesis": n.get("thesis", ""),
-                "thread_count": n.get("thread_count", 0),
-                "signal_count": n.get("signal_count", 0),
-                "noise_count": n.get("noise_count", 0),
-                "evidence": ev, "status": n.get("status", "active"),
-                "x": pos["x"] if pos else None, "y": pos["y"] if pos else None,
-                "pinned": bool(pos["pinned"]) if pos else False,
-                # Child thread IDs for expand mode
-                "child_thread_ids": [],  # populated after narrative_child_threads fetch
-            })
-
-        # Orphan thread nodes (not in a narrative, with at least 1 signal)
-        for t in orphan_threads:
-            sn = get_pattern_signal_noise_counts(conn, t["id"])
-            if sn["signal_count"] == 0 and sn["noise_count"] == 0:
-                continue  # skip empty threads
-            t["momentum"] = compute_thread_momentum(conn, t["id"])
-            key = f"thread:{t['id']}"
-            pos = board["positions"].get(key)
-            nodes.append({
-                "id": t["id"], "type": "thread", "title": t["title"],
-                "domain": t["domain"], "signal_count": sn["signal_count"],
-                "noise_count": sn["noise_count"], "momentum": t["momentum"],
-                "synthesis": t.get("synthesis", ""),
-                "x": pos["x"] if pos else None, "y": pos["y"] if pos else None,
+                "id": s["id"],
+                "type": "signal",
+                "title": s["title"] or "(untitled)",
+                "domain": s["domain"] or "",
+                "source": s["source"] or "",
+                "url": s["url"] or "",
+                "signal_count": max(1, c + 1),  # legacy field for node sizing (centrality)
+                "centrality": c,
+                "published_at": s["published_at"],
+                "collected_at": s["collected_at"],
+                "x": pos["x"] if pos else None,
+                "y": pos["y"] if pos else None,
                 "pinned": bool(pos["pinned"]) if pos else False,
             })
-
-        # Narrative child threads (domain='narrative') — fetched separately since excluded above
-        # Also backfill child_thread_ids on narrative nodes
-        narrative_child_threads = get_signal_clusters(conn, status="active", limit=200, domain="narrative")
-        for t in narrative_child_threads:
-            sn = get_pattern_signal_noise_counts(conn, t["id"])
-            key = f"thread:{t['id']}"
-            pos = board["positions"].get(key)
-            nodes.append({
-                "id": t["id"], "type": "narrative_thread", "title": t["title"],
-                "domain": t["domain"], "signal_count": sn["signal_count"],
-                "narrative_id": t["narrative_id"],
-                "x": pos["x"] if pos else None, "y": pos["y"] if pos else None,
-                "pinned": bool(pos["pinned"]) if pos else False,
-            })
-
-        # Backfill child_thread_ids on narrative super-nodes
-        for nd in nodes:
-            if nd.get("type") == "narrative":
-                nd["child_thread_ids"] = [t["id"] for t in narrative_child_threads if t.get("narrative_id") == nd["node_id"]]
 
         conn.close()
         return jsonify({
@@ -5077,78 +5042,52 @@ Return JSON:
         conn.close()
         return jsonify({"paths": paths})
 
-    # ── Phase 2: Unified Stories (chains + narratives) ───────────────────
+    # ── Unified Stories (Phase 3: all stored in causal_paths) ────────────
     @app.route("/api/stories", methods=["GET"])
     def stories_list_api():
-        """Return chains and narratives in a unified shape.
+        """Return all stories (empirical chains + hypothesis narratives).
+
+        After Phase 3: both kinds live in causal_paths with the `origin` column
+        distinguishing them. thread_ids_json holds signal IDs directly.
 
         Each item:
           { id, type, title, thesis, origin, status, thread_ids,
             thread_count, signal_count, confidence_score, created_at }
-        type: 'chain' | 'narrative'
-        origin: 'empirical' (chains) | 'hypothesis' (narratives)
         """
         import json as _json
-        from db import get_causal_paths, get_narratives
 
         conn = get_connection(db_path)
+        rows = conn.execute("""
+            SELECT id, name, thread_ids_json, status, thesis, origin,
+                   reasoning, confidence_score, sub_claims_json,
+                   created_at, updated_at
+            FROM causal_paths
+            WHERE status != 'deleted' OR status IS NULL
+            ORDER BY COALESCE(updated_at, created_at) DESC
+        """).fetchall()
+
         stories = []
-
-        # Chains
-        for p in get_causal_paths(conn):
-            tids = p.get("thread_ids") or []
-            if isinstance(tids, str):
-                try: tids = _json.loads(tids)
-                except: tids = []
-            # Count signals across these threads
-            sig_count = 0
-            if tids:
-                ph = ",".join("?" * len(tids))
-                row = conn.execute(
-                    f"SELECT COUNT(DISTINCT signal_id) as n FROM signal_cluster_items WHERE cluster_id IN ({ph})",
-                    list(tids)
-                ).fetchone()
-                sig_count = row["n"] if row else 0
+        for r in rows:
+            try:
+                sids = _json.loads(r["thread_ids_json"]) if r["thread_ids_json"] else []
+            except Exception:
+                sids = []
+            origin = r["origin"] or "empirical"
             stories.append({
-                "id": p["id"],
-                "type": "chain",
-                "title": p.get("name", ""),
-                "thesis": "",
-                "origin": "empirical",
-                "status": p.get("status", "active"),
-                "thread_ids": tids,
-                "thread_count": len(tids),
-                "signal_count": sig_count,
-                "confidence_score": None,
-                "created_at": p.get("created_at", ""),
-                "updated_at": p.get("updated_at", ""),
+                "id": r["id"],
+                "type": "chain" if origin == "empirical" else "narrative",
+                "title": r["name"] or "",
+                "thesis": r["thesis"] or "",
+                "origin": origin,
+                "status": r["status"] or "active",
+                "thread_ids": sids,       # legacy key name; values are signal IDs
+                "signal_ids": sids,        # new key, same values
+                "thread_count": len(sids), # legacy
+                "signal_count": len(sids),
+                "confidence_score": r["confidence_score"],
+                "created_at": r["created_at"] or "",
+                "updated_at": r["updated_at"] or "",
             })
-
-        # Narratives
-        for n in get_narratives(conn, status="all"):
-            # Collect child thread IDs from signal_clusters where narrative_id matches
-            child_rows = conn.execute(
-                "SELECT id FROM signal_clusters WHERE narrative_id = ?",
-                (n["id"],)
-            ).fetchall()
-            child_tids = [r["id"] for r in child_rows]
-            stories.append({
-                "id": n["id"],
-                "type": "narrative",
-                "title": n.get("title", ""),
-                "thesis": n.get("thesis", "") or "",
-                "origin": "hypothesis",
-                "status": n.get("status", "active"),
-                "thread_ids": child_tids,
-                "thread_count": n.get("thread_count", 0),
-                "signal_count": n.get("signal_count", 0),
-                "confidence_score": n.get("confidence_score"),
-                "created_at": n.get("created_at", ""),
-                "updated_at": n.get("updated_at", ""),
-            })
-
-        # Sort newest first (use updated_at if present, else created_at)
-        stories.sort(key=lambda s: s.get("updated_at") or s.get("created_at") or "", reverse=True)
 
         conn.close()
         return jsonify({"stories": stories})

@@ -2212,39 +2212,62 @@ def insert_signals_batch(conn, signals):
 def get_signals(conn, domain=None, days_back=7, limit=200):
     """Fetch signals with optional domain filter and recency window.
 
-    Includes thread assignment info (thread_id, thread_title) via subquery.
+    Phase 3: thread_info comes from causal_paths membership (stories).
+    Format: 'path_id::name|||path_id::name'. Computed in Python since
+    SQL-level JSON search in sqlite is awkward.
     """
-    thread_sub = """(SELECT GROUP_CONCAT(sc.id || '::' || REPLACE(sc.title, '|||', ''), '|||')
-        FROM signal_cluster_items sci
-        JOIN signal_clusters sc ON sc.id = sci.cluster_id
-        WHERE sci.signal_id = s.id) AS thread_info"""
+    import json as _json
     if domain:
         rows = conn.execute(
-            f"""SELECT s.*, {thread_sub} FROM signals s
-               WHERE s.domain = ? AND s.collected_at >= datetime('now', ?)
-               ORDER BY s.collected_at DESC LIMIT ?""",
+            """SELECT * FROM signals
+               WHERE domain = ? AND collected_at >= datetime('now', ?)
+               ORDER BY collected_at DESC LIMIT ?""",
             (domain, f"-{days_back} days", limit),
         ).fetchall()
     else:
         rows = conn.execute(
-            f"""SELECT s.*, {thread_sub} FROM signals s
-               WHERE s.collected_at >= datetime('now', ?)
-               ORDER BY s.collected_at DESC LIMIT ?""",
+            """SELECT * FROM signals
+               WHERE collected_at >= datetime('now', ?)
+               ORDER BY collected_at DESC LIMIT ?""",
             (f"-{days_back} days", limit),
         ).fetchall()
-    return [dict(r) for r in rows]
+
+    # Build signal_id → [(path_id, name), ...] map from causal_paths
+    path_rows = conn.execute("SELECT id, name, thread_ids_json FROM causal_paths").fetchall()
+    membership = {}  # sig_id → [(pid, name)]
+    for p in path_rows:
+        try: sids = _json.loads(p["thread_ids_json"]) if p["thread_ids_json"] else []
+        except: sids = []
+        safe_name = (p["name"] or "").replace("|||", "")
+        for sid in sids:
+            membership.setdefault(sid, []).append(f"{p['id']}::{safe_name}")
+
+    out = []
+    for r in rows:
+        d = dict(r)
+        pieces = membership.get(d["id"], [])
+        d["thread_info"] = "|||".join(pieces) if pieces else None
+        out.append(d)
+    return out
 
 
 def get_unassigned_signals(conn, days_back=1, limit=300):
-    """Fetch signals not yet assigned to any thread, within recency window."""
+    """Phase 3: signal_cluster_items removed. Returns signals not in any
+    causal_path (story)."""
+    import json as _json
+    path_rows = conn.execute("SELECT thread_ids_json FROM causal_paths").fetchall()
+    assigned = set()
+    for p in path_rows:
+        try: sids = _json.loads(p["thread_ids_json"]) if p["thread_ids_json"] else []
+        except: sids = []
+        assigned.update(sids)
     rows = conn.execute(
-        """SELECT s.* FROM signals s
-           LEFT JOIN signal_cluster_items sci ON sci.signal_id = s.id
-           WHERE sci.id IS NULL AND s.collected_at >= datetime('now', ?)
-           ORDER BY s.collected_at DESC LIMIT ?""",
+        """SELECT * FROM signals
+           WHERE collected_at >= datetime('now', ?)
+           ORDER BY collected_at DESC LIMIT ?""",
         (f"-{days_back} days", limit),
     ).fetchall()
-    return [dict(r) for r in rows]
+    return [dict(r) for r in rows if r["id"] not in assigned]
 
 
 def get_signal_counts_by_domain(conn, days_back=7):
