@@ -57,6 +57,27 @@ function resolveThreadId() {
     return match ? match.id : null;
 }
 
+// After a successful capture, tell any open SignalVault tabs to refresh.
+async function refreshSignalVaultTabs() {
+    try {
+        // Derive host from the capture endpoint so a custom port still works
+        const ep = window._endpoint || DEFAULT_ENDPOINT;
+        const u = new URL(ep);
+        const pattern = `${u.protocol}//${u.host}/*`;
+        const tabs = await chrome.tabs.query({ url: pattern });
+        for (const t of tabs) {
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: t.id },
+                    func: () => { window._signalVaultRefresh?.(); }
+                });
+            } catch (e) { /* tab may be restricted — ignore */ }
+        }
+    } catch (e) {
+        console.warn('[clipper] refresh-signalvault failed:', e);
+    }
+}
+
 // ── Init: grab tab info + selected text ────────────────────────────────
 async function init() {
     // Load endpoint override from storage
@@ -166,6 +187,8 @@ async function save() {
             const assignment = data.thread_assignment?.thread_title;
             status.textContent = assignment ? `✓ Saved → ${assignment}` : '✓ Captured';
             btn.textContent = '✓ Captured';
+            // Trigger refresh in any open SignalVault tabs
+            refreshSignalVaultTabs();
             setTimeout(() => window.close(), 1200);
         } else {
             status.className = 'status error';

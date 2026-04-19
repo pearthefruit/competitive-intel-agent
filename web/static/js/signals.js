@@ -380,6 +380,29 @@ function loadSignals() {
     }).catch(e => console.error('[signals] load error:', e));
 }
 
+// ── Auto-refresh hooks ─────────────────────────────────────────────────
+// 1. Browser extension calls this after a successful capture to push
+//    fresh data into any open SignalVault tab without a manual reload.
+// 2. Tab visibility change: when the SignalVault tab regains focus,
+//    refresh if it's been >10s since the last load (catches the case
+//    where extension-triggered refresh didn't fire or tab was hidden).
+window._signalVaultRefresh = function() {
+    if (typeof loadSignals === 'function') loadSignals();
+    // If board or chains subtab is visible, reload that too
+    if (typeof _signalTab !== 'undefined' && _signalTab === 'graph' && typeof loadBoard === 'function') {
+        loadBoard();
+    }
+    _lastSignalsLoadAt = Date.now();
+};
+
+let _lastSignalsLoadAt = Date.now();
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    // Throttle: skip if we loaded in the last 10 seconds
+    if (Date.now() - _lastSignalsLoadAt < 10_000) return;
+    window._signalVaultRefresh?.();
+});
+
 function _renderBrainstormList(brainstorms) {
     const container = document.getElementById('signals-brainstorm-list');
     const items = document.getElementById('brainstorm-list-items');
