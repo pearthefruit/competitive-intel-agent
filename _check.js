@@ -1,0 +1,10044 @@
+
+// ===================== MARKED CONFIG =====================
+// Make external links open in new tab; keep internal report links in-app
+// Superscript citation links (¹²³...) get styled like Perplexity
+const renderer = new marked.Renderer();
+const SUPERSCRIPT_RE = /^[¹²³⁴⁵⁶⁷⁸⁹⁰]+$/;
+renderer.link = function({ href, title, tokens }) {
+    try {
+        const h = href || '';
+        const text = this.parser.parseInline(tokens);
+        // Internal report links handled by click interception
+        if (h.match(/reports[\\\/].+\.md$/)) {
+            const titleAttr = title ? ` title="${title}"` : '';
+            return `<a href="${h}"${titleAttr}>${text}</a>`;
+        }
+        const titleAttr = title ? ` title="${title}"` : '';
+        // Superscript citation links → styled badge that opens in new tab
+        const plainText = text.replace(/<[^>]+>/g, '').trim();
+        if (SUPERSCRIPT_RE.test(plainText)) {
+            return `<a href="${h}" class="citation"${titleAttr} target="_blank" rel="noopener noreferrer">${plainText}</a>`;
+        }
+        // Regular external links → new tab
+        return `<a href="${h}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+    } catch (e) {
+        // Fallback: render a basic link so parsing never breaks
+        return `<a href="${href || '#'}" target="_blank" rel="noopener noreferrer">${href || 'link'}</a>`;
+    }
+};
+marked.setOptions({ renderer });
+
+// ===================== TOAST =====================
+function showToast(message, type = 'info', duration = 6000) {
+    const container = document.getElementById('toast-container');
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.innerHTML = `<span>${message}</span><button class="toast-close" onclick="this.parentElement.remove()">&times;</button>`;
+    container.appendChild(el);
+    if (duration > 0) setTimeout(() => { if (el.parentElement) el.remove(); }, duration);
+}
+
+// ===================== STATE =====================
+const STORAGE_KEY = 'signalvault_chats';
+let chats = [];
+let activeChatId = null;
+let sendingChats = new Set();  // track which chats are currently processing
+let messageQueue = [];
+let currentReportFilename = null;
+let allReports = [];
+let allCompanies = [];
+let openCompanies = new Set();
+let companySortMode = 'recent'; // 'recent' or 'alpha'
+
+// Context pill state
+let activeContext = null;       // { company, type, label }
+let contextDismissed = false;
+let resumePromptShown = false;
+
+// ===================== SPLIT VIEW STATE =====================
+let _splitActive = false;
+let _splitFocusedSide = 'left';
+let _wasExpandedBeforeSplit = false;
+const _emptyPanel = () => ({ type: null, reportFilename: null, dossierName: null, briefingData: null, dossierData: null, company: null, analysisType: null, date: null });
+let _splitPanels = { left: _emptyPanel(), right: _emptyPanel() };
+
+function _isInSplitPanel(filename, dossierName) {
+    if (!_splitActive) return false;
+    for (const side of ['left', 'right']) {
+        const p = _splitPanels[side];
+        if (filename && p.reportFilename === filename) return side;
+        if (dossierName && p.dossierName === dossierName) return side;
+    }
+    return false;
+}
+
+function setContext(company, type, label) {
+    activeContext = { company: company, type: type, label: label };
+    contextDismissed = false;
+    resumePromptShown = false;
+    renderContextPill();
+}
+
+function clearContextPill() {
+    contextDismissed = true;
+    renderContextPill();
+}
+
+function clearContextFull() {
+    activeContext = null;
+    contextDismissed = false;
+    resumePromptShown = false;
+    renderContextPill();
+}
+
+function renderContextPill() {
+    const bar = document.getElementById('context-pill-bar');
+    const text = document.getElementById('context-pill-text');
+    if (!activeContext || contextDismissed) {
+        bar.style.display = 'none';
+        return;
+    }
+    text.textContent = 'Viewing: ' + activeContext.company + ' \u00b7 ' + activeContext.label;
+    bar.style.display = 'block';
+}
+
+function getContextCompany() {
+    return activeContext ? activeContext.company : null;
+}
+
+function findExistingCompanyChat(company) {
+    if (!company) return null;
+    const lc = company.toLowerCase();
+    const chat = getActiveChat();
+    return chats.find(c => c.id !== (chat ? chat.id : '') && (c.company || '').toLowerCase() === lc && c.messages.length > 0);
+}
+
+function showResumePrompt(company, existingChat) {
+    return new Promise(resolve => {
+        const bar = document.getElementById('resume-prompt');
+        const text = document.getElementById('resume-prompt-text');
+        text.textContent = `Continue previous ${company} conversation?`;
+        bar.style.display = 'flex';
+
+        const yesBtn = document.getElementById('resume-yes-btn');
+        const newBtn = document.getElementById('resume-new-btn');
+
+        function cleanup() {
+            bar.style.display = 'none';
+            yesBtn.removeEventListener('click', onYes);
+            newBtn.removeEventListener('click', onNew);
+        }
+        function onYes() { cleanup(); resolve('resume'); }
+        function onNew() { cleanup(); resolve('new'); }
+
+        yesBtn.addEventListener('click', onYes);
+        newBtn.addEventListener('click', onNew);
+    });
+}
+
+function hideResumePrompt() {
+    document.getElementById('resume-prompt').style.display = 'none';
+}
+
+// ===================== INIT =====================
+document.addEventListener('DOMContentLoaded', () => {
+    loadChats();
+    renderChatList();
+    loadReports();
+    refreshUsageBadge();
+    // Start with a fresh chat or load the most recent
+    if (chats.length) {
+        loadChat(chats[0].id);
+    } else {
+        newChat();
+    }
+});
+
+// ===================== LOCAL STORAGE =====================
+function loadChats() {
+    try { chats = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+    catch { chats = []; }
+}
+
+function saveChats() {
+    if (chats.length > 30) chats = chats.slice(0, 30);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+}
+
+function getActiveChat() {
+    return chats.find(c => c.id === activeChatId);
+}
+
+// ===================== LEFT TABS =====================
+function switchLeftTab(tab) {
+    document.querySelectorAll('.left-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.left-panel').forEach(p => p.classList.remove('active'));
+    const idx = tab === 'chats' ? 1 : 2;
+    document.querySelector(`.left-tab:nth-child(${idx})`).classList.add('active');
+    document.getElementById(`panel-${tab}`).classList.add('active');
+    if (tab === 'companies') loadCompanies();
+}
+
+function switchModule(mod) {
+    document.querySelectorAll('.module-item').forEach(m => m.classList.remove('active'));
+    document.querySelectorAll('.workspace').forEach(w => w.classList.remove('active'));
+    document.querySelector(`.module-item[data-module="${mod}"]`).classList.add('active');
+    document.getElementById(`workspace-${mod}`).classList.add('active');
+    if (mod === 'prospecting') { loadCampaigns(); _loadLenses(); }
+    if (mod === 'signals') { loadSignals(); loadSignalFreshness(); }
+}
+
+// ===================== CHAT LIST =====================
+function renderChatList() {
+    const filter = (document.getElementById('chat-filter').value || '').toLowerCase();
+    const list = document.getElementById('chat-list');
+    const filtered = chats.filter(c => !filter || (c.title || '').toLowerCase().includes(filter) || (c.company || '').toLowerCase().includes(filter));
+
+    list.innerHTML = filtered.map(c => `
+        <div class="chat-item ${c.id === activeChatId ? 'active' : ''}" onclick="loadChat('${c.id}')">
+            <button class="chat-item-delete" onclick="event.stopPropagation();deleteChat('${c.id}')" title="Delete">&times;</button>
+            <div class="chat-item-title">${escHtml(c.title || 'New Chat')}</div>
+            <div class="chat-item-meta">
+                <span class="chat-item-date">${formatDate(c.created)}</span>
+                ${c.company ? `<span class="chat-item-company">${escHtml(c.company)}</span>` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+function newChat() {
+    const chat = { id: 'chat_' + Date.now(), title: '', company: null, messages: [], created: Date.now() };
+    chats.unshift(chat);
+    activeChatId = chat.id;
+    saveChats();
+    renderChatList();
+    renderMessages();
+    document.getElementById('chat-input').focus();
+}
+
+function loadChat(id) {
+    // Exit split view or focus mode so chat is visible
+    if (_splitActive) {
+        const remaining = _splitPanels[_splitFocusedSide];
+        _exitSplitView();
+        if (remaining.type === 'report' && remaining.reportFilename) {
+            openReport(remaining.reportFilename);
+        } else if (remaining.type === 'briefing' && remaining.dossierName) {
+            openDossier(remaining.dossierName);
+        }
+    }
+    const rp = document.getElementById('right-pane');
+    if (rp && rp.classList.contains('expanded')) {
+        collapseReport();
+    }
+    activeChatId = id;
+    renderChatList();
+    renderMessages();
+}
+
+function deleteChat(id) {
+    chats = chats.filter(c => c.id !== id);
+    saveChats();
+    if (id === activeChatId) {
+        if (chats.length) loadChat(chats[0].id);
+        else newChat();
+    } else {
+        renderChatList();
+    }
+}
+
+// ===================== REPORT LIST (kept for openReport compat) =====================
+async function loadReports() {
+    try {
+        const resp = await fetch('/api/reports');
+        allReports = await resp.json();
+    } catch { allReports = []; }
+}
+
+// ===================== COMPANY LIST (unified sidebar) =====================
+let activeDossierName = null;
+
+async function loadCompanies() {
+    try {
+        const resp = await fetch('/api/companies');
+        if (!resp.ok) { console.error('Companies API error:', resp.status); allCompanies = []; }
+        else { allCompanies = await resp.json(); }
+    } catch (e) { console.error('loadCompanies failed:', e); allCompanies = []; }
+    renderCompanyList();
+}
+
+function refreshSidebar() {
+    // Reload companies panel if visible, and always refresh allReports for openReport compat
+    loadReports();
+    const panel = document.getElementById('panel-companies');
+    if (panel && panel.classList.contains('active')) loadCompanies();
+}
+
+// --- LLM Usage Tracking ---
+async function refreshUsageBadge() {
+    try {
+        const resp = await fetch('/api/llm-usage');
+        const data = await resp.json();
+        const badge = document.getElementById('llm-usage-badge');
+        if (!badge || data.error) return;
+
+        const t = data.today || {};
+        const total = t.total || 0;
+        const success = t.success || 0;
+        const failed = total - success;
+        const totalTokens = (t.input_tokens || 0) + (t.output_tokens || 0);
+
+        // Badge shows calls + token count
+        const tokStr = totalTokens > 0 ? ` · ${_fmtTok(totalTokens)}` : '';
+        badge.textContent = `${total} calls${tokStr}`;
+        badge.classList.remove('warning', 'danger');
+        if (failed > 5) badge.classList.add('danger');
+        else if (failed > 0) badge.classList.add('warning');
+
+        // Render panel content
+        const panel = document.getElementById('llm-usage-content');
+        if (!panel) return;
+        let html = '';
+        html += `<div class="llm-usage-row"><span>Total calls</span><span class="cnt">${total}</span></div>`;
+        html += `<div class="llm-usage-row"><span>Successful</span><span class="cnt">${success}</span></div>`;
+        if (failed) html += `<div class="llm-usage-row error"><span>Failed/Rate-limited</span><span class="cnt">${failed}</span></div>`;
+        if (totalTokens > 0) {
+            html += `<div class="llm-usage-row"><span>Input tokens</span><span class="cnt">${_fmtTok(t.input_tokens||0)}</span></div>`;
+            html += `<div class="llm-usage-row"><span>Output tokens</span><span class="cnt">${_fmtTok(t.output_tokens||0)}</span></div>`;
+            html += `<div class="llm-usage-row"><span>Total tokens</span><span class="cnt" style="color:#a855f7">${_fmtTok(totalTokens)}</span></div>`;
+        }
+
+        // By provider — with per-model token counts
+        const byProvider = {};
+        (t.by_provider || []).forEach(r => {
+            const key = `${r.provider}/${r.model}`;
+            if (!byProvider[key]) byProvider[key] = { success: 0, fail: 0, in_tok: 0, out_tok: 0 };
+            if (r.status === 'success') byProvider[key].success += r.cnt;
+            else byProvider[key].fail += r.cnt;
+            byProvider[key].in_tok += (r.input_tokens || 0);
+            byProvider[key].out_tok += (r.output_tokens || 0);
+        });
+        const providers = Object.entries(byProvider);
+        if (providers.length) {
+            html += '<div class="llm-usage-divider"></div>';
+            providers.forEach(([name, counts]) => {
+                const short = name.split('/').pop().replace(/-/g, ' ').slice(0, 25);
+                const failStr = counts.fail ? ` <span style="color:#ef4444">(${counts.fail} fail)</span>` : '';
+                const modelTok = (counts.in_tok + counts.out_tok) > 0 ? ` <span style="color:#a855f7">${_fmtTok(counts.in_tok + counts.out_tok)}</span>` : '';
+                html += `<div class="llm-usage-row"><span>${escHtml(short)}</span><span class="cnt">${counts.success}${failStr}${modelTok}</span></div>`;
+            });
+        }
+
+        // Recent errors
+        const errors = data.recent_errors || [];
+        if (errors.length) {
+            html += '<div class="llm-usage-divider"></div>';
+            html += '<div style="color:#ef4444;font-weight:600;margin-bottom:4px">Recent Errors</div>';
+            errors.slice(0, 5).forEach(e => {
+                const time = _utcToLocal(e.created_at);
+                const err = (e.error || '').slice(0, 60);
+                html += `<div style="color:var(--text-muted);font-size:11px;margin-bottom:2px">${time} ${escHtml(e.provider)}/${escHtml(e.model?.split('/').pop() || '')} — ${escHtml(err)}</div>`;
+            });
+        }
+
+        // All-time totals
+        const a = data.all_time || {};
+        if (a.total) {
+            html += '<div class="llm-usage-divider"></div>';
+            const allTok = (a.input_tokens || 0) + (a.output_tokens || 0);
+            const allFailed = (a.total || 0) - (a.success || 0);
+            html += `<div style="color:var(--text-muted);font-weight:600;margin-bottom:4px">All Time</div>`;
+            html += `<div class="llm-usage-row"><span>Total calls</span><span class="cnt">${a.total.toLocaleString()}</span></div>`;
+            html += `<div class="llm-usage-row"><span>Successful</span><span class="cnt">${(a.success||0).toLocaleString()}</span></div>`;
+            if (allFailed) html += `<div class="llm-usage-row error"><span>Failed/Rate-limited</span><span class="cnt">${allFailed.toLocaleString()}</span></div>`;
+            if (allTok > 0) html += `<div class="llm-usage-row"><span>Total tokens</span><span class="cnt" style="color:#a855f7">${_fmtTok(allTok)}</span></div>`;
+        }
+
+        panel.innerHTML = html;
+    } catch {}
+}
+
+function toggleUsagePanel() {
+    const panel = document.getElementById('llm-usage-panel');
+    if (!panel) return;
+    const visible = panel.style.display !== 'none';
+    panel.style.display = visible ? 'none' : 'block';
+    if (!visible) refreshUsageBadge();
+}
+
+// Refresh usage badge periodically
+setInterval(refreshUsageBadge, 15000);
+
+function _formatSidebarDate(dateStr) {
+    if (!dateStr) return '';
+    let ds = dateStr;
+    if (!ds.includes('T') && ds.includes(' ')) ds = ds.replace(' ', 'T');
+    
+    // Add Z if it's missing and it looks like UTC (which our DB timestamps are)
+    if (!ds.includes('Z') && !ds.includes('+')) ds += 'Z';
+    
+    const d = new Date(ds);
+    if (isNaN(d.getTime())) return '';
+    
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    let h = d.getHours(), ampm = h >= 12 ? 'p' : 'a';
+    h = h % 12 || 12;
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${mm}-${dd} ${h}:${min}${ampm}`;
+}
+
+function toggleCompanySort() {
+    companySortMode = companySortMode === 'recent' ? 'alpha' : 'recent';
+    const btn = document.getElementById('company-sort-btn');
+    if (btn) {
+        btn.textContent = companySortMode === 'recent' ? 'New' : 'A-Z';
+        btn.title = companySortMode === 'recent' ? 'Sorted by recent' : 'Sorted alphabetically';
+    }
+    renderCompanyList();
+}
+
+function toggleCompany(name) {
+    if (openCompanies.has(name)) openCompanies.delete(name);
+    else openCompanies.add(name);
+    renderCompanyList();
+}
+
+function renderCompanyList() {
+    const filter = (document.getElementById('company-filter').value || '').toLowerCase();
+    const list = document.getElementById('company-list');
+
+    let filtered = allCompanies.filter(c =>
+        !filter
+        || c.name.toLowerCase().includes(filter)
+        || (c.sector || '').toLowerCase().includes(filter)
+        || (c.analyses || []).some(a => a.type.toLowerCase().includes(filter))
+    );
+
+    if (companySortMode === 'alpha') {
+        filtered = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    // 'recent' keeps the API order (already sorted by last_updated desc)
+
+    if (!filtered.length) {
+        list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12px">No companies yet. Start a chat to generate intelligence.</div>';
+        return;
+    }
+
+    list.innerHTML = filtered.map(company => {
+        const isOpen = openCompanies.has(company.name);
+        const chevron = '&#9654;';
+        const starHtml = company.has_briefing ? '<span class="company-briefing-star" title="Has intelligence briefing">&#9733;</span>' : '';
+        const sectorHtml = company.sector ? `<span class="company-sector">${escHtml(company.sector)}</span>` : '';
+
+        let itemsHtml = '';
+        if (isOpen) {
+            // Briefing link
+            if (company.has_briefing) {
+                const briefActive = activeDossierName === company.name ? ' active' : '';
+                const briefDateStr = _formatSidebarDate(company.briefing_generated_at);
+                const displayDate = briefDateStr ? `<span class="report-date" style="font-size:10px; margin-left:auto; opacity:0.7">${briefDateStr}</span>` : '';
+                
+                itemsHtml += `<div class="company-briefing-link${briefActive}" onclick="openDossier('${escHtml(company.name)}')" onmousedown="handleSidebarMouseDown(event,'briefing',null,'${escHtml(company.name)}')">
+                    <span style="display:flex; align-items:center; width:100%">
+                        &#9733; Intelligence Briefing
+                        ${displayDate}
+                    </span>
+                </div>`;
+            }
+
+                // Analysis items
+                (company.analyses || []).forEach(a => {
+                    const isActive = currentReportFilename === a.report_file ? ' active' : '';
+                    const noReport = !a.has_report ? ' no-report' : '';
+                    const dateStr = _formatSidebarDate(a.date);
+                itemsHtml += `<div class="report-item can-drag${isActive}" onclick="openReport('${escHtml(a.report_file)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(a.report_file)}','${escHtml(company.name)}')">
+                    <span class="report-type-dot dot-${a.type}"></span>
+                    <div class="report-rename-wrap">
+                        <span class="report-name-text">${escHtml(a.type)}</span>
+                        <span class="rename-btn" onclick="renameReport('${escHtml(a.report_file)}', event)" title="Rename report">Edit</span>
+                    </div>
+                    <span class="report-date">${dateStr}</span></div>`;
+            });
+
+            // Orphan reports (files not linked to any dossier_analyses row)
+            (company.orphan_reports || []).forEach(fn => {
+                const isActive = currentReportFilename === fn ? ' active' : '';
+                itemsHtml += `<div class="report-item can-drag${isActive}" onclick="openReport('${escHtml(fn)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(fn)}','${escHtml(company.name)}')">
+                    <span class="report-type-dot"></span>
+                    <div class="report-rename-wrap">
+                        <span class="report-name-text">${escHtml(fn.replace(/\.md$/, ''))}</span>
+                        <span class="rename-btn" onclick="renameReport('${escHtml(fn)}', event)" title="Rename report">Edit</span>
+                    </div>
+                    <span class="report-date"></span></div>`;
+            });
+
+            // Generate briefing button
+            if (!company.has_briefing && company.analysis_count >= 2) {
+                itemsHtml += `<div style="padding:4px 8px 8px"><button class="company-gen-briefing-btn" onclick="event.stopPropagation();generateBriefing('${escHtml(company.name)}')">Generate Briefing</button></div>`;
+            }
+        }
+
+        const isActive = activeDossierName === company.name;
+        return `<div class="company-group${isOpen ? ' open' : ''}">
+            <div class="company-group-header${isActive ? ' active' : ''}" onclick="openDossier('${escHtml(company.name)}')">
+                <span class="company-group-chevron" onclick="event.stopPropagation();toggleCompany('${escHtml(company.name)}')">${chevron}</span>
+                <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${escHtml(company.name)}</span>
+                <span class="rename-btn" onclick="renameCompany('${escHtml(company.name)}', event)" title="Rename company">Edit</span>
+                <span class="rename-btn" onclick="deleteCompany('${escHtml(company.name)}', event)" title="Delete company" style="color:var(--red)">&times;</span>
+                ${starHtml}
+                ${sectorHtml}
+                <span class="company-group-count">${company.analysis_count || 0}</span>
+            </div>
+            ${isOpen ? `<div class="company-group-items">${itemsHtml}</div>` : ''}
+        </div>`;
+    }).join('');
+}
+
+async function deleteCompany(nameEscaped, event) {
+    if (event) event.stopPropagation();
+    const d = document.createElement('div');
+    d.innerHTML = nameEscaped;
+    const name = d.textContent;
+
+    if (!confirm(`Delete "${name}" and all its analyses, lens scores, and events? This cannot be undone.`)) return;
+
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(name)}/delete`, { method: 'POST' });
+        const data = await resp.json();
+        if (!resp.ok) {
+            alert(data.error || 'Delete failed');
+            return;
+        }
+        openCompanies.delete(name);
+        if (activeDossierName === name) activeDossierName = null;
+        loadCompanies();
+        // Clear right pane if it was showing this company
+        const rightContent = document.getElementById('right-content');
+        if (rightContent && activeDossierName === null) rightContent.innerHTML = '';
+    } catch (e) {
+        alert('Delete failed: ' + e.message);
+    }
+}
+
+async function renameCompany(oldNameEscaped, event) {
+    if (event) event.stopPropagation();
+    // Unescape name in case it was HTML escaped in the template
+    const d = document.createElement('div');
+    d.innerHTML = oldNameEscaped;
+    const oldName = d.textContent;
+
+    const newName = await showPromptModal(`Rename ${oldName} to:`);
+    if (!newName || newName === oldName) return;
+
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(oldName)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_name: newName })
+        });
+        const text = await resp.text();
+        let data;
+        try { data = JSON.parse(text); } catch (e) { data = { error: 'Server returned non-JSON response: ' + text.slice(0, 100) }; }
+
+        if (!resp.ok) {
+            alert(data.error || 'Rename failed');
+            return;
+        }
+        // Update local state and refresh
+        if (openCompanies.has(oldName)) {
+            openCompanies.delete(oldName);
+            openCompanies.add(newName);
+        }
+        if (activeDossierName === oldName) activeDossierName = newName;
+        loadCompanies();
+        if (activeContext && activeContext.company === oldName) {
+            setContext(newName, activeContext.type, activeContext.label);
+        }
+    } catch (e) {
+        console.error('Rename error:', e);
+        alert('An error occurred during rename: ' + e.message);
+    }
+}
+
+async function openDossier(companyName) {
+    try {
+        // If split view is active, load into focused panel
+        if (_splitActive) {
+            await _loadIntoSplitPanel(_splitFocusedSide, 'briefing', companyName);
+            renderCompanyList();
+            return;
+        }
+
+        // Pre-fetch available lenses for pill bar
+        if (!_cachedLenses) {
+            try {
+                const lensResp = await fetch('/api/lenses');
+                if (lensResp.ok) _cachedLenses = await lensResp.json();
+            } catch {}
+        }
+
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}`);
+        if (!resp.ok) return;
+        const dossier = await resp.json();
+        activeDossierName = companyName;
+        currentReportFilename = null;
+        _activeDashboardLens = null;
+        const dLabel = dossier.briefing_json ? 'intelligence briefing' : 'dossier';
+        setContext(companyName, dossier.briefing_json ? 'briefing' : 'dossier', dLabel);
+        renderCompanyList();
+        showDossierDetail(dossier);
+    } catch (e) {
+        console.error('Failed to load dossier:', e);
+    }
+}
+
+function showDossierDetail(d) {
+    const rp = document.getElementById('right-pane');
+    currentReportFilename = null;
+
+    // Try to show briefing if available
+    if (d.briefing_json) {
+        try {
+            const briefing = typeof d.briefing_json === 'string' ? JSON.parse(d.briefing_json) : d.briefing_json;
+            showBriefing(d, briefing);
+            return;
+        } catch (e) { console.error('Failed to parse briefing:', e); }
+    }
+
+    // Fall back to legacy view
+    showLegacyDossierDetail(d);
+}
+
+async function deleteOrphanAnalysis(analysisId, event) {
+    if (event) event.stopPropagation();
+    try {
+        const resp = await fetch(`/api/analyses/${analysisId}`, {method: 'DELETE'});
+        if (resp.ok) {
+            refreshSidebar();
+        }
+    } catch (e) { console.error('Failed to delete orphan analysis:', e); }
+}
+
+async function renameReport(oldFilenameEscaped, event) {
+    if (event) event.stopPropagation();
+    // Unescape filename in case it was HTML escaped
+    const d = document.createElement('div');
+    d.innerHTML = oldFilenameEscaped;
+    const oldFilename = d.textContent;
+
+    const oldName = oldFilename.replace(/\.md$/, '');
+    const newName = await showPromptModal(`Rename report to:`, oldName);
+    if (!newName || newName === oldName) return;
+
+    try {
+        const resp = await fetch(`/api/reports/${encodeURIComponent(oldFilename)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_filename: newName })
+        });
+        const text = await resp.text();
+        let data;
+        try { data = JSON.parse(text); } catch (e) { data = { error: 'Server returned non-JSON: ' + text.slice(0, 100) }; }
+
+        if (!resp.ok) {
+            alert(data.error || 'Rename failed');
+            return;
+        }
+        
+        // Update local state
+        if (currentReportFilename === oldFilename) {
+            currentReportFilename = data.new_filename;
+        }
+        
+        // Refresh UI
+        loadCompanies();
+        // If the report was open, re-render it to update breadcrumbs etc
+        if (currentReportFilename === data.new_filename) {
+            openReport(data.new_filename);
+        }
+    } catch (e) {
+        console.error('Rename report error:', e);
+        alert('An error occurred during report rename: ' + e.message);
+    }
+}
+
+function _scoreColorClass(score) {
+    if (score >= 80) return 'vanguard';
+    if (score >= 60) return 'contender';
+    if (score >= 40) return 'exposed';
+    if (score >= 20) return 'laggard';
+    return 'liability';
+}
+
+// Global store for source key facts — populated when briefing is rendered
+let _sourceKeyFacts = {};
+let _sourceAnalysisExists = {};
+// Global store for active briefing data — used by dashboard expand mode
+let _activeBriefingData = null;
+let _activeDossierData = null;
+let _activeDashboardLens = null; // lens override for expanded dashboard view
+
+const _VALID_SOURCES = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis','brand_ad','executive_signals'];
+
+// Match source tags including hyphens (e.g. [lens_ctv-ad-sales], [brand_ad])
+const _SOURCE_TAG_RE = /\[([\w][\w,\s-]*)\]/g;
+
+function _isSourceTag(tag) {
+    // Accept known sources, lens_ prefixed tags, and any underscore/hyphen tag that looks like a source
+    if (_VALID_SOURCES.includes(tag)) return true;
+    if (tag.startsWith('lens_')) return true;
+    if (/^[a-z][a-z0-9_-]+$/.test(tag)) return true;
+    return false;
+}
+
+function _sourceBadgeClass(tag) {
+    // Map to a known source class for coloring, or fall back to generic
+    if (_VALID_SOURCES.includes(tag)) return `source-${tag}`;
+    if (tag.startsWith('lens_')) return 'source-lens';
+    return 'source-profile';
+}
+
+function _sourceBadgeDisplayName(tag) {
+    return tag.replace(/^lens_/, '').replace(/[-_]/g, ' ');
+}
+
+function _renderSourceBadge(tag) {
+    const cls = _sourceBadgeClass(tag);
+    const name = _sourceBadgeDisplayName(tag);
+    return `<span class="source-badge ${cls}" onclick="event.stopPropagation();showSourcePopover(event,'${tag}')" title="Click to see evidence from ${name} analysis">${name}</span>`;
+}
+
+function _renderCitedText(text) {
+    // Replace [source] and [source1, source2] tags with clickable badges
+    if (!text) return '';
+    return escHtml(text).replace(_SOURCE_TAG_RE, (match, inner) => {
+        const sources = inner.split(',').map(s => s.trim().toLowerCase().replace(/\s+/g, '_')).filter(s => s);
+        const badges = sources
+            .filter(s => _isSourceTag(s))
+            .map(s => _renderSourceBadge(s));
+        return badges.length ? badges.join(' ') : match;
+    });
+}
+
+function _stripCitations(text) {
+    // Remove [source] tags from text, return clean prose
+    if (!text) return '';
+    return escHtml(text).replace(new RegExp('\\s*' + _SOURCE_TAG_RE.source, 'g'), (match, inner) => {
+        const sources = inner.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
+        const allValid = sources.every(s => _isSourceTag(s));
+        return allValid ? '' : match;
+    }).replace(/\s{2,}/g, ' ').trim();
+}
+
+function _extractSources(text) {
+    // Extract unique source tags from text, return as array
+    if (!text) return [];
+    const found = new Set();
+    text.replace(_SOURCE_TAG_RE, (match, inner) => {
+        inner.split(',').map(s => s.trim().toLowerCase()).filter(s => _isSourceTag(s)).forEach(s => found.add(s));
+    });
+    return [...found];
+}
+
+// Priority keys per analysis type — show these first in popover
+const _SOURCE_PRIORITY_KEYS = {
+    hiring: ['total_open_roles','engineering_ratio','ai_ml_ratio','top_departments','seniority_skew','growth_signal','hiring_trend','top_strategic_tags'],
+    sentiment: ['overall_sentiment','glassdoor_rating','recommend_to_friend_pct','top_pros','top_cons','culture_themes','sentiment_trend'],
+    financial: ['revenue','revenue_growth','market_cap','valuation','headcount','profitability','cash_position','financial_health'],
+    patents: ['total_patents','ai_ml_patents','top_patent_areas','patent_trend','rd_intensity','recent_patents'],
+    competitors: ['key_competitors','market_position','competitive_advantages','competitive_moat','threat_level'],
+    techstack: ['frontend_framework','analytics_tools','ab_testing_tools','infrastructure_provider','tech_modernity_signals'],
+    seo: ['seo_overall_assessment','aeo_readiness_signals','seo_schema_types','pages_analyzed'],
+    pricing: ['pricing_model','pricing_tiers','price_range','target_segment','has_free_tier'],
+    profile: ['sector','key_products','revenue','headcount','key_competitors','business_model'],
+    brand_ad: ['active_ad_channels','ctv_activity','ad_spend_signal','recent_campaigns','content_output','influencer_activity','channel_expansion_signals'],
+    executive_signals: ['organizational_commitment','leadership_stability','leadership_investment_domains','recent_executive_hires','open_executive_searches','notable_signals'],
+};
+
+const _SOURCE_LABELS = {
+    hiring: 'Hiring Intelligence',
+    sentiment: 'Employee Sentiment',
+    financial: 'Financial Data',
+    patents: 'Patent & IP',
+    competitors: 'Competitive Landscape',
+    techstack: 'Tech Stack',
+    seo: 'SEO/AEO Audit',
+    pricing: 'Pricing Analysis',
+    profile: 'Company Profile',
+    landscape: 'Market Landscape',
+    compare: 'Comparison',
+    analysis: 'Analysis',
+    brand_ad: 'Brand & Advertising',
+    executive_signals: 'Executive Signals',
+};
+
+function showSourcePopover(event, type) {
+    // Remove any existing popover
+    dismissSourcePopover();
+
+    const facts = _sourceKeyFacts[type];
+    const badge = event.target;
+    const rect = badge.getBoundingClientRect();
+
+    const pop = document.createElement('div');
+    pop.className = 'source-popover';
+    pop.id = 'active-source-popover';
+
+    const displayName = _sourceBadgeDisplayName(type);
+    const label = _SOURCE_LABELS[type] || (displayName.charAt(0).toUpperCase() + displayName.slice(1));
+    const badgeCls = _sourceBadgeClass(type);
+    let html = `<div class="source-popover-header"><span class="source-badge ${badgeCls}">${escHtml(displayName)}</span> ${escHtml(label)}</div>`;
+
+    if (facts && Object.keys(facts).length) {
+        // Sort entries by priority for this source type
+        const priority = _SOURCE_PRIORITY_KEYS[type] || [];
+        const allEntries = Object.entries(facts).filter(([k, v]) => v !== null && v !== undefined && v !== '');
+        const sorted = allEntries.sort((a, b) => {
+            const ai = priority.indexOf(a[0]);
+            const bi = priority.indexOf(b[0]);
+            if (ai >= 0 && bi >= 0) return ai - bi;
+            if (ai >= 0) return -1;
+            if (bi >= 0) return 1;
+            return 0;
+        });
+        const shown = sorted.slice(0, 5);
+        shown.forEach(([key, val]) => {
+            const fmtLabel = key.replace(/_/g, ' ').replace(/\bpct\b/g, '%');
+            let value;
+            if (Array.isArray(val)) {
+                value = val.slice(0, 3).join(', ');
+                if (val.length > 3) value += ` (+${val.length - 3} more)`;
+            } else {
+                value = String(val);
+            }
+            html += `<div class="source-popover-fact"><strong>${escHtml(fmtLabel)}:</strong> ${escHtml(value)}</div>`;
+        });
+        if (sorted.length > 5) {
+            html += `<div class="source-popover-fact" style="color:var(--text-muted);font-style:italic">+ ${sorted.length - 5} more facts</div>`;
+        }
+    } else if (_sourceAnalysisExists[type]) {
+        html += `<div class="source-popover-fact" style="font-style:italic">Facts are being extracted. Reopen the briefing in a moment.</div>`;
+    } else {
+        html += `<div class="source-popover-fact" style="font-style:italic">No structured facts extracted yet. Run this analysis to populate.</div>`;
+    }
+
+    // Detect which split panel the badge lives in (if any) so scrollToSourceReport
+    // targets the correct panel when both panels have briefings.
+    let originPanel = '';
+    if (_splitActive) {
+        const leftContent = document.getElementById('split-content-left');
+        const rightContent = document.getElementById('split-content-right');
+        if (leftContent && leftContent.contains(badge)) originPanel = 'left';
+        else if (rightContent && rightContent.contains(badge)) originPanel = 'right';
+    }
+    html += `<div class="source-popover-link" onclick="dismissSourcePopover();scrollToSourceReport('${type}','${originPanel}')">View full report &rarr;</div>`;
+
+    pop.innerHTML = html;
+    document.body.appendChild(pop);
+
+    // Position below the badge, clamped to viewport
+    const popRect = pop.getBoundingClientRect();
+    let top = rect.bottom + 6;
+    let left = rect.left;
+    if (top + popRect.height > window.innerHeight - 10) top = rect.top - popRect.height - 6;
+    if (left + popRect.width > window.innerWidth - 10) left = window.innerWidth - popRect.width - 10;
+    pop.style.top = top + 'px';
+    pop.style.left = Math.max(10, left) + 'px';
+
+    // Dismiss on outside click (after a tick to avoid immediate dismiss)
+    setTimeout(() => {
+        document.addEventListener('click', _popoverOutsideClick, { once: true });
+    }, 10);
+}
+
+function _popoverOutsideClick(e) {
+    const pop = document.getElementById('active-source-popover');
+    if (pop && !pop.contains(e.target)) {
+        dismissSourcePopover();
+    } else if (pop) {
+        // Re-attach if click was inside popover
+        setTimeout(() => {
+            document.addEventListener('click', _popoverOutsideClick, { once: true });
+        }, 10);
+    }
+}
+
+function toggleScoreTooltip(icon) {
+    const parent = icon.closest('.maturity-label') || icon.closest('.dash-hero-label');
+    if (!parent) return;
+    const tooltip = parent.nextElementSibling;
+    if (tooltip && tooltip.classList.contains('score-tooltip')) {
+        const showing = tooltip.style.display === 'none';
+        tooltip.style.display = showing ? 'block' : 'none';
+        if (showing) {
+            setTimeout(() => {
+                document.addEventListener('click', function _dismiss(e) {
+                    if (!tooltip.contains(e.target) && e.target !== icon) {
+                        tooltip.style.display = 'none';
+                        document.removeEventListener('click', _dismiss);
+                    }
+                });
+            }, 10);
+        }
+    }
+}
+
+function toggleMethodologyTip(tipId) {
+    const tip = document.getElementById(tipId);
+    if (tip) tip.style.display = tip.style.display === 'none' ? 'block' : 'none';
+}
+
+function dismissSourcePopover() {
+    const pop = document.getElementById('active-source-popover');
+    if (pop) pop.remove();
+}
+
+function scrollToSourceReport(type, originPanel) {
+    // If in dashboard/expanded mode, restore original briefing first
+    const rp = document.getElementById('right-pane');
+    if (rp && rp.classList.contains('expanded') && _originalReportHTML) {
+        _restoreOriginalReport();
+        rp.classList.remove('expanded');
+        document.getElementById('expand-icon-open').style.display = '';
+        document.getElementById('expand-icon-close').style.display = 'none';
+        document.getElementById('expand-btn').title = 'Focus mode';
+        if (savedRightWidth) {
+            rp.style.width = savedRightWidth + 'px';
+            rp.style.minWidth = savedRightWidth + 'px';
+        } else {
+            rp.style.width = '';
+            rp.style.minWidth = '';
+        }
+    }
+
+    // In split view, .right-body is display:none so its .briefing-section elements
+    // are hidden. Scope search to the originating split panel.
+    let searchRoot = document;
+    if (_splitActive) {
+        if (originPanel) {
+            // Badge told us which panel it lives in
+            const panelContent = document.getElementById('split-content-' + originPanel);
+            if (panelContent) searchRoot = panelContent;
+        } else {
+            // Fallback: pick whichever panel has briefing sections
+            const leftContent = document.getElementById('split-content-left');
+            const rightContent = document.getElementById('split-content-right');
+            if (leftContent && leftContent.querySelector('.briefing-section')) {
+                searchRoot = leftContent;
+            } else if (rightContent && rightContent.querySelector('.briefing-section')) {
+                searchRoot = rightContent;
+            }
+        }
+    }
+
+    const sections = searchRoot.querySelectorAll('.briefing-section');
+    for (const sec of sections) {
+        const title = sec.querySelector('.briefing-section-title');
+        if (title && title.textContent.includes('Source Reports')) {
+            sec.classList.add('open');
+            const row = sec.querySelector(`.staleness-row[data-source-type="${type}"]`);
+            if (row) {
+                row.style.background = 'rgba(59,130,246,0.15)';
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => { row.style.background = ''; }, 2000);
+            }
+            return;
+        }
+    }
+}
+
+function renderScoreRing(score, size) {
+    size = size || 120;
+    const radius = (size - 16) / 2;
+    const circumference = 2 * Math.PI * radius;
+    const offset = circumference - (score / 100) * circumference;
+    const cc = _scoreColorClass(score);
+    return `<div class="maturity-ring" style="width:${size}px;height:${size}px">
+        <svg width="${size}" height="${size}">
+            <circle class="ring-bg" cx="${size/2}" cy="${size/2}" r="${radius}" />
+            <circle class="ring-fill ring-${cc}" cx="${size/2}" cy="${size/2}" r="${radius}"
+                    stroke-dasharray="${circumference}" stroke-dashoffset="${offset}" />
+        </svg>
+        <div class="maturity-value score-${cc}">${score}</div>
+    </div>`;
+}
+
+function renderSubScore(label, score, algoData) {
+    const cc = _scoreColorClass(score);
+    let infoIcon = '';
+    if (algoData && algoData.algorithmic_score !== undefined) {
+        const algoScore = algoData.algorithmic_score;
+        const conf = algoData.algorithmic_confidence;
+        const signals = algoData.signals_used || [];
+        const confPct = conf !== undefined ? Math.round(conf * 100) + '%' : '?';
+        const delta = score - algoScore;
+        const deltaStr = delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : '±0';
+        let tipRows = signals.map(s => `<div class="methodology-tip-row">${escHtml(s)}</div>`).join('');
+        if (!tipRows) tipRows = '<div class="methodology-tip-row" style="font-style:italic">No structured signals</div>';
+        const tipId = 'algo-tip-' + label.replace(/[^a-zA-Z]/g, '');
+        infoIcon = ` <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('${tipId}')" style="font-size:11px">&#9432;</span>
+            <div class="methodology-tip" id="${tipId}">
+                <div class="methodology-tip-title">Algorithmic Base: ${algoScore}/100 → Final: ${score}/100 (${deltaStr})</div>
+                <div class="methodology-tip-row"><strong>Confidence:</strong> ${confPct}</div>
+                <div style="margin-top:4px;font-size:12px;font-weight:600;color:var(--text-secondary)">Signals:</div>
+                ${tipRows}
+            </div>`;
+    }
+    return `<div class="sub-score-row">
+        <span class="sub-score-label">${escHtml(label)}${infoIcon}</span>
+        <div class="sub-score-bar"><div class="sub-score-fill" style="width:${score}%;background:var(--${cc === 'vanguard' ? 'green' : cc === 'contender' ? 'accent' : cc === 'exposed' ? 'yellow' : 'red'})"></div></div>
+        <span class="sub-score-value score-${cc}">${score}</span>
+    </div>`;
+}
+
+function _briefingSection(title, body, open) {
+    return `<div class="briefing-section${open ? ' open' : ''}">
+        <div class="briefing-section-header" onclick="this.parentElement.classList.toggle('open')">
+            <span class="briefing-section-title">${escHtml(title)}</span>
+            <span class="briefing-section-chevron">&#9660;</span>
+        </div>
+        <div class="briefing-section-body">${body}</div>
+    </div>`;
+}
+
+// ---- Dynamic scoring section (lens-parameterized) ----
+
+function _renderScoringSection(scoring, isFullBriefing) {
+    // Extract lens metadata with legacy fallbacks
+    const lensInfo = scoring._lens || {};
+    const scoringLabel = lensInfo.score_label || 'Digital Maturity Score';
+    const dims = scoring._dimensions || [
+        {key:'tech_modernity', label:'Tech Modernity', weight:0.30},
+        {key:'data_analytics', label:'Data & Analytics', weight:0.25},
+        {key:'ai_readiness', label:'AI Readiness', weight:0.25},
+        {key:'organizational_readiness', label:'Org Readiness', weight:0.20},
+    ];
+    const lensLabels = scoring._lens_labels || [
+        {min_score:80, label:'Digital Vanguard'},
+        {min_score:60, label:'Digital Contender'},
+        {min_score:40, label:'Digitally Exposed'},
+        {min_score:20, label:'Digital Laggard'},
+        {min_score:0, label:'Digital Liability'},
+    ];
+
+    const score = scoring.overall_score || 0;
+    const label = scoring.overall_label || '';
+    const subs = scoring.sub_scores || {};
+
+    let html = '';
+    html += renderScoreRing(score, 120);
+    html += `<div class="score-tooltip-wrap"><div class="maturity-label score-${_scoreColorClass(score)}">${escHtml(label)} <span class="score-info-icon" onclick="event.stopPropagation();toggleScoreTooltip(this)">&#9432;</span></div>
+    <div class="score-tooltip" style="display:none">
+        <div class="score-tooltip-title">${escHtml(scoringLabel)}</div>
+        <div class="score-tooltip-body">
+            ${isFullBriefing ? 'Scores this company across weighted dimensions:' : 'Lens scoring overlay — scores from a separate lens evaluation:'}
+            <div class="score-tooltip-dims">`;
+    dims.forEach(d => {
+        const wPct = Math.round((d.weight || 0) * 100);
+        html += `<div><strong>${escHtml(d.label)} (${wPct}%)</strong></div>`;
+    });
+    html += `</div><div class="score-tooltip-tiers">`;
+    lensLabels.forEach(tier => {
+        const cc = _scoreColorClass(tier.min_score);
+        html += `<span class="score-${cc}">&#9679;</span> ${tier.min_score}+ ${escHtml(tier.label)} &nbsp;`;
+    });
+    html += `</div></div></div></div>`;
+
+    if (!isFullBriefing) {
+        html += `<div style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:4px;font-style:italic">Scoring overlay — briefing content reflects a different lens</div>`;
+    }
+
+    // Sub-scores
+    dims.forEach(d => {
+        const sub = subs[d.key] || {};
+        html += renderSubScore(d.label, sub.score || 0, sub);
+    });
+
+    // Sub-score rationales with source badges
+    html += `<div style="margin-top:8px">`;
+    dims.forEach(d => {
+        const sub = subs[d.key] || {};
+        if (sub.rationale) {
+            const sources = _extractSources(sub.rationale);
+            const badges = sources.map(s =>
+                _renderSourceBadge(s)
+            ).join(' ');
+            html += `<div style="margin-bottom:6px"><span style="font-size:15px;font-weight:600;color:var(--text-secondary)">${escHtml(d.label)}:</span> <span style="font-size:15px;color:var(--text-muted)">${_stripCitations(sub.rationale)}</span> ${badges}</div>`;
+        }
+    });
+    html += `</div>`;
+
+    return html;
+}
+
+// ---- Extracted render functions for lens-parameterized sections ----
+
+function _renderOpportunitiesSection(opps) {
+    if (!opps || !opps.length) return '';
+    let oppHtml = '';
+    opps.forEach(opp => {
+        const pClass = `opp-priority-${opp.priority || 'medium'}`;
+        const explicitSources = opp.source_analyses || [];
+        const inlineSources = _extractSources((opp.evidence || '') + ' ' + (opp.detail || ''));
+        const allSources = [...new Set([...explicitSources, ...inlineSources])];
+        const sourceBadges = allSources.map(s =>
+            _renderSourceBadge(s)
+        ).join(' ');
+        oppHtml += `<div class="opp-card" onclick="this.classList.toggle('expanded')">
+            <div class="opp-card-header">
+                <span class="opp-service">${escHtml(opp.service || '')}</span>
+                <span class="opp-priority ${pClass}">${escHtml(opp.priority || '')}</span>
+            </div>
+            <div class="opp-evidence">${_renderCitedText(opp.evidence || '')}</div>
+            <div class="opp-meta">
+                <span>${escHtml(opp.estimated_scope || '')}</span>
+            </div>
+            ${opp.why_now ? `<div class="opp-why-now">${_renderCitedText(opp.why_now)}</div>` : ''}
+            <div class="opp-detail">
+                ${opp.detail ? `<div class="opp-detail-text">${_renderCitedText(opp.detail)}</div>` : ''}
+                ${allSources.length ? `<div class="opp-source-links"><span style="font-size:14px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
+            </div>
+        </div>`;
+    });
+    return `<div style="padding:0 12px 12px">
+        <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Consulting Opportunities <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('scope-methodology')">&#9432;</span></div>
+        <div class="methodology-tip" id="scope-methodology">
+            <div class="methodology-tip-title">Scope Estimation Methodology</div>
+            Estimates based on typical Big 4 / MBB engagement structures (blended daily rate ~$3-5K/consultant):
+            <div class="methodology-tip-row"><strong>$500K-1M, 3-6 mo</strong> — Small team (2-3). Assessments, strategy design, POC, governance frameworks.</div>
+            <div class="methodology-tip-row"><strong>$1-3M, 6-12 mo</strong> — Medium team (4-6). Platform implementation, org redesign, single workstream.</div>
+            <div class="methodology-tip-row"><strong>$2-5M, 9-18 mo</strong> — Large team (6-10). Multi-workstream programs, enterprise rollout. $10B+ revenue companies.</div>
+            <div class="methodology-tip-row"><strong>$5M+, 12-24 mo</strong> — Full transformation (10+). Company-wide digital transformation. $50B+ companies only.</div>
+            <div class="methodology-tip-note">Scaled to company size using revenue, headcount, and hiring velocity. Conservative estimates preferred.</div>
+        </div>
+        ${oppHtml}</div>`;
+}
+
+function _renderRiskSection(risks) {
+    if (!risks || !risks.length) return '';
+    let riskHtml = '';
+    risks.forEach(r => {
+        const sev = r.severity || 'medium';
+        riskHtml += `<div class="risk-card risk-${sev}">
+            <div class="risk-category">${escHtml(r.category || '')} - ${escHtml(sev)}</div>
+            <div class="risk-desc">${_renderCitedText(r.description || '')}</div>
+        </div>`;
+    });
+    return _briefingSection('Risk Profile', riskHtml, false);
+}
+
+function _renderAssessmentSection(text) {
+    if (!text) return '';
+    return _briefingSection('Strategic Assessment', `<div style="font-size:14px;color:var(--text-secondary);line-height:1.6;white-space:pre-wrap">${_renderCitedText(text)}</div>`, false);
+}
+
+// ---- Lens section swapping ----
+
+function _enrichScoringFromLensData(lensScoreData) {
+    // Build scoring object from lens_scores data, enriching with lens config metadata
+    const scoring = lensScoreData.score_data || lensScoreData;
+    const lc = lensScoreData.lens_config || {};
+    if (!scoring._lens_labels && lc.labels && lc.labels.length) scoring._lens_labels = lc.labels;
+    if (!scoring._lens) scoring._lens = {};
+    if (!scoring._lens.score_label && lc.score_label) scoring._lens.score_label = lc.score_label;
+    if (!scoring._lens.name && lensScoreData.lens_name) scoring._lens.name = lensScoreData.lens_name;
+    if (!scoring._dimensions && lc.dimensions) {
+        scoring._dimensions = lc.dimensions.map(d => ({key: d.key, label: d.label, weight: d.weight}));
+    }
+    return scoring;
+}
+
+function _swapAllLensSections(lensScoreData, briefingData, isFullBriefing) {
+    // 1. Swap scoring
+    const scoringContainer = document.getElementById('scoring-swap-area');
+    if (scoringContainer) {
+        const scoring = isFullBriefing ? (briefingData.scoring || briefingData.digital_maturity || {}) : _enrichScoringFromLensData(lensScoreData);
+        scoringContainer.innerHTML = _renderScoringSection(scoring, isFullBriefing);
+    }
+
+    // 2. Swap opportunities
+    const oppsContainer = document.getElementById('opps-swap-area');
+    if (oppsContainer) {
+        if (isFullBriefing && briefingData) {
+            oppsContainer.innerHTML = _renderOpportunitiesSection(briefingData.engagement_opportunities || []);
+        } else {
+            const sd = lensScoreData.score_data || lensScoreData;
+            const opps = sd.engagement_opportunities || [];
+            if (opps.length) {
+                oppsContainer.innerHTML = _renderOpportunitiesSection(opps);
+            } else {
+                const lensId = lensScoreData.lens_id || (sd._lens || {}).id;
+                const companyName = (_activeDossierData || {}).company_name || '';
+                oppsContainer.innerHTML = `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">
+                    Opportunities not available for this score version.
+                    <span style="color:var(--accent);cursor:pointer" onclick="_scoreLensViaPill('${escHtml(companyName)}', ${lensId})">Rescore to generate.</span>
+                </div>`;
+            }
+        }
+    }
+
+    // 3. Swap risk profile
+    const riskContainer = document.getElementById('risk-swap-area');
+    if (riskContainer) {
+        if (isFullBriefing && briefingData) {
+            riskContainer.innerHTML = _renderRiskSection(briefingData.risk_profile || []);
+        } else {
+            const sd = lensScoreData.score_data || lensScoreData;
+            const risks = sd.risk_profile || [];
+            if (risks.length) {
+                riskContainer.innerHTML = _renderRiskSection(risks);
+            } else {
+                riskContainer.innerHTML = '';
+            }
+        }
+    }
+
+    // 4. Swap strategic assessment
+    const assessContainer = document.getElementById('assessment-swap-area');
+    if (assessContainer) {
+        if (isFullBriefing && briefingData) {
+            assessContainer.innerHTML = _renderAssessmentSection(briefingData.strategic_assessment || '');
+        } else {
+            const sd = lensScoreData.score_data || lensScoreData;
+            const text = sd.strategic_assessment || '';
+            if (text) {
+                assessContainer.innerHTML = _renderAssessmentSection(text);
+            } else {
+                assessContainer.innerHTML = '';
+            }
+        }
+    }
+
+    // 5. Update active pill
+    document.querySelectorAll('#lens-pill-bar .lens-pill').forEach(p => p.classList.remove('active'));
+    if (isFullBriefing) {
+        const bp = document.getElementById('briefing-lens-pill');
+        if (bp) bp.classList.add('active');
+    } else {
+        const lensId = lensScoreData.lens_id || (lensScoreData.score_data || lensScoreData)._lens?.id;
+        const tp = document.getElementById(`lens-pill-${lensId}`);
+        if (tp) tp.classList.add('active');
+    }
+}
+
+// ---- Pill click handlers ----
+
+async function handleLensPillClick(lensId, isFullBriefing) {
+    if (isFullBriefing) {
+        _swapAllLensSections(null, _activeBriefingData, true);
+        return;
+    }
+    const scored = (_activeDossierData.lens_scores || []).find(s => s.lens_id === lensId);
+    if (scored) {
+        _swapAllLensSections(scored, null, false);
+    } else {
+        await _scoreLensViaPill((_activeDossierData || {}).company_name, lensId);
+    }
+}
+
+async function _scoreLensViaPill(companyName, lensId) {
+    const pill = document.getElementById(`lens-pill-${lensId}`);
+    if (!pill || !companyName) return;
+
+    pill.classList.add('lens-pill-loading');
+    const origInner = pill.innerHTML;
+
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/score-lens`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lens_id: lensId })
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showToast(err.error || 'Scoring failed', 'error');
+            pill.classList.remove('lens-pill-loading');
+            pill.innerHTML = origInner;
+            return;
+        }
+
+        const data = await resp.json();
+        const scoreData = data.score;
+
+        // Update pill to scored state
+        pill.classList.remove('lens-pill-loading', 'lens-pill-unscored');
+        pill.style.borderStyle = '';
+        pill.style.opacity = '';
+        const sc = scoreData.overall_score || 0;
+        const cc = _scoreColorClass(sc);
+        const pillScore = pill.querySelector('.lens-pill-score');
+        if (pillScore) {
+            pillScore.textContent = sc;
+            pillScore.className = `lens-pill-score score-${cc}`;
+            pillScore.style.color = '';
+        }
+
+        // Update dossier cache
+        if (!_activeDossierData.lens_scores) _activeDossierData.lens_scores = [];
+        const lensInfo = (_cachedLenses || []).find(l => l.id === lensId);
+        const lsEntry = {
+            lens_id: lensId,
+            lens_name: lensInfo ? lensInfo.name : 'Lens',
+            overall_score: sc,
+            overall_label: scoreData.overall_label,
+            score_data: scoreData,
+            lens_config: lensInfo ? (lensInfo.config || lensInfo) : {},
+        };
+        _activeDossierData.lens_scores = _activeDossierData.lens_scores.filter(s => s.lens_id !== lensId);
+        _activeDossierData.lens_scores.push(lsEntry);
+
+        // Swap to the new lens view
+        _swapAllLensSections(lsEntry, null, false);
+    } catch (e) {
+        showToast('Scoring failed: ' + e.message, 'error');
+        pill.classList.remove('lens-pill-loading');
+        pill.innerHTML = origInner;
+    }
+}
+
+// ---- Dashboard (expanded) lens pill handler ----
+
+async function handleDashLensPillClick(lensId, isFullBriefing) {
+    if (isFullBriefing) {
+        _activeDashboardLens = null;
+    } else {
+        const scored = (_activeDossierData.lens_scores || []).find(s => s.lens_id === lensId);
+        if (scored) {
+            _activeDashboardLens = scored;
+        } else {
+            // Score the unscored lens, then rebuild
+            const companyName = (_activeDossierData || {}).company_name;
+            if (!companyName) return;
+            // Reuse the existing score-via-pill logic but rebuild dashboard after
+            await _scoreLensViaDashPill(companyName, lensId);
+            return;
+        }
+    }
+    // Rebuild the dashboard with the new active lens
+    const content = document.getElementById('right-content');
+    if (content) _buildBriefingDashboard(content);
+}
+
+async function _scoreLensViaDashPill(companyName, lensId) {
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/score-lens`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lens_id: lensId })
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showToast(err.error || 'Scoring failed', 'error');
+            return;
+        }
+        const data = await resp.json();
+        const scoreData = data.score;
+        const sc = scoreData.overall_score || 0;
+
+        // Update dossier cache
+        if (!_activeDossierData.lens_scores) _activeDossierData.lens_scores = [];
+        const lensInfo = (_cachedLenses || []).find(l => l.id === lensId);
+        const lsEntry = {
+            lens_id: lensId,
+            lens_name: lensInfo ? lensInfo.name : 'Lens',
+            overall_score: sc,
+            overall_label: scoreData.overall_label,
+            score_data: scoreData,
+            lens_config: lensInfo ? (lensInfo.config || lensInfo) : {},
+        };
+        _activeDossierData.lens_scores = _activeDossierData.lens_scores.filter(s => s.lens_id !== lensId);
+        _activeDossierData.lens_scores.push(lsEntry);
+
+        // Set as active and rebuild
+        _activeDashboardLens = lsEntry;
+        const content = document.getElementById('right-content');
+        if (content) _buildBriefingDashboard(content);
+    } catch (e) {
+        showToast('Scoring failed: ' + e.message, 'error');
+    }
+}
+
+// Render briefing HTML into a target element (for split panels).
+// Does NOT set global state or update header.
+function _renderBriefingInto(dossier, b, targetEl) {
+    showBriefing(dossier, b, targetEl);
+}
+
+function showBriefing(dossier, b, _targetEl) {
+    const isSplitTarget = !!_targetEl;
+    if (!isSplitTarget) {
+        _activeBriefingData = b;
+        _activeDossierData = dossier;
+    }
+    const rp = document.getElementById('right-pane');
+    const identity = b.subject_identity || {};
+    if (!isSplitTarget) {
+        document.getElementById('right-company').textContent = identity.name || dossier.company_name;
+        document.getElementById('right-type').textContent = '';
+        document.getElementById('right-date').textContent = '';
+    }
+
+    // Populate source key facts for popover references (no LLM needed)
+    _sourceKeyFacts = {};
+    _sourceAnalysisExists = {};
+    (dossier.analyses || []).forEach(a => {
+        _sourceAnalysisExists[a.analysis_type] = true;
+        if (a.key_facts_json && !_sourceKeyFacts[a.analysis_type]) {
+            try {
+                _sourceKeyFacts[a.analysis_type] = JSON.parse(a.key_facts_json);
+            } catch {}
+        }
+    });
+
+    let html = '';
+
+    // --- Header ---
+    html += `<div class="briefing-header">
+        <div class="briefing-header-title">Intelligence Briefing</div>
+        <div class="briefing-header-company">${escHtml(identity.name || dossier.company_name)}</div>
+        ${identity.sector ? `<div class="briefing-header-sector">${escHtml(identity.sector)}</div>` : ''}
+        <div class="briefing-header-meta">`;
+    if (identity.hq_location) html += `<span>${escHtml(identity.hq_location)}</span>`;
+    if (identity.founded) html += `<span>Est. ${identity.founded}</span>`;
+    if (identity.headcount) html += `<span>${escHtml(String(identity.headcount))} employees</span>`;
+    if (dossier.briefing_generated_at) {
+        let dateStr = dossier.briefing_generated_at;
+        if (!dateStr.includes('T') && dateStr.includes(' ')) dateStr = dateStr.replace(' ', 'T');
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) {
+            html += `<span>Last Refreshed: ${d.toLocaleString()}</span>`;
+        }
+    }
+    html += `</div>`;
+
+    // Staleness check — normalize timestamps to UTC for comparison
+    if (dossier.briefing_generated_at && dossier.analyses && dossier.analyses.length) {
+        const briefingDate = new Date(dossier.briefing_generated_at);
+        // Analysis timestamps may lack timezone — append Z to treat as UTC
+        let latestTs = dossier.analyses[0].created_at;
+        if (latestTs && !latestTs.includes('+') && !latestTs.endsWith('Z')) {
+            latestTs = latestTs.replace(' ', 'T') + 'Z';
+        }
+        const latestAnalysis = new Date(latestTs);
+        if (latestAnalysis > briefingDate) {
+            html += `<div class="briefing-stale-badge">Briefing outdated - new analyses available</div>`;
+        }
+    }
+
+    html += `<div class="briefing-actions">
+        <button class="briefing-btn briefing-btn-primary" onclick="generateBriefing('${escHtml(dossier.company_name)}')">Generate Briefing</button>
+    </div></div>`;
+
+    // --- Scoring Section (lens-parameterized) ---
+    const scoring = b.scoring || b.digital_maturity || {};
+    const briefingLensId = (scoring._lens || {}).id;
+
+    html += `<div style="padding:16px 12px">`;
+
+    // Lens pill bar — briefing lens + all other lenses (scored & unscored)
+    const lensScores = dossier.lens_scores || [];
+    const allLenses = _cachedLenses || [];
+    const scoredMap = {};
+    lensScores.forEach(ls => { scoredMap[ls.lens_id] = ls; });
+
+    html += `<div id="lens-pill-bar" class="lens-bar" style="margin-bottom:12px">`;
+    // Briefing's own lens pill (always first, marked as active)
+    const briefingLensName = (scoring._lens || {}).name || 'Briefing Score';
+    const briefingScore = scoring.overall_score || 0;
+    const bcc = _scoreColorClass(briefingScore);
+    html += `<div class="lens-pill active" id="briefing-lens-pill" onclick="handleLensPillClick(null, true)">
+        <span class="lens-pill-score score-${bcc}">${briefingScore}</span>
+        <span class="lens-pill-name">${escHtml(briefingLensName)}</span>
+        <span style="font-size:9px;color:var(--green);margin-left:4px">Full</span>
+    </div>`;
+    // All other lenses — scored or unscored
+    allLenses.forEach(lens => {
+        if (lens.id === briefingLensId) return; // skip briefing lens (already shown)
+        const scored = scoredMap[lens.id];
+        if (scored) {
+            const lsScore = scored.overall_score || 0;
+            const lcc = _scoreColorClass(lsScore);
+            html += `<div class="lens-pill" id="lens-pill-${lens.id}" onclick="handleLensPillClick(${lens.id}, false)">
+                <span class="lens-pill-score score-${lcc}">${lsScore}</span>
+                <span class="lens-pill-name">${escHtml(lens.name)}</span>
+            </div>`;
+        } else {
+            html += `<div class="lens-pill lens-pill-unscored" id="lens-pill-${lens.id}" onclick="handleLensPillClick(${lens.id}, false)">
+                <span class="lens-pill-score" style="color:var(--text-muted)">--</span>
+                <span class="lens-pill-name">${escHtml(lens.name)}</span>
+            </div>`;
+        }
+    });
+    // "+ New Lens" pseudo-pill
+    html += `<div class="lens-pill" style="border-style:dashed;color:var(--accent);font-size:11px" onclick="openLensBuilder()">+ New Lens</div>`;
+    html += `</div>`;
+
+    // Data confidence indicator
+    const conf = b.data_confidence || {};
+    if (conf.jobs_analyzed !== undefined || conf.overall_confidence) {
+        const confClass = `conf-${conf.overall_confidence || 'medium'}`;
+        html += `<div class="data-confidence-bar">
+            <span class="conf-badge ${confClass}">${escHtml(conf.overall_confidence || 'unknown')}</span>`;
+        if (conf.jobs_analyzed) html += `<span>${conf.jobs_analyzed} roles analyzed</span>`;
+        if (conf.scrape_coverage) html += `<span>· ${escHtml(conf.scrape_coverage.split('(')[0].trim())}</span>`;
+        const avail = conf.analyses_available || [];
+        html += `<span>· ${avail.length} analyses</span>`;
+        if (conf.classification_mode === 'fast') html += `<span>· heuristic</span>`;
+        html += `</div>`;
+    }
+
+    // Swappable scoring area (donut ring, sub-scores, rationales)
+    html += `<div id="scoring-swap-area">`;
+    html += _renderScoringSection(scoring, true);
+    html += `</div></div>`;
+
+    // --- Hiring Trajectory (if available) ---
+    const traj = b.hiring_trajectory;
+    if (traj && traj.trend) {
+        let trajHtml = '';
+        if (traj.velocity) {
+            const trendUp = ['accelerating','growing'].includes(traj.trend);
+            const trendDown = ['decelerating','shrinking'].includes(traj.trend);
+            const arrowClass = trendUp ? 'trajectory-up' : trendDown ? 'trajectory-down' : 'trajectory-stable';
+            const arrow = trendUp ? '&#9650;' : trendDown ? '&#9660;' : '&#8226;';
+            trajHtml += `<div class="trajectory-row">
+                <span class="trajectory-arrow ${arrowClass}">${arrow}</span>
+                <span style="color:var(--text-primary);font-weight:600">${escHtml(traj.velocity)}</span>
+                <span style="color:var(--text-muted)">· ${escHtml(traj.trend)}</span>
+            </div>`;
+        }
+        if (traj.department_shifts && traj.department_shifts.length) {
+            traj.department_shifts.forEach(shift => {
+                const arrowClass = shift.direction === 'up' ? 'trajectory-up' : shift.direction === 'down' ? 'trajectory-down' : 'trajectory-stable';
+                const arrow = shift.direction === 'up' ? '↑' : shift.direction === 'down' ? '↓' : '→';
+                trajHtml += `<div class="trajectory-row">
+                    <span class="trajectory-arrow ${arrowClass}">${arrow}</span>
+                    <span style="color:var(--text-secondary)">${escHtml(shift.department || '')}</span>
+                    <span style="color:var(--text-muted);font-size:12px">${escHtml(shift.detail || '')}</span>
+                </div>`;
+            });
+        }
+        if (traj.interpretation) {
+            trajHtml += `<div style="font-size:15px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(traj.interpretation)}</div>`;
+        }
+        html += _briefingSection('Hiring Trajectory', trajHtml, true);
+    }
+
+    // --- Consulting Opportunities (lens-parameterized, swappable) ---
+    html += `<div id="opps-swap-area">`;
+    html += _renderOpportunitiesSection(b.engagement_opportunities || []);
+    html += `</div>`;
+
+    // --- Budget & Appetite ---
+    const budget = b.budget_signals || {};
+    if (Object.keys(budget).length) {
+        let budgetHtml = '';
+        const confClass = `confidence-${budget.confidence || 'medium'}`;
+        budgetHtml += `<div class="budget-row"><span class="budget-label">Can Afford</span><span class="budget-value">${budget.can_afford ? 'Yes' : 'Unlikely'}</span> <span class="confidence-badge ${confClass}">${escHtml(budget.confidence || '')} confidence</span></div>`;
+        if (budget.evidence) budgetHtml += `<div style="font-size:15px;color:var(--text-muted);margin:4px 0 8px">${_renderCitedText(budget.evidence)}</div>`;
+        if (budget.revenue_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Revenue Trend</span><span class="budget-value">${escHtml(budget.revenue_trend)}</span></div>`;
+        if (budget.hiring_trend) budgetHtml += `<div class="budget-row"><span class="budget-label">Hiring Trend</span><span class="budget-value">${escHtml(budget.hiring_trend)}</span></div>`;
+        if (budget.investment_areas && budget.investment_areas.length) {
+            budgetHtml += `<div class="budget-row"><span class="budget-label">Investing In</span><span class="budget-value">${budget.investment_areas.map(a => escHtml(a)).join(', ')}</span></div>`;
+        }
+        html += _briefingSection('Budget & Appetite Signals', budgetHtml, false);
+    }
+
+    // --- Competitive Pressure ---
+    const comp = b.competitive_pressure || {};
+    if (Object.keys(comp).length) {
+        let compHtml = '';
+        if (comp.urgency) {
+            const urgClass = comp.urgency === 'high' ? 'confidence-high' : comp.urgency === 'medium' ? 'confidence-medium' : 'confidence-low';
+            compHtml += `<div style="margin-bottom:8px">Transformation urgency: <span class="confidence-badge ${urgClass}">${escHtml(comp.urgency)}</span></div>`;
+        }
+        if ((comp.competitors || []).length) {
+            compHtml += `<div class="competitor-header"><span>Competitor</span><span>Digital Maturity</span><span>Threat Assessment</span></div>`;
+        }
+        (comp.competitors || []).forEach(c => {
+            compHtml += `<div class="competitor-row">
+                <span class="competitor-name">${escHtml(c.name || '')}</span>
+                <span class="competitor-maturity">${escHtml(c.digital_maturity_estimate || '')}</span>
+                <span class="competitor-threat">${_renderCitedText(c.threat || '')}</span>
+            </div>`;
+        });
+        if (comp.urgency_drivers && comp.urgency_drivers.length) {
+            compHtml += `<div style="margin-top:8px;font-size:15px;color:var(--text-muted)"><strong>Drivers:</strong> ${comp.urgency_drivers.map(d => _renderCitedText(d)).join(' | ')}</div>`;
+        }
+        html += _briefingSection('Competitive Pressure', compHtml, false);
+    }
+
+    // --- Financial Position ---
+    const fin = b.financial_position || {};
+    if (Object.keys(fin).length) {
+        let finHtml = '';
+        if (fin.summary) finHtml += `<div style="font-size:15px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5">${_renderCitedText(fin.summary)}</div>`;
+        if (fin.metrics && fin.metrics.length) {
+            finHtml += '<div class="metric-grid">';
+            fin.metrics.forEach(m => {
+                finHtml += `<div class="metric-card"><div class="metric-card-label">${escHtml(m.label || '')}</div><div class="metric-card-value">${_renderCitedText(m.value || '')}</div></div>`;
+            });
+            finHtml += '</div>';
+        }
+        html += _briefingSection('Financial Position', finHtml, false);
+    }
+
+    // --- Innovation & IP ---
+    const ip = b.innovation_ip || {};
+    if (Object.keys(ip).length) {
+        let ipHtml = '';
+        if (ip.patent_count !== undefined) {
+            const patentDisplay = ip.patent_count === -1 ? 'Not analyzed' : ip.patent_count;
+            ipHtml += `<div class="budget-row"><span class="budget-label">Patents</span><span class="budget-value">${patentDisplay}</span></div>`;
+        }
+        if (ip.rd_intensity) ipHtml += `<div class="budget-row"><span class="budget-label">R&D Intensity</span><span class="budget-value">${escHtml(ip.rd_intensity)}</span></div>`;
+        if (ip.top_areas && ip.top_areas.length) {
+            ipHtml += `<div class="budget-row"><span class="budget-label">Top Areas</span><span class="budget-value">${ip.top_areas.map(a => escHtml(a)).join(', ')}</span></div>`;
+        }
+        if (ip.assessment) ipHtml += `<div style="font-size:15px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(ip.assessment)}</div>`;
+        html += _briefingSection('Innovation & IP', ipHtml, false);
+    }
+
+    // --- Talent & Culture ---
+    const talent = b.talent_culture || {};
+    if (Object.keys(talent).length) {
+        let talHtml = '';
+        if (talent.sentiment) talHtml += `<div class="budget-row"><span class="budget-label">Sentiment</span><span class="budget-value">${escHtml(talent.sentiment)}</span></div>`;
+        if (talent.hiring_momentum) talHtml += `<div style="font-size:15px;color:var(--text-secondary);margin:4px 0 8px;line-height:1.5">${_renderCitedText(talent.hiring_momentum)}</div>`;
+        // Department focus as mini bars
+        const deptFocus = talent.department_focus || {};
+        if (Object.keys(deptFocus).length) {
+            talHtml += `<div style="margin:8px 0">`;
+            const sorted = Object.entries(deptFocus).sort((a, b) => b[1] - a[1]);
+            sorted.forEach(([dept, raw]) => {
+                const pct = String(raw).replace('%', '');
+                talHtml += `<div class="sub-score-row"><span class="sub-score-label">${escHtml(dept)}</span><div class="sub-score-bar"><div class="sub-score-fill" style="width:${pct}%;background:var(--accent)"></div></div><span class="sub-score-value" style="color:var(--text-secondary)">${pct}%</span></div>`;
+            });
+            talHtml += `</div>`;
+        }
+        if (talent.top_skills && talent.top_skills.length) {
+            talHtml += `<div class="skill-tags">${talent.top_skills.map(s => `<span class="skill-tag">${escHtml(s)}</span>`).join('')}</div>`;
+        }
+        if (talent.assessment) talHtml += `<div style="font-size:15px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(talent.assessment)}</div>`;
+        html += _briefingSection('Talent & Culture', talHtml, false);
+    }
+
+    // --- Risk Profile (lens-parameterized, swappable) ---
+    html += `<div id="risk-swap-area">`;
+    html += _renderRiskSection(b.risk_profile || []);
+    html += `</div>`;
+
+    // --- Strategic Assessment (lens-parameterized, swappable) ---
+    html += `<div id="assessment-swap-area">`;
+    html += _renderAssessmentSection(b.strategic_assessment || '');
+    html += `</div>`;
+
+    // --- Intelligence Timeline (from dossier events) ---
+    const changeEvents = (dossier.events || []).filter(e => e.event_type === 'change_detected');
+    const otherEvents = (dossier.events || []).filter(e => e.event_type !== 'change_detected');
+    if (changeEvents.length || otherEvents.length) {
+        let timeHtml = '';
+        changeEvents.forEach(evt => {
+            let data = {};
+            try { data = JSON.parse(evt.data_json || '{}'); } catch {}
+            const field = data.field || '';
+            const changeType = data.change_type || '';
+            let colorClass = 'change-neutral';
+            if (changeType === 'increased') colorClass = 'change-positive';
+            else if (changeType === 'decreased') colorClass = 'change-negative';
+            timeHtml += `<div class="change-row ${colorClass}">
+                <span class="change-field">${escHtml(field.replace(/_/g, ' '))}</span>
+                <span class="change-arrow"><span class="change-new">${escHtml(evt.title || '')}</span></span>
+                <span class="change-source">${escHtml(evt.event_date || '')}</span>
+            </div>`;
+        });
+        otherEvents.forEach(evt => {
+            timeHtml += `<div class="timeline-event">
+                <div class="timeline-date">${escHtml(evt.event_date || '')}</div>
+                <div class="timeline-type">${escHtml(evt.event_type)}</div>
+                <div><div class="timeline-title">${escHtml(evt.title)}</div></div>
+            </div>`;
+        });
+        html += _briefingSection(`Intelligence Timeline (${changeEvents.length + otherEvents.length})`, timeHtml, false);
+    }
+
+    // --- Data Confidence ---
+    if (conf && (conf.caveats && conf.caveats.length || conf.analyses_missing && conf.analyses_missing.length)) {
+        let confHtml = '';
+        if (conf.scrape_coverage) confHtml += `<div class="budget-row"><span class="budget-label">Scrape Coverage</span><span class="budget-value">${escHtml(conf.scrape_coverage)}</span></div>`;
+        if (conf.jobs_analyzed) confHtml += `<div class="budget-row"><span class="budget-label">Jobs Analyzed</span><span class="budget-value">${conf.jobs_analyzed}</span></div>`;
+        if (conf.analyses_available && conf.analyses_available.length) {
+            confHtml += `<div class="budget-row"><span class="budget-label">Completed</span><span class="budget-value">${conf.analyses_available.map(a => `<span class="source-badge source-${a}">${a}</span>`).join(' ')}</span></div>`;
+        }
+        if (conf.analyses_missing && conf.analyses_missing.length) {
+            confHtml += `<div class="budget-row"><span class="budget-label">Missing</span><span class="budget-value" style="color:var(--text-muted)">${conf.analyses_missing.join(', ')}</span></div>`;
+        }
+        if (conf.caveats && conf.caveats.length) {
+            confHtml += `<div style="margin-top:8px;font-size:15px;color:var(--text-muted)">`;
+            conf.caveats.forEach(c => { confHtml += `<div style="margin-bottom:3px">⚠ ${escHtml(c)}</div>`; });
+            confHtml += `</div>`;
+        }
+        confHtml += `<div style="margin-top:6px"><span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('confidence-methodology')">&#9432;</span>
+            <div class="methodology-tip" id="confidence-methodology">
+                <div class="methodology-tip-title">Confidence Methodology</div>
+                <div class="methodology-tip-row"><strong>Jobs Analyzed</strong> — &gt;100 = high confidence, 30-100 = medium, &lt;30 = low for hiring signals</div>
+                <div class="methodology-tip-row"><strong>Scrape Coverage</strong> — Whether the scrape covered the full ATS board or a limited sample</div>
+                <div class="methodology-tip-row"><strong>Analysis Coverage</strong> — How many of the 12 analysis types have been completed</div>
+                <div class="methodology-tip-note">Missing analyses create blind spots in specific briefing dimensions. Scores for dimensions without supporting data default to 50.</div>
+            </div></div>`;
+        html += _briefingSection('Data Confidence', confHtml, false);
+    }
+
+    // --- Source Reports ---
+    if (dossier.analyses && dossier.analyses.length) {
+        let srcHtml = '';
+        const byType = {};
+        dossier.analyses.forEach(a => {
+            if (!byType[a.analysis_type]) byType[a.analysis_type] = [];
+            byType[a.analysis_type].push(a);
+        });
+        const now = new Date();
+        Object.entries(byType).forEach(([type, runs]) => {
+            const latest = runs[0];
+            const lastDate = new Date(latest.created_at);
+            const days = Math.floor((now - lastDate) / (1000 * 60 * 60 * 24));
+            let freshness = 'fresh', flabel = 'Fresh';
+            if (days >= 90) { freshness = 'very-stale'; flabel = `${days}d ago`; }
+            else if (days >= 30) { freshness = 'stale'; flabel = `${days}d ago`; }
+            else if (days >= 7) { freshness = 'recent'; flabel = `${days}d ago`; }
+            else { flabel = days === 0 ? 'Today' : `${days}d ago`; }
+            srcHtml += `<div class="staleness-row" data-source-type="${escHtml(type)}">
+                <span style="color:var(--text-primary);font-weight:500;min-width:80px">${escHtml(type)}</span>
+                <span class="staleness-badge staleness-${freshness}">${flabel}</span>
+                <span style="font-size:14px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
+                ${latest.report_file ? `<span style="font-size:12px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
+            </div>`;
+        });
+        html += _briefingSection('Source Reports', srcHtml, false);
+    }
+
+    const writeTarget = _targetEl || document.getElementById('right-content');
+    writeTarget.innerHTML = html;
+
+    if (!isSplitTarget) {
+        openRightPane();
+        // If already in expanded/focus mode, rebuild the dashboard view
+        if (rp.classList.contains('expanded')) {
+            _buildCardGrid(rp);
+        }
+    }
+}
+
+// ========== LENS SCORES ==========
+
+let _cachedLenses = null;
+let _activeLensDetail = null;
+
+function _buildLensScoresSection(dossier) {
+    const scores = dossier.lens_scores || [];
+    if (!scores.length) return '';
+
+    let body = '<div class="lens-bar">';
+    scores.forEach((ls, idx) => {
+        const s = ls.overall_score || 0;
+        const cc = _scoreColorClass(s);
+        body += `<div class="lens-pill${idx === 0 ? ' active' : ''}" onclick="expandLensDetail('${escHtml(dossier.company_name)}', ${idx})" data-lens-idx="${idx}">
+            <span class="lens-pill-score score-${cc}">${s}</span>
+            <span class="lens-pill-name">${escHtml(ls.lens_name)}</span>
+        </div>`;
+    });
+    body += '</div>';
+
+    // Auto-expand first lens detail
+    if (scores.length) {
+        body += `<div id="lens-detail-container">${_renderLensDetail(scores[0])}</div>`;
+    }
+
+    return _briefingSection('Lens Scores', body, true);
+}
+
+function _renderLensDetail(ls) {
+    const scoreData = ls.score_data || {};
+    const config = ls.lens_config || {};
+    const dims = config.dimensions || [];
+    const s = scoreData.overall_score || ls.overall_score || 0;
+    const label = scoreData.overall_label || ls.overall_label || '';
+    const cc = _scoreColorClass(s);
+    const scoreLabel = config.score_label || 'Score';
+
+    let html = `<div class="lens-detail-card">
+        <div class="lens-detail-header">
+            ${renderScoreRing(s, 80)}
+            <div class="lens-detail-meta">
+                <div class="lens-detail-label">${escHtml(ls.lens_name)}</div>
+                <div class="lens-detail-tier score-${cc}">${escHtml(label)}</div>
+                ${ls.scored_at ? `<div class="lens-detail-scored">Scored ${_formatLensDate(ls.scored_at)}</div>` : ''}
+            </div>
+        </div>
+        <div class="lens-detail-dims">`;
+
+    // Dimension cards
+    dims.forEach(dim => {
+        const sub = (scoreData.sub_scores || {})[dim.key] || {};
+        const ds = sub.score || 0;
+        const color = _dimColorHex(ds);
+        const wPct = Math.round((dim.weight || 0) * 100) + '%';
+        const rationale = sub.rationale || 'No data available';
+        const signals = (sub.signals || []);
+
+        let signalHtml = signals.map(sig => {
+            if (typeof sig === 'string') {
+                const urlMatch = sig.match(/https?:\/\/[^\s)]+/);
+                if (urlMatch) {
+                    const url = urlMatch[0];
+                    const text = sig.replace(url, '').trim() || url;
+                    return `<a class="icp-signal-tag" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(text)}</a>`;
+                }
+                return `<span class="icp-signal-tag">${escHtml(sig)}</span>`;
+            }
+            const text = sig.text || '';
+            const url = sig.url;
+            if (url) return `<a class="icp-signal-tag" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(text)}</a>`;
+            return `<span class="icp-signal-tag">${escHtml(text)}</span>`;
+        }).join('');
+
+        html += `<div class="icp-dim-card" onclick="if(!event.target.closest('a')){this.classList.toggle('expanded')}">
+            <div class="icp-dim-card-header">
+                <span class="dim-chevron">&#9654;</span>
+                <span class="icp-dim-name">
+                    ${escHtml(dim.label)}
+                    <span class="dim-weight">(${wPct})</span>
+                </span>
+                <span class="icp-dim-score-pill" style="color:${color}">${ds}</span>
+            </div>
+            <div class="icp-dim-bar"><div class="icp-dim-fill" style="width:${ds}%;background:${color}"></div></div>
+            <div class="icp-dim-card-body">
+                <div class="icp-dim-rationale">${_renderCitedText(rationale)}</div>
+                ${signalHtml ? `<div class="icp-dim-signals">${signalHtml}</div>` : ''}
+            </div>
+        </div>`;
+    });
+
+    html += '</div>';
+
+    // Recommended angle
+    if (scoreData.recommended_angle) {
+        html += `<div class="lens-detail-footer">
+            <div class="lens-footer-label">Recommended Angle</div>
+            <div class="lens-footer-text">${_renderCitedText(scoreData.recommended_angle)}</div>
+        </div>`;
+    }
+
+    // Key risks
+    if (scoreData.key_risks && scoreData.key_risks.length) {
+        html += `<div class="lens-detail-footer" style="border-top:none;padding-top:0">
+            <div class="lens-footer-label">Key Risks</div>
+            <ul class="lens-risks-list">${scoreData.key_risks.map(r => `<li>${_renderCitedText(r)}</li>`).join('')}</ul>
+        </div>`;
+    }
+
+    html += '</div>';
+    return html;
+}
+
+function _dimColorHex(score) {
+    if (score >= 80) return '#22c55e';
+    if (score >= 60) return '#3b82f6';
+    if (score >= 40) return '#f59e0b';
+    return '#ef4444';
+}
+
+function _formatLensDate(dateStr) {
+    try {
+        if (!dateStr.includes('T') && dateStr.includes(' ')) dateStr = dateStr.replace(' ', 'T');
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return dateStr;
+        const now = new Date();
+        const days = Math.floor((now - d) / (1000 * 60 * 60 * 24));
+        if (days === 0) return 'today';
+        if (days === 1) return 'yesterday';
+        if (days < 7) return `${days}d ago`;
+        return d.toLocaleDateString();
+    } catch { return dateStr; }
+}
+
+function expandLensDetail(companyName, idx) {
+    // Find the active dossier's lens scores
+    const dossier = _activeDossierData;
+    if (!dossier || !dossier.lens_scores) return;
+    const scores = dossier.lens_scores;
+    if (idx >= scores.length) return;
+
+    // Update active pill
+    document.querySelectorAll('.lens-pill').forEach((p, i) => {
+        p.classList.toggle('active', i === idx);
+    });
+
+    // Render detail
+    const container = document.getElementById('lens-detail-container');
+    if (container) {
+        container.innerHTML = _renderLensDetail(scores[idx]);
+    }
+}
+
+let _briefingInProgress = false;
+
+function generateBriefing(companyName) {
+    if (_briefingInProgress) return;
+    _showLensPicker(companyName);
+}
+
+async function _showLensPicker(companyName) {
+    // Ensure lenses are loaded
+    if (!_cachedLenses) {
+        try {
+            const resp = await fetch('/api/lenses');
+            if (resp.ok) _cachedLenses = await resp.json();
+        } catch {}
+    }
+    const lenses = _cachedLenses || [];
+    if (!lenses.length) {
+        // No lenses cached — just generate with default
+        _executeGenerateBriefing(companyName, null);
+        return;
+    }
+
+    // Determine the last-used lens for this company
+    let defaultLensId = null;
+    const b = _activeBriefingData;
+    if (b && b.scoring && b.scoring._lens) {
+        defaultLensId = b.scoring._lens.id;
+    }
+
+    // Remove any existing picker
+    const existing = document.querySelector('.lens-picker-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'niche-builder-overlay lens-picker-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    let pillsHtml = '';
+    lenses.forEach(lens => {
+        const isDefault = lens.id === defaultLensId;
+        pillsHtml += `<div class="lens-picker-pill${isDefault ? ' active' : ''}" data-lens-id="${lens.id}" onclick="_selectLensForBriefing(this, ${lens.id})">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">${escHtml(lens.name)}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml((lens.config || {}).score_label || lens.description || '')}</div>
+            ${isDefault ? '<div style="font-size:10px;color:var(--green);margin-top:2px">Last used</div>' : ''}
+        </div>`;
+    });
+
+    overlay.innerHTML = `<div class="niche-builder-modal" style="max-width:460px">
+        <div class="niche-builder-header">
+            <h2>Choose Lens for ${escHtml(companyName)}</h2>
+            <button class="icp-wizard-close" onclick="this.closest('.lens-picker-overlay').remove()">&times;</button>
+        </div>
+        <div style="padding:16px 20px">
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Select the evaluation lens for this briefing. The lens determines scoring dimensions, rubrics, and how consulting opportunities are framed.</div>
+            <div class="lens-picker-grid">${pillsHtml}</div>
+            <div style="margin-top:16px;text-align:right">
+                <button class="dash-refresh-btn" style="padding:8px 20px;font-size:13px" onclick="_confirmLensPicker('${escHtml(companyName)}')">Generate Briefing</button>
+            </div>
+        </div>
+    </div>`;
+
+    document.body.appendChild(overlay);
+
+    // ESC to close
+    const escHandler = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); } };
+    document.addEventListener('keydown', escHandler);
+    overlay._escHandler = escHandler;
+}
+
+function _selectLensForBriefing(el, lensId) {
+    el.closest('.lens-picker-grid').querySelectorAll('.lens-picker-pill').forEach(p => p.classList.remove('active'));
+    el.classList.add('active');
+}
+
+function _confirmLensPicker(companyName) {
+    const overlay = document.querySelector('.lens-picker-overlay');
+    const active = overlay ? overlay.querySelector('.lens-picker-pill.active') : null;
+    const lensId = active ? parseInt(active.dataset.lensId) : null;
+    if (overlay) {
+        if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
+        overlay.remove();
+    }
+    _executeGenerateBriefing(companyName, lensId);
+}
+
+async function _executeGenerateBriefing(companyName, lensId) {
+    if (_briefingInProgress) return;
+    _briefingInProgress = true;
+
+    // Switch to target company's view first so "Generating..." shows on the right dossier
+    if (activeDossierName !== companyName) {
+        await openDossier(companyName);
+    }
+
+    // Disable all briefing buttons to prevent duplicate clicks
+    const allBtns = document.querySelectorAll('.briefing-btn-primary, .company-gen-briefing-btn');
+    const origTexts = [];
+    allBtns.forEach(b => { origTexts.push(b.textContent); b.disabled = true; b.textContent = 'Generating...'; });
+
+    const resetBtns = () => {
+        allBtns.forEach((b, i) => { b.disabled = false; b.textContent = origTexts[i] || 'Generate Briefing'; });
+        _briefingInProgress = false;
+    };
+
+    try {
+        const body = lensId ? {lens_id: lensId} : {};
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/briefing`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            _briefingInProgress = false;
+            await loadCompanies();
+            await openDossier(companyName);
+        } else {
+            showToast(data.error || 'Briefing generation failed', 'error', 8000);
+            resetBtns();
+        }
+    } catch (e) {
+        showToast('Error generating briefing: ' + e.message, 'error');
+        resetBtns();
+    }
+}
+
+// ========== LENS BUILDER MODAL ==========
+
+function closeLensBuilder() {
+    const overlay = document.querySelector('.lens-builder-overlay');
+    if (overlay) {
+        if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
+        overlay.remove();
+    }
+}
+
+function openLensBuilder() {
+    document.querySelectorAll('.lens-dropdown').forEach(d => d.remove());
+    const existing = document.querySelector('.lens-builder-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'niche-builder-overlay lens-builder-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeLensBuilder(); });
+
+    overlay.innerHTML = `<div class="niche-builder-modal" style="max-width:520px">
+        <div class="niche-builder-header">
+            <h2>Create New Lens</h2>
+            <button class="icp-wizard-close" onclick="closeLensBuilder()">&times;</button>
+        </div>
+        <div class="niche-builder-body" id="lens-builder-body">
+            <div id="lens-builder-step1">
+                <div class="icp-field">
+                    <label>Lens Name</label>
+                    <input type="text" id="lb-name" placeholder="e.g. CTV Ad Sales Readiness, Cloud Migration Fit">
+                </div>
+                <div class="icp-field">
+                    <label>Description</label>
+                    <textarea id="lb-description" rows="3" placeholder="Describe what this lens evaluates. What dimensions matter? What makes a company score high vs low?" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px;resize:vertical"></textarea>
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:8px">The AI will generate scoring dimensions, weights, rubrics, and tier labels based on your description.</div>
+            </div>
+            <div id="lens-builder-step2" style="display:none">
+                <div id="lb-config-preview"></div>
+            </div>
+        </div>
+        <div class="niche-builder-footer" id="lens-builder-footer">
+            <button class="briefing-btn" onclick="closeLensBuilder()">Cancel</button>
+            <button class="briefing-btn briefing-btn-primary" id="lb-generate-btn" onclick="generateLensConfig()">Generate Lens</button>
+        </div>
+    </div>`;
+
+    document.body.appendChild(overlay);
+    const escHandler = (e) => { if (e.key === 'Escape') closeLensBuilder(); };
+    document.addEventListener('keydown', escHandler);
+    overlay._escHandler = escHandler;
+    setTimeout(() => document.getElementById('lb-name')?.focus(), 100);
+}
+
+async function generateLensConfig() {
+    const name = document.getElementById('lb-name')?.value.trim();
+    const description = document.getElementById('lb-description')?.value.trim();
+    if (!name || !description) { showToast('Please provide a name and description', 'error'); return; }
+
+    const btn = document.getElementById('lb-generate-btn');
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+
+    try {
+        const resp = await fetch('/api/lenses/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, description}),
+        });
+        const data = await resp.json();
+        if (!data.ok || !data.lens) {
+            showToast(data.error || 'Failed to generate lens', 'error');
+            btn.disabled = false; btn.textContent = 'Generate Lens';
+            return;
+        }
+
+        const lens = data.lens;
+        const config = lens.config;
+
+        document.getElementById('lens-builder-step1').style.display = 'none';
+        document.getElementById('lens-builder-step2').style.display = 'block';
+
+        let previewHtml = `<div style="margin-bottom:12px"><strong style="color:var(--text-primary)">${escHtml(lens.name)}</strong> <span style="color:var(--text-muted);font-size:12px">(${escHtml(lens.slug)})</span></div>`;
+        previewHtml += `<div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">${escHtml(config.score_label || 'Score')}</div>`;
+
+        previewHtml += `<div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">Dimensions</div>`;
+        (config.dimensions || []).forEach(d => {
+            const wPct = Math.round((d.weight || 0) * 100);
+            previewHtml += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:13px">
+                <span style="color:var(--text-primary);min-width:140px">${escHtml(d.label)}</span>
+                <div class="sub-score-bar" style="flex:1;height:6px"><div class="sub-score-fill" style="width:${wPct}%;background:var(--accent)"></div></div>
+                <span style="color:var(--text-muted);font-size:12px;min-width:30px">${wPct}%</span>
+            </div>`;
+        });
+
+        previewHtml += `<div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-top:12px;margin-bottom:6px">Tier Labels</div>`;
+        (config.labels || []).forEach(tier => {
+            const cc = _scoreColorClass(tier.min_score);
+            previewHtml += `<span class="score-${cc}" style="margin-right:8px;font-size:12px">&#9679; ${tier.min_score}+ ${escHtml(tier.label)}</span>`;
+        });
+
+        document.getElementById('lb-config-preview').innerHTML = previewHtml;
+        document.getElementById('lens-builder-footer').innerHTML = `<button class="briefing-btn" onclick="closeLensBuilder()">Close</button>`;
+
+        _cachedLenses = null;
+        showToast(`Lens "${lens.name}" created successfully`, 'success');
+    } catch (e) {
+        showToast('Error generating lens: ' + e.message, 'error');
+        btn.disabled = false; btn.textContent = 'Generate Lens';
+    }
+}
+
+function showLegacyDossierDetail(d) {
+    _activeDossierData = d;
+    const rp = document.getElementById('right-pane');
+    document.getElementById('right-company').textContent = d.company_name;
+    document.getElementById('right-type').textContent = d.sector || 'Company Dossier';
+    document.getElementById('right-date').textContent = `Updated ${d.updated_at || ''}`;
+    currentReportFilename = null;
+
+    let html = '';
+
+    // Generate Briefing button
+    html += `<div style="padding:12px;text-align:center;border-bottom:1px solid var(--border);margin-bottom:12px">
+        <button class="briefing-btn briefing-btn-primary" onclick="generateBriefing('${escHtml(d.company_name)}')">Generate Intelligence Briefing</button>
+        <div style="font-size:14px;color:var(--text-muted);margin-top:4px">Requires at least 2 analyses</div>
+    </div>`;
+
+    // Key facts section
+    const allFacts = {};
+    (d.analyses || []).forEach(a => {
+        if (a.key_facts_json) {
+            try {
+                const facts = JSON.parse(a.key_facts_json);
+                Object.assign(allFacts, facts);
+            } catch {}
+        }
+    });
+
+    if (Object.keys(allFacts).length) {
+        html += '<div class="dossier-detail-section"><h3>Key Facts</h3><div class="fact-grid">';
+        const display = ['revenue', 'market_cap', 'headcount', 'ceo', 'hq_location', 'founded',
+                         'patent_count', 'sentiment_score', 'hiring_trend', 'sector'];
+        display.forEach(k => {
+            if (allFacts[k] !== undefined && allFacts[k] !== null) {
+                const label = k.replace(/_/g, ' ');
+                html += `<div class="fact-item"><div class="fact-label">${escHtml(label)}</div><div class="fact-value">${escHtml(String(allFacts[k]))}</div></div>`;
+            }
+        });
+        html += '</div>';
+        ['key_products', 'key_competitors', 'key_risks', 'top_patent_areas'].forEach(k => {
+            if (Array.isArray(allFacts[k]) && allFacts[k].length) {
+                const label = k.replace(/_/g, ' ');
+                html += `<div style="margin-top:8px"><div class="fact-label">${escHtml(label)}</div><div class="fact-value">${allFacts[k].map(v => escHtml(String(v))).join(', ')}</div></div>`;
+            }
+        });
+        html += '</div>';
+    }
+
+    // Recent changes detected between scans
+    const changeEvents = (d.events || []).filter(e => e.event_type === 'change_detected');
+    if (changeEvents.length) {
+        html += `<div class="dossier-detail-section"><h3>Recent Changes (${changeEvents.length})</h3>`;
+        changeEvents.forEach(evt => {
+            let data = {};
+            try { data = JSON.parse(evt.data_json || '{}'); } catch {}
+            const field = data.field || '';
+            const pct = data.pct_change;
+            const changeType = data.change_type || '';
+            let colorClass = 'change-neutral';
+            if (changeType === 'increased') colorClass = 'change-positive';
+            else if (changeType === 'decreased') colorClass = 'change-negative';
+            else if (changeType === 'changed') {
+                const newVal = String(data.new_value || '').toLowerCase();
+                if (newVal === 'negative' || newVal === 'shrinking') colorClass = 'change-negative';
+                else if (newVal === 'positive' || newVal === 'growing') colorClass = 'change-positive';
+            }
+            const source = (evt.description || '').replace('Detected during ', '').replace(' analysis', '');
+            html += `<div class="change-row ${colorClass}">
+                <span class="change-field">${escHtml(field.replace(/_/g, ' '))}</span>
+                <span class="change-arrow">`;
+            if (data.old_value !== undefined && data.old_value !== null && !data.items_added) {
+                html += `<span class="change-old">${escHtml(String(data.old_value))}</span> <span style="color:var(--text-muted)">-></span> <span class="change-new">${escHtml(String(data.new_value))}</span>`;
+            } else if (data.items_added && data.items_added.length) {
+                html += `<span class="change-new">+${data.items_added.map(i => escHtml(i)).join(', ')}</span>`;
+                if (data.items_removed && data.items_removed.length) {
+                    html += ` <span class="change-old">-${data.items_removed.map(i => escHtml(i)).join(', ')}</span>`;
+                }
+            } else {
+                html += `<span class="change-new">${escHtml(String(data.new_value || ''))}</span>`;
+            }
+            html += '</span>';
+            if (pct !== undefined && pct !== null) {
+                const pctClass = pct > 0 ? 'change-pct-up' : 'change-pct-down';
+                html += ` <span class="change-pct ${pctClass}">${pct > 0 ? '+' : ''}${pct}%</span>`;
+            }
+            html += `<span class="change-source">${escHtml(source)} ${escHtml(evt.event_date || '')}</span>`;
+            html += '</div>';
+        });
+        html += '</div>';
+    }
+
+    // Analysis history with staleness
+    if (d.analyses && d.analyses.length) {
+        html += '<div class="dossier-detail-section"><h3>Analysis History</h3>';
+        const byType = {};
+        d.analyses.forEach(a => {
+            if (!byType[a.analysis_type]) byType[a.analysis_type] = [];
+            byType[a.analysis_type].push(a);
+        });
+        const now = new Date();
+        Object.entries(byType).forEach(([type, runs]) => {
+            const latest = runs[0];
+            const lastDate = new Date(latest.created_at);
+            const days = Math.floor((now - lastDate) / (1000 * 60 * 60 * 24));
+            let freshness = 'fresh', label = 'Fresh';
+            if (days >= 90) { freshness = 'very-stale'; label = `${days}d ago`; }
+            else if (days >= 30) { freshness = 'stale'; label = `${days}d ago`; }
+            else if (days >= 7) { freshness = 'recent'; label = `${days}d ago`; }
+            else { label = days === 0 ? 'Today' : `${days}d ago`; }
+            html += `<div class="staleness-row">
+                <span style="color:var(--text-primary);font-weight:500;min-width:80px">${escHtml(type)}</span>
+                <span class="staleness-badge staleness-${freshness}">${label}</span>
+                <span style="font-size:14px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
+                ${latest.report_file ? `<span style="font-size:12px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
+            </div>`;
+        });
+        html += '</div>';
+    }
+
+    // Lens scores (if any)
+    html += _buildLensScoresSection(d);
+
+    // Lens scoring now handled via pill bar in briefing view
+
+    // Timeline events (non-change events)
+    const otherEvents = (d.events || []).filter(e => e.event_type !== 'change_detected');
+    if (otherEvents.length) {
+        html += `<div class="dossier-detail-section"><h3>Timeline (${otherEvents.length} events)</h3>`;
+        otherEvents.forEach(evt => {
+            html += `<div class="timeline-event">
+                <div class="timeline-date">${escHtml(evt.event_date || '')}</div>
+                <div class="timeline-type">${escHtml(evt.event_type)}</div>
+                <div>
+                    <div class="timeline-title">${escHtml(evt.title)}</div>
+                    ${evt.description ? `<div class="timeline-desc">${escHtml(evt.description)}</div>` : ''}
+                </div>
+            </div>`;
+        });
+        html += '</div>';
+    }
+
+    if (!html) {
+        html = '<div style="padding:20px;text-align:center;color:var(--text-muted)">No data in this dossier yet. Run analyses to populate it.</div>';
+    }
+
+    document.getElementById('right-content').innerHTML = html;
+    openRightPane();
+}
+
+// ===================== MESSAGES =====================
+function getChatCol() {
+    const c = document.getElementById('chat-messages');
+    return c.querySelector('.chat-col') || c;
+}
+
+// Auto-scroll gating: disabled when user scrolls up, re-enabled on new message send
+let _chatAutoScroll = true;
+let _chatScrollProgrammatic = false;
+(function() {
+    const c = document.getElementById('chat-messages');
+    if (!c) return;
+    c.addEventListener('scroll', () => {
+        if (_chatScrollProgrammatic) return;
+        const nearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 120;
+        _chatAutoScroll = nearBottom;
+    });
+})();
+function _scrollChatBottom() {
+    if (!_chatAutoScroll) return;
+    const c = document.getElementById('chat-messages');
+    if (!c) return;
+    _chatScrollProgrammatic = true;
+    c.scrollTop = c.scrollHeight;
+    requestAnimationFrame(() => { _chatScrollProgrammatic = false; });
+}
+
+function renderMessages() {
+    const chat = getActiveChat();
+    const container = document.getElementById('chat-messages');
+    const welcome = document.getElementById('welcome');
+
+    if (!chat || !chat.messages.length) {
+        welcome.style.display = 'flex';
+        const msgs = container.querySelectorAll('.msg');
+        msgs.forEach(m => m.remove());
+        return;
+    }
+
+    welcome.style.display = 'none';
+
+    // Remember which thinking/tool bubbles are expanded before re-render
+    const expandedSet = new Set();
+    container.querySelectorAll('.thinking-bubble.expanded').forEach(el => {
+        const idx = el.getAttribute('data-msg-idx');
+        if (idx) expandedSet.add('t' + idx);
+    });
+    container.querySelectorAll('.tool-call-bubble.expanded').forEach(el => {
+        const idx = el.getAttribute('data-msg-idx');
+        if (idx) expandedSet.add('c' + idx);
+    });
+
+    let html = '';
+    let msgIdx = 0;
+    let inToolGroup = false;
+    const msgs = chat.messages;
+    msgs.forEach((m, i) => {
+        const isGroupable = m.role === 'tool_call' || m.role === 'thinking';
+        // Open a tool-group wrapper when entering a run of tool/thinking messages
+        if (isGroupable && !inToolGroup) {
+            html += '<div class="tool-group">';
+            inToolGroup = true;
+        }
+        // Close the wrapper when leaving a run
+        if (!isGroupable && inToolGroup) {
+            html += '</div>';
+            inToolGroup = false;
+        }
+
+        if (m.role === 'user') {
+            html += `<div class="msg msg-user"><div class="msg-bubble">${escHtml(m.content)}</div></div>`;
+        } else if (m.role === 'assistant') {
+            html += `<div class="msg msg-assistant"><div class="msg-bubble">${marked.parse(m.content || '')}</div></div>`;
+        } else if (m.role === 'thinking') {
+            const preview = (m.content || '').slice(0, 100) + (m.content.length > 100 ? '...' : '');
+            const isExpanded = expandedSet.has('t' + msgIdx);
+            html += `<div class="msg msg-thinking">
+                <div class="thinking-bubble${isExpanded ? ' expanded' : ''}" data-msg-idx="${msgIdx}" onclick="if(!window.getSelection().toString())this.classList.toggle('expanded')">
+                    <div class="thinking-label">Reasoning</div>
+                    <div class="thinking-preview">${escHtml(preview)}</div>
+                    <div class="thinking-content">${escHtml(m.content)}</div>
+                </div>
+            </div>`;
+        } else if (m.role === 'tool_call') {
+            const hasResult = !!m.result;
+            const isExpanded = expandedSet.has('c' + msgIdx);
+            const steps = m.steps || [];
+            const isTreeTool = ['score_lens', 'score_prospect', 'full_analysis', 'financial_analysis',
+                                'sentiment_analysis', 'techstack_analysis', 'competitor_analysis',
+                                'patent_analysis', 'seo_audit', 'pricing_analysis'].includes(m.name);
+
+            // For completed tree tools: compact bubble + "View Execution" button (opens fullscreen overlay)
+            // For running tools or non-tree tools: flat step list as before
+            let stepsHtml = '';
+            if (!hasResult && steps.length) {
+                // Still running — show live flat step list
+                stepsHtml = `<div class="tool-progress-log">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(cleanProgress(s))}</div>`).join('')}</div>`;
+            } else if (hasResult && !isTreeTool && steps.length) {
+                // Completed non-tree tool — flat list on expand
+                stepsHtml = `<div class="tool-progress-log">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(cleanProgress(s))}</div>`).join('')}</div>`;
+            }
+            // For completed tree tools: no inline stepsHtml — flowchart opens in overlay
+
+            const statusHtml = hasResult
+                ? `<div class="tool-call-status"><span class="tool-done-check">&#10003;</span> <span class="tool-status-text" style="color:var(--green)">Done${steps.length ? ` — ${steps.length} step${steps.length !== 1 ? 's' : ''}` : ''}</span></div>`
+                : `<div class="tool-call-status"><div class="tool-spinner"></div> <span class="tool-status-text">Running ${escHtml(toolLabel(m.name))}...</span></div>`;
+
+            const chevron = hasResult && !isTreeTool ? `<span class="tool-expand-chevron">&#9660;</span>` : '';
+
+            // "View Execution" button for completed tree tools
+            const execBtn = hasResult && isTreeTool && steps.length
+                ? `<div class="report-link" onclick="event.stopPropagation();openExecOverlay(${msgIdx})" style="margin-top:4px">View Execution &rarr;</div>`
+                : '';
+
+            html += `<div class="msg msg-tool">
+                <div class="tool-call-bubble${hasResult ? (isExpanded ? ' expanded' : '') : ' running'}" data-msg-idx="${msgIdx}" onclick="if(!window.getSelection().toString())this.classList.toggle('expanded')">
+                    <div class="tool-call-header">
+                        <div class="tool-call-icon">${toolIcon(m.name)}</div>
+                        <span class="tool-call-name">${escHtml(toolLabel(m.name))}</span>
+                        ${chevron}
+                    </div>
+                    <div class="tool-call-args">${escHtml(formatArgs(m.args))}</div>
+                    ${statusHtml}
+                    ${stepsHtml}
+                    ${m.result ? `<div class="tool-result-content">${escHtml(m.result)}</div>` : ''}
+                </div>
+                ${execBtn}
+                ${m.reportFile ? `<div class="report-link" onclick="openReport('${m.reportFile}')">View Report &rarr;</div>` : ''}
+            </div>`;
+        }
+        msgIdx++;
+    });
+    if (inToolGroup) html += '</div>'; // close trailing tool-group
+
+    // Keep welcome div hidden but in DOM, wrap everything in centered inner container
+    container.innerHTML = `<div class="chat-col"><div id="welcome" class="welcome" style="display:none">
+        <div class="welcome-title">Signal Vault</div>
+        <div class="welcome-sub">Ask about any company.</div>
+        <div class="quick-actions">
+            <div class="quick-action" onclick="quickAction('full_analysis', 'Run a full analysis on ')">Full Analysis<span>Financial, competitors, patents, sentiment</span></div>
+            <div class="quick-action" onclick="quickAction('compare', 'Compare ', ' and ')">Compare Companies<span>Side-by-side competitive analysis</span></div>
+            <div class="quick-action" onclick="quickAction('landscape', 'Run a landscape analysis on ')">Landscape Analysis<span>Discover competitors automatically</span></div>
+            <div class="quick-action" onclick="quickAction('freeform')">Ask Anything<span>Free-form research question</span></div>
+        </div>
+    </div>` + html + `</div>`;
+    _scrollChatBottom();
+}
+
+// ===================== SEND MESSAGE =====================
+async function sendMessage() {
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    let chat = getActiveChat();
+    if (!chat) { newChat(); chat = getActiveChat(); }
+
+    // Resume prompt: if this is first message, context has a company, and a prior chat exists for that company
+    const ctxCompany = getContextCompany();
+    if (chat.messages.length === 0 && ctxCompany && !resumePromptShown) {
+        const existing = findExistingCompanyChat(ctxCompany);
+        if (existing) {
+            resumePromptShown = true;
+            const choice = await showResumePrompt(ctxCompany, existing);
+            if (choice === 'resume') {
+                // Switch to the existing chat and send the message there
+                loadChat(existing.id);
+                chat = getActiveChat();
+            }
+            // 'new' → continue in current empty chat
+        }
+    }
+
+    // Clear input immediately
+    input.value = '';
+    autoResize(input);
+
+    if (!chat.title) {
+        chat.title = text.slice(0, 60);
+        saveChats();
+        renderChatList();
+    }
+
+    // Seed company from active context
+    if (!chat.company && ctxCompany) {
+        chat.company = ctxCompany;
+        saveChats();
+        renderChatList();
+    }
+
+    // Add user message to chat right away
+    chat.messages.push({ role: 'user', content: text });
+    saveChats();
+    renderMessages();
+    document.getElementById('welcome').style.display = 'none';
+
+    if (sendingChats.has(chat.id)) {
+        // This chat is already processing — queue it for re-processing
+        messageQueue.push(chat.id);
+        updateSendBtn();
+        return;
+    }
+
+    await processChat(chat);
+}
+
+async function processChat(chat) {
+    sendingChats.add(chat.id);
+    updateSendBtn();
+
+    // Typing indicator
+    const container = document.getElementById('chat-messages');
+    const col = getChatCol();
+    const typingEl = document.createElement('div');
+    typingEl.className = 'msg msg-assistant';
+    typingEl.id = 'typing';
+    typingEl.innerHTML = '<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
+    col.appendChild(typingEl);
+    _chatAutoScroll = true; // user just sent — always scroll
+    _scrollChatBottom();
+
+    // API messages (only user + assistant)
+    const apiMessages = chat.messages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({ role: m.role, content: m.content }));
+
+    // Build payload with optional company context
+    const payload = { messages: apiMessages };
+    const ctxCompany = activeContext ? activeContext.company : (chat.company || null);
+    if (ctxCompany) {
+        payload.context = { company: ctxCompany, type: activeContext ? activeContext.type : 'inferred' };
+    }
+
+    try {
+        const resp = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const event = JSON.parse(line.slice(6));
+                    handleSSE(event, chat);
+                } catch {}
+            }
+        }
+    } catch (e) {
+        console.error('[chat] Connection error:', e);
+        chat.messages.push({ role: 'assistant', content: `Connection error: ${e.message || 'stream interrupted'}. The server may have restarted — you can ask me to continue where we left off.` });
+    }
+
+    // Kill any stale running tool calls — mark them as cancelled
+    for (const m of chat.messages) {
+        if (m.role === 'tool_call' && !m.result) {
+            m.result = '(Interrupted — server disconnected before this tool completed)';
+        }
+    }
+
+    const t = document.getElementById('typing');
+    if (t) t.remove();
+
+    saveChats();
+    renderMessages();
+    renderChatList();
+    refreshSidebar();
+
+    // Check if this chat has queued follow-up messages
+    const idx = messageQueue.indexOf(chat.id);
+    if (idx !== -1) {
+        messageQueue.splice(idx, 1);
+        updateSendBtn();
+        await processChat(chat);
+        return;
+    }
+
+    sendingChats.delete(chat.id);
+    updateSendBtn();
+}
+
+function updateSendBtn() {
+    const btn = document.getElementById('send-btn');
+    btn.disabled = false;
+    const chat = getActiveChat();
+    const isSending = chat && sendingChats.has(chat.id);
+    const queued = messageQueue.filter(id => id === (chat && chat.id)).length;
+    if (isSending && queued > 0) {
+        btn.textContent = `Sending... (${queued} queued)`;
+    } else if (isSending) {
+        btn.textContent = 'Sending...';
+    } else {
+        btn.textContent = 'Send';
+    }
+}
+
+function handleSSE(event, chat) {
+    if (event.type === 'thinking') {
+        // Remove typing indicator
+        const t = document.getElementById('typing');
+        if (t) t.remove();
+        chat.messages.push({ role: 'thinking', content: event.text });
+        saveChats();
+        renderMessages();
+        // Re-add typing indicator — agent is still working
+        {
+            const container = document.getElementById('chat-messages');
+            const typingEl = document.createElement('div');
+            typingEl.className = 'msg msg-assistant';
+            typingEl.id = 'typing';
+            typingEl.innerHTML = '<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
+            getChatCol().appendChild(typingEl);
+            _scrollChatBottom();
+        }
+
+    } else if (event.type === 'tool_call') {
+        // Remove typing indicator — the tool call bubble with spinner replaces it
+        const t = document.getElementById('typing');
+        if (t) t.remove();
+        chat.messages.push({ role: 'tool_call', name: event.name, args: event.args, result: null, reportFile: null, steps: [] });
+        // Auto-detect company from tool args
+        if (!chat.company && event.args) {
+            const detected = event.args.company || event.args.company_name || event.args.company_a || null;
+            if (detected) { chat.company = detected; }
+        }
+        saveChats();
+        renderMessages();
+        // Scroll chat to show new tool bubble
+        _scrollChatBottom();
+
+    } else if (event.type === 'tool_progress') {
+        // Accumulate progress steps in the tool_call message data
+        const isStructured = event.structured === true;
+        const rawText = event.text || '';
+        const cleaned = isStructured ? null : cleanProgress(rawText);
+        for (let i = chat.messages.length - 1; i >= 0; i--) {
+            if (chat.messages[i].role === 'tool_call' && !chat.messages[i].result) {
+                if (!chat.messages[i].steps) chat.messages[i].steps = [];
+                if (!chat.messages[i].structuredSteps) chat.messages[i].structuredSteps = [];
+                if (isStructured) {
+                    // Store structured event for tree rendering
+                    chat.messages[i].structuredSteps.push({
+                        event: event.event,
+                        source: event.source,
+                        label: event.label,
+                        status: event.status,
+                        summary: event.summary,
+                        detail: event.detail,
+                        company: event.company,
+                        analysis_type: event.analysis_type,
+                        path: event.path,
+                        model: event.model,
+                    });
+                } else {
+                    // Store RAW text (with [agent] prefix) for tree parsing,
+                    // cleaned text is only used for live DOM display
+                    const steps = chat.messages[i].steps;
+                    if (!steps.length || steps[steps.length - 1] !== rawText) {
+                        steps.push(rawText);
+                    }
+                }
+                break;
+            }
+        }
+        // Live-update the DOM: append step to the progress log
+        const runningBubbles = document.querySelectorAll('.tool-call-bubble.running');
+        const bubble = runningBubbles[runningBubbles.length - 1];
+        if (bubble) {
+            let log = bubble.querySelector('.tool-progress-log');
+            if (!log) {
+                log = document.createElement('div');
+                log.className = 'tool-progress-log';
+                const status = bubble.querySelector('.tool-call-status');
+                if (status) status.after(log);
+            }
+            if (isStructured) {
+                // Render structured event as a styled step
+                const evType = event.event || '';
+                const src = event.label || event.source || evType;
+                const summary = event.summary || event.detail || '';
+                const statusCls = event.status === 'done' ? 'color:var(--green)' : event.status === 'skipped' ? 'color:var(--yellow)' : event.status === 'error' ? 'color:var(--red)' : 'color:var(--purple)';
+                const icon = event.status === 'done' ? '&#10003;' : event.status === 'skipped' ? '&#8212;' : event.status === 'error' ? '&#10007;' : '&#9654;';
+                const step = document.createElement('div');
+                step.className = 'tool-progress-step';
+                step.innerHTML = `<span style="${statusCls};font-size:10px">${icon}</span> <strong style="font-size:10px">${escHtml(src)}</strong>${summary ? ` <span style="color:var(--text-muted);font-size:10px">${escHtml(summary)}</span>` : ''}`;
+                log.appendChild(step);
+                // Update spinner text
+                const statusText = bubble.querySelector('.tool-status-text');
+                if (statusText) statusText.textContent = `${src}${summary ? ' — ' + summary : ''}`;
+            } else {
+                const step = document.createElement('div');
+                step.className = 'tool-progress-step';
+                step.innerHTML = `<span class="tool-step-check">&#10003;</span> ${escHtml(cleaned)}`;
+                log.appendChild(step);
+                // Update the spinner status text to show current step
+                const statusText = bubble.querySelector('.tool-status-text');
+                if (statusText) statusText.textContent = cleaned;
+            }
+        }
+        // Auto-scroll the progress log inside the running bubble (not the outer group)
+        if (_chatAutoScroll) {
+            const runningLog = document.querySelector('.tool-call-bubble.running .tool-progress-log');
+            if (runningLog) runningLog.scrollTop = runningLog.scrollHeight;
+        }
+        _scrollChatBottom();
+
+    } else if (event.type === 'tool_result') {
+        for (let i = chat.messages.length - 1; i >= 0; i--) {
+            if (chat.messages[i].role === 'tool_call' && chat.messages[i].name === event.name && !chat.messages[i].result) {
+                chat.messages[i].result = event.result;
+                const match = event.result.match(/saved to:\s*(?:reports[\/\\])?(.+\.md)/i);
+                if (match) {
+                    chat.messages[i].reportFile = match[1];
+                    const reportName = match[1].replace(/\.md$/, '').replace(/_/g, ' ');
+                    showToast(`<strong>${escHtml(reportName)}</strong> ready — <a href="#" onclick="event.preventDefault();openReport('${escHtml(match[1])}');this.closest('.toast').remove()" style="color:var(--accent);text-decoration:underline">View Report</a>`, 'success', 8000);
+                }
+                break;
+            }
+        }
+        saveChats();
+        renderMessages();
+        // Re-add typing indicator — LLM is still processing the tool result
+        {
+            const container = document.getElementById('chat-messages');
+            const typingEl = document.createElement('div');
+            typingEl.className = 'msg msg-assistant';
+            typingEl.id = 'typing';
+            typingEl.innerHTML = '<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
+            getChatCol().appendChild(typingEl);
+            _scrollChatBottom();
+        }
+
+    } else if (event.type === 'message') {
+        const t = document.getElementById('typing');
+        if (t) t.remove();
+        if (event.text && event.text.trim()) {
+            chat.messages.push({ role: 'assistant', content: event.text });
+            saveChats();
+            renderMessages();
+        }
+
+    } else if (event.type === 'error') {
+        const t = document.getElementById('typing');
+        if (t) t.remove();
+        chat.messages.push({ role: 'assistant', content: 'Error: ' + event.text });
+        saveChats();
+        renderMessages();
+    }
+}
+
+// ===================== QUICK ACTIONS =====================
+function showPromptModal(label, defaultValue = '') {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'prompt-overlay';
+        overlay.innerHTML = `
+            <div class="prompt-modal">
+                <div class="prompt-modal-title">${label}</div>
+                <input class="prompt-modal-input" type="text" value="${escHtml(defaultValue)}" autofocus />
+                <div class="prompt-modal-buttons">
+                    <button class="prompt-modal-btn cancel">Cancel</button>
+                    <button class="prompt-modal-btn confirm">OK</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const inp = overlay.querySelector('.prompt-modal-input');
+        const close = (val) => { overlay.remove(); resolve(val); };
+        overlay.querySelector('.cancel').onclick = () => close(null);
+        overlay.querySelector('.confirm').onclick = () => close(inp.value.trim() || null);
+        inp.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') close(inp.value.trim() || null);
+            if (e.key === 'Escape') close(null);
+        });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+        setTimeout(() => {
+            inp.focus();
+            if (defaultValue) inp.select();
+        }, 50);
+    });
+}
+
+async function quickAction(type, prefix, joiner) {
+    const input = document.getElementById('chat-input');
+    if (type === 'freeform') { input.focus(); return; }
+    if (type === 'compare') {
+        const a = await showPromptModal('First company:');
+        if (!a) return;
+        const b = await showPromptModal('Second company:');
+        if (!b) return;
+        input.value = `${prefix}${a}${joiner}${b}`;
+    } else {
+        const name = await showPromptModal('Company name:');
+        if (!name) return;
+        input.value = `${prefix}${name}`;
+    }
+    sendMessage();
+}
+
+// ===================== RIGHT PANE =====================
+// Renders a report into a target container. Returns { company, type, date } or null.
+async function _renderReportInto(filename, targetEl) {
+    const resp = await fetch(`/api/reports/${encodeURIComponent(filename)}/content`);
+    if (!resp.ok) { console.error('Report API error:', resp.status, filename); return null; }
+    const data = await resp.json();
+
+    let parsedHtml = '';
+    try {
+        parsedHtml = marked.parse(data.content || '');
+    } catch (parseErr) {
+        console.error('Markdown parse error:', parseErr);
+        parsedHtml = '<pre style="white-space:pre-wrap;color:var(--text-secondary)">' + escHtml(data.content || '') + '</pre>';
+    }
+
+    targetEl.innerHTML = parsedHtml;
+    targetEl.parentElement.scrollTop = 0;
+
+    // Intercept clicks on report file links
+    targetEl.querySelectorAll('a').forEach(link => {
+        const href = link.getAttribute('href') || '';
+        if (href.match(/reports[\\\/].+\.md$/)) {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                const fn = href.replace(/^reports[\\\/]/, '');
+                openReport(fn);
+            });
+            link.style.cursor = 'pointer';
+        }
+    });
+
+    return { company: data.company || '', type: data.type || '', date: data.date || '' };
+}
+
+async function openReport(filename) {
+    try {
+        // If split view is active, load into focused panel
+        if (_splitActive) {
+            await _loadIntoSplitPanel(_splitFocusedSide, 'report', filename);
+            renderCompanyList();
+            return;
+        }
+
+        const contentEl = document.getElementById('right-content');
+        const meta = await _renderReportInto(filename, contentEl);
+        if (!meta) return;
+
+        currentReportFilename = filename;
+        activeDossierName = null;
+        _activeBriefingData = null;
+        _activeDossierData = null;
+
+        // Track active company for sidebar highlighting
+        const ownerCompany = allCompanies.find(c =>
+            (c.analyses || []).some(a => a.report_file === filename) ||
+            (c.orphan_reports || []).includes(filename)
+        );
+        if (ownerCompany) openCompanies.add(ownerCompany.name);
+
+        // Add breadcrumb if company is known
+        const typeLabel = displayReportType(meta.type);
+        if (meta.company) {
+            const breadcrumbHtml = `<div class="report-breadcrumb">
+                <span class="breadcrumb-company" onclick="openDossier('${escHtml(meta.company)}')">${escHtml(meta.company)}</span>
+                <span class="breadcrumb-sep">›</span>
+                <span class="breadcrumb-current">${escHtml(typeLabel !== 'report' ? typeLabel + ' report' : 'report')}</span>
+            </div>`;
+            contentEl.innerHTML = breadcrumbHtml + contentEl.innerHTML;
+        }
+
+        // Set header
+        document.getElementById('right-company').textContent = meta.company;
+        document.getElementById('right-type').textContent = typeLabel;
+        document.getElementById('right-date').textContent = meta.date;
+
+        openRightPane();
+        setContext(meta.company, 'report', (typeLabel || 'report') + ' report');
+        renderCompanyList();
+
+        // If in expanded/focus mode, rebuild card grid for this report
+        const rp = document.getElementById('right-pane');
+        if (rp.classList.contains('expanded')) {
+            _buildCardGrid(rp);
+        }
+    } catch (e) {
+        console.error('Failed to load report:', e);
+    }
+}
+
+function openRightPane() {
+    const rp = document.getElementById('right-pane');
+    // Don't reset width if in expanded/focus mode
+    if (!rp.classList.contains('expanded')) {
+        if (savedRightWidth) {
+            rp.style.width = savedRightWidth + 'px';
+            rp.style.minWidth = savedRightWidth + 'px';
+        } else {
+            rp.style.width = '';
+            rp.style.minWidth = '';
+        }
+    }
+    rp.classList.add('open');
+}
+
+function closeRightPane() {
+    const rp = document.getElementById('right-pane');
+    if (_splitActive) {
+        _wasExpandedBeforeSplit = false; // don't restore expanded on close
+        _exitSplitView();
+    }
+    if (rp.classList.contains('expanded')) collapseReport();
+    rp.classList.remove('open');
+    rp.style.width = '';
+    rp.style.minWidth = '';
+    currentReportFilename = null;
+    activeDossierName = null;
+    _activeBriefingData = null;
+    _activeDossierData = null;
+    openCompanies.clear();
+    clearContextFull();
+    renderCompanyList();
+}
+
+// --- Expand / Focus Mode ---
+let _originalReportHTML = null;
+
+// Sections with tables or source lists should span full width
+const WIDE_KEYWORDS = ['profile', 'comparison', 'side-by-side', 'head-to-head', 'source', 'individual report'];
+
+function _sectionIsWide(heading, content) {
+    const h = heading.toLowerCase();
+    if (WIDE_KEYWORDS.some(kw => h.includes(kw))) return true;
+    if (content.querySelector('table')) return true;
+    return false;
+}
+
+function _buildCardGrid(container) {
+    const content = container.querySelector('#right-content');
+    if (!content) return;
+
+    // Save original HTML for restore
+    _originalReportHTML = content.innerHTML;
+
+    // If we have briefing data, build a proper dashboard
+    if (_activeBriefingData) {
+        _buildBriefingDashboard(content);
+        return;
+    }
+
+    // --- Markdown report: split by H2 ---
+    const children = Array.from(content.children);
+    if (!children.length) return;
+
+    const sections = [];
+    let current = null;
+
+    for (const el of children) {
+        if (el.tagName === 'H2') {
+            if (current) sections.push(current);
+            current = { heading: el.textContent, elements: [el] };
+        } else if (el.tagName === 'H1') {
+            if (current) sections.push(current);
+            current = null;
+            if (!sections.length) {
+                sections.push({ heading: '__intro__', elements: [el] });
+            }
+        } else if (el.tagName === 'HR') {
+            continue;
+        } else {
+            if (current) {
+                current.elements.push(el);
+            } else {
+                if (sections.length && sections[0].heading === '__intro__') {
+                    sections[0].elements.push(el);
+                } else {
+                    sections.unshift({ heading: '__intro__', elements: [el] });
+                }
+            }
+        }
+    }
+    if (current) sections.push(current);
+
+    if (sections.filter(s => s.heading !== '__intro__').length < 2) return;
+
+    const grid = document.createElement('div');
+    grid.className = 'report-grid';
+
+    for (const section of sections) {
+        if (section.heading === '__intro__') continue;
+
+        const card = document.createElement('div');
+        card.className = 'report-card';
+
+        const tempDiv = document.createElement('div');
+        section.elements.forEach(el => tempDiv.appendChild(el.cloneNode(true)));
+
+        if (_sectionIsWide(section.heading, tempDiv)) {
+            card.classList.add('card-wide');
+        }
+
+        section.elements.forEach(el => card.appendChild(el.cloneNode(true)));
+        grid.appendChild(card);
+    }
+
+    content.innerHTML = '';
+    const intro = sections.find(s => s.heading === '__intro__');
+    if (intro) {
+        intro.elements.forEach(el => content.appendChild(el.cloneNode(true)));
+    }
+    content.appendChild(grid);
+}
+
+function _dashCard(title, bodyHtml, wide) {
+    return `<div class="dash-card${wide ? ' card-wide' : ''}">
+        <div class="dash-card-title">${escHtml(title)}</div>
+        ${bodyHtml}
+    </div>`;
+}
+
+function _buildBriefingDashboard(content) {
+    const b = _activeBriefingData;
+    const dossier = _activeDossierData;
+    if (!b) return;
+
+    const identity = b.subject_identity || {};
+    const briefingScoring = b.scoring || b.digital_maturity || {};
+    const isLensOverride = !!_activeDashboardLens;
+    const activeScoring = isLensOverride ? _enrichScoringFromLensData(_activeDashboardLens) : briefingScoring;
+    const score = activeScoring.overall_score || 0;
+    const label = activeScoring.overall_label || '';
+    const subs = activeScoring.sub_scores || {};
+    const conf = b.data_confidence || {};
+    const lensInfo = activeScoring._lens || {};
+    const scoringLabel = lensInfo.score_label || (isLensOverride ? (_activeDashboardLens.lens_name || 'Lens Score') : 'Digital Maturity Score');
+    const dims = activeScoring._dimensions || [
+        {key:'tech_modernity', label:'Tech Modernity', weight:0.30},
+        {key:'data_analytics', label:'Data & Analytics', weight:0.25},
+        {key:'ai_readiness', label:'AI Readiness', weight:0.25},
+        {key:'organizational_readiness', label:'Org Readiness', weight:0.20},
+    ];
+    const lensLabels = activeScoring._lens_labels || [
+        {min_score:80, label:'Digital Vanguard'},
+        {min_score:60, label:'Digital Contender'},
+        {min_score:40, label:'Digitally Exposed'},
+        {min_score:20, label:'Digital Laggard'},
+        {min_score:0, label:'Digital Liability'},
+    ];
+
+    let html = '';
+
+    // --- Lens pill bar (same as normal view) ---
+    const briefingLensId = (briefingScoring._lens || {}).id;
+    const lensScores = dossier.lens_scores || [];
+    const allLenses = _cachedLenses || [];
+    const scoredMap = {};
+    lensScores.forEach(ls => { scoredMap[ls.lens_id] = ls; });
+
+    html += `<div id="dash-lens-pill-bar" class="lens-bar" style="margin-bottom:12px;padding:0 16px">`;
+    // Briefing's own lens pill
+    const bPillScore = briefingScoring.overall_score || 0;
+    const bPillCC = _scoreColorClass(bPillScore);
+    const bPillName = (briefingScoring._lens || {}).name || 'Briefing Score';
+    html += `<div class="lens-pill${!isLensOverride ? ' active' : ''}" onclick="handleDashLensPillClick(null, true)">
+        <span class="lens-pill-score score-${bPillCC}">${bPillScore}</span>
+        <span class="lens-pill-name">${escHtml(bPillName)}</span>
+        <span style="font-size:9px;color:var(--green);margin-left:4px">Full</span>
+    </div>`;
+    // Other lenses — scored or unscored
+    allLenses.forEach(lens => {
+        if (lens.id === briefingLensId) return;
+        const scored = scoredMap[lens.id];
+        const isActive = isLensOverride && _activeDashboardLens && _activeDashboardLens.lens_id === lens.id;
+        if (scored) {
+            const lsScore = scored.overall_score || 0;
+            const lcc = _scoreColorClass(lsScore);
+            html += `<div class="lens-pill${isActive ? ' active' : ''}" onclick="handleDashLensPillClick(${lens.id}, false)">
+                <span class="lens-pill-score score-${lcc}">${lsScore}</span>
+                <span class="lens-pill-name">${escHtml(lens.name)}</span>
+            </div>`;
+        } else {
+            html += `<div class="lens-pill lens-pill-unscored" onclick="handleDashLensPillClick(${lens.id}, false)">
+                <span class="lens-pill-score" style="color:var(--text-muted)">--</span>
+                <span class="lens-pill-name">${escHtml(lens.name)}</span>
+            </div>`;
+        }
+    });
+    html += `<div class="lens-pill" style="border-style:dashed;color:var(--accent);font-size:11px" onclick="openLensBuilder()">+ New Lens</div>`;
+    html += `</div>`;
+
+    // Lens overlay disclaimer when viewing non-briefing lens
+    if (isLensOverride) {
+        html += `<div style="font-size:11px;color:var(--text-muted);text-align:center;margin-bottom:8px;font-style:italic">Scoring overlay — briefing content reflects a different lens</div>`;
+    }
+
+    // --- Hero strip: identity | donut | sub-scores ---
+    let metaParts = [];
+    if (identity.hq_location) metaParts.push(identity.hq_location);
+    if (identity.founded) metaParts.push('Est. ' + identity.founded);
+    if (identity.headcount) metaParts.push(identity.headcount + ' employees');
+
+    let barsHtml = '';
+    dims.forEach(d => {
+        const sub = subs[d.key] || {};
+        barsHtml += renderSubScore(d.label, sub.score || 0, sub);
+    });
+
+    let confLine = '';
+    if (conf.overall_confidence) confLine += conf.overall_confidence.toUpperCase();
+    if (conf.jobs_analyzed) confLine += ` · ${conf.jobs_analyzed} roles`;
+    const avail = conf.analyses_available || [];
+    if (avail.length) confLine += ` · ${avail.length} analyses`;
+
+    // Build rationale HTML for the right half of the hero row
+    let rationaleHtml = '';
+    dims.forEach(d => {
+        const sub = subs[d.key] || {};
+        if (sub.rationale) {
+            const sources = _extractSources(sub.rationale);
+            const badges = sources.map(s =>
+                _renderSourceBadge(s)
+            ).join(' ');
+            rationaleHtml += `<div class="dash-rationale-entry"><div class="dash-rationale-label">${escHtml(d.label)}</div><div class="dash-rationale-text" onclick="this.classList.toggle('expanded')" title="Click to expand">${_stripCitations(sub.rationale)}</div>${badges ? `<div style="margin-top:4px">${badges}</div>` : ''}</div>`;
+        }
+    });
+
+    // Build dynamic tooltip
+    let tooltipDims = '';
+    dims.forEach(d => {
+        const wPct = Math.round((d.weight || 0) * 100);
+        tooltipDims += `<div><strong>${escHtml(d.label)} (${wPct}%)</strong></div>`;
+    });
+    let tooltipTiers = '';
+    lensLabels.forEach(tier => {
+        const cc = _scoreColorClass(tier.min_score);
+        tooltipTiers += `<span class="score-${cc}">&#9679;</span> ${tier.min_score}+ ${escHtml(tier.label)} &nbsp;`;
+    });
+
+    html += `<div class="dash-hero-row">
+        <div class="dash-hero-left">
+            <div class="dash-hero-identity">
+                <div class="dash-hero-company">${escHtml(identity.name || dossier.company_name)}</div>
+                ${identity.sector ? `<div class="dash-hero-sector">${escHtml(identity.sector)}</div>` : ''}
+                <div class="dash-hero-detail">${escHtml(metaParts.join(' · '))}</div>
+                <div class="dash-hero-timestamp" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; font-style: italic;">
+                    Last Refreshed: ${(() => {
+                        if (!dossier.briefing_generated_at) return 'Never';
+                        let ds = dossier.briefing_generated_at;
+                        if (!ds.includes('T') && ds.includes(' ')) ds = ds.replace(' ', 'T');
+                        const d = new Date(ds);
+                        return isNaN(d.getTime()) ? 'Never' : d.toLocaleString();
+                    })()}
+                </div>
+                <button class="dash-refresh-btn" onclick="event.stopPropagation();generateBriefing('${escHtml(dossier.company_name)}')">&#x21bb; Refresh Briefing</button>
+            </div>
+            <div class="dash-hero-score">
+                ${renderScoreRing(score, 100)}
+                <div class="score-tooltip-wrap"><div class="dash-hero-label score-${_scoreColorClass(score)}">${escHtml(label)} <span class="score-info-icon" onclick="event.stopPropagation();toggleScoreTooltip(this)">&#9432;</span></div>
+                <div class="score-tooltip" style="display:none">
+                    <div class="score-tooltip-title">${escHtml(scoringLabel)}</div>
+                    <div class="score-tooltip-body">
+                        Scores this company across weighted dimensions:
+                        <div class="score-tooltip-dims">${tooltipDims}</div>
+                        <div class="score-tooltip-tiers">${tooltipTiers}</div>
+                    </div>
+                </div></div>
+                ${confLine ? `<div class="dash-hero-meta">${escHtml(confLine)}</div>` : ''}
+            </div>
+            <div class="dash-hero-bars">${barsHtml}</div>
+        </div>
+        <div class="dash-hero-right">
+            <div class="dash-hero-right-title">Score Rationale</div>
+            ${rationaleHtml}
+        </div>
+    </div>`;
+
+    // --- Consulting Opportunities (right after hero, before card grid) ---
+    const lensSD = isLensOverride ? (_activeDashboardLens.score_data || {}) : null;
+    const opps = isLensOverride ? (lensSD.engagement_opportunities || []) : (b.engagement_opportunities || []);
+    if (opps.length) {
+        let oppHtml = '<div class="opp-inner-grid">';
+        opps.forEach(opp => {
+            const pClass = `opp-priority-${opp.priority || 'medium'}`;
+            const explicitSources = opp.source_analyses || [];
+            const inlineSources = _extractSources((opp.evidence || '') + ' ' + (opp.detail || ''));
+            const allSources = [...new Set([...explicitSources, ...inlineSources])];
+            const sourceBadges = allSources.map(s =>
+                _renderSourceBadge(s)
+            ).join(' ');
+            oppHtml += `<div class="opp-card" onclick="this.classList.toggle('expanded')">
+                <div class="opp-card-header"><span class="opp-service">${escHtml(opp.service || '')}</span><span class="opp-priority ${pClass}">${escHtml(opp.priority || '')}</span></div>
+                <div class="opp-evidence">${_renderCitedText(opp.evidence || '')}</div>
+                <div class="opp-meta"><span>${escHtml(opp.estimated_scope || '')}</span></div>
+                ${opp.why_now ? `<div class="opp-why-now">${_renderCitedText(opp.why_now)}</div>` : ''}
+                <div class="opp-detail">
+                    ${opp.detail ? `<div class="opp-detail-text">${_renderCitedText(opp.detail)}</div>` : ''}
+                    ${allSources.length ? `<div class="opp-source-links"><span style="font-size:14px;color:var(--text-muted);margin-right:2px">Sources:</span>${sourceBadges}</div>` : ''}
+                </div>
+            </div>`;
+        });
+        oppHtml += '</div>';
+        const oppTitle = `Consulting Opportunities <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('dash-scope-methodology')">&#9432;</span>
+            <div class="methodology-tip" id="dash-scope-methodology" style="display:none">
+                <div class="methodology-tip-title">Scope Estimation Methodology</div>
+                Estimates based on typical Big 4 / MBB engagement structures (blended daily rate ~$3-5K/consultant):
+                <div class="methodology-tip-row"><strong>$500K-1M, 3-6 mo</strong> — Small team (2-3). Assessments, strategy design, POC, governance frameworks.</div>
+                <div class="methodology-tip-row"><strong>$1-3M, 6-12 mo</strong> — Medium team (4-6). Platform implementation, org redesign, single workstream.</div>
+                <div class="methodology-tip-row"><strong>$2-5M, 9-18 mo</strong> — Large team (6-10). Multi-workstream programs, enterprise rollout. $10B+ revenue companies.</div>
+                <div class="methodology-tip-row"><strong>$5M+, 12-24 mo</strong> — Full transformation (10+). Company-wide digital transformation. $50B+ companies only.</div>
+                <div class="methodology-tip-note">Scaled to company size using revenue, headcount, and hiring velocity. Conservative estimates preferred.</div>
+            </div>`;
+        html += `<div class="dash-card" style="margin-bottom:16px">
+            <div class="dash-card-title">${oppTitle}</div>
+            ${oppHtml}
+        </div>`;
+    } else if (isLensOverride) {
+        const rescoreLensId = _activeDashboardLens.lens_id || '';
+        const rescoreCompany = escHtml((dossier || {}).company_name || '');
+        html += `<div class="dash-card" style="margin-bottom:16px">
+            <div class="dash-card-title">Consulting Opportunities</div>
+            <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">
+                Opportunities not available for this lens score version.
+                <span style="color:var(--accent);cursor:pointer" onclick="_scoreLensViaDashPill('${rescoreCompany}', ${rescoreLensId})">Rescore to generate.</span>
+            </div>
+        </div>`;
+    }
+
+    // --- Card grid ---
+    let cards = '';
+
+    // Hiring Trajectory
+    const traj = b.hiring_trajectory;
+    if (traj && traj.trend) {
+        let trajHtml = '';
+        if (traj.velocity) {
+            const trendUp = ['accelerating','growing'].includes(traj.trend);
+            const trendDown = ['decelerating','shrinking'].includes(traj.trend);
+            const arrowClass = trendUp ? 'trajectory-up' : trendDown ? 'trajectory-down' : 'trajectory-stable';
+            const arrow = trendUp ? '&#9650;' : trendDown ? '&#9660;' : '&#8226;';
+            trajHtml += `<div class="trajectory-row"><span class="trajectory-arrow ${arrowClass}">${arrow}</span><span style="color:var(--text-primary);font-weight:600">${escHtml(traj.velocity)}</span> <span style="color:var(--text-muted)">· ${escHtml(traj.trend)}</span></div>`;
+        }
+        if (traj.department_shifts && traj.department_shifts.length) {
+            traj.department_shifts.forEach(shift => {
+                const arrow = shift.direction === 'up' ? '↑' : shift.direction === 'down' ? '↓' : '→';
+                const arrowClass = shift.direction === 'up' ? 'trajectory-up' : shift.direction === 'down' ? 'trajectory-down' : 'trajectory-stable';
+                trajHtml += `<div class="trajectory-row"><span class="trajectory-arrow ${arrowClass}">${arrow}</span><span style="color:var(--text-secondary);font-size:14px">${escHtml(shift.department || '')}</span> <span style="color:var(--text-muted);font-size:11px">${escHtml(shift.detail || '')}</span></div>`;
+            });
+        }
+        if (traj.interpretation) trajHtml += `<div style="font-size:14px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(traj.interpretation)}</div>`;
+        cards += _dashCard('Hiring Trajectory', trajHtml, false);
+    }
+
+    // Budget & Appetite
+    const budget = b.budget_signals || {};
+    if (Object.keys(budget).length) {
+        let bHtml = '';
+        const confClass = `confidence-${budget.confidence || 'medium'}`;
+        bHtml += `<div class="budget-row"><span class="budget-label">Can Afford</span><span class="budget-value">${budget.can_afford ? 'Yes' : 'Unlikely'}</span> <span class="confidence-badge ${confClass}">${escHtml(budget.confidence || '')} conf.</span></div>`;
+        if (budget.revenue_trend) bHtml += `<div class="budget-row"><span class="budget-label">Revenue</span><span class="budget-value">${_renderCitedText(budget.revenue_trend)}</span></div>`;
+        if (budget.hiring_trend) bHtml += `<div class="budget-row"><span class="budget-label">Hiring</span><span class="budget-value">${_renderCitedText(budget.hiring_trend)}</span></div>`;
+        if (budget.investment_areas && budget.investment_areas.length) bHtml += `<div class="budget-row"><span class="budget-label">Investing In</span><span class="budget-value">${budget.investment_areas.map(a => _renderCitedText(a)).join(', ')}</span></div>`;
+        if (budget.evidence) bHtml += `<div style="font-size:15px;color:var(--text-muted);margin-top:6px">${_renderCitedText(budget.evidence)}</div>`;
+        cards += _dashCard('Budget & Appetite', bHtml, false);
+    }
+
+    // Competitive Pressure
+    const comp = b.competitive_pressure || {};
+    if (Object.keys(comp).length) {
+        let cHtml = '';
+        if (comp.urgency) {
+            const urgClass = comp.urgency === 'high' ? 'confidence-high' : comp.urgency === 'medium' ? 'confidence-medium' : 'confidence-low';
+            cHtml += `<div style="margin-bottom:6px">Urgency: <span class="confidence-badge ${urgClass}">${escHtml(comp.urgency)}</span></div>`;
+        }
+        if ((comp.competitors || []).length) {
+            cHtml += `<div class="competitor-header"><span>Competitor</span><span>Digital Maturity</span><span>Threat Assessment</span></div>`;
+        }
+        (comp.competitors || []).forEach(c => {
+            cHtml += `<div class="competitor-row"><span class="competitor-name">${escHtml(c.name || '')}</span><span class="competitor-maturity">${_renderCitedText(c.digital_maturity_estimate || '')}</span><span class="competitor-threat">${_renderCitedText(c.threat || '')}</span></div>`;
+        });
+        cards += _dashCard('Competitive Pressure', cHtml, false);
+    }
+
+    // Financial Position
+    const fin = b.financial_position || {};
+    if (Object.keys(fin).length) {
+        let fHtml = '';
+        if (fin.metrics && fin.metrics.length) {
+            fHtml += '<div class="metric-grid">';
+            fin.metrics.forEach(m => {
+                fHtml += `<div class="metric-card"><div class="metric-card-label">${escHtml(m.label || '')}</div><div class="metric-card-value">${_renderCitedText(m.value || '')}</div></div>`;
+            });
+            fHtml += '</div>';
+        }
+        if (fin.summary) fHtml += `<div style="font-size:14px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(fin.summary)}</div>`;
+        cards += _dashCard('Financial Position', fHtml, false);
+    }
+
+    // Innovation & IP
+    const ip = b.innovation_ip || {};
+    if (Object.keys(ip).length) {
+        let ipHtml = '';
+        if (ip.patent_count !== undefined) {
+            const pd = ip.patent_count === -1 ? 'N/A' : ip.patent_count;
+            ipHtml += `<div class="budget-row"><span class="budget-label">Patents</span><span class="budget-value">${pd}</span></div>`;
+        }
+        if (ip.rd_intensity) ipHtml += `<div class="budget-row"><span class="budget-label">R&D</span><span class="budget-value">${escHtml(ip.rd_intensity)}</span></div>`;
+        if (ip.top_areas && ip.top_areas.length) ipHtml += `<div class="budget-row"><span class="budget-label">Focus</span><span class="budget-value">${ip.top_areas.map(a => _renderCitedText(a)).join(', ')}</span></div>`;
+        if (ip.assessment) ipHtml += `<div style="font-size:15px;color:var(--text-muted);margin-top:6px;line-height:1.5">${_renderCitedText(ip.assessment)}</div>`;
+        cards += _dashCard('Innovation & IP', ipHtml, false);
+    }
+
+    // Talent & Culture
+    const talent = b.talent_culture || {};
+    if (Object.keys(talent).length) {
+        let tHtml = '';
+        if (talent.sentiment) tHtml += `<div class="budget-row"><span class="budget-label">Sentiment</span><span class="budget-value">${escHtml(talent.sentiment)}</span></div>`;
+        const deptFocus = talent.department_focus || {};
+        if (Object.keys(deptFocus).length) {
+            const sorted = Object.entries(deptFocus).sort((a, b) => b[1] - a[1]);
+            sorted.forEach(([dept, raw]) => {
+                const pct = String(raw).replace('%', '');
+                tHtml += `<div class="sub-score-row"><span class="sub-score-label">${escHtml(dept)}</span><div class="sub-score-bar"><div class="sub-score-fill" style="width:${pct}%;background:var(--accent)"></div></div><span class="sub-score-value" style="color:var(--text-secondary)">${pct}%</span></div>`;
+            });
+        }
+        if (talent.top_skills && talent.top_skills.length) tHtml += `<div class="skill-tags" style="margin-top:6px">${talent.top_skills.map(s => `<span class="skill-tag">${escHtml(s)}</span>`).join('')}</div>`;
+        if (talent.assessment) tHtml += `<div style="font-size:14px;color:var(--text-muted);margin-top:8px;line-height:1.5">${_renderCitedText(talent.assessment)}</div>`;
+        cards += _dashCard('Talent & Culture', tHtml, false);
+    }
+
+    // Risk Profile (wide with 2-col inner grid)
+    const risks = isLensOverride ? (lensSD.risk_profile || []) : (b.risk_profile || []);
+    if (risks.length) {
+        let rHtml = '<div class="risk-inner-grid">';
+        risks.forEach(r => {
+            const sev = r.severity || 'medium';
+            rHtml += `<div class="risk-card risk-${sev}"><div class="risk-category">${escHtml(r.category || '')} - ${escHtml(sev)}</div><div class="risk-desc">${_renderCitedText(r.description || '')}</div></div>`;
+        });
+        rHtml += '</div>';
+        cards += _dashCard('Risk Profile', rHtml, true);
+    }
+
+    // Strategic Assessment (wide, paragraph blocks matching report view)
+    const stratText = isLensOverride ? (lensSD.strategic_assessment || '') : (b.strategic_assessment || '');
+    if (stratText) {
+        // Split on double newlines, or fall back to sentence groups if no double newlines
+        let paras = stratText.split(/\n\s*\n/).filter(p => p.trim());
+        if (paras.length <= 1) {
+            // No double newlines — split on single newlines
+            paras = stratText.split(/\n/).filter(p => p.trim());
+        }
+        if (paras.length <= 1) {
+            // Still one block — split into ~4 chunks by sentences
+            const sentences = stratText.split(/(?<=[.!?])\s+/).filter(s => s.trim());
+            const chunkSize = Math.ceil(sentences.length / 4);
+            paras = [];
+            for (let i = 0; i < sentences.length; i += chunkSize) {
+                paras.push(sentences.slice(i, i + chunkSize).join(' '));
+            }
+        }
+        const stratHtml = paras.map(p => `<p style="font-size:15px;color:var(--text-secondary);line-height:1.7;margin:0 0 14px 0">${_renderCitedText(p.trim())}</p>`).join('');
+        cards += _dashCard('Strategic Assessment', stratHtml, true);
+    }
+
+    // Data Confidence
+    if (conf && (conf.caveats && conf.caveats.length || conf.analyses_missing && conf.analyses_missing.length)) {
+        let dcHtml = '';
+        if (conf.overall_confidence) {
+            const confClass = `confidence-${conf.overall_confidence}`;
+            dcHtml += `<div class="budget-row"><span class="budget-label">Confidence</span><span class="confidence-badge ${confClass}">${escHtml(conf.overall_confidence.toUpperCase())}</span></div>`;
+        }
+        if (conf.scrape_coverage) dcHtml += `<div class="budget-row"><span class="budget-label">Scrape Coverage</span><span class="budget-value">${escHtml(conf.scrape_coverage)}</span></div>`;
+        if (conf.jobs_analyzed) dcHtml += `<div class="budget-row"><span class="budget-label">Jobs Analyzed</span><span class="budget-value">${conf.jobs_analyzed}</span></div>`;
+        if (conf.analyses_available && conf.analyses_available.length) {
+            dcHtml += `<div class="budget-row"><span class="budget-label">Completed</span><span class="budget-value">${conf.analyses_available.map(a => `<span class="source-badge source-${a}" title="${a} analysis">${a}</span>`).join(' ')}</span></div>`;
+        }
+        if (conf.analyses_missing && conf.analyses_missing.length) {
+            dcHtml += `<div class="budget-row"><span class="budget-label">Missing</span><span class="budget-value" style="color:var(--text-muted)">${conf.analyses_missing.join(', ')}</span></div>`;
+        }
+        if (conf.caveats && conf.caveats.length) {
+            dcHtml += `<div style="margin-top:8px;font-size:15px;color:var(--text-muted)">`;
+            conf.caveats.forEach(c => { dcHtml += `<div style="margin-bottom:3px">⚠ ${escHtml(c)}</div>`; });
+            dcHtml += `</div>`;
+        }
+        cards += _dashCard('Data Confidence', dcHtml, false);
+    }
+
+    // Source Reports
+    if (dossier && dossier.analyses && dossier.analyses.length) {
+        let srcHtml = '';
+        const byType = {};
+        dossier.analyses.forEach(a => {
+            if (!byType[a.analysis_type]) byType[a.analysis_type] = [];
+            byType[a.analysis_type].push(a);
+        });
+        const now = new Date();
+        Object.entries(byType).forEach(([type, runs]) => {
+            const latest = runs[0];
+            const lastDate = new Date(latest.created_at);
+            const days = Math.floor((now - lastDate) / (1000 * 60 * 60 * 24));
+            let freshness = 'fresh', flabel = 'Fresh';
+            if (days >= 90) { freshness = 'very-stale'; flabel = `${days}d ago`; }
+            else if (days >= 30) { freshness = 'stale'; flabel = `${days}d ago`; }
+            else if (days >= 7) { freshness = 'recent'; flabel = `${days}d ago`; }
+            else { flabel = days === 0 ? 'Today' : `${days}d ago`; }
+            srcHtml += `<div class="staleness-row" data-source-type="${escHtml(type)}">
+                <span style="color:var(--text-primary);font-weight:500;min-width:80px">${escHtml(type)}</span>
+                <span class="staleness-badge staleness-${freshness}">${flabel}</span>
+                <span style="font-size:14px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
+                ${latest.report_file ? `<span style="font-size:12px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
+            </div>`;
+        });
+        cards += _dashCard('Source Reports', srcHtml, false);
+    }
+
+    html += `<div class="dash-grid">${cards}</div>`;
+    content.innerHTML = html;
+
+    /* Equalize card heights per row — if a card's content is less than
+       half the tallest card in its row, let it keep its natural height
+       instead of stretching to match. */
+    requestAnimationFrame(() => {
+        const grid = content.querySelector('.dash-grid');
+        if (!grid) return;
+        const cards = Array.from(grid.querySelectorAll('.dash-card:not(.card-wide)'));
+        if (!cards.length) return;
+
+        // Temporarily set align-self:start on all to measure natural heights
+        cards.forEach(c => c.style.alignSelf = 'start');
+
+        // Group cards into rows by their offsetTop
+        const rows = [];
+        let currentRow = [cards[0]];
+        let currentTop = cards[0].offsetTop;
+        for (let i = 1; i < cards.length; i++) {
+            if (Math.abs(cards[i].offsetTop - currentTop) < 5) {
+                currentRow.push(cards[i]);
+            } else {
+                rows.push(currentRow);
+                currentRow = [cards[i]];
+                currentTop = cards[i].offsetTop;
+            }
+        }
+        rows.push(currentRow);
+
+        // For each row: if no card is less than half the tallest, stretch all
+        rows.forEach(row => {
+            const heights = row.map(c => c.offsetHeight);
+            const maxH = Math.max(...heights);
+            const tooShort = heights.filter(h => h <= maxH * 0.5).length;
+            if (tooShort < 2) {
+                // Stretch all cards in this row to the tallest
+                row.forEach(c => { c.style.alignSelf = ''; c.style.minHeight = maxH + 'px'; });
+            }
+            // else: leave align-self:start — cards keep natural heights
+        });
+    });
+}
+
+function _restoreOriginalReport() {
+    if (!_originalReportHTML) return;
+    const content = document.getElementById('right-content');
+    if (content) content.innerHTML = _originalReportHTML;
+    _originalReportHTML = null;
+}
+
+function toggleExpandReport() {
+    const rp = document.getElementById('right-pane');
+    // If split is active, the expand button acts as "exit split"
+    if (_splitActive) {
+        const remaining = _splitPanels[_splitFocusedSide];
+        _exitSplitView();
+        if (remaining.type === 'report' && remaining.reportFilename) {
+            openReport(remaining.reportFilename);
+        } else if (remaining.type === 'briefing' && remaining.dossierName) {
+            openDossier(remaining.dossierName);
+        }
+        return;
+    }
+    if (rp.classList.contains('expanded')) {
+        collapseReport();
+    } else {
+        expandReport();
+    }
+}
+
+function expandReport() {
+    const rp = document.getElementById('right-pane');
+    rp.classList.add('expanded');
+    document.getElementById('expand-icon-open').style.display = 'none';
+    document.getElementById('expand-icon-close').style.display = '';
+    document.getElementById('expand-btn').title = 'Exit focus mode (Esc)';
+    if (!_splitActive) _buildCardGrid(rp);
+}
+
+function collapseReport() {
+    const rp = document.getElementById('right-pane');
+    rp.classList.remove('expanded');
+    document.getElementById('expand-icon-open').style.display = '';
+    document.getElementById('expand-icon-close').style.display = 'none';
+    document.getElementById('expand-btn').title = 'Focus mode';
+    _activeDashboardLens = null;
+    if (!_splitActive) _restoreOriginalReport();
+    // Restore saved width
+    if (savedRightWidth) {
+        rp.style.width = savedRightWidth + 'px';
+        rp.style.minWidth = savedRightWidth + 'px';
+    } else {
+        rp.style.width = '';
+        rp.style.minWidth = '';
+    }
+}
+
+// --- Overflow menu & delete confirmation ---
+function toggleOverflowMenu(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('overflow-menu');
+    menu.classList.toggle('open');
+}
+
+function confirmDeleteReport() {
+    document.getElementById('overflow-menu').classList.remove('open');
+    const name = currentReportFilename || activeDossierName || 'this item';
+    if (confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) {
+        deleteCurrentReport();
+    }
+}
+
+// Close overflow menu when clicking elsewhere
+document.addEventListener('click', function(e) {
+    const menu = document.getElementById('overflow-menu');
+    if (menu && !e.target.closest('.right-actions')) {
+        menu.classList.remove('open');
+    }
+});
+
+// Esc key to exit focus mode (or close overflow menu)
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        const menu = document.getElementById('overflow-menu');
+        if (menu && menu.classList.contains('open')) {
+            menu.classList.remove('open');
+            e.preventDefault();
+            return;
+        }
+        // Exit prospect detail fullscreen
+        const detailPane = document.getElementById('pane-detail');
+        if (detailPane && detailPane.classList.contains('fullscreen')) {
+            toggleDetailFullscreen();
+            e.preventDefault();
+            return;
+        }
+        // Exit split view first if active
+        if (_splitActive) {
+            toggleExpandReport(); // reuses the "exit split" logic
+            e.preventDefault();
+            return;
+        }
+        const rp = document.getElementById('right-pane');
+        if (rp && rp.classList.contains('expanded')) {
+            collapseReport();
+            e.preventDefault();
+        }
+    }
+});
+
+function printReport() {
+    // Button feedback
+    const btn = document.querySelector('.right-btn');
+    const origText = btn ? btn.textContent : '';
+    if (btn) { btn.textContent = 'Exporting...'; btn.disabled = true; }
+    const resetBtn = () => { if (btn) { btn.textContent = origText; btn.disabled = false; } };
+
+    // Determine export type: report file or briefing/dossier
+    if (currentReportFilename) {
+        // Server-side PDF from markdown report
+        fetch(`/api/reports/${currentReportFilename}/pdf`)
+            .then(resp => {
+                if (!resp.ok) throw new Error('PDF export failed');
+                return resp.blob();
+            })
+            .then(blob => {
+                _downloadBlob(blob, currentReportFilename.replace('.md', '.pdf'));
+                resetBtn();
+            })
+            .catch(err => {
+                console.error('PDF export error:', err);
+                showToast('PDF export failed — check console for details.', 'error');
+                resetBtn();
+            });
+    } else if (activeDossierName) {
+        // Server-side PDF from briefing/dossier
+        fetch(`/api/dossiers/${encodeURIComponent(activeDossierName)}/pdf`)
+            .then(resp => {
+                if (!resp.ok) throw new Error('Briefing PDF export failed');
+                return resp.blob();
+            })
+            .then(blob => {
+                const safeName = activeDossierName.toLowerCase().replace(/\s+/g, '_');
+                _downloadBlob(blob, `${safeName}_briefing.pdf`);
+                resetBtn();
+            })
+            .catch(err => {
+                console.error('PDF export error:', err);
+                showToast('PDF export failed — check console for details.', 'error');
+                resetBtn();
+            });
+    } else {
+        resetBtn();
+    }
+}
+
+function _downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+async function deleteCurrentReport() {
+    if (!currentReportFilename || !confirm('Delete this report?')) return;
+    try {
+        await fetch(`/api/reports/${currentReportFilename}`, { method: 'DELETE' });
+        closeRightPane();
+        refreshSidebar();
+    } catch {}
+}
+
+// ===================== UTILS =====================
+function cleanProgress(text) {
+    // Strip [tag] prefix from progress lines: "[financial] Analyzing..." → "Analyzing..."
+    return text.replace(/^\[[\w]+\]\s*/, '').trim() || text;
+}
+
+function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function displayReportType(t) {
+    if (!t) return 'report';
+    // lens_workforce-management → workforce management
+    if (t.startsWith('lens_')) t = t.slice(5);
+    return t.replace(/[-_]/g, ' ');
+}
+function _fmtTok(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+    return String(n);
+}
+function _utcToLocal(utcStr) {
+    if (!utcStr) return '';
+    try {
+        const d = new Date(utcStr.endsWith('Z') ? utcStr : utcStr + 'Z');
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch { return utcStr.slice(11, 16); }
+}
+
+function formatArgs(args) {
+    if (!args) return '';
+    return Object.entries(args).map(([k,v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ');
+}
+
+function toolIcon(name) {
+    const icons = {
+        financial_analysis: '📊', hiring_analysis: '👥', competitor_analysis: '⚔️',
+        sentiment_analysis: '💬', patent_analysis: '🔬', techstack_analysis: '🛠️',
+        seo_analysis: '🔍', pricing_analysis: '💰', compare_companies: '⚖️',
+        landscape_analysis: '🗺️', company_profile: '🏢', generate_briefing: '📋',
+        web_search: '🌐', news_search: '📰', think: '🧠',
+        scrape_page: '🕷️', lookup_ticker: '📈', search_sec: '🏛️',
+    };
+    return icons[name] || '⚙️';
+}
+
+function toolLabel(name) {
+    return (name || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/** Open fullscreen execution overlay for a completed tool call. */
+function openExecOverlay(msgIdx) {
+    const chat = getActiveChat();
+    if (!chat) return;
+    const m = chat.messages[msgIdx];
+    if (!m || m.role !== 'tool_call' || !m.result) return;
+
+    const overlay = document.getElementById('exec-overlay');
+    const iconEl = document.getElementById('exec-overlay-icon');
+    const titleEl = document.getElementById('exec-overlay-title');
+    const subtitleEl = document.getElementById('exec-overlay-subtitle');
+    const metaEl = document.getElementById('exec-overlay-meta');
+    const bodyEl = document.getElementById('exec-overlay-body');
+
+    iconEl.innerHTML = toolIcon(m.name);
+    titleEl.textContent = toolLabel(m.name);
+    subtitleEl.textContent = formatArgs(m.args);
+    metaEl.innerHTML = `<span>&#10003; Done &mdash; ${(m.steps || []).length} steps</span>`;
+
+    // Render the flowchart tree in the overlay body
+    // Prefer structuredSteps (proper tree data) over flat string parsing
+    const structuredSteps = m.structuredSteps || [];
+    const steps = m.steps || [];
+
+    if (structuredSteps.length > 0) {
+        // Use structured events → proper flowchart
+        const treeNodes = _structuredStepsToTree(structuredSteps, m.name, m.args);
+        if (treeNodes) {
+            renderPipelineTree(treeNodes, bodyEl);
+        } else {
+            bodyEl.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">No structured execution data.</div>';
+        }
+    } else if (steps.length) {
+        // Fallback: bridge parser for tools without structured events
+        const isTreeTool = ['score_lens', 'score_prospect', 'full_analysis', 'financial_analysis',
+                            'sentiment_analysis', 'techstack_analysis', 'competitor_analysis',
+                            'patent_analysis', 'seo_audit', 'pricing_analysis'].includes(m.name);
+        if (isTreeTool) {
+            bodyEl.innerHTML = _buildToolStepsTree(steps, m.name);
+        } else {
+            bodyEl.innerHTML = `<div class="tool-progress-log" style="max-height:none;padding-left:0">${steps.map(s => `<div class="tool-progress-step"><span class="tool-step-check">&#10003;</span> ${escHtml(cleanProgress(s))}</div>`).join('')}</div>`;
+        }
+    } else {
+        bodyEl.innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">No execution steps recorded.</div>';
+    }
+
+    overlay.classList.add('visible');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeExecOverlay() {
+    const overlay = document.getElementById('exec-overlay');
+    overlay.classList.remove('visible');
+    document.body.style.overflow = '';
+}
+
+// Close overlay on Escape
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeExecOverlay();
+});
+
+function formatDate(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const now = new Date();
+    if (d.toDateString() === now.toDateString()) return 'Today';
+    const y = new Date(now); y.setDate(now.getDate() - 1);
+    if (d.toDateString() === y.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// Keyboard: Ctrl+N new chat
+document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+        e.preventDefault();
+        newChat();
+        document.getElementById('chat-input').focus();
+    }
+});
+
+// ===================== SPLIT VIEW =====================
+
+function _enterSplitView() {
+    if (_splitActive) return;
+    _splitActive = true;
+    _splitFocusedSide = 'left';
+    const rp = document.getElementById('right-pane');
+
+    // Track if user was already in expanded/focus mode
+    _wasExpandedBeforeSplit = rp.classList.contains('expanded');
+    // If in expanded mode, remove it (split-active has its own fullscreen)
+    if (_wasExpandedBeforeSplit) {
+        rp.classList.remove('expanded');
+        if (_originalReportHTML) { _originalReportHTML = null; }
+    }
+
+    rp.classList.add('split-active');
+
+    // Update expand button to "Exit split view"
+    document.getElementById('expand-icon-open').style.display = 'none';
+    document.getElementById('expand-icon-close').style.display = '';
+    document.getElementById('expand-btn').title = 'Exit split view (Esc)';
+
+    const rightBody = rp.querySelector('.right-body');
+    const container = document.createElement('div');
+    container.className = 'split-container';
+    container.id = 'split-container';
+    container.innerHTML = `
+        <div class="split-panel focused" id="split-panel-left">
+            <div class="split-panel-header" onclick="_focusSplitPanel('left')">
+                <span class="split-panel-title" id="split-title-left"></span>
+                <span class="split-panel-badge" id="split-badge-left"></span>
+                <button class="split-panel-close" onclick="event.stopPropagation(); closeSplitPanel('left')" title="Close">&times;</button>
+            </div>
+            <div class="split-panel-body" onclick="_focusSplitPanel('left')">
+                <div class="md-content" id="split-content-left"></div>
+            </div>
+        </div>
+        <div class="split-divider" id="split-divider"></div>
+        <div class="split-panel" id="split-panel-right">
+            <div class="split-panel-header" onclick="_focusSplitPanel('right')">
+                <span class="split-panel-title" id="split-title-right"></span>
+                <span class="split-panel-badge" id="split-badge-right"></span>
+                <button class="split-panel-close" onclick="event.stopPropagation(); closeSplitPanel('right')" title="Close">&times;</button>
+            </div>
+            <div class="split-panel-body" onclick="_focusSplitPanel('right')">
+                <div class="md-content" id="split-content-right"></div>
+            </div>
+        </div>`;
+    rightBody.after(container);
+    _initSplitDivider();
+}
+
+function _focusSplitPanel(side) {
+    _splitFocusedSide = side;
+    const left = document.getElementById('split-panel-left');
+    const right = document.getElementById('split-panel-right');
+    if (left) left.classList.toggle('focused', side === 'left');
+    if (right) right.classList.toggle('focused', side === 'right');
+}
+
+function _exitSplitView() {
+    if (!_splitActive) return;
+    _splitActive = false;
+    const rp = document.getElementById('right-pane');
+    rp.classList.remove('split-active');
+
+    // Restore expand button
+    document.getElementById('expand-icon-open').style.display = '';
+    document.getElementById('expand-icon-close').style.display = 'none';
+    document.getElementById('expand-btn').title = 'Focus mode';
+
+    // If user was in expanded mode before split, restore it
+    if (_wasExpandedBeforeSplit) {
+        rp.classList.add('expanded');
+        document.getElementById('expand-icon-open').style.display = 'none';
+        document.getElementById('expand-icon-close').style.display = '';
+        document.getElementById('expand-btn').title = 'Exit focus mode (Esc)';
+    } else {
+        // Restore saved width
+        if (savedRightWidth) {
+            rp.style.width = savedRightWidth + 'px';
+            rp.style.minWidth = savedRightWidth + 'px';
+        } else {
+            rp.style.width = '';
+            rp.style.minWidth = '';
+        }
+    }
+    _wasExpandedBeforeSplit = false;
+
+    const container = document.getElementById('split-container');
+    if (container) container.remove();
+    _splitPanels.left = _emptyPanel();
+    _splitPanels.right = _emptyPanel();
+}
+
+async function _loadIntoSplitPanel(side, type, identifier) {
+    const contentEl = document.getElementById('split-content-' + side);
+    const titleEl = document.getElementById('split-title-' + side);
+    const badgeEl = document.getElementById('split-badge-' + side);
+    if (!contentEl) return;
+
+    if (type === 'report') {
+        const meta = await _renderReportInto(identifier, contentEl);
+        if (!meta) return;
+        titleEl.textContent = meta.company;
+        badgeEl.textContent = displayReportType(meta.type);
+        _splitPanels[side] = {
+            type: 'report', reportFilename: identifier, dossierName: null,
+            briefingData: null, dossierData: null,
+            company: meta.company, analysisType: meta.type, date: meta.date,
+        };
+    } else if (type === 'briefing') {
+        try {
+            const resp = await fetch('/api/dossiers/' + encodeURIComponent(identifier));
+            if (!resp.ok) return;
+            const dossier = await resp.json();
+            if (dossier.briefing_json) {
+                const briefing = typeof dossier.briefing_json === 'string'
+                    ? JSON.parse(dossier.briefing_json) : dossier.briefing_json;
+                _renderBriefingInto(dossier, briefing, contentEl);
+                titleEl.textContent = dossier.company_name;
+                badgeEl.textContent = 'briefing';
+                _splitPanels[side] = {
+                    type: 'briefing', reportFilename: null, dossierName: identifier,
+                    briefingData: briefing, dossierData: dossier,
+                    company: dossier.company_name, analysisType: 'briefing', date: '',
+                };
+            }
+        } catch (e) { console.error('Failed to load briefing for split:', e); }
+    }
+}
+
+async function _moveCurrentToSplitPanel(side) {
+    if (currentReportFilename) {
+        await _loadIntoSplitPanel(side, 'report', currentReportFilename);
+    } else if (activeDossierName) {
+        await _loadIntoSplitPanel(side, 'briefing', activeDossierName);
+    }
+}
+
+function closeSplitPanel(side) {
+    const otherSide = side === 'left' ? 'right' : 'left';
+    const remaining = _splitPanels[otherSide];
+    _exitSplitView();
+    if (remaining.type === 'report' && remaining.reportFilename) {
+        openReport(remaining.reportFilename);
+    } else if (remaining.type === 'briefing' && remaining.dossierName) {
+        openDossier(remaining.dossierName);
+    }
+}
+
+function _initSplitDivider() {
+    const divider = document.getElementById('split-divider');
+    const container = document.getElementById('split-container');
+    const leftPanel = document.getElementById('split-panel-left');
+    const rightPanel = document.getElementById('split-panel-right');
+    if (!divider || !container || !leftPanel) return;
+
+    let dragging = false;
+    let startX, startLeftWidth;
+
+    divider.addEventListener('mousedown', e => {
+        e.preventDefault();
+        dragging = true;
+        startX = e.clientX;
+        startLeftWidth = leftPanel.offsetWidth;
+        divider.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', function _splitMove(e) {
+        if (!dragging) return;
+        const delta = e.clientX - startX;
+        const cw = container.offsetWidth;
+        const newLeft = Math.max(200, Math.min(startLeftWidth + delta, cw - 200));
+        const pct = (newLeft / cw) * 100;
+        leftPanel.style.flex = '0 0 ' + pct + '%';
+        rightPanel.style.flex = '0 0 ' + (100 - pct) + '%';
+    });
+
+    document.addEventListener('mouseup', function _splitUp() {
+        if (!dragging) return;
+        dragging = false;
+        divider.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    });
+}
+
+// Drop zone show/hide
+// ===================== CUSTOM DRAG FOR SPLIT VIEW =====================
+// Uses mouse events instead of HTML5 DnD for cross-browser reliability
+let _dragState = null;
+
+function _ensureDropOverlay() {
+    let overlay = document.getElementById('drop-zone-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'drop-zone-overlay';
+        overlay.id = 'drop-zone-overlay';
+        overlay.innerHTML = '<div class="drop-zone" data-side="left">\u25C0 Left panel</div>'
+            + '<div class="drop-zone" data-side="right">Right panel \u25B6</div>';
+        document.body.appendChild(overlay);
+    }
+    return overlay;
+}
+
+function _showDropZones() {
+    _ensureDropOverlay().classList.add('visible');
+}
+
+function _hideDropZones() {
+    const overlay = document.getElementById('drop-zone-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('visible');
+    overlay.querySelectorAll('.drop-zone').forEach(z => z.classList.remove('drag-over'));
+}
+
+function handleSidebarMouseDown(e, type, filename, company) {
+    if (e.button !== 0) return;
+    _dragState = {
+        type: type,
+        filename: filename,
+        dossier: type === 'briefing' ? company : null,
+        company: company,
+        startX: e.clientX,
+        startY: e.clientY,
+        active: false,
+    };
+    document.addEventListener('mousemove', _onDragMouseMove);
+    document.addEventListener('mouseup', _onDragMouseUp);
+}
+
+function _onDragMouseMove(e) {
+    if (!_dragState) return;
+
+    if (!_dragState.active) {
+        const dx = Math.abs(e.clientX - _dragState.startX);
+        const dy = Math.abs(e.clientY - _dragState.startY);
+        if (dx < 6 && dy < 6) return;
+        _dragState.active = true;
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'grabbing';
+        _showDropZones();
+    }
+
+    // Highlight the zone under cursor
+    const overlay = document.getElementById('drop-zone-overlay');
+    if (overlay) {
+        overlay.querySelectorAll('.drop-zone').forEach(zone => {
+            const r = zone.getBoundingClientRect();
+            zone.classList.toggle('drag-over',
+                e.clientX >= r.left && e.clientX <= r.right &&
+                e.clientY >= r.top && e.clientY <= r.bottom);
+        });
+    }
+}
+
+function _onDragMouseUp(e) {
+    document.removeEventListener('mousemove', _onDragMouseMove);
+    document.removeEventListener('mouseup', _onDragMouseUp);
+    if (!_dragState) return;
+
+    const wasActive = _dragState.active;
+    const payload = { ..._dragState };
+
+    if (wasActive) {
+        // Find which zone the cursor is over BEFORE hiding
+        let droppedSide = null;
+        const overlay = document.getElementById('drop-zone-overlay');
+        if (overlay) {
+            overlay.querySelectorAll('.drop-zone').forEach(zone => {
+                const r = zone.getBoundingClientRect();
+                if (e.clientX >= r.left && e.clientX <= r.right &&
+                    e.clientY >= r.top && e.clientY <= r.bottom) {
+                    droppedSide = zone.dataset.side;
+                }
+            });
+        }
+
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        _hideDropZones();
+
+        // Eat the click event that follows mouseup so onclick doesn't fire
+        document.addEventListener('click', function _eatClick(ev) {
+            ev.stopPropagation();
+            ev.preventDefault();
+            document.removeEventListener('click', _eatClick, true);
+        }, true);
+
+        if (droppedSide) {
+            _handleSplitDrop(droppedSide, payload);
+        }
+    }
+    // If !wasActive, the mouseup is a normal click — onclick handler fires naturally
+
+    _dragState = null;
+}
+
+async function _handleSplitDrop(side, payload) {
+    const otherSide = side === 'left' ? 'right' : 'left';
+
+    const existing = _isInSplitPanel(payload.filename, payload.dossier);
+    if (existing) {
+        showToast('Already open in the other panel', 'warning');
+        return;
+    }
+
+    if (!_splitActive) {
+        const rp = document.getElementById('right-pane');
+        if (!rp.classList.contains('open')) openRightPane();
+        _enterSplitView();
+        await _moveCurrentToSplitPanel(otherSide);
+    }
+
+    if (payload.type === 'report' && payload.filename) {
+        await _loadIntoSplitPanel(side, 'report', payload.filename);
+    } else if (payload.type === 'briefing' && payload.dossier) {
+        await _loadIntoSplitPanel(side, 'briefing', payload.dossier);
+    }
+}
+
+// ===================== PROSPECTING =====================
+let allCampaigns = [];
+let activeCampaignId = null;
+let activeProspectName = null;
+let _prospectPipelineRunning = false;
+let _currentRunCampaignId = null; // tracks which campaign owns the live pipeline DOM in Pane 2
+let _savedLivePipelineDOM = null; // stashed live pipeline DOM when user views another campaign
+let _activeTreeRootId = null;    // root campaign id of the currently displayed discovery tree
+let _activeTreeNodeId = null;    // which tree node is selected (shows its companies in Pane 3)
+
+// Flat prospect lookup — built from campaigns for detail view
+let _prospectsByName = {};
+
+function _getScore(p) {
+    // Unified score accessor — prefers lens score over UA fit
+    return p?.lens_score || p?.ua_fit || null;
+}
+
+function _hasScore(p) {
+    return !!_getScore(p);
+}
+
+function _prospectTierClass(score) {
+    if (score >= 80) return 'prime';
+    if (score >= 60) return 'strong';
+    if (score >= 40) return 'possible';
+    if (score >= 20) return 'weak';
+    return 'none';
+}
+
+function _dimColor(score) {
+    if (score >= 80) return 'var(--green)';
+    if (score >= 60) return 'var(--accent)';
+    if (score >= 40) return 'var(--yellow)';
+    return 'var(--red)';
+}
+
+async function loadCampaigns() {
+    try {
+        const resp = await fetch('/api/campaigns');
+        if (!resp.ok) { allCampaigns = []; }
+        else { allCampaigns = await resp.json(); }
+    } catch (e) { console.error('loadCampaigns failed:', e); allCampaigns = []; }
+    renderCampaignSidebar();
+}
+
+function renderCampaignSidebar() {
+    const list = document.getElementById('prospect-search-list');
+    if (!list) return;
+    _prospectsByName = {};
+
+    // Index all prospects from all campaigns (including children) for detail lookup
+    allCampaigns.forEach(c => {
+        (c.prospects || []).forEach(p => {
+            if (p.company_name) _prospectsByName[p.company_name] = p;
+        });
+        (c.children || []).forEach(ch => {
+            (ch.prospects || []).forEach(p => {
+                if (p.company_name) _prospectsByName[p.company_name] = p;
+            });
+        });
+    });
+
+    if (!allCampaigns.length) {
+        list.innerHTML = `<div class="pane-empty">
+            <div class="icon">&#128269;</div>
+            <div>No campaigns yet.</div>
+            <div class="subtitle">Enter a niche above to discover and score companies.</div>
+        </div>`;
+        return;
+    }
+
+    list.innerHTML = allCampaigns.map(c => {
+        const isActive = activeCampaignId === c.id ? ' active' : '';
+        const statusBadge = c.status === 'running'
+            ? '<span class="pane-status-badge running">Running</span>'
+            : c.status === 'error'
+            ? '<span class="pane-status-badge error">Error</span>'
+            : c.status === 'empty'
+            ? '<span class="pane-status-badge" style="background:rgba(107,114,128,0.15);color:#9ca3af">No results</span>'
+            : '';
+
+        return `<div class="search-query-item${isActive}" data-campaign-id="${c.id}" onclick="selectCampaign(${c.id})">
+            <div class="search-query-info">
+                <div class="search-query-name">${escHtml(c.name || c.niche)}</div>
+                <div class="search-query-meta">
+                    ${c.prospect_count || 0} prospects ${statusBadge}
+                </div>
+            </div>
+            <div class="search-query-actions">
+                <button class="campaign-group-action" onclick="event.stopPropagation();renameCampaign(${c.id})" title="Rename">&#9998;</button>
+                <button class="campaign-group-action" onclick="event.stopPropagation();deleteCampaign(${c.id})" title="Delete">&times;</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function selectCampaign(campaignId) {
+    const wasActive = activeCampaignId === campaignId;
+    if (wasActive) {
+        // Re-trigger insight generation if missing on re-click
+        const c = allCampaigns.find(x => x.id === campaignId);
+        if (c && !c.insight && c.status === 'complete') {
+            _autoGenerateInsight(campaignId);
+        }
+        return;
+    }
+
+    const mapEl = document.getElementById('pipeline-map');
+
+    // If pipeline is running and we're leaving the live campaign, stash its DOM
+    if (_prospectPipelineRunning && _currentRunCampaignId && activeCampaignId === _currentRunCampaignId && mapEl) {
+        _savedLivePipelineDOM = mapEl.innerHTML;
+    }
+
+    activeCampaignId = campaignId;
+    // Highlight sidebar item
+    document.querySelectorAll('.search-query-item').forEach(el => {
+        const id = parseInt(el.dataset.campaignId, 10);
+        el.classList.toggle('active', id === campaignId);
+    });
+
+    // If switching back to the running campaign, restore its live DOM
+    if (_prospectPipelineRunning && _currentRunCampaignId === campaignId && _savedLivePipelineDOM && mapEl) {
+        mapEl.innerHTML = _savedLivePipelineDOM;
+        mapEl.style.display = 'block';
+        const emptyEl = document.getElementById('pane-execution-empty');
+        if (emptyEl) emptyEl.style.display = 'none';
+        const badge = document.getElementById('pane-execution-status');
+        if (badge) { badge.textContent = 'Running'; badge.className = 'pane-status-badge running'; }
+        _savedLivePipelineDOM = null;
+    } else {
+        // Check if campaign has child expansions → render discovery tree
+        const c = allCampaigns.find(x => x.id === campaignId);
+        const hasChildren = c && c.children && c.children.length > 0;
+        if (hasChildren) {
+            _activeTreeRootId = campaignId;
+            _activeTreeNodeId = campaignId;
+            renderDiscoveryTree(campaignId);
+        } else {
+            _activeTreeRootId = null;
+            _activeTreeNodeId = null;
+            renderExecutionPane(campaignId);
+        }
+    }
+
+    renderSummaryPane(_activeTreeNodeId || campaignId);
+    clearDetailPane();
+    focusPane('pane-execution');
+}
+
+async function renameCampaign(campaignId) {
+    const c = allCampaigns.find(x => x.id === campaignId);
+    const newName = prompt('Rename campaign:', c?.name || c?.niche || '');
+    if (!newName || !newName.trim()) return;
+    try {
+        await fetch(`/api/campaigns/${campaignId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName.trim() }),
+        });
+        await loadCampaigns();
+    } catch (e) { console.error('Rename failed:', e); }
+}
+
+async function deleteCampaign(campaignId) {
+    if (!confirm('Delete this campaign? Prospect data will be kept.')) return;
+    try {
+        await fetch(`/api/campaigns/${campaignId}`, { method: 'DELETE' });
+        if (activeCampaignId === campaignId) {
+            activeCampaignId = null;
+            _resetAllPanes();
+        }
+        await loadCampaigns();
+    } catch (e) { console.error('Delete failed:', e); }
+}
+
+// --- Pane helpers ---
+
+function _resetAllPanes() {
+    // Reset Pane 2
+    const mapEl = document.getElementById('pipeline-map');
+    const execEmpty = document.getElementById('pane-execution-empty');
+    const execStatus = document.getElementById('pane-execution-status');
+    if (mapEl) { mapEl.style.display = 'none'; mapEl.innerHTML = ''; }
+    if (execEmpty) execEmpty.style.display = 'block';
+    if (execStatus) { execStatus.textContent = ''; execStatus.className = 'pane-status-badge'; }
+    // Reset Pane 3
+    const sumContent = document.getElementById('pane-summary-content');
+    const sumEmpty = document.getElementById('pane-summary-empty');
+    if (sumContent) { sumContent.style.display = 'none'; sumContent.innerHTML = ''; }
+    if (sumEmpty) sumEmpty.style.display = 'block';
+    // Reset Pane 4
+    clearDetailPane();
+}
+
+function clearDetailPane() {
+    activeProspectName = null;
+    _savedDetailHTML = null;
+    const detContent = document.getElementById('pane-detail-content');
+    const detEmpty = document.getElementById('pane-detail-empty');
+    if (detContent) { detContent.style.display = 'none'; detContent.innerHTML = ''; }
+    if (detEmpty) detEmpty.style.display = 'block';
+    // Exit fullscreen if active
+    const pane = document.getElementById('pane-detail');
+    if (pane) pane.classList.remove('fullscreen');
+    const btn = document.getElementById('detail-expand-btn');
+    if (btn) { btn.innerHTML = '&#x26F6;'; btn.title = 'Expand to fullscreen'; }
+    // Remove highlights from Pane 2 cards and Pane 3 rows
+    document.querySelectorAll('.company-card.active').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.cv-result-row.active').forEach(r => r.classList.remove('active'));
+}
+
+// --- Pane 2: Execution Engine ---
+
+function renderExecutionPane(campaignId) {
+    // If this campaign is the one currently running live, don't touch DOM — just update badge
+    if (_prospectPipelineRunning && _currentRunCampaignId === campaignId) {
+        const badge = document.getElementById('pane-execution-status');
+        if (badge) { badge.textContent = 'Running'; badge.className = 'pane-status-badge running'; }
+        return;
+    }
+
+    const c = allCampaigns.find(x => x.id === campaignId);
+    if (!c) return;
+
+    const emptyEl = document.getElementById('pane-execution-empty');
+    const mapEl = document.getElementById('pipeline-map');
+    const badge = document.getElementById('pane-execution-status');
+
+    // Use flowchart renderer if execution_log exists (new campaigns)
+    if (c.execution_log && c.execution_log.length && c.status !== 'empty') {
+        if (emptyEl) emptyEl.style.display = 'none';
+        if (mapEl) mapEl.style.display = 'block';
+        if (badge) { badge.textContent = 'Complete'; badge.className = 'pane-status-badge complete'; }
+        const label = c.seed_company ? `Similar to ${c.seed_company}` : (c.name || c.niche || 'Discovery');
+        const treeNodes = _discoverLogToTree(c.execution_log, c.prospects, label);
+        renderPipelineTree(treeNodes, mapEl);
+        return;
+    }
+
+    // Set status badge
+    if (badge) {
+        if (c.status === 'complete') { badge.textContent = 'Complete'; badge.className = 'pane-status-badge complete'; }
+        else if (c.status === 'error') { badge.textContent = 'Error'; badge.className = 'pane-status-badge error'; }
+        else if (c.status === 'empty') { badge.textContent = 'No Results'; badge.className = 'pane-status-badge'; badge.style.cssText = 'background:rgba(107,114,128,0.15);color:#9ca3af'; }
+        else { badge.textContent = ''; badge.className = 'pane-status-badge'; }
+    }
+
+    const prospects = (c.prospects || []).sort((a, b) =>
+        (_getScore(b)?.overall_score || 0) - (_getScore(a)?.overall_score || 0));
+
+    // Handle empty campaigns (no companies found)
+    if (c.status === 'empty' || (!prospects.length && c.status !== 'running')) {
+        emptyEl.style.display = 'none';
+        mapEl.style.display = 'block';
+        mapEl.innerHTML = `
+            <div class="pipeline-node done" style="padding:10px 14px">
+                <div class="pipeline-node-header">
+                    <div class="pipeline-node-icon">&#128269;</div>
+                    <div class="pipeline-node-label">Discovery</div>
+                </div>
+                <div class="pipeline-node-meta">Niche: <strong style="color:var(--text-primary)">${escHtml(c.niche || c.name)}</strong></div>
+            </div>
+            <div class="pipeline-connector"></div>
+            <div class="pipeline-node" style="border-color:rgba(107,114,128,0.3);padding:12px">
+                <div class="pipeline-node-header">
+                    <div class="pipeline-node-icon" style="background:rgba(107,114,128,0.15)">&#128269;</div>
+                    <div class="pipeline-node-label" style="color:#9ca3af">No Results</div>
+                </div>
+                <div class="pipeline-node-meta" style="margin-top:4px;color:var(--text-muted)">No companies matched this niche. Try broadening the search terms.</div>
+            </div>
+        `;
+        return;
+    }
+
+    const scored = prospects.filter(p => _hasScore(p));
+    const _limitedStatuses = ['limited', 'http_403', 'connection_failed'];
+    const valid = prospects.filter(p => p.validation_status === 'valid').length;
+    const limited = prospects.filter(p => _limitedStatuses.includes(p.validation_status)).length;
+    const skipped = prospects.filter(p => p.validation_status && p.validation_status !== 'valid' && !_limitedStatuses.includes(p.validation_status)).length;
+
+    // Build static pipeline reconstruction — pipeline steps + search log
+    emptyEl.style.display = 'none';
+    mapEl.style.display = 'block';
+
+    const companyNames = prospects.map(p => p.company_name).join(', ');
+    const searchLogHtml = _buildSearchLogHtml(c.execution_log);
+
+    mapEl.innerHTML = `
+        <div class="pipeline-node done" style="padding:10px 14px">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon">&#128269;</div>
+                <div class="pipeline-node-label">Discovery</div>
+            </div>
+            <div class="pipeline-node-meta">Niche: <strong style="color:var(--text-primary)">${escHtml(c.niche || c.name)}</strong></div>
+            ${searchLogHtml}
+        </div>
+        <div class="pipeline-connector done"></div>
+        <div class="pipeline-node done" style="border-color:rgba(168,85,247,0.2);padding:12px">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon" style="background:rgba(168,85,247,0.15)">&#127919;</div>
+                <div class="pipeline-node-label" style="color:var(--purple)">Found ${prospects.length} companies</div>
+            </div>
+            <div class="pipeline-node-meta" style="margin-top:4px;font-size:11px;color:var(--text-muted)">${escHtml(companyNames)}</div>
+        </div>
+        <div class="pipeline-connector done"></div>
+        <div class="pipeline-node done" style="padding:10px 14px">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon" style="font-size:14px">&#10003;</div>
+                <div class="pipeline-node-label">Validation</div>
+            </div>
+            <div class="pipeline-node-meta">${valid} valid${limited > 0 ? ` (${limited} limited)` : ''}${skipped > 0 ? ` &mdash; ${skipped} skipped` : ''}</div>
+        </div>
+        <div class="pipeline-connector done"></div>
+        <div class="pipeline-complete-node">
+            <span class="check">&#10003;</span>
+            Pipeline complete &mdash; ${scored.length > 0 ? `${scored.length} companies scored` : `${prospects.length} companies discovered`}
+        </div>
+    `;
+}
+
+// --- Niche Evaluation Chart Renderers ---
+
+function renderNicheEvaluation(ne, prospects, campaignNode) {
+    if (!ne) return '';
+    const cov = ne.data_coverage || {};
+    const agg = ne.aggregate || {};
+
+    // KPI stat cards
+    const stats = [];
+    if (agg.total_revenue_formatted) stats.push({v: agg.total_revenue_formatted, l: 'Combined Revenue'});
+    if (agg.median_revenue_formatted) stats.push({v: agg.median_revenue_formatted, l: 'Median Revenue'});
+    if (ne.company_count) stats.push({v: ne.company_count, l: 'Companies Scanned'});
+    if (agg.avg_revenue_growth != null) {
+        const allEstimated = (ne.per_company || []).filter(c => c.growth != null).every(c => c.growth_estimated);
+        stats.push({v: (agg.avg_revenue_growth > 0 ? '+' : '') + agg.avg_revenue_growth.toFixed(1) + '%', l: allEstimated ? 'Avg Growth YoY (est.)' : 'Avg Growth YoY'});
+    }
+    if (agg.total_market_cap_formatted) stats.push({v: agg.total_market_cap_formatted, l: 'Combined Mkt Cap'});
+    if (agg.total_employees) stats.push({v: agg.total_employees.toLocaleString(), l: 'Total Employees'});
+
+    const statHtml = stats.length ? `<div class="ne-stat-grid">${stats.map(s =>
+        `<div class="ne-stat-card"><div class="ne-stat-value">${s.v}</div><div class="ne-stat-label">${s.l}</div></div>`
+    ).join('')}</div>` : '';
+
+    // Public vs Private
+    const pp = ne.public_vs_private || {};
+    const ppHtml = (pp.public || pp.private) ? `<div style="display:flex;gap:12px;font-size:11px;color:var(--text-muted);margin-top:6px">
+        ${pp.public ? `<span><span style="color:var(--accent);font-weight:600">${pp.public}</span> Public</span>` : ''}
+        ${pp.private ? `<span><span style="color:var(--purple);font-weight:600">${pp.private}</span> Private</span>` : ''}
+    </div>` : '';
+
+    // Build prospect lookup for descriptions and metadata
+    const prospectMap = {};
+    (prospects || []).forEach(p => {
+        if (p.company_name) prospectMap[p.company_name.toLowerCase()] = p;
+    });
+
+    // Clear selection state when rebuilding with checkboxes
+    if (prospects && prospects.length) _selectedForResearch.clear();
+
+    // Unified company cards with expandable detail + research checkboxes
+    const companies = (ne.per_company || []).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+    const maxRev = companies.length ? Math.max(...companies.map(c => c.revenue || 0)) : 0;
+    const companyCardsHtml = companies.map(c => {
+        const hasRev = c.revenue != null;
+        const barPct = hasRev && maxRev ? Math.max((c.revenue / maxRev) * 100, 2) : 0;
+        const growthVal = c.growth != null ? c.growth : null;
+        const barColor = growthVal != null ? (growthVal > 0 ? 'var(--green)' : growthVal < 0 ? 'var(--red)' : 'var(--text-muted)') : 'var(--text-muted)';
+        const growthColor = growthVal != null ? (growthVal > 10 ? 'var(--green)' : growthVal >= 0 ? 'var(--text-secondary)' : 'var(--red)') : '';
+        let growthText = '';
+        let growthEst = c.growth_estimated ? ' est.' : '';
+        if (growthVal != null) {
+            const pctStr = `${growthVal > 0 ? '+' : ''}${growthVal.toFixed(0)}%`;
+            if (hasRev) {
+                const priorRev = c.revenue / (1 + growthVal / 100);
+                const absChange = c.revenue - priorRev;
+                const sign = absChange >= 0 ? '+' : '';
+                const absFmt = Math.abs(absChange) >= 1e9 ? `${sign}$${(absChange/1e9).toFixed(1)}B`
+                    : Math.abs(absChange) >= 1e6 ? `${sign}$${(absChange/1e6).toFixed(0)}M`
+                    : `${sign}$${(absChange/1e3).toFixed(0)}K`;
+                growthText = `${pctStr} (${absFmt})`;
+            } else {
+                growthText = pctStr;
+            }
+        }
+        const quality = c.data_quality === 'high' ? '' : c.data_quality === 'medium' ? '' : ' (est.)';
+
+        const badges = [];
+        if (c.hq_country && c.hq_country !== 'Unknown') badges.push(c.hq_country);
+        if (c.sector && c.sector !== 'Unknown' && c.sector !== 'None') badges.push(c.sector);
+        const ppBadge = c.is_public
+            ? `<span class="ne-badge" style="font-size:9px;padding:1px 6px;border-color:rgba(59,130,246,0.3);color:var(--accent)">Public</span>`
+            : `<span class="ne-badge" style="font-size:9px;padding:1px 6px;border-color:rgba(168,85,247,0.3);color:var(--purple)">Private</span>`;
+
+        // Merge prospect data (description, validation, discovery evidence)
+        const prospect = prospectMap[(c.name || '').toLowerCase()];
+        const desc = prospect?.company_description || '';
+        const disc = prospect?.discovery || {};
+        const vstatus = prospect?.validation_status || 'valid';
+        const isSkipped = vstatus !== 'valid' && vstatus !== 'limited' && vstatus !== 'http_403' && vstatus !== 'connection_failed';
+        const safeName = (c.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const hasProspects = prospects && prospects.length > 0;
+
+        return `<div class="ne-company-card${isSkipped ? ' skipped' : ''}" onclick="if(!event.target.closest('.ne-card-cb-wrap')){openProspectDetail('${safeName}')}" style="cursor:pointer${isSkipped ? ';opacity:0.5' : ''}">
+            ${hasProspects && !isSkipped ? `<div class="ne-card-cb-wrap" onclick="event.stopPropagation();const cb=this.querySelector('input');cb.checked=!cb.checked;this.classList.toggle('checked',cb.checked);_toggleResearchSelection('${safeName}',cb)">
+                <input type="checkbox" class="discovery-select-cb">
+                <div class="ne-card-cb-dot"></div>
+            </div>` : ''}
+            <div class="ne-company-row">
+                <span class="ne-company-name" title="${escHtml(c.name)}">${escHtml(c.name)}</span>
+                <span class="ne-company-rev">${hasRev ? c.revenue_formatted + quality : '—'}</span>
+                ${growthText ? `<span class="ne-company-growth" style="color:${growthColor}">${growthText}${growthEst}</span>` : '<span class="ne-company-growth" style="color:var(--text-muted)">—</span>'}
+            </div>
+            ${hasRev ? `<div class="ne-bar-track" style="height:6px;margin:4px 0 0">
+                <div class="ne-bar-fill" style="width:${barPct}%;background:${barColor};height:100%"></div>
+            </div>` : ''}
+            ${desc ? `<div style="font-size:11px;color:var(--text-muted);line-height:1.4;margin-top:4px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(desc)}</div>` : ''}
+            <div class="ne-company-badges">
+                ${ppBadge}
+                ${badges.map(b => `<span class="ne-badge" style="font-size:9px;padding:1px 6px">${escHtml(b)}</span>`).join('')}
+            </div>
+        </div>`;
+    }).join('');
+
+    // Send to Research bar (only when prospects exist)
+    const researchBarHtml = (prospects && prospects.length) ? `
+        <div class="send-to-research-bar" id="summary-research-bar" style="display:none">
+            <span class="str-count">0/3 selected</span>
+            <span class="str-label" style="font-size:11px;color:var(--text-muted)">Score with:</span>
+            ${_buildLensSelectHtml('summary-lens-select')}
+            <button class="str-btn" onclick="_sendToResearch('summary-lens-select')" disabled>Send to Research</button>
+        </div>` : '';
+
+    // Coverage footer
+    const coverageHtml = `<div class="ne-coverage">
+        Data coverage: ${cov.revenue_known || 0}/${ne.company_count} with revenue &bull;
+        ${cov.market_cap_known || 0} publicly traded &bull;
+        ${cov.growth_known || 0} with growth data
+    </div>`;
+
+    return `
+        <div class="ne-section">
+            <div class="cv-section-title" style="margin-bottom:12px">Niche Evaluation</div>
+            ${statHtml}
+            ${ppHtml}
+        </div>
+        ${companies.length ? `<div class="ne-section" style="padding-right:36px">
+            <div class="ne-section-title">Company Breakdown</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click a company for details. Select companies to send to Research.</div>
+            ${companyCardsHtml}
+        </div>` : ''}
+        ${coverageHtml}
+        ${researchBarHtml}
+    `;
+}
+
+function _neRevenueChart(ne) {
+    const companies = (ne.per_company || []).filter(c => c.revenue).sort((a,b) => b.revenue - a.revenue);
+    if (!companies.length) return '<div class="ne-no-data">No revenue data available</div>';
+    const maxRev = companies[0].revenue;
+    return companies.map(c => {
+        const pct = Math.max((c.revenue / maxRev) * 100, 2);
+        const color = c.is_public ? 'var(--accent)' : 'var(--purple)';
+        const quality = c.data_quality === 'low' ? ' (est.)' : '';
+        return `<div class="ne-bar-row">
+            <span class="ne-bar-label" title="${escHtml(c.name)}">${escHtml(c.name)}</span>
+            <div class="ne-bar-track">
+                <div class="ne-bar-fill" style="width:${pct}%;background:${color}"></div>
+            </div>
+            <span class="ne-bar-value">${c.revenue_formatted || '?'}${quality}</span>
+        </div>`;
+    }).join('');
+}
+
+function _neStackedBar(buckets, config) {
+    if (!buckets || !buckets.length) return '';
+    const total = buckets.reduce((s, b) => s + b.count, 0);
+    if (!total) return '<div class="ne-no-data">No data available</div>';
+
+    const segments = buckets.map((b, i) => {
+        const pct = (b.count / total) * 100;
+        const cfg = config[i] || {color: 'var(--text-muted)'};
+        return pct > 0 ? `<div class="ne-stacked-segment" style="width:${pct}%;background:${cfg.color}" title="${b.label}: ${b.count}"></div>` : '';
+    }).join('');
+
+    const legend = buckets.map((b, i) => {
+        const cfg = config[i] || {color: 'var(--text-muted)', label: b.label};
+        return b.count > 0 ? `<span class="ne-legend-item"><span class="ne-legend-dot" style="background:${cfg.color}"></span>${cfg.label} (${b.count})</span>` : '';
+    }).join('');
+
+    return `<div class="ne-stacked-bar">${segments}</div><div class="ne-legend">${legend}</div>`;
+}
+
+// --- Pane 3: Market Summary ---
+
+function renderSummaryPane(campaignId) {
+    const c = _findCampaignById(campaignId);
+    if (!c) return;
+
+    const sumContent = document.getElementById('pane-summary-content');
+    const sumEmpty = document.getElementById('pane-summary-empty');
+    if (!sumContent) return;
+
+    const prospects = (c.prospects || []).sort((a, b) =>
+        (_getScore(b)?.overall_score || 0) - (_getScore(a)?.overall_score || 0));
+    const scored = prospects.filter(p => _hasScore(p));
+
+    // Handle empty campaigns
+    if (c.status === 'empty' || (!prospects.length && c.status !== 'running')) {
+        if (sumEmpty) sumEmpty.style.display = 'none';
+        sumContent.style.display = 'block';
+        sumContent.innerHTML = `<div class="pane-empty">
+            <div class="icon">&#128269;</div>
+            <div>No companies found</div>
+            <div class="subtitle">Try different search terms or broaden the niche.</div>
+        </div>`;
+        return;
+    }
+
+    const statusText = c.status === 'complete' ? 'Complete' : c.status === 'running' ? 'Running...' : c.status === 'error' ? 'Error' : c.status;
+    let createdDate = '';
+    if (c.created_at) {
+        const d = new Date(c.created_at.replace(' ', 'T') + (c.created_at.includes('Z') || c.created_at.includes('+') ? '' : 'Z'));
+        createdDate = isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    // Score tier distribution
+    const tiers = { prime: 0, strong: 0, possible: 0, weak: 0 };
+    scored.forEach(p => { tiers[_prospectTierClass(_getScore(p)?.overall_score || 0)]++; });
+
+    // Tier distribution bar
+    const tierTotal = scored.length || 1;
+    const tierBarHtml = scored.length > 0 ? `
+        <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin-bottom:6px">
+            ${tiers.prime > 0 ? `<div style="width:${(tiers.prime/tierTotal)*100}%;background:var(--green)" title="${tiers.prime} Prime"></div>` : ''}
+            ${tiers.strong > 0 ? `<div style="width:${(tiers.strong/tierTotal)*100}%;background:var(--accent)" title="${tiers.strong} Strong"></div>` : ''}
+            ${tiers.possible > 0 ? `<div style="width:${(tiers.possible/tierTotal)*100}%;background:var(--yellow)" title="${tiers.possible} Possible"></div>` : ''}
+            ${tiers.weak > 0 ? `<div style="width:${(tiers.weak/tierTotal)*100}%;background:var(--red)" title="${tiers.weak} Weak"></div>` : ''}
+        </div>
+        <div style="display:flex;gap:12px;font-size:10px;color:var(--text-muted)">
+            ${tiers.prime > 0 ? `<span><span style="color:var(--green);font-weight:600">${tiers.prime}</span> Prime</span>` : ''}
+            ${tiers.strong > 0 ? `<span><span style="color:var(--accent);font-weight:600">${tiers.strong}</span> Strong</span>` : ''}
+            ${tiers.possible > 0 ? `<span><span style="color:var(--yellow);font-weight:600">${tiers.possible}</span> Possible</span>` : ''}
+            ${tiers.weak > 0 ? `<span><span style="color:var(--red);font-weight:600">${tiers.weak}</span> Weak</span>` : ''}
+        </div>` : '';
+
+    // Fit levels legend
+    const fitLegendHtml = `
+        <div class="fit-legend">
+            <span class="fit-legend-item"><span class="fit-dot" style="background:var(--green)"></span>80+ Prime</span>
+            <span class="fit-legend-item"><span class="fit-dot" style="background:var(--accent)"></span>60-79 Strong</span>
+            <span class="fit-legend-item"><span class="fit-dot" style="background:var(--yellow)"></span>40-59 Possible</span>
+            <span class="fit-legend-item"><span class="fit-dot" style="background:var(--red)"></span>20-39 Weak</span>
+            <span class="fit-legend-item"><span class="fit-dot" style="background:var(--text-muted)"></span>0-19 Not a Fit</span>
+        </div>`;
+
+    // Ranked results
+    const rankedHtml = _buildRankedListHtml(scored);
+
+    // Agent Insights
+    const insight = c.insight;
+    let insightHtml = '';
+    const _priorityIcons = [
+        { icon: '&#8593;', bg: 'rgba(22,163,74,0.12)', color: 'var(--green)' },   // trending up
+        { icon: '&#36;', bg: 'rgba(59,130,246,0.12)', color: 'var(--accent)' },    // dollar
+        { icon: '&#9678;', bg: 'rgba(168,85,247,0.12)', color: 'var(--purple)' },  // target
+    ];
+    if (insight) {
+        const summaryP = insight.vertical_summary ? `<div class="agent-insights-summary">${escHtml(insight.vertical_summary)}</div>` : '';
+        const prioritiesHtml = (insight.top_3_priorities || []).map((p, i) => {
+            const ic = _priorityIcons[i] || _priorityIcons[2];
+            return `<li><span class="priority-icon" style="background:${ic.bg};color:${ic.color}">${ic.icon}</span><div class="priority-title">${escHtml(p.title)}</div><div class="priority-desc">${escHtml(p.description)}</div></li>`;
+        }).join('');
+
+        // Market Signal Diagnostics — dynamically derived from lens dimensions
+        const _diagIcons = [
+            { icon: '&#128737;', bg: 'rgba(239,68,68,0.1)', color: 'var(--red)' },
+            { icon: '&#128200;', bg: 'rgba(22,163,74,0.1)', color: 'var(--green)' },
+            { icon: '&#127916;', bg: 'rgba(168,85,247,0.1)', color: 'var(--purple)' },
+            { icon: '&#128176;', bg: 'rgba(59,130,246,0.1)', color: 'var(--accent)' },
+        ];
+        // Build diagnostics from whatever dimensions the score has
+        const sampleScore = _getScore(scored[0]);
+        const dims = sampleScore?._dimensions || Object.keys(sampleScore?.sub_scores || {}).map(k => ({
+            key: k, label: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), weight: 0.2,
+        }));
+        const signalBadges = dims.slice(0, 4).map((dim, i) => {
+            const ic = _diagIcons[i % _diagIcons.length];
+            const aboveThreshold = scored.filter(p => {
+                const sc = _getScore(p);
+                return (sc?.sub_scores?.[dim.key]?.score || 0) >= 50;
+            }).length;
+            return { ...ic, title: dim.label, sub: `${aboveThreshold}/${scored.length} score 50+ on ${dim.label}` };
+        });
+        const signalHtml = signalBadges.map(b =>
+            `<div class="signal-badge"><div class="signal-badge-icon" style="background:${b.bg};color:${b.color}">${b.icon}</div><div><div class="signal-badge-title">${b.title}</div><div class="signal-badge-sub">${b.sub}</div></div></div>`
+        ).join('');
+
+        insightHtml = `
+            <div class="cv-section">
+                <div class="cv-section-title">Agent Insights</div>
+                <div class="agent-insights">
+                    ${summaryP}
+                    ${prioritiesHtml ? `<ul class="agent-insights-priorities">${prioritiesHtml}</ul>` : ''}
+                </div>
+            </div>
+            <div class="cv-section">
+                <div class="cv-section-title">Market Signal Diagnostics</div>
+                <div class="signal-diagnostics">${signalHtml}</div>
+            </div>`;
+    } else if (scored.length > 0) {
+        const willGenerate = c.status === 'complete';
+        insightHtml = `
+            <div class="cv-section">
+                <div class="cv-section-title">Agent Insights</div>
+                <div id="agent-insights-placeholder" class="agent-insights-loading">
+                    ${willGenerate
+                        ? '<div class="spinner"></div> Generating insights...'
+                        : '<span style="color:var(--text-muted);font-size:12px">Insights will generate once pipeline completes</span>'}
+                </div>
+            </div>`;
+    }
+
+    sumEmpty.style.display = 'none';
+    sumContent.style.display = 'block';
+    const breadcrumbHtml = _buildBreadcrumb(campaignId);
+    sumContent.innerHTML = `
+        <div class="campaign-view">
+            ${breadcrumbHtml}
+            <div class="campaign-view-header">
+                <div>
+                    <h2 class="campaign-view-title">${escHtml(c.seed_company ? `Similar to ${c.seed_company}` : (c.name || c.niche))}</h2>
+                    <div class="campaign-view-meta">
+                        ${createdDate} &bull; ${statusText} &bull; ${prospects.length} companies
+                    </div>
+                </div>
+            </div>
+
+            ${c.niche_eval ? renderNicheEvaluation(c.niche_eval, prospects, c) : ''}
+
+            ${!c.niche_eval ? (scored.length > 0 ? `
+            <div class="cv-section">
+                <div class="cv-section-title">Score Distribution</div>
+                ${tierBarHtml}
+                ${fitLegendHtml}
+            </div>
+
+            ${insightHtml}
+
+            <div class="cv-section">
+                <div class="cv-section-title">Results</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click a company for detailed analysis</div>
+                <div id="pane-summary-ranked-list">${rankedHtml}</div>
+            </div>
+            ${(() => {
+                const unscoredProspects = prospects.filter(p => !_hasScore(p));
+                return unscoredProspects.length > 0 ? `<div class="ne-divider"></div>${_buildDiscoveryListHtml(unscoredProspects, c)}` : '';
+            })()}
+            ` : _buildDiscoveryListHtml(prospects, c)) : ''}
+
+            ${c.niche_eval && scored.length > 0 ? `
+            <div class="ne-divider"></div>
+            <div class="cv-section">
+                <div class="cv-section-title">Score Distribution</div>
+                ${tierBarHtml}
+                ${fitLegendHtml}
+            </div>
+            ${insightHtml}
+            <div class="cv-section">
+                <div class="cv-section-title">Scored Results</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click a company for detailed analysis</div>
+                <div id="pane-summary-ranked-list">${rankedHtml}</div>
+            </div>
+            ` : ''}
+
+            ${_buildChildCampaignsHtml(c)}
+        </div>
+    `;
+
+    // Auto-trigger insight generation if missing
+    if (!insight && scored.length > 0 && c.status === 'complete') {
+        _autoGenerateInsight(campaignId);
+    }
+}
+
+function _buildDiscoveryListHtml(prospects, campaignNode) {
+    if (!prospects || prospects.length === 0) {
+        return '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">No prospects discovered yet.</div>';
+    }
+    // Clear selection state when rebuilding
+    _selectedForResearch.clear();
+    const seedCompany = campaignNode && campaignNode.seed_company;
+
+    const items = prospects.map(p => {
+        const name = p.company_name || '?';
+        const desc = p.company_description || '';
+        const disc = p.discovery || {};
+        const size = disc.estimated_size || '';
+        const evidence = disc.evidence || [];
+        const vstatus = p.validation_status || 'valid';
+        const vreason = p.validation_reason || '';
+        const isLimited = vstatus === 'limited' || vstatus === 'http_403' || vstatus === 'connection_failed';
+        const isSkipped = vstatus !== 'valid' && !isLimited;
+        const vIcon = vstatus === 'valid' ? '&#10003;' : isLimited ? '&#9888;' : '';
+        const vColor = vstatus === 'valid' ? 'var(--green)' : isLimited ? 'var(--yellow)' : '';
+        const limitedMsg = isLimited ? (vstatus === 'http_403' ? 'Website blocked (403)' : vstatus === 'connection_failed' ? 'Website unreachable' : vreason || 'Limited data') : '';
+        const ancestryBadge = seedCompany ? `<span class="ancestry-badge">Similar to ${escHtml(seedCompany)}</span>` : '';
+        const dataPayload = JSON.stringify({name, description: desc, evidence}).replace(/'/g, '&#39;');
+        return `<div class="discovery-list-item${isSkipped ? ' skipped' : ''}" data-company-name="${escHtml(name)}" data-company-payload='${dataPayload}' style="cursor:pointer;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;position:relative${isSkipped ? ';opacity:0.5' : ''}">
+            ${!isSkipped ? `<input type="checkbox" class="discovery-select-cb" onclick="event.stopPropagation();_toggleResearchSelection('${escHtml(name).replace(/'/g, "\\'")}', this)" style="position:absolute;top:10px;right:10px;width:16px;height:16px;accent-color:var(--purple);cursor:pointer">` : ''}
+            ${ancestryBadge}
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:${desc ? '4px' : '0'};padding-right:${isSkipped ? '0' : '28px'}">
+                ${vIcon ? `<span style="color:${vColor};font-size:12px">${vIcon}</span>` : ''}
+                <span style="font-weight:600;font-size:13px;color:var(--text-primary)">${escHtml(name)}</span>
+                ${size ? `<span class="company-card-size" style="margin:0">${escHtml(size)}</span>` : ''}
+            </div>
+            ${desc ? `<div style="font-size:11px;color:var(--text-muted);line-height:1.4;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;${!isSkipped ? 'padding-right:28px' : ''}">${escHtml(desc)}</div>` : ''}
+            ${isLimited ? `<div style="font-size:10px;color:var(--yellow);margin-top:2px">&#9888; ${escHtml(limitedMsg)} &mdash; financial &amp; sentiment analysis still available</div>` : ''}
+            ${isSkipped ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">No valid website found</div>` : ''}
+        </div>`;
+    }).join('');
+    return `
+        <div class="cv-section">
+            <div class="cv-section-title">Discovered Companies (${prospects.length})</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Select companies to send to Research for scoring.</div>
+            ${items}
+        </div>
+        <div class="send-to-research-bar" id="summary-research-bar" style="display:none">
+            <span class="str-count">0/3 selected</span>
+            <span class="str-label" style="font-size:11px;color:var(--text-muted)">Score with:</span>
+            ${_buildLensSelectHtml('summary-lens-select')}
+            <button class="str-btn" onclick="_sendToResearch('summary-lens-select')" disabled>Send to Research</button>
+        </div>`;
+}
+
+function _buildRankedListHtml(scored) {
+    return scored.map(p => {
+        const _sc = _getScore(p);
+        const s = _sc?.overall_score || 0;
+        const label = _sc?.overall_label || '';
+        const isLimited = p.validation_status && p.validation_status !== 'valid';
+        const isActive = activeProspectName === p.company_name ? ' active' : '';
+        return `<div class="cv-result-row${isActive}" data-company="${escHtml(p.company_name)}">
+            <span class="cv-result-score" style="color:${_dimColor(s)}">${s}</span>
+            <span class="cv-result-name">${escHtml(p.company_name)}${isLimited ? ' <span class="limited-badge">Limited</span>' : ''}</span>
+            <span class="cv-result-label" style="color:${_dimColor(s)}">${escHtml(label)}</span>
+        </div>`;
+    }).join('');
+}
+
+let _insightGenerating = {};
+async function _autoGenerateInsight(campaignId) {
+    if (_insightGenerating[campaignId]) return; // prevent duplicate concurrent calls
+    _insightGenerating[campaignId] = true;
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 min client timeout
+        const resp = await fetch(`/api/campaigns/${campaignId}/insight`, {
+            method: 'POST',
+            signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        // Update local cache
+        const c = allCampaigns.find(x => x.id === campaignId);
+        if (c) c.insight = data.insight || data;
+        // Re-render insight section if this campaign is still active
+        if (activeCampaignId === campaignId) {
+            renderSummaryPane(campaignId);
+        }
+    } catch (err) {
+        console.error('Failed to generate insight:', err);
+        const ph = document.getElementById('agent-insights-placeholder');
+        if (ph) {
+            const msg = err.name === 'AbortError'
+                ? 'Insight generation timed out. Click campaign again to retry.'
+                : 'Insights unavailable. Click campaign again to retry.';
+            ph.innerHTML = `<span style="color:var(--text-muted);font-size:12px">${msg}</span>`;
+        }
+    } finally {
+        delete _insightGenerating[campaignId];
+    }
+}
+
+// ===================== DISCOVERY TREE HELPERS =====================
+
+/** Find a campaign by id — searches roots AND their children arrays. */
+function _findCampaignById(campaignId) {
+    for (const c of allCampaigns) {
+        if (c.id === campaignId) return c;
+        for (const ch of (c.children || [])) {
+            if (ch.id === campaignId) return ch;
+        }
+    }
+    return null;
+}
+
+/** Get depth of a campaign in its tree (root = 0). */
+function _getNodeDepth(campaignId) {
+    const c = _findCampaignById(campaignId);
+    if (!c || !c.parent_campaign_id) return 0;
+    return 1 + _getNodeDepth(c.parent_campaign_id);
+}
+
+/** Build clickable breadcrumb for child campaign nodes. */
+function _buildBreadcrumb(campaignId) {
+    const nodes = [];
+    let cur = _findCampaignById(campaignId);
+    while (cur) {
+        nodes.unshift(cur);
+        if (!cur.parent_campaign_id) break;
+        cur = _findCampaignById(cur.parent_campaign_id);
+    }
+    if (nodes.length <= 1) return '';
+    return `<div class="tree-breadcrumb">${nodes.map((n, i) => {
+        const label = n.seed_company ? `Similar to ${escHtml(n.seed_company)}` : escHtml(n.name || n.niche);
+        const isCurrent = i === nodes.length - 1;
+        return `<span class="breadcrumb-seg${isCurrent ? ' current' : ''}" ${isCurrent ? '' : `onclick="_selectTreeNode(${n.id})"`}>${label}</span>`;
+    }).join('<span class="breadcrumb-sep">/</span>')}</div>`;
+}
+
+function _buildChildCampaignsHtml(campaign) {
+    // Find child campaigns (Find Similar explorations) for this campaign
+    const children = (campaign.children || []).filter(ch => ch.parent_campaign_id === campaign.id);
+    if (!children.length) return '';
+
+    const items = children.map(ch => {
+        const label = ch.seed_company ? `Similar to ${escHtml(ch.seed_company)}` : escHtml(ch.name || ch.niche);
+        const count = ch.prospect_count || (ch.prospects || []).length || 0;
+        const statusBadge = ch.status === 'running'
+            ? '<span class="pane-status-badge running" style="font-size:9px;padding:1px 5px">Running</span>'
+            : ch.status === 'empty'
+            ? '<span class="pane-status-badge" style="font-size:9px;padding:1px 5px;background:rgba(107,114,128,0.15);color:#9ca3af">Empty</span>'
+            : '';
+        return `<div class="discovery-list-item" style="cursor:pointer;padding:10px 12px;border:1px solid rgba(168,85,247,0.2);border-radius:8px;margin-bottom:6px;background:rgba(168,85,247,0.03)"
+            onclick="_selectTreeNode(${ch.id})">
+            <div style="display:flex;align-items:center;gap:8px">
+                <span style="color:var(--purple);font-size:13px">&#128279;</span>
+                <span style="font-weight:600;font-size:13px;color:var(--text-primary)">${label}</span>
+                <span style="font-size:11px;color:var(--purple)">${count} companies</span>
+                ${statusBadge}
+            </div>
+        </div>`;
+    }).join('');
+
+    return `<div class="ne-divider"></div>
+        <div class="cv-section">
+            <div class="cv-section-title">Related Explorations</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Click to view "Find Similar" results</div>
+            ${items}
+        </div>`;
+}
+
+// ===================== SHARED PIPELINE TREE RENDERER (Flowchart Cards) =====================
+//
+// Renders pipeline stages as visual card nodes connected by arrows.
+// Stage children are shown as inline chips (source badges) inside the card.
+// Click a mini-card to expand its detail panel below the grid.
+//
+
+/** Toggle a single mini-card detail panel. Only one open at a time per card. */
+function _toggleMiniDetail(cardId, idx) {
+    const area = document.getElementById('ptree-details-' + cardId);
+    if (!area) return;
+    const panels = area.querySelectorAll('.ptree-mini-detail-panel');
+    const target = document.getElementById('ptree-detail-' + cardId + '-' + idx);
+    // Find the mini-card to toggle its selected state
+    const fanout = area.closest('.ptree-fanout');
+    const minis = fanout ? fanout.querySelectorAll('.ptree-mini') : [];
+
+    const isOpen = target && target.style.display !== 'none';
+    // Close all panels first
+    panels.forEach(p => p.style.display = 'none');
+    minis.forEach(m => m.classList.remove('selected'));
+    // Toggle target
+    if (!isOpen && target) {
+        target.style.display = 'block';
+        if (minis[idx]) minis[idx].classList.add('selected');
+    }
+}
+
+function _ptreeStatusBg(status) {
+    const m = { done: 'rgba(22,163,74,0.15)', running: 'rgba(168,85,247,0.15)', cached: 'rgba(59,130,246,0.15)', error: 'rgba(239,68,68,0.15)', skipped: 'rgba(107,114,128,0.15)' };
+    return m[status] || 'rgba(255,255,255,0.06)';
+}
+
+/**
+ * Render a tree of pipeline nodes as a flowchart into a container element.
+ * Each top-level node is a card. Children become chips inside the card.
+ */
+function renderPipelineTree(nodes, container) {
+    if (!container || !nodes || !nodes.length) return;
+    const tree = nodes[0].children ? nodes : _assembleTreePT(nodes);
+    let html = '<div class="ptree">';
+    tree.forEach((node, i) => {
+        if (i > 0) html += '<div class="ptree-arrow"></div>';
+        html += _renderCard(node);
+    });
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function _assembleTreePT(nodes) {
+    const map = {};
+    nodes.forEach(n => { map[n.id] = { ...n, children: [] }; });
+    const roots = [];
+    nodes.forEach(n => {
+        if (n.parent_id && map[n.parent_id]) {
+            map[n.parent_id].children.push(map[n.id]);
+        } else {
+            roots.push(map[n.id]);
+        }
+    });
+    return roots;
+}
+
+/** Render a single card node with horizontal fan-out for children. */
+function _renderCard(node) {
+    const status = node.status || 'done';
+    const iconBg = node.iconBg || _ptreeStatusBg(status);
+    const iconHtml = node.icon
+        ? `<div class="ptree-card-icon" style="background:${iconBg}">${node.icon}</div>`
+        : '';
+    const statusHtml = status !== 'done'
+        ? `<span class="ptree-status ${status}">${status}</span>`
+        : '';
+    const summaryHtml = node.summary
+        ? `<div class="ptree-card-summary">${escHtml(node.summary)}</div>`
+        : '';
+
+    const children = node.children || [];
+
+    // Build horizontal fan-out — mini-cards branching from this stage
+    let fanoutHtml = '';
+    if (children.length > 0) {
+        const cardId = (node.id || Math.random().toString(36).slice(2)).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const minis = children.map((child, idx) => {
+            const cStatus = child.status || 'done';
+            const cLabel = child.label || '?';
+            const cSummary = child.summary || '';
+            const cDetail = child.detail || '';
+            const subCount = (child.children || []).length;
+            const valueText = cSummary || (subCount > 0 ? `${subCount} steps` : '');
+            const hasDetail = !!(cDetail && cDetail !== cSummary);
+            const clickAttr = hasDetail
+                ? `onclick="event.stopPropagation();_toggleMiniDetail('${cardId}',${idx})"`
+                : '';
+            return `<div class="ptree-mini ${cStatus}${hasDetail ? ' has-detail' : ''}" ${clickAttr} data-idx="${idx}" title="${escHtml(cLabel)}${valueText ? ': ' + escHtml(valueText) : ''}">
+                <div class="ptree-mini-label">${escHtml(cLabel)}</div>
+                ${valueText ? `<div class="ptree-mini-value">${escHtml(valueText)}</div>` : ''}
+            </div>`;
+        }).join('');
+
+        // Per-child detail panels (only one visible at a time, below the grid)
+        const detailPanels = children.map((child, idx) => {
+            const cDetail = child.detail || '';
+            if (!cDetail || cDetail === (child.summary || '')) return '';
+            // _richDetail flag means the detail already contains safe HTML (links)
+            const detailRendered = child._richDetail
+                ? cDetail.replace(/\n/g, '<br>')
+                : escHtml(cDetail).replace(/\n/g, '<br>');
+            return `<div class="ptree-mini-detail-panel" id="ptree-detail-${cardId}-${idx}" style="display:none">
+                <strong>${escHtml(child.label || '')}</strong><br>${detailRendered}
+            </div>`;
+        }).join('');
+
+        fanoutHtml = `<div class="ptree-fanout">
+            <div class="ptree-fanout-rail"></div>
+            <div class="ptree-fanout-items">${minis}</div>
+            ${detailPanels ? `<div class="ptree-detail-area" id="ptree-details-${cardId}">${detailPanels}</div>` : ''}
+        </div>`;
+    }
+
+    const detailHtml = '';
+    const chevronHtml = '';
+
+    return `<div class="ptree-card status-${status}">
+        <div class="ptree-card-header">
+            ${iconHtml}
+            <span class="ptree-card-label">${escHtml(node.label || '')}</span>
+            ${statusHtml}
+        </div>
+        ${summaryHtml}
+        ${fanoutHtml}
+    </div>`;
+}
+
+// ===================== DISCOVER EXECUTION LOG → TREE NODES =====================
+
+const _srcColors = { web: '#3b82f6', news: '#a855f7', gnews: '#a855f7', reddit: '#f97316' };
+const _srcLabels = { web: 'Web', news: 'News', gnews: 'Google News', reddit: 'Reddit' };
+
+/** Convert a Discover execution_log array into pipeline tree nodes. */
+function _discoverLogToTree(executionLog, prospects, campaignLabel) {
+    if (!executionLog || !executionLog.length) return [];
+    const log = executionLog;
+
+    // Build as flat array of top-level cards (each renders as its own ptree-card
+    // with arrows between them). Children of each card become clickable mini-cards.
+    const cards = [];
+
+    // Root / label card
+    const rootCard = {
+        id: 'root', label: campaignLabel || 'Discovery', status: 'done',
+        kind: 'root', icon: '&#128269;', iconBg: 'rgba(168,85,247,0.15)', children: [],
+    };
+
+    // Seed Profile — shown as mini-card inside root
+    const seedProfile = log.find(e => e.type === 'seed_profile');
+    if (seedProfile && seedProfile.profile) {
+        const p = seedProfile.profile;
+        const svc = Array.isArray(p.services) ? p.services.join(', ') : (p.services || '');
+        rootCard.summary = `${p.industry || '?'} · ${p.scale || '?'} · ${p.client_type || '?'}`;
+        rootCard.children.push({
+            id: 'profile', label: `Profile: ${escHtml(seedProfile.company || '?')}`,
+            status: 'done', kind: 'stage', icon: '&#128100;', iconBg: 'rgba(168,85,247,0.15)',
+            summary: `${p.industry || '?'} · ${p.scale || '?'}`,
+            detail: `Industry: ${escHtml(p.industry || '?')}\nScale: ${escHtml(p.scale || '?')}\nClient type: ${escHtml(p.client_type || '?')}\nServices: ${escHtml(svc)}`,
+            children: [],
+        });
+    }
+    cards.push(rootCard);
+
+    // Search — own top-level card, source groups as mini-cards
+    const searches = log.filter(e => e.type === 'search_done');
+    const summary = log.find(e => e.type === 'search_complete');
+    if (searches.length) {
+        const unique = summary ? summary.unique_results : searches.reduce((s, e) => s + (e.results_count || 0), 0);
+        const srcCounts = {};
+        searches.forEach(s => { srcCounts[s.source] = (srcCounts[s.source] || 0) + 1; });
+        const srcText = Object.entries(srcCounts).map(([k, v]) => `${v} ${_srcLabels[k] || k}`).join(', ');
+
+        const searchCard = {
+            id: 'search', label: 'Search', status: 'done', kind: 'stage',
+            icon: '&#128269;', iconBg: 'rgba(59,130,246,0.15)',
+            summary: `${searches.length} queries (${srcText}) → ${unique} unique`,
+            children: [],
+        };
+
+        // Group searches by source — each source becomes a clickable mini-card
+        const bySource = {};
+        searches.forEach(s => {
+            const src = s.source || 'web';
+            if (!bySource[src]) bySource[src] = [];
+            bySource[src].push(s);
+        });
+
+        Object.entries(bySource).forEach(([src, items]) => {
+            const color = _srcColors[src] || '#6b7280';
+            const label = _srcLabels[src] || src;
+            const totalResults = items.reduce((s, e) => s + (e.results_count || 0), 0);
+            // Build rich detail with results under each query
+            const srcDetailParts = [];
+            items.forEach(s => {
+                srcDetailParts.push(`⟐ ${escHtml(s.query || '?')} → ${s.results_count || 0} results`);
+                if (s.results && s.results.length) {
+                    s.results.forEach(r => {
+                        const title = r.title || 'Untitled';
+                        const url = r.url || '';
+                        const meta = [r.source, r.date].filter(Boolean).join(' · ');
+                        if (url) {
+                            srcDetailParts.push(`  ↳ <a href="${escHtml(url)}" target="_blank" rel="noopener" class="ptree-result-link">${escHtml(title)}</a>${meta ? ' <span class="ptree-result-meta">(' + escHtml(meta) + ')</span>' : ''}`);
+                        } else {
+                            srcDetailParts.push(`  ↳ ${escHtml(title)}${meta ? ' (' + escHtml(meta) + ')' : ''}`);
+                        }
+                    });
+                }
+            });
+            const srcDetail = srcDetailParts.join('\n');
+            searchCard.children.push({
+                id: `search.${src}`, label: label, status: 'done', kind: 'stage',
+                icon: '&#127760;', iconBg: `${color}22`,
+                summary: `${items.length} queries → ${totalResults} results`,
+                detail: srcDetail,
+                _richDetail: true,
+                children: [],
+            });
+        });
+
+        if (summary) {
+            searchCard.children.push({
+                id: 'search.dedup', label: 'Deduplicate', status: 'done', kind: 'result',
+                icon: '&#128200;', iconBg: 'rgba(22,163,74,0.15)',
+                summary: `${summary.total_results} → ${summary.unique_results} unique`,
+                children: [],
+            });
+        }
+        cards.push(searchCard);
+    }
+
+    // AI Extraction — own top-level card, each company as a mini-card
+    const extracted = log.find(e => e.type === 'extracted');
+    if (extracted) {
+        const details = extracted.company_details || [];
+        const names = extracted.companies || [];
+        const extractionCard = {
+            id: 'extraction', label: 'AI Extraction', status: 'done', kind: 'stage',
+            icon: '&#127919;', iconBg: 'rgba(168,85,247,0.15)',
+            summary: `${names.length} companies`,
+            children: [],
+        };
+        if (details.length) {
+            extractionCard.children = details.map((c, i) => {
+                const name = c.name || names[i] || '?';
+                const lines = [];
+                if (c.description) lines.push(escHtml(c.description));
+                if (c.estimated_size) lines.push(`Size: ${escHtml(c.estimated_size)}`);
+                if (c.website) lines.push(`<a href="${escHtml(c.website)}" target="_blank" rel="noopener" class="ptree-result-link">${escHtml(c.website)}</a>`);
+                if (c.why_included) lines.push(`Why: ${escHtml(c.why_included)}`);
+                return {
+                    id: `extraction.${i}`, label: name, status: 'done', kind: 'result',
+                    summary: c.estimated_size || '',
+                    detail: lines.join('\n'),
+                    _richDetail: true,
+                    children: [],
+                };
+            });
+        } else {
+            // Fallback for old campaigns without company_details
+            extractionCard.detail = escHtml(names.join(', '));
+        }
+        cards.push(extractionCard);
+    }
+
+    // Validation — own top-level card, per-company results as mini-cards
+    const validations = log.filter(e => e.type === 'validated');
+    if (validations.length) {
+        const vValid = validations.filter(v => !v.limited && v.valid).length;
+        const vLimited = validations.filter(v => v.limited).length;
+        cards.push({
+            id: 'validation', label: 'Validation', status: 'done', kind: 'stage',
+            icon: '&#10003;', iconBg: 'rgba(22,163,74,0.15)',
+            summary: `${vValid} valid${vLimited ? `, ${vLimited} limited` : ''}`,
+            children: validations.map((v, i) => ({
+                id: `validation.${i}`, label: v.company || '?',
+                status: v.limited ? 'error' : v.valid ? 'done' : 'skipped',
+                kind: 'result',
+                summary: v.limited ? (v.reason || 'limited') : v.valid ? 'OK' : (v.reason || 'skipped'),
+                detail: `Company: ${v.company || '?'}\nStatus: ${v.limited ? 'Limited' : v.valid ? 'Valid' : 'Skipped'}${v.reason ? '\nReason: ' + v.reason : ''}`,
+                children: [],
+            })),
+        });
+    } else if (prospects && prospects.length) {
+        // Fallback from prospect data
+        const _ls = ['limited', 'http_403', 'connection_failed'];
+        const v = prospects.filter(p => p.validation_status === 'valid').length;
+        const l = prospects.filter(p => _ls.includes(p.validation_status)).length;
+        cards.push({
+            id: 'validation', label: 'Validation', status: 'done', kind: 'stage',
+            icon: '&#10003;', iconBg: 'rgba(22,163,74,0.15)',
+            summary: `${v} valid${l ? `, ${l} limited` : ''}`,
+            children: [],
+        });
+    }
+
+    return cards;
+}
+
+// ===================== RESEARCH TOOL STEPS → TREE (BRIDGE) =====================
+
+const _agentMeta = {
+    financial:      { icon: '&#128200;', label: 'Financial Analysis',  bg: 'rgba(22,163,74,0.15)' },
+    sentiment:      { icon: '&#128172;', label: 'Sentiment Analysis',  bg: 'rgba(234,179,8,0.15)' },
+    techstack:      { icon: '&#9881;',   label: 'Techstack Analysis',  bg: 'rgba(59,130,246,0.15)' },
+    lens:           { icon: '&#127919;', label: 'Lens Scoring',        bg: 'rgba(168,85,247,0.15)' },
+    landscape:      { icon: '&#127758;', label: 'Landscape',           bg: 'rgba(107,114,128,0.15)' },
+    competitors:    { icon: '&#9876;',   label: 'Competitors',         bg: 'rgba(239,68,68,0.15)' },
+    patents:        { icon: '&#128218;', label: 'Patents',             bg: 'rgba(168,85,247,0.15)' },
+    discover:       { icon: '&#128269;', label: 'Discovery',           bg: 'rgba(168,85,247,0.15)' },
+    // Phase types (used by structured progress within individual agents)
+    lookup:         { icon: '&#128270;', label: 'Industry Lookup',     bg: 'rgba(59,130,246,0.15)' },
+    search:         { icon: '&#128269;', label: 'Patent Search',       bg: 'rgba(168,85,247,0.15)' },
+    web_search:     { icon: '&#127760;', label: 'Web Search',          bg: 'rgba(59,130,246,0.15)' },
+    deep_sources:   { icon: '&#128225;', label: 'Deep Sources',        bg: 'rgba(234,179,8,0.15)' },
+    crawl:          { icon: '&#128424;', label: 'Site Crawl',          bg: 'rgba(107,114,128,0.15)' },
+    analysis:       { icon: '&#128202;', label: 'SEO/AEO Analysis',   bg: 'rgba(59,130,246,0.15)' },
+    pricing_detect: { icon: '&#128176;', label: 'Pricing Detection',  bg: 'rgba(22,163,74,0.15)' },
+    report:         { icon: '&#128196;', label: 'Report Generation',   bg: 'rgba(22,163,74,0.15)' },
+    dossier:        { icon: '&#128451;', label: 'Dossier Update',      bg: 'rgba(168,85,247,0.15)' },
+};
+
+/**
+ * Convert structuredSteps (from progress_cb events) into PipelineTree nodes.
+ * This produces a proper flowchart because the data carries real tree structure.
+ */
+function _structuredStepsToTree(structuredSteps, toolName, args) {
+    if (!structuredSteps || !structuredSteps.length) return null;
+
+    const root = {
+        id: 'root', label: toolName ? toolLabel(toolName) : 'Execution',
+        status: 'done', kind: 'root', icon: toolIcon(toolName),
+        iconBg: 'rgba(168,85,247,0.15)',
+        summary: args ? formatArgs(args) : '', children: [],
+    };
+
+    // Group events by analysis_type to build stage nodes
+    // Flow: analyzing → (analysis_start → source_start/source_done... → analysis_done)* → scoring
+    const stages = {};
+    const stageOrder = [];
+    let currentStage = null;
+
+    structuredSteps.forEach(ev => {
+        if (ev.event === 'analyzing') {
+            // Root-level info — which analyses are planned
+            root.summary = `${(ev.analyses || []).length} analyses for ${ev.company || ''}`;
+        } else if (ev.event === 'analysis_start') {
+            const at = ev.analysis_type || 'unknown';
+            const meta = _agentMeta[at] || { icon: '&#9654;', label: ev.label || at, bg: 'rgba(255,255,255,0.06)' };
+            currentStage = {
+                id: at, label: meta.label, status: 'running', kind: 'stage',
+                icon: meta.icon, iconBg: meta.bg,
+                summary: '', children: [], _sources: [],
+            };
+            stages[at] = currentStage;
+            stageOrder.push(at);
+        } else if (ev.event === 'analysis_done') {
+            const at = ev.analysis_type || currentStage?.id;
+            if (at && stages[at]) {
+                stages[at].status = ev.error ? 'error' : (ev.reused ? 'cached' : 'done');
+                if (ev.reused) stages[at].summary = 'Cached (< 7 days old)';
+                else if (ev.error) stages[at].summary = ev.error;
+                else if (ev.report_path) stages[at].summary = 'Report saved';
+                // else: leave summary from source_done events
+            }
+        } else if (ev.event === 'source_start') {
+            // Create implicit stage if source events arrive without analysis_start
+            // (financial, sentiment, techstack emit source events directly)
+            if (!currentStage) {
+                const implicitKey = (toolName || '').replace('_analysis', '').replace('_audit', '');
+                const meta = _agentMeta[implicitKey] || { icon: '&#9654;', label: toolLabel(toolName) || 'Analysis', bg: 'rgba(255,255,255,0.06)' };
+                currentStage = {
+                    id: implicitKey || '_implicit', label: meta.label, status: 'running', kind: 'stage',
+                    icon: meta.icon, iconBg: meta.bg,
+                    summary: '', children: [], _sources: [],
+                };
+                stages[currentStage.id] = currentStage;
+                stageOrder.push(currentStage.id);
+            }
+            // Track that a source is being queried
+            currentStage._sources.push({
+                source: ev.source, label: ev.label || ev.source,
+                status: 'running', summary: ev.detail || '', detail: ev.detail || '',
+            });
+        } else if (ev.event === 'source_done') {
+            // Create implicit stage if needed (same as source_start)
+            if (!currentStage) {
+                const implicitKey = (toolName || '').replace('_analysis', '').replace('_audit', '');
+                const meta = _agentMeta[implicitKey] || { icon: '&#9654;', label: toolLabel(toolName) || 'Analysis', bg: 'rgba(255,255,255,0.06)' };
+                currentStage = {
+                    id: implicitKey || '_implicit', label: meta.label, status: 'running', kind: 'stage',
+                    icon: meta.icon, iconBg: meta.bg,
+                    summary: '', children: [], _sources: [],
+                };
+                stages[currentStage.id] = currentStage;
+                stageOrder.push(currentStage.id);
+            }
+            // Update the source with result — preserve detail from source_start
+            const src = currentStage._sources.find(s => s.source === ev.source);
+            if (src) {
+                src.status = ev.status || 'done';
+                src.summary = ev.summary || '';
+                if (ev.detail) src.detail = ev.detail;
+            } else {
+                currentStage._sources.push({
+                    source: ev.source, label: ev.label || ev.source,
+                    status: ev.status || 'done', summary: ev.summary || '',
+                    detail: ev.detail || '',
+                });
+            }
+        } else if (ev.event === 'generating') {
+            if (currentStage) {
+                currentStage._sources.push({
+                    source: 'llm', label: 'LLM Synthesis',
+                    status: 'done', summary: ev.detail || 'Generating report',
+                });
+            }
+        } else if (ev.event === 'report_saved') {
+            if (currentStage) {
+                currentStage._sources.push({
+                    source: 'report', label: 'Report Saved',
+                    status: 'done', summary: ev.path || 'Saved',
+                });
+            }
+        } else if (ev.event === 'scoring') {
+            const scoringNode = {
+                id: 'scoring', label: 'Lens Scoring', status: 'done', kind: 'stage',
+                icon: '&#127919;', iconBg: 'rgba(168,85,247,0.15)',
+                summary: `${ev.lens || 'Lens'} evaluation`, children: [],
+            };
+            stages['scoring'] = scoringNode;
+            stageOrder.push('scoring');
+        }
+    });
+
+    // Convert source arrays into children nodes, collect phases as top-level cards
+    const topLevel = [];
+    stageOrder.forEach(at => {
+        const stage = stages[at];
+        if (stage._sources) {
+            stage.children = stage._sources.map((src, i) => ({
+                id: `${at}.${src.source || i}`, label: src.label,
+                status: src.status, kind: 'operation',
+                summary: src.summary, detail: src.detail || '', children: [],
+            }));
+            delete stage._sources;
+        }
+        // Implicit stages (no analysis_done) — infer status from children
+        if (stage.status === 'running' && stage.children && stage.children.length > 0) {
+            const hasError = stage.children.some(c => c.status === 'error');
+            stage.status = hasError ? 'error' : 'done';
+        }
+        topLevel.push(stage);
+    });
+
+    // Return phases as top-level nodes — each becomes a full card with source fan-out.
+    // The overlay header already shows the tool name + args, so no root wrapper needed.
+    return topLevel.length > 0 ? topLevel : null;
+}
+
+/**
+ * Parse flat tool_progress step strings into a PipelineTree structure (bridge/fallback).
+ * Groups steps by [agent_prefix] into stage branches with operations as children.
+ */
+function _buildToolStepsTree(steps, toolName) {
+    if (!steps || !steps.length) return '';
+
+    // Parse each step to identify its agent prefix
+    const parsed = steps.map(s => {
+        const match = s.match(/^\[(\w+)\]\s*(.+)$/);
+        if (match) return { agent: match[1].toLowerCase(), text: match[2].trim(), raw: s };
+        // Direct progress strings (no prefix) — group under tool name
+        return { agent: '_direct', text: s, raw: s };
+    });
+
+    // Group by agent
+    const groups = {};
+    const groupOrder = [];
+    parsed.forEach(p => {
+        if (!groups[p.agent]) {
+            groups[p.agent] = [];
+            groupOrder.push(p.agent);
+        }
+        groups[p.agent].push(p);
+    });
+
+    // Build tree nodes
+    const rootChildren = [];
+    groupOrder.forEach(agent => {
+        const items = groups[agent];
+        const meta = _agentMeta[agent] || { icon: '&#9654;', label: agent, bg: 'rgba(255,255,255,0.06)' };
+
+        if (agent === '_direct') {
+            // Direct progress — render as flat operations under root
+            items.forEach((item, i) => {
+                rootChildren.push({
+                    id: `direct.${i}`, label: item.text, status: 'done', kind: 'operation', children: [],
+                });
+            });
+            return;
+        }
+
+        // Classify steps within each agent
+        const stageNode = {
+            id: agent, label: meta.label, status: 'done', kind: 'stage',
+            icon: meta.icon, iconBg: meta.bg,
+            summary: `${items.length} steps`,
+            children: [],
+        };
+
+        items.forEach((item, i) => {
+            // Detect key patterns for richer display
+            const text = item.text;
+            let childLabel = text;
+            let childSummary = '';
+            let childStatus = 'done';
+
+            // Extract results/counts from common patterns
+            const resultMatch = text.match(/returned (\d+) results?/i);
+            const savedMatch = text.match(/Report saved to (.+)/i);
+            const notFoundMatch = text.match(/not found|no .* results|could not/i);
+            const reusedMatch = text.match(/reusing cached/i);
+            const fetchingMatch = text.match(/^(Fetching|Searching|Scraping|Generating)/i);
+
+            if (resultMatch) childSummary = `${resultMatch[1]} results`;
+            else if (savedMatch) { childLabel = 'Report saved'; childSummary = savedMatch[1]; }
+            else if (notFoundMatch) childStatus = 'skipped';
+            else if (reusedMatch) childStatus = 'cached';
+
+            stageNode.children.push({
+                id: `${agent}.${i}`, label: childLabel, status: childStatus,
+                kind: savedMatch ? 'result' : 'operation',
+                summary: childSummary, children: [],
+            });
+        });
+
+        // Update stage summary with more context
+        const resultSteps = items.filter(s => s.text.match(/returned \d+ results?/i));
+        const savedSteps = items.filter(s => s.text.match(/Report saved/i));
+        const cachedSteps = items.filter(s => s.text.match(/reusing cached/i));
+        if (cachedSteps.length) stageNode.status = 'cached';
+        if (savedSteps.length) stageNode.summary = 'Report saved';
+        else if (resultSteps.length) {
+            const total = resultSteps.reduce((s, item) => {
+                const m = item.text.match(/returned (\d+) results?/i);
+                return s + (m ? parseInt(m[1]) : 0);
+            }, 0);
+            stageNode.summary = `${total} results across ${resultSteps.length} sources`;
+        }
+
+        rootChildren.push(stageNode);
+    });
+
+    // Render using the shared PipelineTree renderer
+    const tmp = document.createElement('div');
+    renderPipelineTree(rootChildren, tmp);
+    return tmp.innerHTML;
+}
+
+// ---- Execution log rendering (summary + expandable detail) ----
+
+/** Toggle expanded detail on an execution step block (double-click handler). */
+function _toggleExecDetail(el) {
+    const detail = el.querySelector('.exec-detail');
+    if (detail) detail.style.display = detail.style.display === 'none' ? 'block' : 'none';
+}
+
+/** Build full execution log HTML — summary by default, double-click expands detail. */
+function _buildExecutionLogHtml(executionLog, prospects) {
+    if (!executionLog || !executionLog.length) return '';
+    const log = executionLog;
+
+    const sections = [];
+
+    // --- Seed Profile (for "Find Similar" mode) ---
+    const seedProfile = log.find(e => e.type === 'seed_profile');
+    if (seedProfile) {
+        const p = seedProfile.profile;
+        const company = seedProfile.company || '?';
+        const summaryText = p
+            ? `${p.industry || '?'} · ${p.scale || '?'} · ${p.client_type || '?'}`
+            : 'Profile lookup failed';
+        const detailHtml = p ? `
+            <div class="exec-detail" style="display:none;margin-top:6px;font-size:10px;color:var(--text-muted);line-height:1.6">
+                <div><strong>Industry:</strong> ${escHtml(p.industry || 'Unknown')}</div>
+                <div><strong>Scale:</strong> ${escHtml(p.scale || 'Unknown')}</div>
+                <div><strong>Client type:</strong> ${escHtml(p.client_type || 'Unknown')}</div>
+                <div><strong>Services:</strong> ${escHtml(Array.isArray(p.services) ? p.services.join(', ') : (p.services || 'Unknown'))}</div>
+            </div>
+        ` : '';
+        sections.push(`<div class="exec-step" ondblclick="_toggleExecDetail(this)" title="Double-click for detail" style="cursor:pointer">
+            <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:var(--purple);font-size:10px">&#128100;</span>
+                <span class="exec-step-title">Seed Profile: ${escHtml(company)}</span>
+            </div>
+            <div class="exec-step-summary">${escHtml(summaryText)}</div>
+            ${detailHtml}
+        </div>`);
+    }
+
+    // --- Search Queries ---
+    const plan = log.find(e => e.type === 'discovery_plan' && e.total_queries > 0);
+    const searches = log.filter(e => e.type === 'search_done');
+    const summary = log.find(e => e.type === 'search_complete');
+    if (searches.length) {
+        const totalResults = summary ? summary.total_results : searches.reduce((s, e) => s + (e.results_count || 0), 0);
+        const uniqueResults = summary ? summary.unique_results : totalResults;
+        const srcCounts = {};
+        searches.forEach(s => { srcCounts[s.source] = (srcCounts[s.source] || 0) + 1; });
+        const srcSummary = Object.entries(srcCounts).map(([k, v]) => `${v} ${_srcLabels[k] || k}`).join(', ');
+        const summaryText = `${searches.length} queries (${srcSummary}) → ${uniqueResults} unique results`;
+
+        const detailRows = searches.map(s => {
+            const color = _srcColors[s.source] || '#6b7280';
+            const label = _srcLabels[s.source] || s.source_label || s.source;
+            return `<div style="display:flex;align-items:center;gap:6px;font-size:10px;line-height:1.8">
+                <span style="color:var(--green);font-size:9px">&#10003;</span>
+                <span style="color:${color};font-weight:600;min-width:70px">${escHtml(label)}</span>
+                <span style="color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.query || '')}</span>
+                <span style="color:var(--text-muted);font-size:9px;white-space:nowrap">${s.results_count || 0}</span>
+            </div>`;
+        }).join('');
+
+        sections.push(`<div class="exec-step" ondblclick="_toggleExecDetail(this)" title="Double-click for detail" style="cursor:pointer">
+            <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:var(--accent);font-size:10px">&#128269;</span>
+                <span class="exec-step-title">Search</span>
+            </div>
+            <div class="exec-step-summary">${escHtml(summaryText)}</div>
+            <div class="exec-detail" style="display:none;margin-top:6px">
+                ${detailRows}
+                ${summary ? `<div style="font-size:10px;color:var(--text-muted);margin-top:4px;padding-top:4px;border-top:1px solid var(--border)">Deduplicated: ${summary.total_results} total → ${summary.unique_results} unique</div>` : ''}
+            </div>
+        </div>`);
+    }
+
+    // --- LLM Extraction ---
+    const extracted = log.find(e => e.type === 'extracted');
+    if (extracted) {
+        const names = extracted.companies || [];
+        sections.push(`<div class="exec-step" ondblclick="_toggleExecDetail(this)" title="Double-click for detail" style="cursor:pointer">
+            <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:var(--purple);font-size:10px">&#127919;</span>
+                <span class="exec-step-title">AI Extraction</span>
+            </div>
+            <div class="exec-step-summary">Extracted ${names.length} companies from search results</div>
+            <div class="exec-detail" style="display:none;margin-top:6px;font-size:10px;color:var(--text-muted);line-height:1.6">${escHtml(names.join(', '))}</div>
+        </div>`);
+    }
+
+    // --- Validation ---
+    const validations = log.filter(e => e.type === 'validated');
+    if (validations.length) {
+        const vValid = validations.filter(v => !v.limited && v.valid).length;
+        const vLimited = validations.filter(v => v.limited).length;
+        const vSkipped = validations.filter(v => !v.valid && !v.limited).length;
+        const summaryText = `${vValid} valid${vLimited ? `, ${vLimited} limited` : ''}${vSkipped ? `, ${vSkipped} skipped` : ''}`;
+
+        const detailRows = validations.map(v => {
+            const icon = v.limited ? '<span style="color:var(--yellow)">&#9888;</span>'
+                       : v.valid ? '<span style="color:var(--green)">&#10003;</span>'
+                       : '<span style="color:var(--red)">&times;</span>';
+            const reason = v.reason && v.reason !== 'OK' ? ` — ${escHtml(v.reason)}` : '';
+            return `<div style="font-size:10px;line-height:1.8;display:flex;align-items:center;gap:6px">
+                ${icon}
+                <span style="color:var(--text-secondary)">${escHtml(v.company || '?')}</span>
+                <span style="color:var(--text-muted)">${reason}</span>
+            </div>`;
+        }).join('');
+
+        sections.push(`<div class="exec-step" ondblclick="_toggleExecDetail(this)" title="Double-click for detail" style="cursor:pointer">
+            <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:var(--green);font-size:10px">&#10003;</span>
+                <span class="exec-step-title">Validation</span>
+            </div>
+            <div class="exec-step-summary">${escHtml(summaryText)}</div>
+            <div class="exec-detail" style="display:none;margin-top:6px">${detailRows}</div>
+        </div>`);
+    } else if (prospects && prospects.length) {
+        // Fallback: reconstruct from prospect data if no validation events in log
+        const _ls = ['limited', 'http_403', 'connection_failed'];
+        const v = prospects.filter(p => p.validation_status === 'valid').length;
+        const l = prospects.filter(p => _ls.includes(p.validation_status)).length;
+        const sk = prospects.filter(p => p.validation_status && p.validation_status !== 'valid' && !_ls.includes(p.validation_status)).length;
+        sections.push(`<div class="exec-step">
+            <div style="display:flex;align-items:center;gap:6px">
+                <span style="color:var(--green);font-size:10px">&#10003;</span>
+                <span class="exec-step-title">Validation</span>
+            </div>
+            <div class="exec-step-summary">${v} valid${l ? `, ${l} limited` : ''}${sk ? `, ${sk} skipped` : ''}</div>
+        </div>`);
+    }
+
+    return `<div style="margin-top:8px;display:flex;flex-direction:column;gap:3px">${sections.join('')}</div>`;
+}
+
+/** Build inline execution details using the PipelineTree renderer. */
+function _buildNodeExecutionHtml(node) {
+    const prospects = node.prospects || [];
+    if (!prospects.length && node.status !== 'empty') return '';
+
+    if (node.status === 'empty') {
+        return `<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary)">
+            <div style="font-size:11px;color:var(--text-muted)">No companies matched this search.</div>
+        </div>`;
+    }
+
+    // Use new tree renderer if execution_log exists
+    if (node.execution_log && node.execution_log.length) {
+        const label = node.seed_company ? `Similar to ${node.seed_company}` : (node.name || node.niche || 'Discovery');
+        const treeNodes = _discoverLogToTree(node.execution_log, prospects, label);
+        // Render to string: create temp container, render, extract innerHTML
+        const tmp = document.createElement('div');
+        renderPipelineTree(treeNodes, tmp);
+        return `<div style="margin-top:8px">${tmp.innerHTML}</div>`;
+    }
+
+    // Fallback to legacy exec-step rendering
+    return _buildExecutionLogHtml(node.execution_log, prospects);
+}
+
+/** Build search log HTML using PipelineTree for standalone campaigns (renderExecutionPane). */
+function _buildSearchLogHtml(executionLog) {
+    if (!executionLog || !executionLog.length) return '';
+    const treeNodes = _discoverLogToTree(executionLog, null, 'Search Activity');
+    // Render just the children (skip the root wrapper for inline use)
+    if (treeNodes.length && treeNodes[0].children && treeNodes[0].children.length) {
+        const tmp = document.createElement('div');
+        // Render the children directly without the root wrapper
+        const childNodes = treeNodes[0].children;
+        tmp.innerHTML = `<div class="ptree">${childNodes.map(n => _renderPTreeNode(n, 0)).join('')}</div>`;
+        return tmp.innerHTML;
+    }
+    return _buildExecutionLogHtml(executionLog, null);
+}
+
+/** Render the discovery tree in Pane 2 for a campaign with children. */
+function renderDiscoveryTree(rootCampaignId) {
+    const mapEl = document.getElementById('pipeline-map');
+    const emptyEl = document.getElementById('pane-execution-empty');
+    if (!mapEl) return;
+    if (emptyEl) emptyEl.style.display = 'none';
+    mapEl.style.display = 'block';
+
+    const root = allCampaigns.find(x => x.id === rootCampaignId);
+    if (!root) return;
+
+    // Flatten tree: root + children
+    const allNodes = [root, ...(root.children || [])];
+    const activeId = _activeTreeNodeId || rootCampaignId;
+
+    // Build a children map for tree-line rendering
+    const childrenOf = {};
+    allNodes.forEach(n => {
+        const pid = n.parent_campaign_id || null;
+        if (!childrenOf[pid]) childrenOf[pid] = [];
+        childrenOf[pid].push(n);
+    });
+
+    // Recursive render
+    function _renderNode(node, depth) {
+        const isActive = node.id === activeId;
+        const indent = depth * 24;
+        const icon = node.seed_company ? '&#128279;' : '&#128269;';
+        const label = node.seed_company ? `Similar to ${escHtml(node.seed_company)}` : escHtml(node.name || node.niche);
+        const count = node.prospect_count || (node.prospects || []).length || 0;
+        const statusCls = node.status === 'complete' ? 'done' : node.status === 'running' ? 'running' : '';
+        const statusBadge = node.status === 'running'
+            ? '<span class="pane-status-badge running" style="font-size:9px;padding:1px 6px">Running</span>'
+            : node.status === 'error'
+            ? '<span class="pane-status-badge error" style="font-size:9px;padding:1px 6px">Error</span>'
+            : node.status === 'empty'
+            ? '<span class="pane-status-badge" style="font-size:9px;padding:1px 6px;background:rgba(107,114,128,0.15);color:#9ca3af">Empty</span>'
+            : '';
+
+        // Active node shows expanded execution details; inactive nodes stay compact
+        const executionHtml = isActive ? _buildNodeExecutionHtml(node) : '';
+
+        let html = `<div class="tree-node${isActive ? ' active' : ''}" data-campaign-id="${node.id}" onclick="_selectTreeNode(${node.id})" style="margin-left:${indent}px">
+            ${depth > 0 ? '<div class="tree-connector-horiz"></div>' : ''}
+            <div class="pipeline-node ${statusCls}" style="margin:4px 0;padding:10px 12px;cursor:pointer">
+                <div class="pipeline-node-header">
+                    <div class="pipeline-node-icon" style="font-size:14px">${icon}</div>
+                    <div class="pipeline-node-label" style="font-size:12px">${label}</div>
+                </div>
+                <div class="pipeline-node-meta" style="font-size:10px;margin-top:3px;display:flex;gap:8px;align-items:center">
+                    <span style="color:var(--purple)">${count} companies</span>
+                    ${statusBadge}
+                </div>
+                ${executionHtml}
+            </div>
+        </div>`;
+
+        // Render children recursively
+        const kids = childrenOf[node.id] || [];
+        for (const kid of kids) {
+            html += _renderNode(kid, depth + 1);
+        }
+        return html;
+    }
+
+    mapEl.innerHTML = _renderNode(root, 0);
+
+    // Update status badge
+    const badge = document.getElementById('pane-execution-status');
+    if (badge) {
+        badge.textContent = 'Tree';
+        badge.className = 'pane-status-badge';
+        badge.style.cssText = 'background:rgba(168,85,247,0.15);color:var(--purple)';
+    }
+}
+
+/** Handle click on a tree node — update Pane 3 to show that node's companies. */
+function _selectTreeNode(campaignId) {
+    _activeTreeNodeId = campaignId;
+    if (_activeTreeRootId) renderDiscoveryTree(_activeTreeRootId);
+    renderSummaryPane(campaignId);
+    clearDetailPane();
+}
+
+// Real-time summary update during live pipeline (called on each 'scored' SSE event)
+function _updateLiveSummary(ev) {
+    const sumContent = document.getElementById('pane-summary-content');
+    const sumEmpty = document.getElementById('pane-summary-empty');
+    if (!sumContent) return;
+
+    // Show pane on first scored event
+    if (sumEmpty && sumEmpty.style.display !== 'none') {
+        sumEmpty.style.display = 'none';
+        sumContent.style.display = 'block';
+        sumContent.innerHTML = `<div class="campaign-view">
+            <div class="cv-section">
+                <div class="cv-section-title">Results (Live)</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px">Companies are ranked as they score</div>
+                <div id="pane-summary-ranked-list"></div>
+            </div>
+        </div>`;
+    }
+
+    // Insert into ranked list in sorted position (descending score)
+    const listEl = document.getElementById('pane-summary-ranked-list');
+    if (!listEl) return;
+
+    const score = ev.overall_score || 0;
+    const label = ev.label || '';
+    const name = ev.company || '';
+    const color = _dimColor(score);
+    const rowHtml = `<div class="cv-result-row" data-company="${escHtml(name)}" data-score="${score}">
+        <span class="cv-result-score" style="color:${color}">${score}</span>
+        <span class="cv-result-name">${escHtml(name)}</span>
+        <span class="cv-result-label" style="color:${color}">${escHtml(label)}</span>
+    </div>`;
+
+    // Find insertion point (sorted descending)
+    const existing = listEl.querySelectorAll('.cv-result-row');
+    let inserted = false;
+    for (const row of existing) {
+        const rowScore = parseInt(row.dataset.score || '0', 10);
+        if (score > rowScore) {
+            row.insertAdjacentHTML('beforebegin', rowHtml);
+            inserted = true;
+            break;
+        }
+    }
+    if (!inserted) listEl.insertAdjacentHTML('beforeend', rowHtml);
+}
+
+function closeProspectDetail() {
+    clearDetailPane();
+}
+
+async function openProspectDetail(companyName) {
+    activeProspectName = companyName;
+    // Highlight matching card in Pane 2 pipeline map
+    document.querySelectorAll('.company-card').forEach(c => {
+        c.classList.toggle('active', c.dataset.companyName === companyName);
+    });
+    // Highlight matching row in Pane 3 ranked list
+    document.querySelectorAll('.cv-result-row').forEach(r => {
+        r.classList.toggle('active', r.dataset.company === companyName);
+    });
+
+    // Show loading state in Pane 4 immediately
+    const detContent = document.getElementById('pane-detail-content');
+    const detEmpty = document.getElementById('pane-detail-empty');
+    if (detContent && detEmpty) {
+        detEmpty.style.display = 'none';
+        detContent.style.display = 'block';
+        detContent.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;padding:40px;gap:10px;color:var(--text-muted)">
+            <div style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--purple);border-radius:50%;animation:spin 0.8s linear infinite"></div>
+            Loading ${escHtml(companyName)}...
+        </div>`;
+    }
+
+    // Find the prospect data from campaign lookup or fetch fresh
+    let p = _prospectsByName[companyName];
+    if (!p || !_hasScore(p)) {
+        try {
+            const resp = await fetch('/api/ua-targets');
+            if (resp.ok) {
+                const targets = await resp.json();
+                p = targets.find(x => x.company_name === companyName);
+                if (p) _prospectsByName[companyName] = p;
+            }
+        } catch (e) { /* ignore */ }
+    }
+    if (!p || !_hasScore(p)) {
+        // Show discovery blurb — try live pipeline state first, then campaign prospect data
+        const discoveryCompany = (_pipelineState.companies || []).find(c => c.name === companyName);
+        // Also check campaign data (for sidebar-loaded campaigns + child tree nodes)
+        const lookupCampaignId = _activeTreeNodeId || activeCampaignId;
+        const lookupCampaign = lookupCampaignId ? _findCampaignById(lookupCampaignId) : null;
+        const campaignProspect = !discoveryCompany && lookupCampaign
+            ? (lookupCampaign.prospects || []).find(x => x.company_name === companyName)
+            : null;
+
+        const disc = campaignProspect?.discovery || null;
+        const dc = discoveryCompany || (campaignProspect ? {
+            name: campaignProspect.company_name,
+            description: disc?.description || campaignProspect.company_description,
+            website: campaignProspect.website_url || disc?.website,
+            estimated_size: disc?.estimated_size || null,
+            why_included: disc?.why_included || null,
+            evidence: disc?.evidence || [],
+        } : null);
+
+        if (dc && detContent) {
+            const website = dc.website || '';
+            const evidence = dc.evidence || [];
+
+            // Why included (prominent, separate from sources)
+            let whyHtml = '';
+            if (dc.why_included) {
+                whyHtml = `<div class="why-included-box"><strong>Why this company?</strong>${escHtml(dc.why_included)}</div>`;
+            }
+
+            // Evidence sources with type badges
+            let evidenceHtml = '';
+            if (evidence.length > 0) {
+                evidenceHtml = `<div style="margin-top:14px">
+                    <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Sources</div>
+                    ${evidence.map(e => {
+                        const srcType = _inferSourceType(e.source_url);
+                        return `<div class="evidence-item">
+                            <div class="evidence-header">
+                                <span class="evidence-source-badge ${srcType}">${srcType}</span>
+                                ${e.source_url ? `<a href="${escHtml(e.source_url)}" target="_blank" rel="noopener">${escHtml(e.source_title || (() => { try { return new URL(e.source_url).hostname; } catch { return e.source_url; } })())}</a>` : `<span style="color:var(--text-secondary);font-size:12px">${escHtml(e.source_title || 'Unknown source')}</span>`}
+                            </div>
+                            ${e.snippet ? `<div class="evidence-snippet">${escHtml(e.snippet)}</div>` : ''}
+                        </div>`;
+                    }).join('')}
+                </div>`;
+            }
+
+            // "Find Similar" button — show if depth < 3 and pipeline not running
+            const treeDepth = _getNodeDepth(_activeTreeNodeId || activeCampaignId);
+            const canExpand = treeDepth < 3 && !_prospectPipelineRunning;
+            const safeName = companyName.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const findSimilarHtml = canExpand
+                ? `<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+                    <button class="find-similar-btn" onclick="runFindSimilar('${safeName}')">
+                        &#128279; Find Similar Companies
+                    </button>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:4px">
+                        Discover companies similar to ${escHtml(companyName)}
+                    </div>
+                </div>`
+                : (treeDepth >= 3
+                    ? `<div style="margin-top:16px;font-size:11px;color:var(--text-muted)">Max expansion depth reached (3 levels)</div>`
+                    : '');
+
+            detContent.innerHTML = `<div style="padding:24px">
+                <h2 style="margin-bottom:8px;font-size:18px">${escHtml(companyName)}</h2>
+                ${dc.description ? `<p style="color:var(--text-secondary);font-size:13px;margin-bottom:10px;line-height:1.5">${escHtml(dc.description)}</p>` : ''}
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+                    ${dc.estimated_size ? `<span class="company-card-size">${escHtml(dc.estimated_size)}</span>` : ''}
+                    ${website ? `<a href="${escHtml(website.startsWith('http') ? website : 'https://' + website)}" target="_blank" style="color:var(--accent);font-size:12px">${escHtml(website)}</a>` : ''}
+                </div>
+                ${whyHtml}
+                ${evidenceHtml}
+                ${findSimilarHtml}
+            </div>`;
+            detEmpty.style.display = 'none';
+            detContent.style.display = 'block';
+            return;
+        }
+        if (detContent) detContent.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-muted)">
+            <div style="font-size:24px;margin-bottom:8px">&#8987;</div>
+            No discovery data for ${escHtml(companyName)}.
+        </div>`;
+        return;
+    }
+
+    const fit = _getScore(p);
+    const score = fit.overall_score || 0;
+    const tier = _prospectTierClass(score);
+    const sub = fit.sub_scores || {};
+    const snap = fit.company_snapshot || {};
+
+    const analysesUsed = fit._analyses_used || {};
+
+    const dims = (fit._dimensions || [
+        { key: 'financial_capacity',      label: 'Financial Capacity',      weight: 0.25 },
+        { key: 'advertising_maturity',    label: 'Paid Media Footprint',    weight: 0.20 },
+        { key: 'growth_trajectory',       label: 'Growth Trajectory',       weight: 0.20 },
+        { key: 'creative_readiness',      label: 'Video Asset Readiness',   weight: 0.20 },
+        { key: 'channel_expansion_intent',label: 'Channel Expansion Intent',weight: 0.15 },
+    ]);
+
+    const _dimDisplayLabel = {
+        'advertising_maturity': 'Paid Media Footprint',
+        'creative_readiness': 'Video Asset Readiness',
+    };
+    // Tooltips from lens config rubric descriptions (if present), else generic
+    const _dimTooltips = {};
+    dims.forEach(d => {
+        if (d.rubric_description) _dimTooltips[d.key] = d.rubric_description;
+    });
+
+    // Collect all sources across dimensions for the Analysis Sources section
+    const allSources = [];
+
+    function _renderSignal(sig) {
+        // Handle both old (string) and new ({text, url}) formats
+        if (typeof sig === 'string') {
+            // Auto-detect URLs in plain string signals
+            const urlMatch = sig.match(/https?:\/\/[^\s)]+/);
+            if (urlMatch) {
+                const url = urlMatch[0];
+                const text = sig.replace(url, '').trim() || url;
+                allSources.push({ text, url });
+                return `<a class="icp-signal-tag" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(text)}</a>`;
+            }
+            return `<span class="icp-signal-tag">${escHtml(sig)}</span>`;
+        }
+        const text = sig.text || sig;
+        const url = sig.url;
+        if (url) {
+            allSources.push({ text, url });
+            return `<a class="icp-signal-tag" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(text)}</a>`;
+        }
+        return `<span class="icp-signal-tag">${escHtml(text)}</span>`;
+    }
+
+    let dimCardsHtml = dims.map(d => {
+        const ds = sub[d.key] || {};
+        const s = ds.score || 0;
+        const color = _dimColor(s);
+        const wPct = Math.round((d.weight || 0) * 100) + '%';
+        const displayLabel = _dimDisplayLabel[d.key] || d.label;
+        const tooltip = _dimTooltips[d.key] || '';
+        const rationale = ds.rationale || 'No data available';
+        const signals = (ds.signals || []).map(sig => _renderSignal(sig)).join('');
+
+        return `<div class="icp-dim-card" onclick="if(!event.target.closest('a')){this.classList.toggle('expanded')}">
+            <div class="icp-dim-card-header">
+                <span class="dim-chevron">&#9654;</span>
+                <span class="icp-dim-name">
+                    ${escHtml(displayLabel)}
+                    <span class="dim-weight">(${wPct})</span>
+                    ${tooltip ? `<span class="icp-dim-tooltip-icon" onclick="event.stopPropagation()">i<span class="dim-tooltip">${escHtml(tooltip)}</span></span>` : ''}
+                </span>
+                <span class="icp-dim-score-pill" style="color:${color}">${s}</span>
+            </div>
+            <div class="icp-dim-bar"><div class="icp-dim-fill" style="width:${s}%;background:${color}"></div></div>
+            <div class="icp-dim-card-body">
+                <div class="icp-dim-rationale">${_renderCitedText(rationale)}</div>
+                ${signals ? `<div class="icp-dim-signals">${signals}</div>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+
+    let snapHtml = '';
+    const _pillColors = [
+        { bg: 'rgba(59,130,246,0.12)', color: '#60a5fa' },
+        { bg: 'rgba(168,85,247,0.12)', color: '#c084fc' },
+        { bg: 'rgba(22,163,74,0.12)', color: '#4ade80' },
+        { bg: 'rgba(234,179,8,0.12)', color: '#facc15' },
+        { bg: 'rgba(239,68,68,0.12)', color: '#f87171' },
+        { bg: 'rgba(20,184,166,0.12)', color: '#2dd4bf' },
+    ];
+    function _toPills(arr) {
+        return `<div class="snap-pills">${arr.map((v, i) => {
+            const c = _pillColors[i % _pillColors.length];
+            return `<span class="snap-pill" style="background:${c.bg};color:${c.color}">${escHtml(v)}</span>`;
+        }).join('')}</div>`;
+    }
+
+    const snapPlain = [
+        ['Website', snap.website],
+        ['Revenue', snap.estimated_revenue],
+        ['Employees', snap.estimated_employees],
+        ['Recent Funding', snap.recent_funding],
+    ];
+    const snapPillFields = [
+        ['E-com Platform', snap.ecom_platform ? [snap.ecom_platform] : null],
+        ['Ad Channels', snap.primary_ad_channels],
+        ['Ad Pixels', snap.ad_pixels_detected],
+    ];
+    snapHtml = snapPlain.filter(f => f[1]).map(f =>
+        `<div class="icp-snap-item">${f[0]}<span>${escHtml(String(f[1]))}</span></div>`
+    ).join('');
+    const pillRows = snapPillFields.filter(f => f[1] && f[1].length).map(f =>
+        `<div class="icp-snap-item" style="grid-column:1/-1">${f[0]}${_toPills(f[1])}</div>`
+    ).join('');
+    snapHtml += pillRows;
+
+    let risksHtml = (fit.key_risks || []).map(r => `<li>${_renderCitedText(r)}</li>`).join('');
+
+    const cov = fit.signal_coverage || {};
+    const confLabel = cov.confidence || '?';
+    const confColor = confLabel === 'high' ? 'var(--green)' : confLabel === 'moderate' ? 'var(--yellow)' : 'var(--red)';
+
+    const analysisLabels = { techstack: 'Tech Stack', financial: 'Financial', brand_ad: 'Brand & Ad Intel', sentiment: 'Brand & Ad Intel' };
+    let methHtml = '';
+
+    // Deduplicate allSources by URL
+    const seenUrls = new Set();
+    const uniqueSources = allSources.filter(s => {
+        if (seenUrls.has(s.url)) return false;
+        seenUrls.add(s.url);
+        return true;
+    });
+
+    const sourceListHtml = uniqueSources.map(s => `<div style="font-size:12px;padding:4px 0;display:flex;gap:6px;align-items:baseline">
+        <span style="color:var(--text-muted);flex-shrink:0">&#8226;</span>
+        <a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;word-break:break-all;font-size:11px">${escHtml(s.text)}</a>
+    </div>`).join('');
+
+    // Internal analysis report badges — clickable to open report in Research module
+    const reportBadgesHtml = Object.entries(analysesUsed).map(([atype, path]) => {
+        const label = analysisLabels[atype] || atype;
+        const filename = path ? path.replace(/^reports[\\/\\\\]/, '') : '';
+        if (!filename) return '';
+        return `<span class="source-badge source-${atype}" style="cursor:pointer;font-size:12px;padding:3px 10px;margin:2px" onclick="event.stopPropagation();switchModule('research');openReport('${escHtml(filename)}')" title="View ${escHtml(label)} report">${escHtml(label)}</span>`;
+    }).join('');
+
+    if (uniqueSources.length > 0 || Object.keys(analysesUsed).length > 0) {
+        methHtml = `<div class="icp-section">
+            <div class="icp-section-title">Analysis Sources</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">
+                Confidence: <span style="color:${confColor}">${confLabel}</span>
+                &bull; ${Object.keys(analysesUsed).length}/3 analyses completed
+            </div>
+            ${reportBadgesHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">${reportBadgesHtml}</div>` : ''}
+            ${uniqueSources.length > 0 ? `<div style="margin-top:4px;padding-top:8px;border-top:1px solid var(--border)">
+                <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;font-weight:600">External Sources (${uniqueSources.length})</div>
+                ${sourceListHtml}
+            </div>` : ''}
+        </div>`;
+    } else {
+        methHtml = `<div class="icp-section">
+            <div class="icp-section-title">Analysis Sources</div>
+            <div style="font-size:12px;color:var(--text-muted);padding:12px;background:var(--bg-tertiary);border-radius:8px;border:1px solid var(--border)">
+                No analysis data available. Re-score to run fresh analyses.
+            </div>
+        </div>`;
+    }
+
+    // Render into Pane 4
+    if (!detContent) return;
+
+    detContent.innerHTML = `<div class="icp-detail">
+        <div class="icp-detail-header">
+            <div style="text-align:center">
+                <div class="icp-big-score ${tier}">
+                    <span class="num">${score}</span>
+                    <span class="lbl">/100</span>
+                </div>
+                <div class="icp-score-label-row">
+                    <span class="icp-score-type-label">${escHtml(fit._lens_name || 'Prospect Score')}</span>
+                    <span class="icp-info-icon">i
+                        <span class="icp-info-tooltip">Scored using ${escHtml(fit._lens_name || 'the configured lens')} with weighted dimension analysis.</span>
+                    </span>
+                </div>
+            </div>
+            <div class="icp-detail-meta">
+                <h2>${escHtml(companyName)}</h2>
+                <span class="icp-label-badge" style="color:${_dimColor(score)}">${escHtml(fit.overall_label || '?')}</span>
+                <span style="font-size:11px;color:var(--text-muted);margin-left:8px">Confidence: <span style="color:${confColor}">${confLabel}</span> &bull; ${cov.categories_with_data || 0}/${cov.categories_total || 3} analyses</span>
+            </div>
+            <div class="icp-actions-row">
+                <button class="icp-rescore-btn" id="icp-rescore-btn" onclick="rescoreProspect('${encodeURIComponent(companyName)}')">&#8635; Re-score</button>
+            </div>
+        </div>
+
+        ${fit.recommended_angle ? `<div class="icp-playbook">
+            <div class="icp-playbook-header">
+                <span class="icp-playbook-icon">&#128218;</span>
+                <span class="icp-playbook-label">Outbound Strategy Playbook</span>
+            </div>
+            <div class="icp-playbook-text">${_renderCitedText(fit.recommended_angle)}</div>
+        </div>` : ''}
+
+        <div class="icp-section">
+            <div class="icp-section-title">Score Dimensions</div>
+            ${dimCardsHtml}
+        </div>
+
+        ${snapHtml ? `<div class="icp-section">
+            <div class="icp-section-title">Company Snapshot</div>
+            <div class="icp-snapshot">${snapHtml}</div>
+        </div>` : ''}
+
+        ${risksHtml ? `<div class="icp-section">
+            <div class="icp-section-title">Key Risks</div>
+            <ul class="icp-risks">${risksHtml}</ul>
+        </div>` : ''}
+
+        ${methHtml}
+    </div>`;
+
+    const pane = document.getElementById('pane-detail-body');
+    if (pane) pane.scrollTop = 0;
+    focusPane('pane-detail');
+}
+
+let _savedDetailHTML = null;
+
+function toggleDetailFullscreen() {
+    const pane = document.getElementById('pane-detail');
+    const btn = document.getElementById('detail-expand-btn');
+    const detContent = document.getElementById('pane-detail-content');
+    if (!pane || !detContent) return;
+
+    const isFs = pane.classList.contains('fullscreen');
+    if (isFs) {
+        // Exit fullscreen — restore original narrow layout
+        pane.classList.remove('fullscreen');
+        btn.innerHTML = '&#x26F6;';
+        btn.title = 'Expand to fullscreen';
+        if (_savedDetailHTML) {
+            detContent.innerHTML = _savedDetailHTML;
+            _savedDetailHTML = null;
+        }
+    } else {
+        // Enter fullscreen — save original, rebuild as dashboard
+        _savedDetailHTML = detContent.innerHTML;
+        pane.classList.add('fullscreen');
+        btn.innerHTML = '&#x2716;';
+        btn.title = 'Exit fullscreen (Esc)';
+        _buildProspectDashboard(detContent);
+    }
+}
+
+function _buildProspectDashboard(container) {
+    if (!activeProspectName) return;
+    const p = _prospectsByName[activeProspectName];
+    if (!p || !_hasScore(p)) return;
+
+    const fit = _getScore(p);
+    const score = fit.overall_score || 0;
+    const tier = _prospectTierClass(score);
+    const sub = fit.sub_scores || {};
+    const snap = fit.company_snapshot || {};
+    const cov = fit.signal_coverage || {};
+    const confLabel = cov.confidence || '?';
+    const confColor = confLabel === 'high' ? 'var(--green)' : confLabel === 'moderate' ? 'var(--yellow)' : 'var(--red)';
+    const analysesUsed = fit._analyses_used || {};
+    const analysisLabels = { techstack: 'Tech Stack', financial: 'Financial', brand_ad: 'Brand & Ad Intel', sentiment: 'Brand & Ad Intel' };
+
+    const _dimDisplayLabel = {
+        'advertising_maturity': 'Paid Media Footprint',
+        'creative_readiness': 'Video Asset Readiness',
+    };
+    const dims = (fit._dimensions || [
+        { key: 'financial_capacity',      label: 'Financial Capacity',      weight: 0.25 },
+        { key: 'advertising_maturity',    label: 'Paid Media Footprint',    weight: 0.20 },
+        { key: 'growth_trajectory',       label: 'Growth Trajectory',       weight: 0.20 },
+        { key: 'creative_readiness',      label: 'Video Asset Readiness',   weight: 0.20 },
+        { key: 'channel_expansion_intent',label: 'Channel Expansion Intent',weight: 0.15 },
+    ]);
+
+    // Tooltips from lens config (if present), else empty
+    const _dimTooltips = {};
+    dims.forEach(d => {
+        if (d.rubric_description) _dimTooltips[d.key] = d.rubric_description;
+    });
+
+    // Collect all sources for the sources card
+    const allSrc = [];
+    dims.forEach(d => {
+        const ds = sub[d.key] || {};
+        (ds.signals || []).forEach(sig => {
+            if (typeof sig === 'object' && sig.url) {
+                if (!allSrc.some(s => s.url === sig.url)) allSrc.push(sig);
+            }
+        });
+    });
+
+    // Hero row: score donut + company meta | dimension bars
+    let barsHtml = dims.map(d => {
+        const ds = sub[d.key] || {};
+        const s = ds.score || 0;
+        const color = _dimColor(s);
+        const displayLabel = _dimDisplayLabel[d.key] || d.label;
+        const wPct = Math.round((d.weight || 0) * 100);
+        const tooltip = _dimTooltips[d.key] || '';
+        const tipHtml = tooltip ? ` <span class="icp-dim-tooltip-icon" onclick="event.stopPropagation()">i<span class="dim-tooltip">${escHtml(tooltip)}</span></span>` : '';
+        return `<div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:12px;color:var(--text-secondary);min-width:180px">${escHtml(displayLabel)} <span style="color:var(--text-muted);font-size:10px">(${wPct}%)</span>${tipHtml}</span>
+            <div style="flex:1;height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden">
+                <div style="height:100%;width:${s}%;background:${color};border-radius:4px;transition:width 0.8s"></div>
+            </div>
+            <span style="font-size:13px;font-weight:700;color:${color};min-width:28px;text-align:right">${s}</span>
+        </div>`;
+    }).join('');
+
+    // Report badges
+    const reportBadgesHtml = Object.entries(analysesUsed).map(([atype, path]) => {
+        const label = analysisLabels[atype] || atype;
+        const filename = path ? path.replace(/^reports[\\/\\\\]/, '') : '';
+        if (!filename) return '';
+        return `<span class="source-badge source-${atype}" style="cursor:pointer;font-size:12px;padding:3px 10px;margin:2px" onclick="event.stopPropagation();switchModule('research');openReport('${escHtml(filename)}')" title="View ${escHtml(label)} report">${escHtml(label)}</span>`;
+    }).join('');
+
+    // Playbook card
+    const playbookCard = fit.recommended_angle ? _dashCard('Outbound Strategy Playbook',
+        `<div style="font-size:13px;color:var(--text-secondary);line-height:1.5">${_renderCitedText(fit.recommended_angle)}</div>`, true) : '';
+
+    // Dimension detail cards — each dimension gets its own card
+    const dimCards = dims.map(d => {
+        const ds = sub[d.key] || {};
+        const s = ds.score || 0;
+        const color = _dimColor(s);
+        const displayLabel = _dimDisplayLabel[d.key] || d.label;
+        const rationale = ds.rationale || 'No data available';
+        const signals = (ds.signals || []).map(sig => {
+            if (typeof sig === 'string') return `<span class="icp-signal-tag">${escHtml(sig)}</span>`;
+            const text = sig.text || sig;
+            const url = sig.url;
+            return url
+                ? `<a class="icp-signal-tag" href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(text)}</a>`
+                : `<span class="icp-signal-tag">${escHtml(text)}</span>`;
+        }).join('');
+
+        const tooltip = _dimTooltips[d.key] || '';
+        const tipHtml = tooltip ? ` <span class="icp-dim-tooltip-icon" onclick="event.stopPropagation()">i<span class="dim-tooltip">${escHtml(tooltip)}</span></span>` : '';
+
+        return `<div class="dash-card">
+            <div class="dash-card-title">${escHtml(displayLabel)}${tipHtml} <span style="color:${color};float:right;font-size:16px">${s}</span></div>
+            <div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden;margin-bottom:10px">
+                <div style="height:100%;width:${s}%;background:${color};border-radius:3px"></div>
+            </div>
+            <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:8px">${_renderCitedText(rationale)}</div>
+            ${signals ? `<div class="icp-dim-signals">${signals}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    // Company snapshot card
+    const snapFields = [
+        ['Website', snap.website], ['Revenue', snap.estimated_revenue],
+        ['Employees', snap.estimated_employees], ['Recent Funding', snap.recent_funding],
+    ].filter(f => f[1]);
+    const snapCard = snapFields.length ? _dashCard('Company Snapshot',
+        `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            ${snapFields.map(f => `<div style="font-size:12px;color:var(--text-muted)">${f[0]}<div style="font-size:13px;color:var(--text-primary);font-weight:500">${escHtml(String(f[1]))}</div></div>`).join('')}
+        </div>
+        ${(snap.primary_ad_channels || []).length ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Ad Channels<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${snap.primary_ad_channels.map((v, i) => {
+            const c2 = [{bg:'rgba(59,130,246,0.12)',color:'#60a5fa'},{bg:'rgba(168,85,247,0.12)',color:'#c084fc'},{bg:'rgba(22,163,74,0.12)',color:'#4ade80'},{bg:'rgba(234,179,8,0.12)',color:'#facc15'},{bg:'rgba(239,68,68,0.12)',color:'#f87171'}][i%5];
+            return `<span style="display:inline-block;font-size:11px;padding:2px 8px;border-radius:4px;background:${c2.bg};color:${c2.color}">${escHtml(v)}</span>`;
+        }).join('')}</div></div>` : ''}`, false) : '';
+
+    // Risks card
+    const risksCard = (fit.key_risks || []).length ? _dashCard('Key Risks',
+        `<ul class="icp-risks">${(fit.key_risks || []).map(r => `<li>${_renderCitedText(r)}</li>`).join('')}</ul>`, false) : '';
+
+    // Sources card
+    const sourcesCard = _dashCard('Analysis Sources',
+        `${reportBadgesHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">${reportBadgesHtml}</div>` : ''}
+        ${allSrc.length > 0 ? `<div style="padding-top:8px;border-top:1px solid var(--border)">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:6px;font-weight:600">External Sources (${allSrc.length})</div>
+            ${allSrc.map(s => `<div style="font-size:11px;padding:3px 0"><a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">${escHtml(s.text)}</a></div>`).join('')}
+        </div>` : '<div style="font-size:12px;color:var(--text-muted)">Re-score to generate source citations.</div>'}`, false);
+
+    container.innerHTML = `<div class="icp-detail" style="padding:24px 32px">
+        <div class="dash-hero-row">
+            <div class="dash-hero-left">
+                <div class="dash-hero-identity" style="border-right:none;padding-right:0">
+                    <div class="dash-hero-company">${escHtml(activeProspectName)}</div>
+                    <div style="margin-top:4px">
+                        <span class="icp-label-badge" style="color:${_dimColor(score)};font-size:12px">${escHtml(fit.overall_label || '?')}</span>
+                    </div>
+                    <div class="dash-hero-detail">Confidence: <span style="color:${confColor}">${confLabel}</span> &bull; ${cov.categories_with_data || 0}/${cov.categories_total || 3} analyses</div>
+                    <div class="icp-actions-row" style="margin-top:8px">
+                        <button class="icp-rescore-btn" id="icp-rescore-btn" onclick="rescoreProspect('${encodeURIComponent(activeProspectName)}')" style="font-size:11px;padding:4px 10px">&#8635; Re-score</button>
+                    </div>
+                </div>
+                <div class="dash-hero-score">
+                    <div class="icp-big-score ${tier}" style="width:90px;height:90px;font-size:28px">
+                        <span class="num">${score}</span>
+                        <span class="lbl">/100</span>
+                    </div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:4px">${escHtml(fit._lens_name || 'Prospect Score')} <span class="icp-info-icon" style="font-size:10px">i<span class="icp-info-tooltip">Scored using ${escHtml(fit._lens_name || 'the configured lens')} with weighted dimension analysis.</span></span></div>
+                </div>
+            </div>
+            <div class="dash-hero-right">
+                <div class="dash-hero-right-title">Dimension Scores</div>
+                <div style="display:flex;flex-direction:column;gap:10px">${barsHtml}</div>
+            </div>
+        </div>
+
+        ${playbookCard}
+
+        <div class="dash-grid">
+            ${dimCards}
+            ${snapCard}
+            ${risksCard}
+            ${sourcesCard}
+        </div>
+    </div>`;
+}
+
+async function rescoreProspect(encodedName) {
+    const companyName = decodeURIComponent(encodedName);
+    const btn = document.getElementById('icp-rescore-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.innerHTML = '&#8635; Scoring...';
+    btn.style.opacity = '0.6';
+
+    // Get website from existing data
+    const p = _prospectsByName[companyName];
+    const website = _getScore(p)?.company_snapshot?.website || '';
+
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/ua-fit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ website_url: website }),
+        });
+        if (!resp.ok) throw new Error('Re-score failed');
+        // Reload campaigns and re-open this company
+        await loadCampaigns();
+        openProspectDetail(companyName);
+    } catch (e) {
+        console.error('Re-score failed:', e);
+        btn.innerHTML = '&#8635; Failed — retry';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+    }
+}
+
+// ===================== PIPELINE MAP =====================
+let _pipelineState = {
+    niche: '', companies: [],
+    companyStatus: {}, companyScores: {}, companyAnalysisProgress: {},
+    phase: 'idle',
+};
+
+function _safeName(name) {
+    return name.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+// Responsive: focus a single pane on narrow screens
+// Pane order for adjacency logic (the pane you click + its predecessor are shown)
+const _paneOrder = ['pane-execution', 'pane-summary', 'pane-detail'];
+
+// === Discover → Research selection state ===
+let _selectedForResearch = new Map(); // name → {name, website, description}
+let _availableLenses = []; // [{id, name, slug}, ...]
+
+async function _loadLenses() {
+    try {
+        const resp = await fetch('/api/lenses');
+        if (resp.ok) {
+            _availableLenses = await resp.json();
+        }
+    } catch (e) { console.error('Failed to load lenses:', e); }
+}
+
+function _buildLensSelectHtml(selectId) {
+    if (_availableLenses.length === 0) return `<select class="lens-select" id="${selectId}"><option>Loading...</option></select>`;
+    const lastUsed = localStorage.getItem('sv_last_lens') || '';
+    const opts = _availableLenses.map((l, i) => {
+        const val = l.slug || l.name;
+        const sel = lastUsed ? (val === lastUsed ? 'selected' : '') : (i === 0 ? 'selected' : '');
+        return `<option value="${escHtml(val)}" ${sel}>${escHtml(l.name)}</option>`;
+    }).join('');
+    return `<select class="lens-select" id="${selectId}">${opts}</select>`;
+}
+
+function _getSelectedLensName(selectId) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return _availableLenses[0]?.name || 'CTV Ad Sales';
+    const opt = sel.options[sel.selectedIndex];
+    return opt ? opt.textContent : _availableLenses[0]?.name || 'CTV Ad Sales';
+}
+
+function _inferSourceType(url) {
+    if (!url) return 'web';
+    const u = url.toLowerCase();
+    if (u.includes('reddit.com')) return 'reddit';
+    if (u.includes('news.ycombinator.com')) return 'news';
+    if (u.includes('techcrunch.com') || u.includes('bloomberg.com') || u.includes('reuters.com') ||
+        u.includes('cnbc.com') || u.includes('forbes.com') || u.includes('wsj.com') ||
+        u.includes('venturebeat.com') || u.includes('theverge.com') || u.includes('wired.com') ||
+        u.includes('businessinsider.com') || u.includes('axios.com') || u.includes('theinformation.com') ||
+        u.includes('semafor.com') || u.includes('news.') || u.includes('/news/')) return 'news';
+    return 'web';
+}
+
+function _toggleResearchSelection(name, checkboxEl) {
+    // Parse data from the parent list item
+    const item = checkboxEl.closest('.discovery-list-item');
+    let data;
+    try { data = JSON.parse(item?.dataset.companyPayload || '{}'); } catch { data = { name }; }
+
+    if (checkboxEl.checked) {
+        // If at max, prevent checking
+        if (_selectedForResearch.size >= 3) {
+            checkboxEl.checked = false;
+            return;
+        }
+        _selectedForResearch.set(name, data);
+        if (item) item.classList.add('selected');
+    } else {
+        _selectedForResearch.delete(name);
+        if (item) item.classList.remove('selected');
+    }
+    _updateSummaryResearchBar();
+    _updateCheckboxStates();
+}
+
+function _updateCheckboxStates() {
+    const atMax = _selectedForResearch.size >= 3;
+    document.querySelectorAll('.discovery-select-cb').forEach(cb => {
+        if (!cb.checked) {
+            cb.disabled = atMax;
+            cb.style.opacity = atMax ? '0.3' : '1';
+            cb.style.cursor = atMax ? 'not-allowed' : 'pointer';
+        }
+    });
+}
+
+function _updateSummaryResearchBar() {
+    const bar = document.getElementById('summary-research-bar');
+    if (!bar) return;
+    const count = _selectedForResearch.size;
+    bar.style.display = count > 0 ? 'flex' : 'none';
+    const countEl = bar.querySelector('.str-count');
+    if (countEl) countEl.textContent = count >= 3 ? '3/3 selected (max)' : `${count}/3 selected`;
+    const btn = bar.querySelector('.str-btn');
+    if (btn) btn.disabled = count === 0;
+}
+
+function focusPane(paneId) {
+    if (window.innerWidth >= 1440) return; // no-op on wide screens
+    document.querySelectorAll('.prospect-pane').forEach(p => p.classList.remove('pane-focused'));
+
+    const idx = _paneOrder.indexOf(paneId);
+    if (idx < 0) return;
+
+    // Show the target pane + the one before it (2 panes visible)
+    const target = document.getElementById(paneId);
+    if (target) target.classList.add('pane-focused');
+
+    if (idx > 0) {
+        const prev = document.getElementById(_paneOrder[idx - 1]);
+        if (prev) prev.classList.add('pane-focused');
+    }
+}
+
+// Pane header clicks for responsive expand
+document.addEventListener('click', function(e) {
+    const header = e.target.closest('.prospect-pane .pane-header');
+    if (!header) return;
+    const pane = header.closest('.prospect-pane');
+    if (pane && window.innerWidth < 1440) {
+        focusPane(pane.id);
+    }
+});
+
+// Remove pane-focused on resize above breakpoint
+window.addEventListener('resize', function() {
+    if (window.innerWidth >= 1440) {
+        document.querySelectorAll('.prospect-pane.pane-focused').forEach(p => p.classList.remove('pane-focused'));
+    }
+});
+
+// Pane resize handles — drag to resize adjacent panes
+(function initPaneResizers() {
+    document.querySelectorAll('.pane-resize-handle').forEach(handle => {
+        handle.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            const leftPane = document.getElementById(handle.dataset.left);
+            const rightPane = document.getElementById(handle.dataset.right);
+            if (!leftPane || !rightPane) return;
+
+            handle.classList.add('dragging');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+
+            // Account for CSS zoom on ancestor — offsetWidth gives CSS px, clientX is visual px
+            const zoomEl = leftPane.closest('[style*="zoom"], #workspace-prospecting');
+            const zoom = zoomEl ? parseFloat(getComputedStyle(zoomEl).zoom) || 1 : 1;
+            const startX = e.clientX;
+            const startLeftW = leftPane.offsetWidth;
+            const startRightW = rightPane.offsetWidth;
+
+            function onMove(e2) {
+                const dx = (e2.clientX - startX) / zoom;
+                const totalW = startLeftW + startRightW;
+                // Clamp so neither goes below 200 AND total is preserved
+                const newLeft = Math.max(200, Math.min(startLeftW + dx, totalW - 200));
+                const newRight = totalW - newLeft;
+                if (newLeft >= 200 && newRight >= 200) {
+                    leftPane.style.width = newLeft + 'px';
+                    leftPane.style.flex = '0 0 ' + newLeft + 'px';
+                    leftPane.style.minWidth = '0';
+                    rightPane.style.width = newRight + 'px';
+                    rightPane.style.flex = '0 0 ' + newRight + 'px';
+                    rightPane.style.minWidth = '0';
+                }
+            }
+
+            function onUp() {
+                handle.classList.remove('dragging');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+            }
+
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        });
+    });
+})();
+
+function _scrollPipelineBottom() {
+    const pane = document.getElementById('pane-execution-body');
+    if (pane) pane.scrollTo({ top: pane.scrollHeight, behavior: 'smooth' });
+}
+
+function initPipelineMap(niche) {
+    const emptyEl = document.getElementById('pane-execution-empty');
+    const mapEl = document.getElementById('pipeline-map');
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (mapEl) mapEl.style.display = 'block';
+
+    _pipelineState = {
+        niche, companies: [],
+        companyStatus: {}, companyScores: {}, companyAnalysisProgress: {},
+        nicheEval: null,
+        phase: 'discovering',
+    };
+
+    mapEl.innerHTML = `
+        <div class="pipeline-node running" id="pm-input">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon">&#128269;</div>
+                <div class="pipeline-node-label">Discovery</div>
+            </div>
+            <div class="pipeline-node-meta">
+                Niche: <strong style="color:var(--text-primary)">${escHtml(niche)}</strong>
+            </div>
+        </div>
+        <div class="pipeline-connector" id="pm-conn-discovery"></div>
+        <div class="pipeline-node running" id="pm-discovery">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon"><div class="company-card-spinner"></div></div>
+                <div class="pipeline-node-label">Searching...</div>
+            </div>
+            <div class="pipeline-node-meta" id="pm-discovery-meta">Querying web, news, Reddit...</div>
+        </div>
+    `;
+}
+
+function handlePipelineSSE(ev) {
+    const mapEl = document.getElementById('pipeline-map');
+    if (!mapEl) return;
+
+    if (ev.type === 'status') {
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) metaEl.textContent = ev.text;
+
+    } else if (ev.type === 'discovery_plan') {
+        // Show query plan breakdown
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) metaEl.innerHTML = `<span style="color:var(--text-secondary)">Running ${ev.total_queries} targeted queries</span>
+            <span style="color:var(--text-muted);font-size:10px;margin-left:6px">(${ev.web} web, ${ev.news} news, ${ev.reddit} reddit)</span>`;
+        // Add search activity log container
+        const discNode = document.getElementById('pm-discovery');
+        if (discNode && !document.getElementById('pm-search-log')) {
+            discNode.insertAdjacentHTML('beforeend', `<div id="pm-search-log" style="margin-top:8px;max-height:180px;overflow-y:auto;font-size:11px;line-height:1.6"></div>`);
+        }
+
+    } else if (ev.type === 'search_start') {
+        const logEl = document.getElementById('pm-search-log');
+        if (logEl) {
+            const sourceColors = {web: 'var(--accent)', news: 'var(--green)', reddit: 'var(--yellow)'};
+            const color = sourceColors[ev.source] || 'var(--text-muted)';
+            logEl.insertAdjacentHTML('beforeend',
+                `<div id="pm-search-${ev.index}" style="display:flex;align-items:center;gap:6px;padding:2px 0;opacity:0.7">
+                    <div class="company-card-spinner" style="width:10px;height:10px;border-width:1.5px"></div>
+                    <span style="color:${color};font-weight:600;min-width:56px">${escHtml(ev.source_label)}</span>
+                    <span style="color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(ev.query)}</span>
+                </div>`);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        // Update counter
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) {
+            const counterSpan = metaEl.querySelector('.search-counter') || (() => {
+                const s = document.createElement('span');
+                s.className = 'search-counter';
+                s.style.cssText = 'display:block;margin-top:3px;font-size:11px;color:var(--text-muted)';
+                metaEl.appendChild(s);
+                return s;
+            })();
+            counterSpan.textContent = `Search ${ev.index}/${ev.total}...`;
+        }
+
+    } else if (ev.type === 'search_done') {
+        const rowEl = document.getElementById(`pm-search-${ev.index}`);
+        if (rowEl) {
+            rowEl.style.opacity = '1';
+            const spinner = rowEl.querySelector('.company-card-spinner');
+            if (spinner) spinner.outerHTML = `<span style="color:var(--green);font-size:10px">&#10003;</span>`;
+            // Append result count
+            rowEl.insertAdjacentHTML('beforeend',
+                `<span style="color:var(--text-muted);font-size:10px;white-space:nowrap">${ev.results_count} results</span>`);
+        }
+
+    } else if (ev.type === 'search_complete') {
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) {
+            const counterSpan = metaEl.querySelector('.search-counter');
+            if (counterSpan) counterSpan.textContent = `${ev.unique_results} unique results from ${ev.total_results} total`;
+        }
+
+    } else if (ev.type === 'extracting') {
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) {
+            const counterSpan = metaEl.querySelector('.search-counter');
+            if (counterSpan) counterSpan.innerHTML = `<span style="color:var(--purple)">${escHtml(ev.text)}</span>`;
+        }
+
+    } else if (ev.type === 'extracted') {
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) {
+            const counterSpan = metaEl.querySelector('.search-counter');
+            if (counterSpan) counterSpan.innerHTML = `<span style="color:var(--green)">Extracted ${ev.count} companies</span>`;
+        }
+
+    } else if (ev.type === 'discovered') {
+        const companies = ev.companies || [];
+        _pipelineState.companies = companies;
+        _pipelineState.phase = 'discovered';
+        if (ev.campaign_id) {
+            _pipelineState.campaignId = ev.campaign_id;
+            _currentRunCampaignId = ev.campaign_id;
+            // For child campaigns (Find Similar), don't change activeCampaignId —
+            // the root stays active in sidebar, the child becomes the active tree node
+            if (_activeTreeRootId) {
+                _activeTreeNodeId = ev.campaign_id;
+            } else {
+                activeCampaignId = ev.campaign_id;
+            }
+            // Refresh sidebar (root campaigns only) — child shows up in tree after pipeline completes
+            loadCampaigns();
+        }
+
+        // Mark discovery as done
+        const discNode = document.getElementById('pm-discovery');
+        if (discNode) {
+            discNode.classList.remove('running');
+            discNode.classList.add('done');
+            discNode.querySelector('.pipeline-node-icon').innerHTML = '&#10003;';
+            discNode.querySelector('.pipeline-node-label').textContent = `Found ${companies.length} companies`;
+        }
+        const discConn = document.getElementById('pm-conn-discovery');
+        if (discConn) discConn.classList.add('done');
+
+        // Mark input node as done
+        const inputNode = document.getElementById('pm-input');
+        if (inputNode) { inputNode.classList.remove('running'); inputNode.classList.add('done'); }
+
+        // Add "companies found" summary node (no company cards — those are in Pane 3)
+        mapEl.insertAdjacentHTML('beforeend', `
+            <div class="pipeline-connector done"></div>
+            <div class="pipeline-node done" style="border-color:rgba(168,85,247,0.2);padding:12px">
+                <div class="pipeline-node-header">
+                    <div class="pipeline-node-icon" style="background:rgba(168,85,247,0.15)">&#127919;</div>
+                    <div class="pipeline-node-label" style="color:var(--purple)">${companies.length} companies found</div>
+                </div>
+                <div class="pipeline-node-meta" style="margin-top:4px;font-size:11px;color:var(--text-muted)">${companies.map(c => c.name).join(', ')}</div>
+            </div>
+        `);
+        companies.forEach(c => { _pipelineState.companyStatus[c.name || '?'] = 'discovered'; });
+        setTimeout(_scrollPipelineBottom, 100);
+
+    } else if (ev.type === 'validating') {
+        const metaEl = document.getElementById('pm-discovery-meta');
+        if (metaEl) metaEl.textContent = `Validating ${ev.total} company websites...`;
+
+    } else if (ev.type === 'validated') {
+        // No card DOM updates — company cards are in Pane 3 only
+        // Just track validation state for later use
+        _pipelineState.companyStatus[ev.company] = ev.valid ? (ev.limited ? 'limited' : 'valid') : 'skipped';
+
+    } else if (ev.type === 'validation_complete') {
+        // Insert validation summary node
+        const conn = document.getElementById('pm-conn-discovery');
+        if (conn) {
+            conn.insertAdjacentHTML('afterend', `
+                <div class="pipeline-node done" id="pm-validation" style="padding:10px 14px">
+                    <div class="pipeline-node-header">
+                        <div class="pipeline-node-icon" style="font-size:14px">&#10003;</div>
+                        <div class="pipeline-node-label">Validation</div>
+                    </div>
+                    <div class="pipeline-node-meta">${ev.valid_count} valid${ev.limited_count ? ` (${ev.limited_count} limited)` : ''}${ev.rejected_count ? ` &mdash; ${ev.rejected_count} skipped` : ''}</div>
+                </div>
+                <div class="pipeline-connector done"></div>
+            `);
+        }
+
+    } else if (ev.type === 'niche_scan_start') {
+        // Show niche scan progress in Pane 3
+        const sumContent = document.getElementById('pane-summary-content');
+        const sumEmpty = document.getElementById('pane-summary-empty');
+        if (sumEmpty) sumEmpty.style.display = 'none';
+        if (sumContent) {
+            sumContent.style.display = 'block';
+            sumContent.innerHTML = `<div class="campaign-view" style="padding:16px">
+                <div class="ne-section">
+                    <div class="ne-section-title">Niche Evaluation</div>
+                    <div id="niche-scan-progress" style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-secondary)">
+                        <div class="company-card-spinner" style="width:14px;height:14px;border-width:2px"></div>
+                        <span>Scanning financial data: 0/${ev.total} companies...</span>
+                    </div>
+                </div>
+            </div>`;
+        }
+        // Add scan node to Pane 2 pipeline
+        const valNode = document.getElementById('pm-validation');
+        if (valNode) {
+            valNode.insertAdjacentHTML('afterend', `
+                <div class="pipeline-connector" id="pm-conn-scan"></div>
+                <div class="pipeline-node running" id="pm-niche-scan" style="padding:10px 14px">
+                    <div class="pipeline-node-header">
+                        <div class="company-card-spinner" style="width:14px;height:14px;border-width:2px"></div>
+                        <div class="pipeline-node-label">Financial Scan</div>
+                    </div>
+                    <div class="pipeline-node-meta" id="pm-scan-meta">Scanning 0/${ev.total}...</div>
+                </div>
+            `);
+        }
+
+    } else if (ev.type === 'niche_scan_progress') {
+        // Update scan counter in Pane 3 and Pane 2
+        const progEl = document.getElementById('niche-scan-progress');
+        if (progEl) {
+            const icon = ev.status === 'done' ? '&#10003;' : ev.status === 'error' ? '&#10007;' : '';
+            const snap = ev.snapshot || {};
+            const detail = snap.revenue_formatted ? ` &mdash; ${snap.revenue_formatted}${snap.is_public ? ' (public)' : ''}` : '';
+            progEl.innerHTML = `<div class="company-card-spinner" style="width:14px;height:14px;border-width:2px"></div>
+                <span>Scanning: ${ev.index}/${ev.total} &mdash; ${escHtml(ev.company)}${detail}</span>`;
+        }
+        const scanMeta = document.getElementById('pm-scan-meta');
+        if (scanMeta) scanMeta.textContent = `Scanning ${ev.index}/${ev.total}...`;
+
+    } else if (ev.type === 'niche_eval_complete') {
+        // Store niche eval and render charts in Pane 3
+        _pipelineState.nicheEval = ev.niche_eval;
+        const sumContent2 = document.getElementById('pane-summary-content');
+        if (sumContent2) {
+            // Build company list from discovery data
+            const discoveredCompanies = (_pipelineState.companies || []);
+            const discoveryListHtml = discoveredCompanies.map(c => {
+                const name = c.name || '?';
+                const desc = c.description || '';
+                const size = c.estimated_size || '';
+                return `<div class="discovery-list-item" data-company-name="${escHtml(name)}" style="cursor:pointer;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px"
+                    onclick="openProspectDetail('${escHtml(name).replace(/'/g, "\\'")}')">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:${desc ? '4px' : '0'}">
+                        <span style="font-weight:600;font-size:13px;color:var(--text-primary)">${escHtml(name)}</span>
+                        ${size ? `<span class="company-card-size" style="margin:0">${escHtml(size)}</span>` : ''}
+                    </div>
+                    ${desc ? `<div style="font-size:11px;color:var(--text-muted);line-height:1.4;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden">${escHtml(desc)}</div>` : ''}
+                </div>`;
+            }).join('');
+
+            // Build pseudo-prospects from discovered companies for consolidated cards
+            const pseudoProspects = discoveredCompanies.map(c => ({
+                company_name: c.name,
+                company_description: c.description || '',
+                validation_status: 'valid',
+                discovery: { estimated_size: c.estimated_size, why_included: c.why_included, evidence: c.evidence },
+            }));
+
+            sumContent2.innerHTML = `<div class="campaign-view" style="padding:16px">
+                ${renderNicheEvaluation(ev.niche_eval, pseudoProspects, null)}
+            </div>`;
+        }
+        // Update Pane 2 scan node to done
+        const scanNode = document.getElementById('pm-niche-scan');
+        if (scanNode) {
+            scanNode.className = 'pipeline-node done';
+            scanNode.style.padding = '10px 14px';
+            const cov = ev.niche_eval?.data_coverage || {};
+            scanNode.innerHTML = `
+                <div class="pipeline-node-header">
+                    <div class="pipeline-node-icon" style="font-size:14px">&#10003;</div>
+                    <div class="pipeline-node-label">Financial Scan</div>
+                </div>
+                <div class="pipeline-node-meta">${ev.niche_eval?.company_count || 0} scanned &mdash; ${cov.revenue_known || 0} with revenue data</div>
+            `;
+        }
+
+    } else if (ev.type === 'analyzing') {
+        // Fires at start of score_ua_fit() — BEFORE analyses run — so card + rows exist
+        const name = ev.company;
+        _pipelineState.companyStatus[name] = 'scoring';
+        _pipelineState.companyAnalysisProgress[name] = {};
+        const card = document.getElementById('pm-card-' + _safeName(name));
+        if (card) {
+            card.className = 'company-card scoring';
+            const ring = card.querySelector('.company-card-ring');
+            if (ring) ring.innerHTML = '<div class="company-card-spinner"></div>';
+            // Build full-name analysis rows
+            const analyses = ev.has_website
+                ? [['techstack','Tech Stack'],['financial','Financial'],['brand_ad','Brand & Ad Intel']]
+                : [['financial','Financial'],['brand_ad','Brand & Ad Intel']];
+            const rowsHtml = analyses.map(([atype, label]) =>
+                `<div class="analysis-row">
+                    <div class="analysis-row-icon" id="pm-icon-${_safeName(name)}-${atype}"></div>
+                    <span class="analysis-row-name">${label}</span>
+                    <span class="analysis-row-status" id="pm-status-${_safeName(name)}-${atype}">Queued</span>
+                </div>`
+            ).join('');
+            card.insertAdjacentHTML('beforeend',
+                `<div class="analysis-list" id="pm-list-${_safeName(name)}">${rowsHtml}</div>`);
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+    } else if (ev.type === 'scoring') {
+        // LLM scoring starting — analyses are done
+        const name = ev.company;
+        const card = document.getElementById('pm-card-' + _safeName(name));
+        if (card) {
+            const ring = card.querySelector('.company-card-ring');
+            if (ring) ring.title = 'AI scoring in progress...';
+        }
+
+    } else if (ev.type === 'analysis_start') {
+        const name = ev.company;
+        const atype = ev.analysis_type;
+        if (!_pipelineState.companyAnalysisProgress[name]) {
+            _pipelineState.companyAnalysisProgress[name] = {};
+        }
+        _pipelineState.companyAnalysisProgress[name][atype] = 'running';
+        const icon = document.getElementById(`pm-icon-${_safeName(name)}-${atype}`);
+        const status = document.getElementById(`pm-status-${_safeName(name)}-${atype}`);
+        if (icon) icon.className = 'analysis-row-icon running';
+        if (status) { status.className = 'analysis-row-status running'; status.textContent = 'Running...'; }
+
+    } else if (ev.type === 'analysis_done') {
+        const name = ev.company;
+        const atype = ev.analysis_type;
+        const state = ev.reused ? 'cached' : (ev.report_path ? 'done' : 'error');
+        const symbol = state === 'done' ? '✓' : (state === 'cached' ? '↩' : '!');
+        const statusText = ev.reused ? '↩ Cached' : (ev.report_path ? 'Done' : 'Failed');
+        if (_pipelineState.companyAnalysisProgress[name]) {
+            _pipelineState.companyAnalysisProgress[name][atype] = state;
+        }
+        const icon = document.getElementById(`pm-icon-${_safeName(name)}-${atype}`);
+        const status = document.getElementById(`pm-status-${_safeName(name)}-${atype}`);
+        if (icon) { icon.className = `analysis-row-icon ${state}`; icon.textContent = symbol; }
+        if (status) { status.className = `analysis-row-status ${state}`; status.textContent = statusText; }
+
+    } else if (ev.type === 'scored') {
+        const name = ev.company;
+        _pipelineState.companyStatus[name] = 'scored';
+        _pipelineState.companyScores[name] = { score: ev.overall_score, label: ev.label };
+        // Pre-fetch full prospect data so Pane 4 clicks work immediately
+        fetch('/api/ua-targets').then(r => r.ok ? r.json() : []).then(targets => {
+            const t = targets.find(x => x.company_name === name);
+            if (t) _prospectsByName[name] = t;
+        }).catch(() => {});
+        const card = document.getElementById('pm-card-' + _safeName(name));
+        if (card) {
+            const color = _dimColor(ev.overall_score);
+            card.className = 'company-card scored';
+            card.style.borderColor = color;
+            const ring = card.querySelector('.company-card-ring');
+            if (ring) {
+                ring.style.borderColor = color;
+                ring.style.color = color;
+                ring.textContent = ev.overall_score;
+            }
+            const meta = card.querySelector('.company-card-meta');
+            if (meta) meta.innerHTML = `<span style="color:${color}">${escHtml(ev.label)}</span>`;
+            // Ensure analysis rows exist — rebuild from scored event if analyzing event was missed
+            const existingList = card.querySelector('.analysis-list');
+            if (!existingList && ev.analyses_used && ev.analyses_used.length > 0) {
+                const aLabels = { techstack: 'Tech Stack', financial: 'Financial', brand_ad: 'Brand & Ad Intel' };
+                const rowsHtml = ev.analyses_used.map(k =>
+                    `<div class="analysis-row">
+                        <div class="analysis-row-icon done">&#10003;</div>
+                        <span class="analysis-row-name">${escHtml(aLabels[k] || k)}</span>
+                        <span class="analysis-row-status done">Done</span>
+                    </div>`
+                ).join('');
+                card.insertAdjacentHTML('beforeend',
+                    `<div class="analysis-list">${rowsHtml}</div>`);
+            }
+        }
+        // Real-time Pane 3 update
+        _updateLiveSummary(ev);
+
+    } else if (ev.type === 'score_error') {
+        const name = ev.company;
+        _pipelineState.companyStatus[name] = 'error';
+        const card = document.getElementById('pm-card-' + _safeName(name));
+        if (card) {
+            card.className = 'company-card error';
+            const ring = card.querySelector('.company-card-ring');
+            if (ring) { ring.textContent = '!'; ring.style.borderColor = 'var(--red)'; ring.style.color = 'var(--red)'; }
+            const meta = card.querySelector('.company-card-meta');
+            if (meta) meta.innerHTML = `<span style="color:var(--red)">Error</span>`;
+        }
+
+    } else if (ev.type === 'complete') {
+        _pipelineState.phase = 'complete';
+        // Pipeline is logically done — clear running state so renderExecutionPane won't bail
+        _prospectPipelineRunning = false;
+        _currentRunCampaignId = null;
+        const mapEl2 = document.getElementById('pipeline-map');
+        if (mapEl2) {
+            mapEl2.insertAdjacentHTML('beforeend', `
+                <div class="pipeline-connector done"></div>
+                <div class="pipeline-complete-node">
+                    <span class="check">&#10003;</span>
+                    Discovery complete &mdash; ${ev.total_discovered || ev.total_scored || 0} companies found
+                </div>
+            `);
+            setTimeout(_scrollPipelineBottom, 100);
+        }
+        // Set Pane 2 badge to Complete
+        const badge = document.getElementById('pane-execution-status');
+        if (badge) { badge.textContent = 'Complete'; badge.className = 'pane-status-badge complete'; }
+
+        // Reload campaigns sidebar and populate Pane 3
+        const cid = ev.campaign_id || _pipelineState.campaignId;
+        if (cid) {
+            loadCampaigns().then(() => {
+                // Check if this is a child campaign (Find Similar completed)
+                const completedCampaign = _findCampaignById(cid);
+                if (completedCampaign && completedCampaign.parent_campaign_id) {
+                    // Child campaign — rebuild tree, show child's results in Pane 3
+                    const rootId = _activeTreeRootId || activeCampaignId;
+                    _activeTreeRootId = rootId;
+                    _activeTreeNodeId = cid;
+                    renderDiscoveryTree(rootId);
+                    renderSummaryPane(cid);
+                    renderExecutionPane(cid);
+                } else {
+                    activeCampaignId = cid;
+                    renderCampaignSidebar();
+                    renderSummaryPane(cid);
+                    renderExecutionPane(cid);
+                    // Highlight active sidebar item
+                    document.querySelectorAll('.search-query-item').forEach(el => {
+                        const id = parseInt(el.dataset.campaignId, 10);
+                        el.classList.toggle('active', id === cid);
+                    });
+                }
+            });
+        }
+
+    } else if (ev.type === 'insight_ready') {
+        // Server generated insight — reload campaign data and re-render summary
+        const insightCid = ev.campaign_id || _pipelineState.campaignId;
+        if (insightCid) {
+            loadCampaigns().then(() => {
+                if (activeCampaignId === insightCid) {
+                    renderSummaryPane(insightCid);
+                }
+            });
+        }
+
+    } else if (ev.type === 'error') {
+        const isEmptyResult = !!ev.campaign_id;
+        const mapEl2 = document.getElementById('pipeline-map');
+        if (mapEl2) {
+            const color = isEmptyResult ? 'var(--text-secondary)' : 'var(--red)';
+            const icon = isEmptyResult ? '&#128269;' : '&#9888;';
+            const label = isEmptyResult ? 'No Results' : 'Error';
+            const bgColor = isEmptyResult ? 'rgba(107,114,128,0.15)' : 'rgba(239,68,68,0.15)';
+            mapEl2.insertAdjacentHTML('beforeend', `
+                <div class="pipeline-connector"></div>
+                <div class="pipeline-node" style="border-color:${color};color:${color}">
+                    <div class="pipeline-node-header">
+                        <div class="pipeline-node-icon" style="background:${bgColor}">${icon}</div>
+                        <div class="pipeline-node-label" style="color:${color}">${label}</div>
+                    </div>
+                    <div class="pipeline-node-meta" style="color:${color}">${escHtml(ev.text)}</div>
+                </div>
+            `);
+        }
+        const badge = document.getElementById('pane-execution-status');
+        if (badge) {
+            if (isEmptyResult) {
+                badge.textContent = 'No Results';
+                badge.className = 'pane-status-badge';
+                badge.style.cssText = 'background:rgba(107,114,128,0.15);color:#9ca3af';
+            } else {
+                badge.textContent = 'Error';
+                badge.className = 'pane-status-badge error';
+            }
+        }
+        if (ev.campaign_id) _currentRunCampaignId = ev.campaign_id;
+    }
+}
+
+// Poll for vertical insight after pipeline completes (insight generates in background thread)
+function _pollForInsight(campaignId, attempts = 0) {
+    if (attempts >= 12) return; // stop after ~60s
+    setTimeout(() => {
+        fetch(`/api/campaigns/${campaignId}`).then(r => r.ok ? r.json() : null).then(data => {
+            if (data && data.insight_json) {
+                // Insight ready — update cache and re-render
+                loadCampaigns().then(() => {
+                    if (activeCampaignId === campaignId) {
+                        renderSummaryPane(campaignId);
+                    }
+                });
+            } else {
+                _pollForInsight(campaignId, attempts + 1);
+            }
+        }).catch(() => _pollForInsight(campaignId, attempts + 1));
+    }, 5000);
+}
+
+// Pipeline map company card clicks
+document.getElementById('pipeline-map').addEventListener('click', function(e) {
+    const card = e.target.closest('.company-card.scored');
+    if (!card) return;
+    const name = card.dataset.companyName;
+    if (name) openProspectDetail(name);
+});
+
+// Result row clicks in summary pane (delegated to handle apostrophes/special chars in names)
+document.getElementById('pane-summary-content').addEventListener('click', function(e) {
+    // Don't handle clicks on links
+    if (e.target.closest('a')) return;
+
+    // Scored result row → open detail
+    const row = e.target.closest('.cv-result-row');
+    if (row) {
+        const name = row.dataset.company;
+        if (name) openProspectDetail(name);
+        return;
+    }
+
+    // Discovery list item → open detail only (checkbox handles selection separately)
+    const item = e.target.closest('.discovery-list-item');
+    if (item && !e.target.closest('.discovery-select-cb')) {
+        const name = item.dataset.companyName;
+        if (name) openProspectDetail(name);
+    }
+});
+
+async function _sendToResearch(lensSelectId) {
+    // Gather companies from selection map
+    const companies = Array.from(_selectedForResearch.values());
+    if (!companies.length) return;
+
+    const selId = lensSelectId || 'summary-lens-select';
+    const lensName = _getSelectedLensName(selId);
+    const selEl = document.getElementById(selId);
+    if (selEl) localStorage.setItem('sv_last_lens', selEl.value);
+
+    const btn = document.querySelector('.str-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+
+    try {
+        const resp = await fetch('/api/send-to-research', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ companies }),
+        });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            alert(err.error || 'Failed to send');
+            return;
+        }
+        // Switch to Research module and pre-fill chat with scoring query
+        switchModule('research');
+        refreshSidebar();
+        switchLeftTab('chats');
+        newChat();
+
+        const names = companies.map(c => c.name);
+        let query = '';
+        if (names.length === 1) {
+            query = `Score ${names[0]} using the ${lensName} lens.`;
+        } else {
+            query = `Score ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]} using the ${lensName} lens.`;
+        }
+
+        // Collect all evidence source URLs across companies
+        const allSources = [];
+        companies.forEach(c => {
+            (c.evidence || []).forEach(e => {
+                if (e.source_url && !allSources.includes(e.source_url)) allSources.push(e.source_url);
+            });
+        });
+        if (allSources.length > 0) {
+            query += '\n\nSources:\n' + allSources.map(u => `- ${u}`).join('\n');
+        }
+
+        setTimeout(() => {
+            const chatInput = document.getElementById('chat-input');
+            if (chatInput) {
+                chatInput.value = query;
+                autoResize(chatInput);
+                chatInput.focus();
+                chatInput.setSelectionRange(chatInput.value.length, chatInput.value.length);
+            }
+        }, 200);
+
+        // Clear selection state
+        _selectedForResearch.clear();
+    } catch (e) {
+        console.error('Send to research failed:', e);
+        alert('Failed: ' + e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Send to Research'; }
+    }
+}
+
+function runProspectPipeline() {
+    if (_prospectPipelineRunning) return;
+    const nicheInput = document.getElementById('prospect-niche-input');
+    const niche = (nicheInput.value || '').trim();
+    if (!niche) {
+        nicheInput.classList.add('shake');
+        nicheInput.placeholder = 'Type a niche first, e.g. "DTC beauty brands"';
+        setTimeout(() => nicheInput.classList.remove('shake'), 600);
+        nicheInput.focus();
+        return;
+    }
+    const topN = parseInt(document.getElementById('prospect-topn').value) || 10;
+
+    _prospectPipelineRunning = true;
+    _currentRunCampaignId = null; // will be set on 'discovered' event
+    const btn = document.getElementById('prospect-run-btn');
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+
+    // Set Pane 2 badge to Running
+    const badge = document.getElementById('pane-execution-status');
+    if (badge) { badge.textContent = 'Running'; badge.className = 'pane-status-badge running'; }
+
+    // Clear Panes 3 & 4
+    clearDetailPane();
+    const sumContent = document.getElementById('pane-summary-content');
+    const sumEmpty = document.getElementById('pane-summary-empty');
+    if (sumContent) { sumContent.style.display = 'none'; sumContent.innerHTML = ''; }
+    if (sumEmpty) sumEmpty.style.display = 'block';
+
+    // Init pipeline map in Pane 2
+    initPipelineMap(niche);
+    focusPane('pane-execution');
+
+    // Add temporary sidebar entry so user can navigate back to this running pipeline
+    const list = document.getElementById('prospect-search-list');
+    if (list) {
+        // Deactivate other items
+        document.querySelectorAll('.search-query-item').forEach(el => el.classList.remove('active'));
+        // Insert at top
+        const tempItem = document.createElement('div');
+        tempItem.className = 'search-query-item active';
+        tempItem.id = 'prospect-running-temp';
+        tempItem.setAttribute('data-campaign-id', 'running');
+        tempItem.onclick = () => {
+            // Switch back to the running pipeline
+            document.querySelectorAll('.search-query-item').forEach(el => el.classList.remove('active'));
+            tempItem.classList.add('active');
+            if (_currentRunCampaignId) activeCampaignId = _currentRunCampaignId;
+            if (_savedLivePipelineDOM) {
+                const mapEl = document.getElementById('pipeline-map');
+                if (mapEl) { mapEl.innerHTML = _savedLivePipelineDOM; mapEl.style.display = 'block'; }
+                const emptyEl = document.getElementById('pane-execution-empty');
+                if (emptyEl) emptyEl.style.display = 'none';
+                _savedLivePipelineDOM = null;
+            }
+            const execBadge = document.getElementById('pane-execution-status');
+            if (execBadge) { execBadge.textContent = 'Running'; execBadge.className = 'pane-status-badge running'; }
+            focusPane('pane-execution');
+        };
+        tempItem.innerHTML = `<div class="search-query-info">
+            <div class="search-query-name">${escHtml(niche)}</div>
+            <div class="search-query-meta">
+                <span class="pane-status-badge running">Running</span>
+            </div>
+        </div>`;
+        list.insertBefore(tempItem, list.firstChild);
+    }
+
+    // Collect structured niche fields if Niche Builder was used
+    const nicheCtx = {};
+    const _nbSize = document.querySelector('#nb-company-size .icp-chip.selected');
+    if (_nbSize) nicheCtx.company_size = _nbSize.dataset.value;
+    const _nbModel = document.querySelector('#nb-business-model .icp-chip.selected');
+    if (_nbModel) nicheCtx.business_model = _nbModel.dataset.value === 'Both' ? 'B2B/B2C' : _nbModel.dataset.value;
+    const _nbVert = (document.getElementById('nb-vertical')?.value || '').trim();
+    if (_nbVert) nicheCtx.vertical = _nbVert;
+    const _nbGeoC = (document.getElementById('nb-geography-custom')?.value || '').trim();
+    const _nbGeo = document.querySelector('#nb-geography .icp-chip.selected');
+    if (_nbGeoC) nicheCtx.geography = _nbGeoC;
+    else if (_nbGeo) nicheCtx.geography = _nbGeo.dataset.value;
+    const _nbQual = (document.getElementById('nb-qualifiers')?.value || '').trim();
+    if (_nbQual) nicheCtx.qualifiers = _nbQual;
+
+    fetch('/api/ua-pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ niche, top_n: topN, context: nicheCtx }),
+    }).then(async resp => {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const ev = JSON.parse(line.slice(6));
+                    handlePipelineSSE(ev);
+                } catch {}
+            }
+        }
+    }).catch(e => {
+        console.error('Pipeline error:', e);
+        handlePipelineSSE({ type: 'error', text: 'Connection error: ' + e.message });
+    }).finally(() => {
+        _prospectPipelineRunning = false;
+        const finishedCampaignId = _currentRunCampaignId;
+        _currentRunCampaignId = null;
+        _savedLivePipelineDOM = null;
+        btn.disabled = false;
+        btn.textContent = 'Search';
+        loadCampaigns().then(() => {
+            // Re-render execution pane with the final pipeline tree
+            if (finishedCampaignId) {
+                activeCampaignId = finishedCampaignId;
+                renderExecutionPane(finishedCampaignId);
+            }
+        });
+    });
+}
+
+// ===================== FIND SIMILAR =====================
+
+function initPipelineMapSimilar(seedCompany) {
+    const emptyEl = document.getElementById('pane-execution-empty');
+    const mapEl = document.getElementById('pipeline-map');
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (mapEl) mapEl.style.display = 'block';
+
+    _pipelineState = {
+        niche: `Similar to ${seedCompany}`, companies: [],
+        companyStatus: {}, companyScores: {}, companyAnalysisProgress: {},
+        phase: 'discovering',
+    };
+
+    if (mapEl) mapEl.innerHTML = `
+        <div class="pipeline-node running" id="pm-input">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon">&#128279;</div>
+                <div class="pipeline-node-label">Find Similar</div>
+            </div>
+            <div class="pipeline-node-meta">
+                Anchored on: <strong style="color:var(--purple)">${escHtml(seedCompany)}</strong>
+            </div>
+        </div>
+        <div class="pipeline-connector" id="pm-conn-discovery"></div>
+        <div class="pipeline-node running" id="pm-discovery">
+            <div class="pipeline-node-header">
+                <div class="pipeline-node-icon"><div class="company-card-spinner"></div></div>
+                <div class="pipeline-node-label">Searching for Similar...</div>
+            </div>
+            <div class="pipeline-node-meta" id="pm-discovery-meta">Building competitor profile...</div>
+        </div>
+    `;
+}
+
+function runFindSimilar(companyName) {
+    if (_prospectPipelineRunning) return;
+
+    const parentCampaignId = _activeTreeNodeId || activeCampaignId;
+    if (!parentCampaignId) return;
+
+    const niche = `Similar to ${companyName}`;
+    const topN = parseInt(document.getElementById('prospect-topn')?.value) || 10;
+
+    _prospectPipelineRunning = true;
+    _currentRunCampaignId = null;
+
+    // Set Pane 2 badge to Running
+    const badge = document.getElementById('pane-execution-status');
+    if (badge) { badge.textContent = 'Running'; badge.className = 'pane-status-badge running'; }
+
+    // Clear Panes 3 & 4
+    clearDetailPane();
+    const sumContent = document.getElementById('pane-summary-content');
+    const sumEmpty = document.getElementById('pane-summary-empty');
+    if (sumContent) { sumContent.style.display = 'none'; sumContent.innerHTML = ''; }
+    if (sumEmpty) sumEmpty.style.display = 'block';
+
+    // Init pipeline map for find-similar mode
+    initPipelineMapSimilar(companyName);
+    focusPane('pane-execution');
+
+    fetch('/api/ua-pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            niche,
+            top_n: topN,
+            seed_company: companyName,
+            parent_campaign_id: parentCampaignId,
+        }),
+    }).then(async resp => {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const ev = JSON.parse(line.slice(6));
+                    handlePipelineSSE(ev);
+                } catch {}
+            }
+        }
+    }).catch(e => {
+        console.error('Find Similar error:', e);
+        handlePipelineSSE({ type: 'error', text: 'Connection error: ' + e.message });
+    }).finally(() => {
+        _prospectPipelineRunning = false;
+        const finishedCampaignId = _currentRunCampaignId;
+        _currentRunCampaignId = null;
+        _savedLivePipelineDOM = null;
+        const btn = document.getElementById('prospect-run-btn');
+        if (btn) { btn.disabled = false; btn.textContent = 'Search'; }
+        loadCampaigns().then(() => {
+            // After loading, if the parent now has children, render the tree
+            if (_activeTreeRootId || activeCampaignId) {
+                const rootId = _activeTreeRootId || activeCampaignId;
+                const root = allCampaigns.find(x => x.id === rootId);
+                if (root && root.children && root.children.length > 0) {
+                    _activeTreeRootId = rootId;
+                    renderDiscoveryTree(rootId);
+                } else if (finishedCampaignId) {
+                    renderExecutionPane(finishedCampaignId);
+                }
+            } else if (finishedCampaignId) {
+                renderExecutionPane(finishedCampaignId);
+            }
+        });
+    });
+}
+
+// ===================== ICP PROFILES =====================
+let allIcpProfiles = [];
+let activeIcpProfileId = null;
+let _icpWizardStep = 0;
+let _icpWizardMode = 'create'; // 'create' or 'edit'
+let _icpEditData = null; // populated in edit mode
+let _icpGeneratedConfig = null; // config from LLM generation
+let _icpCustomerType = ''; // 'B2B', 'B2C', 'Both'
+
+const _INDUSTRY_TREE = {
+    B2B: {
+        'Technology':              ['SaaS', 'Cybersecurity', 'AI / ML', 'DevTools', 'Cloud / Infra', 'E-commerce Platform', 'Other'],
+        'Finance & Banking':       ['Banking / Sell Side', 'Asset Mgmt / Buy Side', 'Insurance', 'Payments / Fintech', 'Other'],
+        'Professional Services':   ['Strategy Consulting', 'IT Consulting / SI', 'Legal', 'Accounting', 'Staffing / Recruiting', 'Other'],
+        'Marketing & Advertising': ['Agency', 'Brand / In-house', 'AdTech', 'MarTech', 'PR / Communications', 'Other'],
+        'Healthcare':              ['Pharma / Biotech', 'MedTech', 'Health IT', 'Providers', 'Payers', 'Other'],
+        'Manufacturing':           ['Automotive', 'Aerospace', 'Electronics', 'Industrial', 'Other'],
+        'Real Estate':             ['Commercial', 'Residential', 'PropTech', 'Other'],
+        'Education':               ['EdTech', 'Higher Ed', 'K-12', 'Corporate Training', 'Other'],
+    },
+    B2C: {
+        'Retail & E-commerce':     ['Fashion / Apparel', 'Beauty / Personal Care', 'Home Goods', 'Electronics', 'Other'],
+        'Food & Beverage':         ['Restaurants / QSR', 'CPG Food', 'Beverage', 'D2C Food', 'Other'],
+        'Health & Wellness':       ['Fitness', 'Supplements', 'Mental Health', 'Telehealth', 'Other'],
+        'Entertainment & Media':   ['Streaming', 'Gaming', 'Publishing', 'Events', 'Other'],
+        'Travel & Hospitality':    ['Hotels', 'Airlines', 'Tourism', 'Other'],
+        'Financial Services':      ['Banking', 'Insurance', 'Investing / Wealth', 'Lending', 'Other'],
+    },
+};
+// "Both" merges both trees
+_INDUSTRY_TREE.Both = { ..._INDUSTRY_TREE.B2B, ..._INDUSTRY_TREE.B2C };
+
+// Niche-detail placeholders based on sub-industry
+const _NICHE_HINTS = {
+    'SaaS': 'e.g. HR Tech, payroll automation, CRM',
+    'Cybersecurity': 'e.g. endpoint security, identity management',
+    'AI / ML': 'e.g. computer vision, NLP, MLOps',
+    'DevTools': 'e.g. CI/CD, observability, testing',
+    'Banking / Sell Side': 'e.g. investment banking, commercial lending',
+    'Asset Mgmt / Buy Side': 'e.g. hedge funds, PE, wealth management',
+    'Payments / Fintech': 'e.g. payment processing, neobanks, BNPL',
+    'Strategy Consulting': 'e.g. MBB, boutique strategy firms',
+    'IT Consulting / SI': 'e.g. Big 4, systems integrators',
+    'Agency': 'e.g. creative agency, media buying, performance marketing',
+    'Brand / In-house': 'e.g. demand gen, growth marketing teams',
+    'AdTech': 'e.g. DSP, SSP, CTV advertising',
+    'MarTech': 'e.g. email platforms, CDPs, analytics',
+    'Fashion / Apparel': 'e.g. DTC fashion, streetwear, luxury',
+    'Beauty / Personal Care': 'e.g. skincare, cosmetics, clean beauty',
+    'Restaurants / QSR': 'e.g. fast-casual chains, ghost kitchens',
+    'CPG Food': 'e.g. snack brands, organic food, frozen meals',
+    'Fitness': 'e.g. gym chains, at-home fitness, wearables',
+};
+
+function _renderIndustryChips(containerId, items, savedVal, singleSelect) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const onclick = singleSelect
+        ? `this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected');_onIndustrySelect('${containerId}',this.textContent)`
+        : `this.classList.toggle('selected')`;
+    el.innerHTML = items.map(s => {
+        const sel = s === savedVal ? ' selected' : '';
+        return `<div class="icp-chip${sel}" onclick="${onclick}">${s}</div>`;
+    }).join('');
+}
+
+function _onIndustrySelect(containerId, value) {
+    if (containerId === 'icp-q-customer-type') {
+        _icpCustomerType = value;
+        // Re-render industry chips
+        const industries = Object.keys(_INDUSTRY_TREE[value] || {});
+        industries.push('Other');
+        _renderIndustryChips('icp-q-industry', industries, '', true);
+        document.getElementById('icp-q-sub-industry').innerHTML = '';
+        document.getElementById('icp-q-niche-detail').placeholder = 'e.g. anything more specific about your area';
+        _updateAdaptiveSteps();
+    } else if (containerId === 'icp-q-industry') {
+        // Re-render sub-industry chips
+        const tree = _INDUSTRY_TREE[_icpCustomerType] || _INDUSTRY_TREE.B2B;
+        const subs = tree[value] || ['Other'];
+        _renderIndustryChips('icp-q-sub-industry', subs, '', true);
+        document.getElementById('icp-q-niche-detail').placeholder = 'e.g. anything more specific about your area';
+    } else if (containerId === 'icp-q-sub-industry') {
+        const hint = _NICHE_HINTS[value] || 'e.g. anything more specific about your area';
+        document.getElementById('icp-q-niche-detail').placeholder = hint;
+    }
+}
+
+function _updateAdaptiveSteps() {
+    // Show/hide B2B vs B2C content in steps 2 and 3
+    const isB2C = _icpCustomerType === 'B2C';
+    document.querySelectorAll('.icp-b2b-content').forEach(el => el.style.display = isB2C ? 'none' : '');
+    document.querySelectorAll('.icp-b2c-content').forEach(el => el.style.display = isB2C ? '' : 'none');
+}
+
+async function loadIcpProfiles() {
+    try {
+        const resp = await fetch('/api/icp-profiles');
+        if (resp.ok) allIcpProfiles = await resp.json();
+        else allIcpProfiles = [];
+    } catch (e) { console.error('loadIcpProfiles failed:', e); allIcpProfiles = []; }
+
+    const active = allIcpProfiles.find(p => p.is_active);
+    activeIcpProfileId = active ? active.id : null;
+
+    // Update indicator name
+    const nameEl = document.getElementById('icp-indicator-name');
+    nameEl.textContent = active ? active.name : 'No profile';
+    nameEl.dataset.profileId = active ? active.id : '';
+
+    // Build popover list
+    const listEl = document.getElementById('icp-popover-list');
+    if (allIcpProfiles.length) {
+        listEl.innerHTML = allIcpProfiles.map(p =>
+            `<div class="icp-popover-item${p.is_active ? ' active' : ''}" onclick="closeIcpPopover(); switchIcpProfile(${p.id});">` +
+            `<span class="icp-popover-dot"></span>` +
+            `<span class="icp-popover-item-name">${escHtml(p.name)}${p.is_default ? ' (default)' : ''}</span></div>`
+        ).join('');
+    } else {
+        listEl.innerHTML = '<div style="padding:10px;font-size:12px;color:var(--text-muted);text-align:center;">No ICP profiles yet</div>';
+    }
+
+    // Render niche suggestions from active profile config
+    _renderNicheSuggestions(active);
+}
+
+function _renderNicheSuggestions(profile) {
+    const container = document.getElementById('niche-suggestions');
+    if (!container) return;
+    const niches = profile?.config?.suggested_niches || [];
+    if (!niches.length) { container.style.display = 'none'; return; }
+    container.style.display = '';
+    container.innerHTML = '<span class="niche-suggestion-label">Try:</span> ' +
+        niches.map(n => `<span class="niche-chip" onclick="document.getElementById('prospect-niche-input').value='${escHtml(n)}';this.parentElement.style.display='none'">${escHtml(n)}</span>`).join('');
+}
+
+async function switchIcpProfile(id) {
+    if (!id) return;
+    id = parseInt(id);
+    if (id === activeIcpProfileId) return;
+    try {
+        await fetch(`/api/icp-profiles/${id}/activate`, { method: 'POST' });
+        activeIcpProfileId = id;
+        await loadIcpProfiles();
+        await loadCampaigns();
+        // Clear all panes
+        _resetAllPanes();
+    } catch (e) { console.error('switchIcpProfile failed:', e); }
+}
+
+function toggleIcpPopover() {
+    document.getElementById('icp-indicator-wrap').classList.toggle('open');
+}
+function closeIcpPopover() {
+    document.getElementById('icp-indicator-wrap').classList.remove('open');
+}
+// Close popover on outside click
+document.addEventListener('click', function(e) {
+    const wrap = document.getElementById('icp-indicator-wrap');
+    if (wrap && !wrap.contains(e.target)) closeIcpPopover();
+});
+
+function togglePreRevenue() {
+    const wrap = document.getElementById('icp-best-customers-wrap');
+    const label = document.getElementById('icp-best-customers-label');
+    const check = document.getElementById('icp-pre-revenue-check');
+    const isOn = wrap.dataset.preRevenue === 'true';
+    wrap.dataset.preRevenue = isOn ? 'false' : 'true';
+    label.textContent = isOn ? "Describe 2-3 of your best customers, or the type of company you'd love to sell to" : 'Describe your dream customers';
+    check.innerHTML = isOn ? '' : '&#10003; ';
+}
+
+function openIcpWizard() {
+    _icpWizardMode = 'create';
+    _icpWizardStep = 0;
+    _icpEditData = null;
+    _icpGeneratedConfig = null;
+    _renderIcpWizard();
+}
+
+function openIcpEditor() {
+    const active = allIcpProfiles.find(p => p.id === activeIcpProfileId);
+    if (!active) return;
+    _icpWizardMode = 'edit';
+    _icpWizardStep = 0;
+    _icpEditData = active;
+    _icpGeneratedConfig = active.config || null;
+    _renderIcpWizard();
+}
+
+function _renderIcpWizard() {
+    // Remove existing wizard if any
+    const existing = document.querySelector('.icp-wizard-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'icp-wizard-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeIcpWizard(); });
+
+    const isEdit = _icpWizardMode === 'edit';
+    const sa = isEdit && _icpEditData?.survey_answers ? _icpEditData.survey_answers : {};
+    const title = isEdit ? 'Edit ICP Profile' : 'New ICP Profile';
+
+    overlay.innerHTML = `<div class="icp-wizard">
+        <div class="icp-wizard-header">
+            <h2>${title}</h2>
+            <button class="icp-wizard-close" onclick="closeIcpWizard()">&times;</button>
+        </div>
+        <div class="icp-wizard-steps">
+            <div class="icp-step-dot active"></div>
+            <div class="icp-step-dot"></div>
+            <div class="icp-step-dot"></div>
+            <div class="icp-step-dot"></div>
+            <div class="icp-step-dot"></div>
+        </div>
+        <div class="icp-wizard-body">
+            <!-- Step 0: Your Business (THE FUNNEL) -->
+            <div class="icp-wizard-step active" data-step="0">
+                <h3>Your Business</h3>
+                <div class="step-desc">Let's narrow things down — a few clicks and we'll know your world.</div>
+                <div class="icp-field">
+                    <label>Who do you sell to?</label>
+                    <div class="icp-chips" id="icp-q-customer-type">
+                        ${['B2B', 'B2C', 'Both'].map(s => {
+                            const sel = sa.customer_type === s ? ' selected' : '';
+                            const desc = s === 'B2B' ? 'Businesses' : s === 'B2C' ? 'Consumers' : 'Both';
+                            return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected');_onIndustrySelect('icp-q-customer-type','${s}')">${s} <span style="opacity:.5;font-size:10px">(${desc})</span></div>`;
+                        }).join('')}
+                    </div>
+                </div>
+                <div class="icp-field">
+                    <label>What industry are you in?</label>
+                    <div class="icp-chips" id="icp-q-industry"></div>
+                </div>
+                <div class="icp-field">
+                    <label>What's your specific area?</label>
+                    <div class="icp-chips" id="icp-q-sub-industry"></div>
+                </div>
+                <div class="icp-field">
+                    <label>Anything more specific?</label>
+                    <div class="field-hint">Optional — helps the AI generate a more precise profile.</div>
+                    <input type="text" id="icp-q-niche-detail" placeholder="e.g. anything more specific about your area" value="${escHtml(sa.niche_detail || '')}">
+                </div>
+            </div>
+
+            <!-- Step 1: Your Offer -->
+            <div class="icp-wizard-step" data-step="1">
+                <h3>Your Offer</h3>
+                <div class="step-desc">No jargon needed — just tell us what you do.</div>
+                <div class="icp-field">
+                    <label>What does your company do?</label>
+                    <div class="field-hint">Describe it like you would to a friend.</div>
+                    <textarea id="icp-q-product" placeholder="e.g. We help restaurants manage their online orders and delivery from one dashboard...">${escHtml(sa.product || '')}</textarea>
+                </div>
+                <div class="icp-field">
+                    <label>What problem does it solve?</label>
+                    <div class="field-hint">What was happening before they used you? What changes after?</div>
+                    <textarea id="icp-q-problem" placeholder="e.g. They were juggling 5 different tablets for UberEats, DoorDash, etc. and losing orders...">${escHtml(sa.problem || '')}</textarea>
+                </div>
+            </div>
+
+            <!-- Step 2: Your Customers (B2B + B2C adaptive) -->
+            <div class="icp-wizard-step" data-step="2">
+                <h3>Your Customers</h3>
+                <div class="step-desc">Help us understand who you sell to — or want to sell to.</div>
+
+                <!-- B2B content -->
+                <div class="icp-b2b-content">
+                    <div class="icp-field" id="icp-best-customers-wrap" data-pre-revenue="${sa.pre_revenue ? 'true' : 'false'}">
+                        <label id="icp-best-customers-label">${sa.pre_revenue ? 'Describe your dream customers' : 'Describe 2-3 of your best customers or dream customers'}</label>
+                        <textarea id="icp-q-best-customers" placeholder="e.g. Glossier, Warby Parker — DTC brands doing $5-50M that are scaling their ad spend">${escHtml(sa.best_customers || '')}</textarea>
+                        <div class="icp-escape-hatch" onclick="togglePreRevenue()">
+                            <span id="icp-pre-revenue-check">${sa.pre_revenue ? '&#10003; ' : ''}</span>I haven't sold yet / I'm pre-revenue
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>How big are they typically?</label>
+                        <div class="icp-chips" id="icp-q-sizes">
+                            ${['Startup (<$1M)', 'Small biz ($1M-$10M)', 'Mid-market ($10M-$200M)', 'Enterprise ($200M+)', 'Not sure'].map(s => {
+                                const sel = (sa.sizes || []).includes(s) ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.classList.toggle('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>What do they have in common?</label>
+                        <div class="icp-chips" id="icp-q-commonalities">
+                            ${['Growing fast', 'VC-backed', 'Hiring aggressively', 'Modernizing tech stack', 'Heavy ad spend', 'Compliance-driven', 'Digital-native'].map(s => {
+                                const sel = (sa.commonalities || []).includes(s) ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.classList.toggle('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                        <textarea id="icp-q-commonalities-other" placeholder="Anything else they have in common?" style="margin-top:8px;min-height:40px">${escHtml(sa.commonalities_other || '')}</textarea>
+                    </div>
+                </div>
+
+                <!-- B2C content (hidden by default) -->
+                <div class="icp-b2c-content" style="display:none">
+                    <div class="icp-field">
+                        <label>Describe your ideal customer</label>
+                        <textarea id="icp-q-ideal-consumer" placeholder="e.g. Health-conscious millennials who shop online and care about ingredients...">${escHtml(sa.ideal_consumer || '')}</textarea>
+                    </div>
+                    <div class="icp-field">
+                        <label>What's your typical price point?</label>
+                        <div class="icp-chips" id="icp-q-price-point">
+                            ${['Under $25', '$25 - $100', '$100 - $500', '$500+', 'Varies'].map(s => {
+                                const sel = sa.price_point === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>Where do they buy?</label>
+                        <div class="icp-chips" id="icp-q-where-they-buy">
+                            ${['Your website', 'Amazon / marketplace', 'Retail stores', 'Subscription', 'App', 'Other'].map(s => {
+                                const sel = (sa.where_they_buy || []).includes(s) ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.classList.toggle('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>What do they have in common?</label>
+                        <div class="icp-chips" id="icp-q-consumer-traits">
+                            ${['Health-conscious', 'Premium buyers', 'Budget-conscious', 'Trend followers', 'Eco-conscious', 'Tech-savvy', 'Young adults (18-35)', 'Parents'].map(s => {
+                                const sel = (sa.consumer_traits || []).includes(s) ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.classList.toggle('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: How You Sell (B2B + B2C adaptive) -->
+            <div class="icp-wizard-step" data-step="3">
+                <h3>How You Sell</h3>
+                <div class="step-desc">Last step — tell us about your sales process.</div>
+
+                <!-- B2B content -->
+                <div class="icp-b2b-content">
+                    <div class="icp-field">
+                        <label>How do customers buy from you?</label>
+                        <div class="icp-chips" id="icp-q-how-they-buy">
+                            ${['Self-serve', 'Demos / sales calls', 'Enterprise sales', 'Partners / referrals', 'Mix', 'Haven\'t sold yet'].map(s => {
+                                const sel = sa.how_they_buy === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>Typical deal size?</label>
+                        <div class="icp-chips" id="icp-q-deal-size">
+                            ${['Under $5K', '$5K - $25K', '$25K - $100K', '$100K - $500K', '$500K+', 'Not sure'].map(s => {
+                                const sel = sa.deal_size === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>How long to close a deal?</label>
+                        <div class="icp-chips" id="icp-q-sales-cycle">
+                            ${['Days', 'Weeks', 'Months', '6+ months', 'Not sure'].map(s => {
+                                const sel = sa.sales_cycle === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- B2C content (hidden by default) -->
+                <div class="icp-b2c-content" style="display:none">
+                    <div class="icp-field">
+                        <label>How do customers find you?</label>
+                        <div class="icp-chips" id="icp-q-acquisition-channels">
+                            ${['Social media', 'Search / SEO', 'Word of mouth', 'Paid ads', 'Retail / in-store', 'Influencers', 'Other'].map(s => {
+                                const sel = (sa.acquisition_channels || []).includes(s) ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.classList.toggle('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>How often do they buy?</label>
+                        <div class="icp-chips" id="icp-q-purchase-frequency">
+                            ${['One-time', 'Monthly', 'Quarterly', 'Yearly', 'Varies'].map(s => {
+                                const sel = sa.purchase_frequency === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="icp-field">
+                        <label>Average order value?</label>
+                        <div class="icp-chips" id="icp-q-avg-order-value">
+                            ${['Under $25', '$25 - $100', '$100 - $500', '$500+', 'Not sure'].map(s => {
+                                const sel = sa.avg_order_value === s ? ' selected' : '';
+                                return `<div class="icp-chip${sel}" onclick="this.parentElement.querySelectorAll('.icp-chip').forEach(c=>c.classList.remove('selected'));this.classList.add('selected')">${s}</div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Review -->
+            <div class="icp-wizard-step" data-step="4">
+                <div id="icp-review-content">
+                    ${_icpGeneratedConfig ? _renderReviewStep(_icpGeneratedConfig, isEdit ? _icpEditData.name : '') : `
+                    <h3>Generate ICP Config</h3>
+                    <div class="step-desc">We'll use AI to generate your scoring dimensions, weights, and rubrics from your answers.</div>
+                    <div style="text-align:center;padding:20px 0">
+                        <button class="icp-wizard-btn-next" onclick="icpWizardGenerate()" id="icp-generate-btn">Generate ICP Config</button>
+                    </div>`}
+                </div>
+            </div>
+        </div>
+        <div class="icp-wizard-nav">
+            <button class="icp-wizard-btn-back" onclick="icpWizardBack()" id="icp-back-btn" style="visibility:hidden">Back</button>
+            <div id="icp-nav-right">
+                <button class="icp-wizard-btn-next" onclick="icpWizardNext()" id="icp-next-btn">Next</button>
+            </div>
+        </div>
+    </div>`;
+
+    document.body.appendChild(overlay);
+    _updateWizardStepUI();
+
+    // Initialize funnel chips from saved state (edit mode) or default
+    if (sa.customer_type) {
+        _icpCustomerType = sa.customer_type;
+        const industries = Object.keys(_INDUSTRY_TREE[sa.customer_type] || {});
+        industries.push('Other');
+        _renderIndustryChips('icp-q-industry', industries, sa.industry || '', true);
+        if (sa.industry) {
+            const tree = _INDUSTRY_TREE[sa.customer_type] || {};
+            const subs = tree[sa.industry] || ['Other'];
+            _renderIndustryChips('icp-q-sub-industry', subs, sa.sub_industry || '', true);
+            if (sa.sub_industry) {
+                const hint = _NICHE_HINTS[sa.sub_industry] || 'e.g. anything more specific about your area';
+                document.getElementById('icp-q-niche-detail').placeholder = hint;
+            }
+        }
+        _updateAdaptiveSteps();
+    } else {
+        _icpCustomerType = '';
+    }
+
+    // Escape key to close
+    overlay._escHandler = (e) => { if (e.key === 'Escape') closeIcpWizard(); };
+    document.addEventListener('keydown', overlay._escHandler);
+}
+
+function _renderReviewStep(config, profileName) {
+    const dims = config.dimensions || [];
+    let dimSliders = dims.map((d, i) => `<div class="icp-dim-edit">
+        <span class="dim-name" title="${escHtml(d.label)}">${escHtml(d.label)}</span>
+        <input type="range" min="5" max="50" value="${Math.round(d.weight * 100)}" oninput="this.nextElementSibling.textContent=this.value+'%'" data-dim-idx="${i}">
+        <span class="dim-weight">${Math.round(d.weight * 100)}%</span>
+    </div>`).join('');
+
+    const filters = config.discovery_filters || {};
+    return `
+        <h3>Review & Customize</h3>
+        <div class="step-desc">Fine-tune your ICP before saving. Adjust weights, edit the definition, and tweak filters.</div>
+        <div class="icp-field">
+            <label>Profile Name</label>
+            <input type="text" id="icp-review-name" value="${escHtml(profileName || '')}" placeholder="e.g. DTC Beauty Brands">
+        </div>
+        <div class="icp-field">
+            <label>ICP Definition (editable)</label>
+            <textarea id="icp-review-definition" style="min-height:90px">${escHtml(config.icp_definition || '')}</textarea>
+        </div>
+        <div class="icp-field">
+            <label>Scoring Dimensions & Weights</label>
+            <div id="icp-review-dims">${dimSliders}</div>
+        </div>
+        <div class="icp-field">
+            <label>Discovery Include Filter</label>
+            <textarea id="icp-review-include" style="min-height:50px">${escHtml(filters.include_description || '')}</textarea>
+        </div>
+        <div class="icp-field">
+            <label>Discovery Exclude Filter</label>
+            <textarea id="icp-review-exclude" style="min-height:50px">${escHtml(filters.exclude_description || '')}</textarea>
+        </div>`;
+}
+
+function closeIcpWizard() {
+    const overlay = document.querySelector('.icp-wizard-overlay');
+    if (overlay) {
+        if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
+        overlay.remove();
+    }
+}
+
+// ===================== NICHE BUILDER MODAL =====================
+
+function _nbSingleSelect(chipEl) {
+    const wasSelected = chipEl.classList.contains('selected');
+    chipEl.parentElement.querySelectorAll('.icp-chip').forEach(c => c.classList.remove('selected'));
+    if (!wasSelected) chipEl.classList.add('selected');
+}
+
+function buildNicheString() {
+    const parts = [];
+    const sizeChip = document.querySelector('#nb-company-size .icp-chip.selected');
+    if (sizeChip) parts.push(sizeChip.dataset.value);
+    const modelChip = document.querySelector('#nb-business-model .icp-chip.selected');
+    if (modelChip) {
+        const val = modelChip.dataset.value;
+        parts.push(val === 'Both' ? 'B2B/B2C' : val);
+    }
+    const vertical = (document.getElementById('nb-vertical')?.value || '').trim();
+    if (vertical) parts.push(vertical);
+    const geoCustom = (document.getElementById('nb-geography-custom')?.value || '').trim();
+    const geoChip = document.querySelector('#nb-geography .icp-chip.selected');
+    if (geoCustom) parts.push(geoCustom);
+    else if (geoChip) parts.push(geoChip.dataset.value);
+    const qualifiers = (document.getElementById('nb-qualifiers')?.value || '').trim();
+    if (qualifiers) parts.push(qualifiers);
+    return parts.join(' ');
+}
+
+function applyNicheBuilder() {
+    const niche = buildNicheString();
+    if (niche) document.getElementById('prospect-niche-input').value = niche;
+    closeNicheBuilder();
+    document.getElementById('prospect-niche-input').focus();
+}
+
+function closeNicheBuilder() {
+    const overlay = document.querySelector('.niche-builder-overlay');
+    if (overlay) {
+        if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
+        overlay.remove();
+    }
+}
+
+function openNicheBuilder() {
+    const existing = document.querySelector('.niche-builder-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'niche-builder-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeNicheBuilder(); });
+
+    const chipRow = (items) => items.map(s =>
+        `<div class="icp-chip" data-value="${s}">${s}</div>`
+    ).join('');
+
+    overlay.innerHTML = `<div class="niche-builder-modal">
+        <div class="niche-builder-header">
+            <h2>Niche Builder</h2>
+            <button class="icp-wizard-close" onclick="closeNicheBuilder()">&times;</button>
+        </div>
+        <div class="niche-builder-body">
+            <div class="icp-field">
+                <label>Business Model</label>
+                <div class="icp-chips" id="nb-business-model">${chipRow(['B2B', 'B2C', 'Both'])}</div>
+            </div>
+            <div class="icp-field">
+                <label>Company Size</label>
+                <div class="icp-chips" id="nb-company-size">${chipRow(['Startup', 'SMB', 'Midmarket', 'Enterprise'])}</div>
+            </div>
+            <div class="icp-field">
+                <label>Vertical / Industry</label>
+                <input type="text" id="nb-vertical" placeholder="e.g. pet health, fintech, beauty, SaaS">
+            </div>
+            <div class="icp-field">
+                <label>Geography</label>
+                <div class="icp-chips" id="nb-geography">${chipRow(['US', 'North America', 'Europe', 'Global'])}</div>
+                <input type="text" id="nb-geography-custom" placeholder="Or type a specific region..." style="margin-top:6px">
+            </div>
+            <div class="icp-field">
+                <label>Additional Qualifiers</label>
+                <input type="text" id="nb-qualifiers" placeholder="e.g. DTC only, VC-backed, subscription model">
+            </div>
+            <div class="niche-builder-preview-label">Preview</div>
+            <div class="niche-builder-preview" id="nb-preview">Select options above to build a niche query...</div>
+        </div>
+        <div class="niche-builder-footer">
+            <button class="icp-wizard-btn-back" onclick="closeNicheBuilder()">Cancel</button>
+            <button class="icp-wizard-btn-next" onclick="applyNicheBuilder()">Build Niche</button>
+        </div>
+    </div>`;
+
+    document.body.appendChild(overlay);
+
+    // Live preview: update on chip clicks and text input
+    const updatePreview = () => {
+        const el = document.getElementById('nb-preview');
+        if (el) el.textContent = buildNicheString() || 'Select options above to build a niche query...';
+    };
+    overlay.querySelectorAll('.icp-chip').forEach(chip => {
+        chip.addEventListener('click', function() { _nbSingleSelect(this); updatePreview(); });
+    });
+    ['nb-vertical', 'nb-geography-custom', 'nb-qualifiers'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', updatePreview);
+    });
+
+    // Focus the vertical input for quick typing
+    const vertInput = document.getElementById('nb-vertical');
+    if (vertInput) setTimeout(() => vertInput.focus(), 50);
+
+    // Escape to close
+    overlay._escHandler = (e) => { if (e.key === 'Escape') closeNicheBuilder(); };
+    document.addEventListener('keydown', overlay._escHandler);
+}
+
+function icpWizardNext() {
+    if (_icpWizardStep >= 4) return;
+    _icpWizardStep++;
+    _updateWizardStepUI();
+}
+
+function icpWizardBack() {
+    if (_icpWizardStep <= 0) return;
+    _icpWizardStep--;
+    _updateWizardStepUI();
+}
+
+function _updateWizardStepUI() {
+    const overlay = document.querySelector('.icp-wizard-overlay');
+    if (!overlay) return;
+
+    // Update step dots
+    overlay.querySelectorAll('.icp-step-dot').forEach((dot, i) => {
+        dot.className = 'icp-step-dot';
+        if (i < _icpWizardStep) dot.classList.add('done');
+        if (i === _icpWizardStep) dot.classList.add('active');
+    });
+
+    // Show/hide steps
+    overlay.querySelectorAll('.icp-wizard-step').forEach(s => {
+        s.classList.toggle('active', parseInt(s.dataset.step) === _icpWizardStep);
+    });
+
+    // Back button
+    const backBtn = document.getElementById('icp-back-btn');
+    if (backBtn) backBtn.style.visibility = _icpWizardStep === 0 ? 'hidden' : 'visible';
+
+    // Nav right: show Next for steps 0-3, Save for step 4
+    const navRight = document.getElementById('icp-nav-right');
+    if (navRight) {
+        if (_icpWizardStep < 4) {
+            navRight.innerHTML = '<button class="icp-wizard-btn-next" onclick="icpWizardNext()" id="icp-next-btn">Next</button>';
+        } else if (_icpGeneratedConfig) {
+            navRight.innerHTML = '<button class="icp-wizard-btn-save" onclick="icpWizardSave()" id="icp-save-btn">Save & Activate</button>';
+        } else {
+            navRight.innerHTML = '';
+        }
+    }
+}
+
+function _gatherSurveyAnswers() {
+    const overlay = document.querySelector('.icp-wizard-overlay');
+    if (!overlay) return {};
+    const _chips = (id) => { const arr = []; overlay.querySelectorAll(`#${id} .icp-chip.selected`).forEach(c => { let t = c.textContent.trim(); if (c.querySelector('span')) t = c.childNodes[0].textContent.trim(); arr.push(t); }); return arr; };
+    const _chip1 = (id) => { const el = overlay.querySelector(`#${id} .icp-chip.selected`); if (!el) return ''; let t = el.textContent.trim(); if (el.querySelector('span')) t = el.childNodes[0].textContent.trim(); return t; };
+    const _val = (id) => (document.getElementById(id)?.value || '').trim();
+    const preRev = document.getElementById('icp-best-customers-wrap')?.dataset.preRevenue === 'true';
+    const isB2C = _icpCustomerType === 'B2C';
+    return {
+        // Step 0 — funnel
+        customer_type: _icpCustomerType,
+        industry: _chip1('icp-q-industry'),
+        sub_industry: _chip1('icp-q-sub-industry'),
+        niche_detail: _val('icp-q-niche-detail'),
+        // Step 1 — offer
+        product: _val('icp-q-product'),
+        problem: _val('icp-q-problem'),
+        // Step 2 — B2B customers
+        best_customers: _val('icp-q-best-customers'),
+        pre_revenue: preRev,
+        sizes: _chips('icp-q-sizes'),
+        commonalities: _chips('icp-q-commonalities'),
+        commonalities_other: _val('icp-q-commonalities-other'),
+        // Step 2 — B2C customers
+        ideal_consumer: _val('icp-q-ideal-consumer'),
+        price_point: _chip1('icp-q-price-point'),
+        where_they_buy: _chips('icp-q-where-they-buy'),
+        consumer_traits: _chips('icp-q-consumer-traits'),
+        // Step 3 — B2B sales
+        how_they_buy: _chip1('icp-q-how-they-buy'),
+        deal_size: _chip1('icp-q-deal-size'),
+        sales_cycle: _chip1('icp-q-sales-cycle'),
+        // Step 3 — B2C sales
+        acquisition_channels: _chips('icp-q-acquisition-channels'),
+        purchase_frequency: _chip1('icp-q-purchase-frequency'),
+        avg_order_value: _chip1('icp-q-avg-order-value'),
+    };
+}
+
+async function icpWizardGenerate() {
+    const answers = _gatherSurveyAnswers();
+    if (!answers.customer_type) { alert('Please select who you sell to (B2B, B2C, or Both).'); _icpWizardStep = 0; _updateWizardStepUI(); return; }
+    if (!answers.product) { alert('Please describe what your company does.'); _icpWizardStep = 1; _updateWizardStepUI(); return; }
+
+    const genBtn = document.getElementById('icp-generate-btn');
+    const reviewContent = document.getElementById('icp-review-content');
+    reviewContent.innerHTML = `<div class="icp-generate-spinner">
+        <div class="spinner"></div>
+        Generating your ICP scoring config...
+    </div>`;
+
+    try {
+        const resp = await fetch('/api/icp-profiles/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ survey_answers: answers }),
+        });
+        if (!resp.ok) throw new Error('Generation failed');
+        const data = await resp.json();
+        _icpGeneratedConfig = data.config;
+
+        // Auto-generate a name suggestion from product
+        const autoName = answers.product.substring(0, 40).split(/[.,;]/)[0].trim();
+
+        reviewContent.innerHTML = _renderReviewStep(_icpGeneratedConfig, autoName);
+        _updateWizardStepUI();
+    } catch (e) {
+        console.error('ICP generation failed:', e);
+        reviewContent.innerHTML = `<h3>Generation Failed</h3>
+            <div class="step-desc" style="color:var(--red)">Could not generate ICP config. Please try again.</div>
+            <div style="text-align:center;padding:20px 0">
+                <button class="icp-wizard-btn-next" onclick="icpWizardGenerate()" id="icp-generate-btn">Retry</button>
+            </div>`;
+    }
+}
+
+async function icpWizardSave() {
+    if (!_icpGeneratedConfig) return;
+
+    // Read user edits from the review step
+    const name = (document.getElementById('icp-review-name')?.value || '').trim();
+    if (!name) { alert('Please enter a profile name.'); return; }
+
+    const config = JSON.parse(JSON.stringify(_icpGeneratedConfig)); // deep copy
+    config.icp_definition = document.getElementById('icp-review-definition')?.value || config.icp_definition;
+
+    // Read dimension weight adjustments
+    const sliders = document.querySelectorAll('#icp-review-dims input[type="range"]');
+    let totalWeight = 0;
+    sliders.forEach(s => { totalWeight += parseInt(s.value); });
+    if (totalWeight > 0) {
+        sliders.forEach(s => {
+            const idx = parseInt(s.dataset.dimIdx);
+            if (config.dimensions[idx]) {
+                config.dimensions[idx].weight = Math.round((parseInt(s.value) / totalWeight) * 100) / 100;
+            }
+        });
+    }
+
+    // Read discovery filter edits
+    if (!config.discovery_filters) config.discovery_filters = {};
+    config.discovery_filters.include_description = document.getElementById('icp-review-include')?.value || '';
+    config.discovery_filters.exclude_description = document.getElementById('icp-review-exclude')?.value || '';
+
+    const survey_answers = _gatherSurveyAnswers();
+    const saveBtn = document.getElementById('icp-save-btn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving...'; }
+
+    try {
+        let resp;
+        if (_icpWizardMode === 'edit' && _icpEditData) {
+            resp = await fetch(`/api/icp-profiles/${_icpEditData.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, config, survey_answers }),
+            });
+        } else {
+            resp = await fetch('/api/icp-profiles', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, config, survey_answers }),
+            });
+        }
+        if (!resp.ok) throw new Error('Save failed');
+        const data = await resp.json();
+
+        // Activate the new/edited profile
+        if (data.id) {
+            await fetch(`/api/icp-profiles/${data.id}/activate`, { method: 'POST' });
+        }
+
+        closeIcpWizard();
+        await loadIcpProfiles();
+        await loadCampaigns();
+    } catch (e) {
+        console.error('ICP save failed:', e);
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save & Activate'; }
+        alert('Failed to save ICP profile. Please try again.');
+    }
+}
+
+// ===================== RESIZE HANDLE =====================
+let savedRightWidth = null;
+(function() {
+    const handle = document.getElementById('resize-handle');
+    const rightPane = document.getElementById('right-pane');
+    let dragging = false;
+    let startX, startWidth;
+
+    handle.addEventListener('mousedown', e => {
+        if (!rightPane.classList.contains('open')) return;
+        e.preventDefault();
+        dragging = true;
+        startX = e.clientX;
+        startWidth = rightPane.offsetWidth;
+        handle.classList.add('dragging');
+        rightPane.classList.add('resizing');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        // Dragging left increases right pane width
+        const delta = startX - e.clientX;
+        const newWidth = Math.max(320, Math.min(startWidth + delta, window.innerWidth - 500));
+        rightPane.style.width = newWidth + 'px';
+        rightPane.style.minWidth = newWidth + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove('dragging');
+        rightPane.classList.remove('resizing');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        // Remember the resized width for subsequent report/briefing opens
+        savedRightWidth = rightPane.offsetWidth;
+    });
+})();
+
+// ===================== SIGNALS MODULE =====================
+
+const _DOMAIN_LABELS = {
+    economics: 'Economics', finance: 'Finance', geopolitics: 'Geopolitics',
+    tech_ai: 'Tech / AI', labor: 'Labor', regulatory: 'Regulatory'
+};
+const _DOMAIN_COLORS = {
+    economics: '#3b82f6', finance: '#22c55e', geopolitics: '#ef4444',
+    tech_ai: '#a855f7', labor: '#eab308', regulatory: '#f97316'
+};
+
+let _signalsCache = [];
+let _threadsCache = [];
+let _signalsDomainFilter = 'all';
+let _activeSignalId = null;
+let _activeThreadId = null;
+let _signalTab = 'threads';
+let _detailRequestId = 0; // monotonic counter to cancel stale fetches
+let _rawSelectedSignals = new Set(); // selected signal IDs in Raw tab for pattern creation
+
+function switchSignalTab(tab) {
+    _signalTab = tab;
+    document.querySelectorAll('.sig-feed-tab').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.sig-feed-tab[data-tab="${tab}"]`).classList.add('active');
+    document.querySelectorAll('.sig-tab-content').forEach(c => c.classList.remove('active'));
+    document.getElementById(`sig-tab-${tab}`).classList.add('active');
+    if (tab === 'graph') loadGraph();
+    // Show/hide filter input (only useful for patterns and raw tabs)
+    const searchInput = document.getElementById('signals-search');
+    if (searchInput) searchInput.style.display = (tab === 'threads' || tab === 'raw') ? '' : 'none';
+    // Clear detail pane on tab switch (except graph — clicking nodes shows detail)
+    if (tab !== 'graph') closeSignalDetail();
+}
+
+function renderActiveSignalTab() {
+    if (_signalTab === 'threads') renderThreadFeed();
+    else renderSignalFeed();
+}
+
+function filterSignalDomain(domain) {
+    _signalsDomainFilter = domain;
+    document.querySelectorAll('.sig-domain-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.sig-domain-btn[data-domain="${domain}"]`).classList.add('active');
+    renderActiveSignalTab();
+}
+
+function loadSignals() {
+    const params = new URLSearchParams({ days_back: 7, limit: 300 });
+    // Load raw signals, threads, and brainstorms in parallel
+    Promise.all([
+        fetch('/api/signals?' + params).then(r => r.json()),
+        fetch('/api/signals/threads').then(r => r.json()),
+        fetch('/api/signals/brainstorms').then(r => r.json()),
+    ]).then(([sigData, threadData, brainstormData]) => {
+        _signalsCache = sigData.signals || [];
+        _threadsCache = threadData.threads || [];
+        renderSignalFeed();
+        renderThreadFeed();
+        _renderBrainstormList(brainstormData.brainstorms || []);
+    }).catch(e => console.error('[signals] load error:', e));
+}
+
+function _renderBrainstormList(brainstorms) {
+    const container = document.getElementById('signals-brainstorm-list');
+    const items = document.getElementById('brainstorm-list-items');
+    if (!brainstorms.length) { container.style.display = 'none'; return; }
+    container.style.display = 'block';
+    items.innerHTML = brainstorms.slice(0, 8).map(b => {
+        const titles = (b.thread_titles || []).join(' × ');
+        const date = b.created_at ? _timeAgo(b.created_at) : '';
+        return `<div onclick="openPastBrainstorm(${b.id})" style="padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer;transition:color 0.15s" onmouseenter="this.style.color='var(--accent)'" onmouseleave="this.style.color=''">
+            <div style="font-size:11px;font-weight:600;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(titles)}</div>
+            <div style="font-size:9px;color:var(--text-muted)">${escHtml(date)} · ${(b.hypotheses || []).length} hypotheses</div>
+        </div>`;
+    }).join('');
+}
+
+function loadSignalFreshness() {
+    fetch('/api/signals/freshness')
+        .then(r => r.json())
+        .then(data => {
+            const fresh = data.freshness || {};
+            const counts = data.counts || {};
+            for (const [dom, cnt] of Object.entries(counts)) {
+                const el = document.getElementById(`sig-count-${dom}`);
+                if (el) el.textContent = cnt;
+            }
+            const el = document.getElementById('signals-freshness');
+            const times = Object.values(fresh);
+            if (times.length) {
+                const latest = times.sort().reverse()[0];
+                el.textContent = 'Last scan: ' + _timeAgo(latest);
+            }
+        })
+        .catch(() => {});
+
+    // Also load scan history
+    fetch('/api/signals/scan-history')
+        .then(r => r.json())
+        .then(data => {
+            const scans = data.scans || [];
+            const container = document.getElementById('signals-scan-history');
+            const items = document.getElementById('scan-history-items');
+            if (!scans.length) { container.style.display = 'none'; return; }
+            container.style.display = 'block';
+            items.innerHTML = scans.map(s => {
+                const age = _timeAgo(s.created_at);
+                return `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:10px;cursor:pointer" onclick="switchSignalTab('execution')">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                        <span style="color:var(--text-secondary);font-weight:600">${s.total_collected} signals · ${s.new_inserted} new</span>
+                        <span style="color:var(--text-muted)">${escHtml(age)}</span>
+                    </div>
+                    <div style="color:var(--text-muted);margin-top:2px">${s.threads_created} patterns · ${s.threads_assigned} assigned</div>
+                </div>`;
+            }).join('');
+        })
+        .catch(() => {});
+}
+
+function _timeAgo(isoStr) {
+    if (!isoStr) return 'never';
+    const d = new Date(isoStr + (isoStr.includes('Z') || isoStr.includes('+') ? '' : 'Z'));
+    const diff = (Date.now() - d.getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+}
+
+function _updateDomainCounts() {
+    const domCounts = {};
+    _signalsCache.forEach(s => { domCounts[s.domain] = (domCounts[s.domain] || 0) + 1; });
+    for (const dom of Object.keys(_DOMAIN_LABELS)) {
+        const el = document.getElementById(`sig-count-${dom}`);
+        if (el) el.textContent = domCounts[dom] || 0;
+    }
+}
+
+function renderSignalFeed() {
+    const container = document.getElementById('sig-tab-raw');
+    const search = (document.getElementById('signals-search').value || '').toLowerCase();
+
+    let filtered = _signalsCache;
+    if (_signalsDomainFilter !== 'all') {
+        filtered = filtered.filter(s => s.domain === _signalsDomainFilter);
+    }
+    if (search) {
+        filtered = filtered.filter(s =>
+            (s.title || '').toLowerCase().includes(search) ||
+            (s.body || '').toLowerCase().includes(search) ||
+            (s.source_name || '').toLowerCase().includes(search)
+        );
+    }
+
+    _updateDomainCounts();
+
+    if (!filtered.length) {
+        container.innerHTML = `<div class="signals-empty">
+            <div style="font-size:32px;margin-bottom:12px">&#128225;</div>
+            <div>No signals match this filter</div>
+        </div>`;
+        return;
+    }
+
+    const html = filtered.map(s => {
+        const domLabel = _DOMAIN_LABELS[s.domain] || s.domain;
+        const dateStr = s.published_at ? s.published_at.substring(0, 10) : '';
+        const checked = _rawSelectedSignals.has(s.id) ? ' checked' : '';
+        return `<div class="sig-card sig-domain-${escHtml(s.domain)} ${s.id === _activeSignalId ? 'active' : ''}"
+                     data-id="${s.id}">
+            <div style="display:flex;gap:8px;align-items:start">
+                <div class="sig-card-select${checked}" data-sig-id="${s.id}" onclick="event.stopPropagation();_toggleRawSelect(${s.id})">✓</div>
+                <div style="flex:1;min-width:0">
+                    <div class="sig-card-header">
+                        <span class="sig-card-domain">${escHtml(domLabel)}</span>
+                        <span class="sig-card-source">${escHtml(s.source_name || s.source)}</span>
+                        <span class="sig-card-date">${escHtml(dateStr)}</span>
+                    </div>
+                    <div class="sig-card-title">${escHtml(s.title)}</div>
+                    ${s.body ? `<div class="sig-card-body">${escHtml(s.body.substring(0, 200))}</div>` : ''}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Add create pattern bar if signals are selected
+    const barHtml = _rawSelectedSignals.size >= 2
+        ? `<div class="sig-create-pattern-bar">
+            <span style="font-size:11px;color:var(--text-secondary);font-weight:600">${_rawSelectedSignals.size} selected</span>
+            <button onclick="_createPatternFromSelection()" style="margin-left:auto;padding:6px 14px;background:linear-gradient(135deg,var(--accent),var(--purple));border:none;border-radius:6px;color:#fff;font-size:11px;font-weight:600;cursor:pointer">Create Pattern →</button>
+            <button onclick="_clearRawSelection()" style="padding:6px 10px;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-size:11px;cursor:pointer">Clear</button>
+           </div>`
+        : _rawSelectedSignals.size === 1
+        ? `<div class="sig-create-pattern-bar"><span style="font-size:11px;color:var(--text-muted)">1 selected — select 1 more to create a pattern</span></div>`
+        : '';
+
+    container.innerHTML = html + barHtml;
+}
+
+// Single event delegation on the feed body — handles both tabs
+document.addEventListener('DOMContentLoaded', () => {
+    const feedBody = document.getElementById('signals-feed-body');
+    if (feedBody) feedBody.addEventListener('click', function(e) {
+        const sigCard = e.target.closest('.sig-card');
+        if (sigCard) { openSignalDetail(parseInt(sigCard.dataset.id)); return; }
+        const threadCard = e.target.closest('.thread-card');
+        if (threadCard) { openThreadDetail(parseInt(threadCard.dataset.id)); return; }
+    });
+});
+
+function renderThreadFeed() {
+    const container = document.getElementById('sig-tab-threads');
+    const search = (document.getElementById('signals-search').value || '').toLowerCase();
+
+    let filtered = _threadsCache;
+    if (_signalsDomainFilter !== 'all') {
+        filtered = filtered.filter(t => t.domain === _signalsDomainFilter);
+    }
+    if (search) {
+        filtered = filtered.filter(t =>
+            (t.title || '').toLowerCase().includes(search) ||
+            (t.synthesis || '').toLowerCase().includes(search)
+        );
+    }
+
+    _updateDomainCounts();
+
+    if (!filtered.length) {
+        container.innerHTML = `<div class="signals-empty">
+            <div style="font-size:32px;margin-bottom:12px">&#128202;</div>
+            <div>${_signalsCache.length ? 'No patterns yet — run a scan to detect them' : 'No patterns yet'}</div>
+            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Patterns are detected automatically when you scan for signals.</div>
+        </div>`;
+        return;
+    }
+
+    const html = filtered.map(t => {
+        const m = t.momentum || {};
+        const mDir = m.direction || 'stable';
+        const mLabel = {accelerating: '↑ Accelerating', stable: '→ Stable', fading: '↓ Decelerating'}[mDir] || '→ Stable';
+        const lifecycle = m.lifecycle || 'active';
+        const domLabel = _DOMAIN_LABELS[t.domain] || t.domain;
+        const domColor = _DOMAIN_COLORS[t.domain] || '#6b7280';
+        const age = t.last_signal_at ? _timeAgo(t.last_signal_at) : _timeAgo(t.created_at);
+        const dormantStyle = lifecycle === 'dormant' ? 'opacity:0.45;' : lifecycle === 'cooling' ? 'opacity:0.7;' : '';
+        const lifecycleLabel = lifecycle === 'dormant' ? `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px">dormant · ${m.days_since_last || 0}d</span>` :
+                               lifecycle === 'cooling' ? `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px">cooling</span>` : '';
+
+        return `<div class="thread-card ${t.id === _activeThreadId ? 'active' : ''}" data-id="${t.id}" style="${dormantStyle}">
+            <div class="thread-card-title">${escHtml(t.title)}</div>
+            ${t.synthesis ? `<div class="thread-card-summary">${escHtml(t.synthesis)}</div>` : ''}
+            <div class="thread-card-meta">
+                <span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700">${escHtml(domLabel)}</span>
+                <span class="thread-card-stat">${t.signal_count || 0} signals</span>
+                <span class="thread-card-stat">${escHtml(age)}</span>
+                <span class="thread-momentum ${escHtml(mDir)}">${mLabel}</span>
+                ${lifecycleLabel}
+            </div>
+        </div>`;
+    }).join('');
+    container.innerHTML = html;
+}
+
+function openSignalDetail(signalId) {
+    // Match by loose equality to handle string/int mismatch from dataset
+    const s = _signalsCache.find(x => x.id == signalId);
+    if (!s) { console.warn('[signals] Signal not found in cache:', signalId); return; }
+    _activeSignalId = s.id;
+    ++_detailRequestId; // cancel any pending thread detail fetches
+
+    // Highlight active card
+    document.querySelectorAll('.sig-card').forEach(c => c.classList.remove('active'));
+    const card = document.querySelector(`.sig-card[data-id="${s.id}"]`);
+    if (card) card.classList.add('active');
+
+    const detailBody = _showDetailPane();
+
+    const domLabel = _DOMAIN_LABELS[s.domain] || s.domain;
+    const domColor = _DOMAIN_COLORS[s.domain] || '#6b7280';
+    const dateStr = s.published_at ? s.published_at.substring(0, 10) : 'Unknown date';
+
+    detailBody.innerHTML = `
+        <div class="sig-detail-card">
+            <div class="sig-detail-hero" style="border-left: 4px solid ${domColor}">
+                <h2>${escHtml(s.title)}</h2>
+                <div class="sig-detail-meta">
+                    <span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700">${escHtml(domLabel)}</span>
+                    <span style="font-size:11px;color:var(--text-muted)">${escHtml(s.source_name || s.source)}</span>
+                    <span style="font-size:11px;color:var(--text-muted)">${escHtml(dateStr)}</span>
+                </div>
+            </div>
+            <div class="sig-detail-body-text" id="sig-detail-text-${s.id}">${s.body ? escHtml(s.body) : '<span style="color:var(--text-muted);font-style:italic">No article text yet</span>'}</div>
+            <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                ${s.url && (!s.body || s.body.length < 500) ? `<button id="sig-fetch-btn-${s.id}" onclick="fetchArticleText(${s.id})" style="padding:6px 14px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer">Load full article</button>` : ''}
+                ${s.url ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--text-muted);font-size:11px;text-decoration:none">Open source &rarr;</a>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function fetchArticleText(signalId) {
+    const btn = document.getElementById('sig-fetch-btn-' + signalId);
+    const textEl = document.getElementById('sig-detail-text-' + signalId);
+    if (btn) { btn.textContent = 'Fetching...'; btn.disabled = true; }
+
+    fetch('/api/signals/' + signalId + '/fetch-article', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok && data.body) {
+                textEl.textContent = data.body;
+                // Update cache too
+                const cached = _signalsCache.find(x => x.id == signalId);
+                if (cached) cached.body = data.body;
+                if (btn) btn.remove();
+            } else {
+                if (btn) { btn.textContent = 'Could not fetch'; btn.style.color = 'var(--red)'; }
+            }
+        })
+        .catch(() => {
+            if (btn) { btn.textContent = 'Fetch failed'; btn.style.color = 'var(--red)'; }
+        });
+}
+
+function _showDetailPane() {
+    const detailBody = document.getElementById('signals-detail-body');
+    const detailEmpty = document.getElementById('signals-detail-empty');
+    const closeBtn = document.querySelector('.signals-detail-close');
+    if (detailEmpty) detailEmpty.style.display = 'none';
+    if (closeBtn) closeBtn.style.display = 'block';
+    return detailBody;
+}
+
+function openThreadDetail(threadId) {
+    _activeThreadId = threadId;
+    const myRequest = ++_detailRequestId; // capture this request's ID
+
+    // Highlight active thread card + graph node
+    document.querySelectorAll('.thread-card').forEach(c => c.classList.remove('active'));
+    const card = document.querySelector(`.thread-card[data-id="${threadId}"]`);
+    if (card) card.classList.add('active');
+
+    const detailBody = _showDetailPane();
+    detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading pattern...</div>`;
+
+    fetch(`/api/signals/threads/${threadId}`)
+        .then(r => r.json())
+        .then(thread => {
+            // Stale guard: if another request was made after this one, discard
+            if (myRequest !== _detailRequestId) return;
+            if (!thread || thread.error) {
+                detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--red)">Thread not found</div>`;
+                return;
+            }
+            const domLabel = _DOMAIN_LABELS[thread.domain] || thread.domain;
+            const domColor = _DOMAIN_COLORS[thread.domain] || '#6b7280';
+            const m = thread.momentum || {};
+            const mDir = m.direction || 'stable';
+            const mLabel = {accelerating: '↑ Accelerating', stable: '→ Stable', fading: '↓ Decelerating'}[mDir];
+            const signals = thread.signals || [];
+            const entities = thread.entities || [];
+
+            // Group entities by type, dedup
+            const entsByType = {};
+            entities.forEach(e => {
+                const type = e.entity_type;
+                if (!entsByType[type]) entsByType[type] = [];
+                const val = e.normalized_value || e.entity_value;
+                if (!entsByType[type].find(x => x.toLowerCase() === val.toLowerCase())) entsByType[type].push(val);
+            });
+
+            const _entIcon = {company: '🏢', sector: '📊', geography: '📍', person: '👤', regulation: '⚖️'};
+            const _entClickable = ['company', 'sector', 'geography'];
+            const entHtml = Object.entries(entsByType).map(([type, vals]) => {
+                const icon = _entIcon[type] || '🔹';
+                const clickable = _entClickable.includes(type);
+                return `<div style="margin-bottom:8px">
+                    <span style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">${escHtml(type)}</span><br>
+                    ${vals.map(v => {
+                        const cls = clickable ? 'ent-chip ent-chip-clickable' : 'ent-chip';
+                        const onclick = clickable ? `onclick="openEntityPopover(event, '${escHtml(type)}', '${escHtml(v.replace(/'/g, "\\'"))}')"` : '';
+                        return `<span class="${cls}" data-type="${escHtml(type)}" ${onclick}>${icon} ${escHtml(v)}</span>`;
+                    }).join('')}
+                </div>`;
+            }).join('');
+
+            const sigSignals = signals.filter(s => s.signal_status !== 'noise');
+            const sigNoise = signals.filter(s => s.signal_status === 'noise');
+
+            const _renderSignalItem = (s, isNoise) => {
+                const dateStr = s.published_at ? s.published_at.substring(0, 10) : '';
+                const opacity = isNoise ? 'opacity:0.4;' : '';
+                const toggleLabel = isNoise ? 'Promote' : 'Noise';
+                const toggleStatus = isNoise ? 'signal' : 'noise';
+                return `<div id="sig-item-${s.id}" style="padding:8px 0;border-bottom:1px solid var(--border);${opacity}">
+                    <div style="display:flex;align-items:start;gap:6px">
+                        <div style="flex:1;min-width:0;cursor:pointer" onclick="_toggleSignalArticle(${s.id}, this)">
+                            <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:3px">${escHtml(s.title)}</div>
+                            <div style="font-size:10px;color:var(--text-muted);display:flex;gap:8px;flex-wrap:wrap">
+                                <span>${escHtml(s.source_name || s.source)}</span>
+                                <span>${escHtml(dateStr)}</span>
+                                ${s.url ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none" onclick="event.stopPropagation()">source →</a>` : ''}
+                            </div>
+                        </div>
+                        <button onclick="_setSignalStatus(${s.id}, '${toggleStatus}', ${thread.id})" style="flex-shrink:0;padding:2px 6px;background:none;border:1px solid var(--border);border-radius:4px;font-size:9px;color:var(--text-muted);cursor:pointer" title="${toggleLabel}">${isNoise ? '↑' : '↓'}</button>
+                    </div>
+                    <div id="sig-article-${s.id}" style="display:none"></div>
+                </div>`;
+            };
+
+            const signalListHtml = sigSignals.map(s => _renderSignalItem(s, false)).join('');
+            const noiseListHtml = sigNoise.length ? `
+                <div style="margin-top:12px;padding-top:8px;border-top:1px dashed var(--border)">
+                    <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+                        ↓ ${sigNoise.length} noise signal(s) — click to toggle
+                    </div>
+                    <div style="display:none">${sigNoise.map(s => _renderSignalItem(s, true)).join('')}</div>
+                </div>
+            ` : '';
+
+            detailBody.innerHTML = `
+                <div class="sig-detail-card">
+                    <div class="sig-detail-hero" style="border-left: 4px solid ${domColor}">
+                        <h2>${escHtml(thread.title)}</h2>
+                        <div class="sig-detail-meta">
+                            <span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700">${escHtml(domLabel)}</span>
+                            <span class="thread-momentum ${escHtml(mDir)}">${mLabel}</span>
+                            <span style="font-size:11px;color:var(--text-muted)">${signals.length} signals</span>
+                            <span style="font-size:11px;color:var(--text-muted)">${m.this_period || 0} this week / ${m.last_period || 0} last week</span>
+                        </div>
+                    </div>
+                    ${thread.synthesis ? `<div class="sig-detail-body-text">${escHtml(thread.synthesis)}</div>` : ''}
+                    ${entHtml ? `<div style="padding:12px 20px;border-top:1px solid var(--border)">
+                        <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">Extracted Entities</div>
+                        ${entHtml}
+                    </div>` : ''}
+                    <div style="padding:12px 20px;border-top:1px solid var(--border)">
+                        <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:8px">Signals (${sigSignals.length})${sigNoise.length ? ` · <span style="color:var(--text-muted)">${sigNoise.length} noise</span>` : ''}</div>
+                        ${signalListHtml || '<div style="color:var(--text-muted);font-size:12px">No signals</div>'}
+                        ${noiseListHtml}
+                    </div>
+                    <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:6px">
+                        <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:2px">Actions</div>
+                        ${_buildThreadActions(thread, entities)}
+                    </div>
+                </div>
+            `;
+        })
+        .catch(e => {
+            if (myRequest !== _detailRequestId) return;
+            console.error('[signals] thread detail error:', e);
+            detailBody.innerHTML = `<div style="text-align:center;padding:40px;color:var(--red)">Failed to load thread</div>`;
+        });
+}
+
+function _buildThreadActions(thread, entities) {
+    const actions = [];
+    const companies = (entities || []).filter(e => e.entity_type === 'company');
+    const sectors = (entities || []).filter(e => e.entity_type === 'sector');
+    const companyNames = [...new Set(companies.map(e => e.normalized_value || e.entity_value))];
+    const sectorNames = [...new Set(sectors.map(e => e.entity_value))];
+
+    const btnStyle = 'padding:8px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;text-align:left;display:flex;align-items:center;gap:6px;transition:all 0.15s;';
+
+    // If thread has companies, offer to research them
+    if (companyNames.length) {
+        const top = companyNames.slice(0, 3);
+        actions.push(`<button onclick="_threadActionResearch('${escHtml(top[0].replace(/'/g, "\\'"))}')" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--accent)">🔬 Research ${escHtml(top[0])}</button>`);
+        if (top.length > 1) {
+            actions.push(`<button onclick="_threadActionDiscover('${escHtml(top.join(', ').replace(/'/g, "\\'"))}')" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary)">🔍 Discover companies like ${escHtml(top.slice(0, 2).join(', '))}</button>`);
+        }
+    }
+
+    // If thread has sectors, offer to discover in that niche
+    if (sectorNames.length) {
+        const niche = sectorNames[0] + (thread.synthesis ? ' — ' + thread.title : '');
+        actions.push(`<button onclick="_threadActionDiscover('${escHtml(niche.replace(/'/g, "\\'"))}')" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary)">📊 Discover companies in ${escHtml(sectorNames[0])}</button>`);
+    }
+
+    // Always offer to search for more signals
+    actions.push(`<button onclick="_threadActionSearchMore('${escHtml(thread.title.replace(/'/g, "\\'"))}', ${thread.id})" style="${btnStyle}background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-muted)">📡 Search for more signals</button>`);
+
+    return actions.join('');
+}
+
+function _threadActionResearch(companyName) {
+    switchModule('research');
+    _prefillResearchChat(companyName);
+}
+
+function _threadActionDiscover(niche) {
+    switchModule('prospecting');
+    const input = document.getElementById('prospect-niche-input');
+    if (input) input.value = niche;
+}
+
+function _threadActionSearchMore(query, patternId) {
+    // Run a targeted search and link results to this pattern
+    const btn = event.target.closest('button');
+    const actionsDiv = btn ? btn.parentElement : null;
+    if (btn) { btn.textContent = '📡 Searching...'; btn.disabled = true; }
+
+    fetch('/api/signals/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, pattern_id: patternId })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (btn) {
+            const parts = [];
+            if (data.new_inserted > 0) parts.push(`${data.new_inserted} new`);
+            if (data.linked_to_pattern > 0) parts.push(`${data.linked_to_pattern} linked`);
+            if (data.filtered_stale > 0) parts.push(`${data.filtered_stale} stale filtered`);
+            btn.textContent = parts.length ? `✓ ${parts.join(', ')}` : '✓ No new signals';
+            btn.style.color = data.linked_to_pattern > 0 ? 'var(--green)' : 'var(--text-muted)';
+        }
+        // Show audit trail below the button
+        if (actionsDiv && data.audit) {
+            const auditEl = document.createElement('div');
+            auditEl.style.cssText = 'margin-top:8px;padding:10px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;font-size:10px';
+            auditEl.innerHTML = `<div style="font-weight:700;color:var(--text-secondary);margin-bottom:6px">Search Audit</div>` +
+                (data.audit.sources || []).map(s =>
+                    `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
+                        <span style="color:var(--text-secondary)">${escHtml(s.source)}</span>
+                        <span style="color:var(--text-muted)"><span class="exec-query-chip">${escHtml(s.query)}</span> ${s.raw} found → ${s.after_filter} fresh</span>
+                    </div>`
+                ).join('') +
+                (data.filtered_stale > 0 ? `<div style="margin-top:4px;color:var(--text-muted)">🕐 ${data.filtered_stale} article(s) older than 30 days filtered out</div>` : '');
+            actionsDiv.appendChild(auditEl);
+        }
+        // Reload feed and refresh this pattern's detail
+        loadSignals();
+        if (patternId) setTimeout(() => openThreadDetail(patternId), 500);
+    })
+    .catch(() => {
+        if (btn) { btn.textContent = 'Search failed'; btn.style.color = 'var(--red)'; }
+    });
+}
+
+function openEntityPopover(event, entityType, entityValue) {
+    event.stopPropagation();
+    // Remove any existing popover
+    document.querySelectorAll('.ent-popover').forEach(p => p.remove());
+
+    const icon = {company: '🏢', sector: '📊', geography: '📍'}[entityType] || '🔹';
+
+    // Create popover shell with loading state
+    const pop = document.createElement('div');
+    pop.className = 'ent-popover';
+    pop.innerHTML = `
+        <div class="ent-popover-header">
+            <span style="font-size:18px">${icon}</span>
+            <div>
+                <div class="ent-popover-title">${escHtml(entityValue)}</div>
+                <div class="ent-popover-subtitle">${escHtml(entityType)}</div>
+            </div>
+        </div>
+        <div class="ent-popover-body" style="text-align:center;padding:20px;color:var(--text-muted);font-size:11px">Loading...</div>
+    `;
+    document.body.appendChild(pop);
+
+    // Position near the click
+    const rect = event.target.getBoundingClientRect();
+    let top = rect.bottom + 6;
+    let left = rect.left;
+    // Keep within viewport
+    if (top + 300 > window.innerHeight) top = rect.top - 300;
+    if (left + 360 > window.innerWidth) left = window.innerWidth - 370;
+    pop.style.top = Math.max(8, top) + 'px';
+    pop.style.left = Math.max(8, left) + 'px';
+
+    // Close on outside click
+    setTimeout(() => {
+        document.addEventListener('click', function _close(e) {
+            if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', _close); }
+        });
+    }, 50);
+
+    // Fetch context
+    fetch(`/api/signals/entity-context/${encodeURIComponent(entityType)}/${encodeURIComponent(entityValue)}`)
+        .then(r => r.json())
+        .then(ctx => {
+            let bodyHtml = '';
+            let actionsHtml = '';
+
+            if (entityType === 'company') {
+                if (ctx.dossier) {
+                    const d = ctx.dossier;
+                    bodyHtml = `
+                        <div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:6px">${escHtml(d.company_name)}</div>
+                        ${d.sector ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Sector: ${escHtml(d.sector)}</div>` : ''}
+                        ${d.description ? `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;line-height:1.4">${escHtml(d.description.substring(0, 200))}</div>` : ''}
+                        ${d.analyses && d.analyses.length ? `<div style="font-size:10px;color:var(--text-muted)">${d.analyses.length} analyses: ${d.analyses.map(a => a.analysis_type).join(', ')}</div>` : ''}
+                    `;
+                    actionsHtml = `
+                        <button class="ent-popover-btn ent-popover-btn-primary" onclick="document.querySelector('.ent-popover').remove();switchModule('research')">Open in Research →</button>
+                    `;
+                } else {
+                    bodyHtml = `<div style="font-size:11px;color:var(--text-muted)">No dossier exists yet for this company.</div>`;
+                    actionsHtml = `
+                        <button class="ent-popover-btn ent-popover-btn-primary" onclick="document.querySelector('.ent-popover').remove();switchModule('research');_prefillResearchChat('${escHtml(entityValue.replace(/'/g, "\\'"))}')">Research →</button>
+                        <button class="ent-popover-btn" onclick="document.querySelector('.ent-popover').remove();switchModule('prospecting');document.getElementById('prospect-niche-input').value='${escHtml(entityValue)}'">Discover →</button>
+                    `;
+                }
+            } else if (entityType === 'sector') {
+                if (ctx.campaigns && ctx.campaigns.length) {
+                    bodyHtml = `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">${ctx.campaigns.length} related campaign(s):</div>` +
+                        ctx.campaigns.map(c => `<div style="font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)">${escHtml(c.niche)} <span style="color:var(--text-muted)">(${c.status})</span></div>`).join('');
+                } else {
+                    bodyHtml = `<div style="font-size:11px;color:var(--text-muted)">No campaigns match this sector yet.</div>`;
+                }
+                actionsHtml = `
+                    <button class="ent-popover-btn ent-popover-btn-primary" onclick="document.querySelector('.ent-popover').remove();switchModule('prospecting');document.getElementById('prospect-niche-input').value='${escHtml(entityValue)}'">Explore as Niche →</button>
+                `;
+            } else if (entityType === 'geography') {
+                bodyHtml = `<div style="font-size:11px;color:var(--text-muted)">Mentioned in ${ctx.signal_count} signal(s).</div>`;
+                actionsHtml = `
+                    <button class="ent-popover-btn" onclick="document.querySelector('.ent-popover').remove();document.getElementById('signals-search').value='${escHtml(entityValue)}';renderActiveSignalTab()">Filter feed →</button>
+                `;
+            }
+
+            pop.querySelector('.ent-popover-body').innerHTML = bodyHtml;
+            if (actionsHtml) {
+                const actDiv = document.createElement('div');
+                actDiv.className = 'ent-popover-actions';
+                actDiv.innerHTML = actionsHtml;
+                pop.appendChild(actDiv);
+            }
+
+            // Add signal count footer
+            if (ctx.signal_count > 0) {
+                const footer = document.createElement('div');
+                footer.style.cssText = 'padding:6px 16px 10px;font-size:10px;color:var(--text-muted)';
+                footer.textContent = `Appears in ${ctx.signal_count} signal(s)`;
+                pop.appendChild(footer);
+            }
+        })
+        .catch(() => {
+            pop.querySelector('.ent-popover-body').innerHTML = '<div style="color:var(--red);font-size:11px">Failed to load context</div>';
+        });
+}
+
+// ===================== GRAPH VIEW =====================
+
+let _graphData = null;
+let _graphSimulation = null;
+let _selectedThreadIds = new Set();
+let _graphMode = 'patterns'; // 'patterns' or 'signals'
+let _zoomedPatternId = null;
+
+function loadGraph() {
+    fetch('/api/signals/graph')
+        .then(r => r.json())
+        .then(data => {
+            _graphData = data;
+            if (data.nodes.length) renderGraph(data);
+        })
+        .catch(e => console.error('[graph] load error:', e));
+}
+
+function renderGraph(data) {
+    const container = document.getElementById('sig-graph-container');
+    const svg = d3.select('#sig-graph-svg');
+    const empty = document.getElementById('signals-graph-empty');
+    const controls = document.getElementById('sig-graph-controls');
+
+    if (!data.nodes.length) { empty.style.display = 'flex'; return; }
+    empty.style.display = 'none';
+    svg.style('display', 'block');
+    controls.style.display = 'flex';
+
+    // Show unassigned signal count
+    const unassigned = data.unassigned_signals || 0;
+    const sel = document.getElementById('sig-graph-selection');
+    if (sel && unassigned > 0 && _selectedThreadIds.size === 0) {
+        sel.innerHTML = `<span style="color:var(--text-muted)">${data.assigned_signals || 0} signals in ${data.nodes.length} patterns · </span><span style="color:var(--purple)">${unassigned} unassigned</span> <span style="color:var(--text-muted);font-size:10px;cursor:pointer" onclick="runResynthesize()" title="Run pattern detection on unassigned signals">(re-detect)</span>`;
+    }
+
+    // Clear previous
+    svg.selectAll('*').remove();
+    _selectedThreadIds.clear();
+    _updateBrainstormBtn();
+
+    const width = container.clientWidth;
+    const height = container.clientHeight - 40; // leave room for controls
+
+    svg.attr('viewBox', [0, 0, width, height]);
+
+    // Zoom behavior — filter out clicks on nodes so they pass through to click handlers
+    const zoomGroup = svg.append('g').attr('class', 'graph-zoom-group');
+    const zoomBehavior = d3.zoom()
+        .scaleExtent([0.3, 4])
+        .filter(event => {
+            if (event.type === 'wheel') return true;
+            // Block zoom on nodes (let D3 drag handle those)
+            const target = event.target;
+            if (target.closest && target.closest('.graph-node')) return false;
+            return !event.button; // only left-click for pan
+        })
+        .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
+    svg.call(zoomBehavior);
+    // Disable double-click zoom (we use dblclick for pattern zoom-in)
+    svg.on('dblclick.zoom', null);
+    svg.node().__zoomBehavior = zoomBehavior;
+
+    // Build D3 force simulation
+    const nodes = data.nodes.map(d => ({...d}));
+    const links = data.edges.map(d => ({...d}));
+
+    _graphSimulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(70))
+        .force('charge', d3.forceManyBody().strength(-80))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(d => Math.sqrt(d.signal_count || 1) * 6 + 16));
+
+    // Edges (inside zoom group)
+    const link = zoomGroup.append('g')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('class', d => 'graph-edge' + (d.manual ? ' manual' : ''))
+        .attr('stroke-width', d => Math.max(1, d.weight * 1.5));
+
+    // Edge labels
+    const linkLabel = zoomGroup.append('g')
+        .selectAll('text')
+        .data(links)
+        .join('text')
+        .attr('class', 'graph-edge-label')
+        .attr('text-anchor', 'middle')
+        .text(d => d.shared_entities.slice(0, 2).map(e => e.name).join(', '));
+
+    // Nodes (inside zoom group)
+    const node = zoomGroup.append('g')
+        .selectAll('g')
+        .data(nodes)
+        .join('g')
+        .attr('class', 'graph-node')
+        .call(d3.drag()
+            .on('start', (event, d) => { if (!event.active) _graphSimulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+            .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+            .on('end', (event, d) => { if (!event.active) _graphSimulation.alphaTarget(0); d.fx = null; d.fy = null; })
+        )
+        .on('click', (event, d) => {
+            event.stopPropagation();
+            if (event.shiftKey) {
+                _toggleThreadSelection(d.id);
+            } else {
+                openThreadDetail(d.id);
+            }
+        })
+        .on('dblclick', (event, d) => {
+            event.stopPropagation();
+            _zoomIntoPattern(d.id);
+            openThreadDetail(d.id);
+        });
+
+    const _lifecycle = d => (d.momentum && d.momentum.lifecycle) || 'active';
+    const nodeR = d => {
+        const base = Math.sqrt(d.signal_count || 1) * 6 + 10;
+        const lc = _lifecycle(d);
+        if (lc === 'dormant') return base * 0.6;
+        if (lc === 'cooling') return base * 0.8;
+        return base;
+    };
+    const nodeOpacity = d => {
+        const lc = _lifecycle(d);
+        if (lc === 'dormant') return 0.3;
+        if (lc === 'cooling') return 0.5;
+        return 0.75;
+    };
+
+    // Selection ring (outer glow) — rendered first so it's behind the main circle
+    node.append('circle')
+        .attr('class', 'select-ring')
+        .attr('r', d => nodeR(d) + 6)
+        .attr('fill', 'none')
+        .attr('stroke', '#fff')
+        .attr('stroke-width', 2)
+        .attr('stroke-dasharray', '4 3');
+
+    // Main node: donut if noise exists, solid circle otherwise
+    const arc = d3.arc();
+    node.each(function(d) {
+        const g = d3.select(this);
+        const r = nodeR(d);
+        const color = _DOMAIN_COLORS[d.domain] || '#6b7280';
+        const op = nodeOpacity(d);
+        const total = d.total_count || d.signal_count || 1;
+        const noise = d.noise_count || 0;
+        const sigRatio = total > 0 ? (total - noise) / total : 1;
+
+        if (noise > 0) {
+            // Donut: signal portion in domain color, noise in dark
+            const thickness = Math.max(4, r * 0.3);
+            // Signal arc
+            g.append('path')
+                .attr('class', 'node-circle')
+                .attr('d', arc({ innerRadius: r - thickness, outerRadius: r, startAngle: 0, endAngle: sigRatio * 2 * Math.PI }))
+                .attr('fill', color)
+                .attr('fill-opacity', op);
+            // Noise arc
+            g.append('path')
+                .attr('d', arc({ innerRadius: r - thickness, outerRadius: r, startAngle: sigRatio * 2 * Math.PI, endAngle: 2 * Math.PI }))
+                .attr('fill', '#ef4444')
+                .attr('fill-opacity', op * 0.5);
+            // Inner fill
+            g.append('circle')
+                .attr('r', r - thickness)
+                .attr('fill', color)
+                .attr('fill-opacity', op * 0.2);
+        } else {
+            // Solid circle
+            g.append('circle')
+                .attr('class', 'node-circle')
+                .attr('r', r)
+                .attr('fill', color)
+                .attr('fill-opacity', op)
+                .attr('stroke', color)
+                .attr('stroke-width', 2);
+        }
+    });
+
+    // Selection checkmark
+    node.append('text')
+        .attr('class', 'select-check')
+        .attr('dx', d => nodeR(d) - 2)
+        .attr('dy', d => -nodeR(d) + 4)
+        .attr('font-size', '12px')
+        .attr('fill', '#22c55e')
+        .text('✓');
+
+    // Node labels
+    node.append('text')
+        .attr('class', 'node-label')
+        .attr('dy', d => nodeR(d) + 14)
+        .attr('text-anchor', 'middle')
+        .text(d => d.title.length > 35 ? d.title.substring(0, 33) + '…' : d.title);
+
+    // Signal count inside node
+    node.append('text')
+        .attr('class', 'node-count')
+        .attr('dy', 4)
+        .attr('text-anchor', 'middle')
+        .text(d => d.signal_count || '');
+
+    // Tick
+    _graphSimulation.on('tick', () => {
+        link
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
+        linkLabel
+            .attr('x', d => (d.source.x + d.target.x) / 2)
+            .attr('y', d => (d.source.y + d.target.y) / 2);
+        node.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+
+    // Click background to deselect
+    svg.on('click', (event) => {
+        if (event.target === svg.node()) {
+            _selectedThreadIds.clear();
+            _updateGraphSelection();
+            _updateBrainstormBtn();
+        }
+    });
+}
+
+function _toggleThreadSelection(threadId) {
+    if (_selectedThreadIds.has(threadId)) {
+        _selectedThreadIds.delete(threadId);
+    } else {
+        if (_selectedThreadIds.size >= 4) return; // max 4
+        _selectedThreadIds.add(threadId);
+    }
+    _updateGraphSelection();
+    _updateBrainstormBtn();
+}
+
+function _updateGraphSelection() {
+    d3.selectAll('.graph-node').classed('selected', d => _selectedThreadIds.has(d.id));
+    d3.selectAll('.graph-edge').classed('highlighted', d =>
+        _selectedThreadIds.has(d.source.id || d.source) && _selectedThreadIds.has(d.target.id || d.target)
+    );
+}
+
+function _updateBrainstormBtn() {
+    const btn = document.getElementById('sig-brainstorm-btn');
+    const sel = document.getElementById('sig-graph-selection');
+    if (!btn) return;
+    if (_selectedThreadIds.size >= 2) {
+        btn.style.display = 'block';
+        sel.innerHTML = `${_selectedThreadIds.size} threads selected · <span style="color:var(--accent);cursor:pointer" onclick="linkSelectedThreads()">Link</span>`;
+    } else {
+        btn.style.display = 'none';
+        sel.textContent = _selectedThreadIds.size === 1 ? '1 pattern selected — Shift+click another to brainstorm' : 'Click to inspect · Shift+click to select';
+    }
+}
+
+function linkSelectedThreads() {
+    if (_selectedThreadIds.size < 2) return;
+    const ids = [..._selectedThreadIds];
+    const promises = [];
+    for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+            promises.push(
+                fetch('/api/signals/thread-links', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ thread_a_id: ids[i], thread_b_id: ids[j], label: 'manual' })
+                })
+            );
+        }
+    }
+    Promise.all(promises).then(() => loadGraph());
+}
+
+function _toggleExecDomain(domain) {
+    if (_execExpandedDomains.has(domain)) {
+        _execExpandedDomains.delete(domain);
+    } else {
+        _execExpandedDomains.add(domain);
+    }
+    // Toggle the DOM directly without full re-render
+    const el = document.querySelector(`.exec-step[data-domain="${domain}"]`);
+    if (el) el.classList.toggle('open');
+}
+
+function _graphZoom(factor) {
+    const svg = d3.select('#sig-graph-svg');
+    const zb = svg.node().__zoomBehavior;
+    if (zb) svg.transition().duration(300).call(zb.scaleBy, factor);
+}
+function _graphReset() {
+    const svg = d3.select('#sig-graph-svg');
+    const zb = svg.node().__zoomBehavior;
+    if (zb) svg.transition().duration(300).call(zb.transform, d3.zoomIdentity);
+}
+function _adjustGraphSpacing(val) {
+    if (!_graphSimulation) return;
+    const v = parseInt(val);
+    _graphSimulation.force('charge').strength(-v * 2);
+    _graphSimulation.force('link').distance(v);
+    _graphSimulation.alpha(0.5).restart();
+}
+
+function _showSignalNodeDetail(s) {
+    ++_detailRequestId;
+    const detailBody = _showDetailPane();
+    const domLabel = _DOMAIN_LABELS[s.domain] || s.domain;
+    const domColor = _DOMAIN_COLORS[s.domain] || '#6b7280';
+    const dateStr = s.published_at ? s.published_at.substring(0, 10) : '';
+    const isNoise = s.signal_status === 'noise';
+    const patternId = _zoomedPatternId;
+    const patternNode = _graphData?.nodes.find(n => n.id === patternId);
+    const patternTitle = patternNode ? patternNode.title : '';
+
+    detailBody.innerHTML = `
+        ${patternTitle ? `<div style="padding:8px 16px;border-bottom:1px solid var(--border);font-size:11px;display:flex;align-items:center;gap:4px">
+            <span style="color:var(--accent);cursor:pointer" onclick="openThreadDetail(${patternId})">📊 ${escHtml(patternTitle)}</span>
+            <span style="color:var(--text-muted)">→</span>
+            <span style="color:var(--text-secondary);font-weight:600">Signal</span>
+        </div>` : ''}
+        <div class="sig-detail-card" style="border:none;border-radius:0">
+            <div class="sig-detail-hero" style="border-left: 4px solid ${domColor}">
+                <h2>${escHtml(s.title)}</h2>
+                <div class="sig-detail-meta">
+                    <span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700">${escHtml(domLabel)}</span>
+                    <span style="font-size:11px;color:var(--text-muted)">${escHtml(s.source_name || s.source)}</span>
+                    <span style="font-size:11px;color:var(--text-muted)">${escHtml(dateStr)}</span>
+                    ${isNoise ? '<span style="font-size:10px;color:var(--red);font-weight:600">NOISE</span>' : ''}
+                </div>
+            </div>
+            <div class="sig-detail-body-text" id="sig-node-body-${s.id}">
+                ${s.body_snippet ? `<div style="margin-bottom:8px">${escHtml(s.body_snippet)}${s.body_len > 300 ? '...' : ''}</div>` : ''}
+                ${s.url ? `<div style="color:var(--accent);cursor:pointer;font-size:11px" onclick="_fetchSignalNodeArticle(${s.id})">Load full article →</div>` : ''}
+            </div>
+            <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap">
+                ${s.url ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px;text-decoration:none">Open source →</a>` : ''}
+            </div>
+        </div>
+    `;
+}
+
+function _fetchSignalNodeArticle(sigId) {
+    const el = document.getElementById('sig-node-body-' + sigId);
+    if (!el) return;
+    el.innerHTML = '<span style="color:var(--text-muted)">Loading...</span>';
+    fetch('/api/signals/' + sigId + '/fetch-article', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            el.textContent = data.ok && data.body ? data.body : 'Could not load article text';
+        })
+        .catch(() => { el.textContent = 'Failed to fetch'; });
+}
+
+function _zoomIntoPattern(patternId) {
+    _graphMode = 'signals';
+    _zoomedPatternId = patternId;
+
+    // Show back button and pattern label
+    document.getElementById('sig-graph-back').style.display = 'block';
+    const label = document.getElementById('sig-graph-pattern-label');
+    const patternNode = _graphData?.nodes.find(n => n.id === patternId);
+    label.textContent = patternNode ? patternNode.title : `Pattern ${patternId}`;
+    label.style.display = 'block';
+
+    // Fetch signals for this pattern and render sub-graph
+    fetch(`/api/signals/patterns/${patternId}/signals`)
+        .then(r => r.json())
+        .then(data => _renderSignalSubGraph(data))
+        .catch(e => console.error('[graph] zoom-in error:', e));
+}
+
+function _zoomOutToPatterns() {
+    _graphMode = 'patterns';
+    _zoomedPatternId = null;
+    document.getElementById('sig-graph-back').style.display = 'none';
+    document.getElementById('sig-graph-pattern-label').style.display = 'none';
+    if (_graphData) renderGraph(_graphData);
+}
+
+function _renderSignalSubGraph(data) {
+    const container = document.getElementById('sig-graph-container');
+    const svg = d3.select('#sig-graph-svg');
+    svg.selectAll('*').remove();
+
+    const width = container.clientWidth;
+    const height = container.clientHeight - 40;
+    svg.attr('viewBox', [0, 0, width, height]);
+
+    const signals = data.signals || [];
+    const edges = data.edges || [];
+    const pattern = data.pattern || {};
+    const domColor = _DOMAIN_COLORS[pattern.domain] || '#6b7280';
+
+    if (!signals.length) return;
+
+    // Zoom behavior
+    const zoomGroup = svg.append('g');
+    const zoomBehavior = d3.zoom()
+        .scaleExtent([0.3, 4])
+        .filter(event => {
+            if (event.type === 'wheel') return true;
+            if (event.target.closest && event.target.closest('.signal-node')) return false;
+            return !event.button;
+        })
+        .on('zoom', (event) => zoomGroup.attr('transform', event.transform));
+    svg.call(zoomBehavior);
+    svg.on('dblclick.zoom', null);
+    svg.node().__zoomBehavior = zoomBehavior;
+
+    const nodes = signals.map(s => ({...s}));
+    const links = edges.map(e => ({...e}));
+
+    // Source icon mapping
+    const srcIcons = { google_news: '📰', reddit: '💬', hackernews: '🟧', fred: '📈', targeted: '🎯' };
+
+    const spacing = Math.max(40, 120 / Math.sqrt(signals.length));
+    const sim = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(links).id(d => d.id).distance(spacing))
+        .force('charge', d3.forceManyBody().strength(-60))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide().radius(22));
+    _graphSimulation = sim;
+
+    // Edges
+    const link = zoomGroup.append('g')
+        .selectAll('line')
+        .data(links)
+        .join('line')
+        .attr('class', 'signal-edge');
+
+    // Edge labels
+    const linkLabel = zoomGroup.append('g')
+        .selectAll('text')
+        .data(links)
+        .join('text')
+        .attr('class', 'graph-edge-label')
+        .attr('text-anchor', 'middle')
+        .text(d => (d.shared || []).slice(0, 1).map(e => e.name).join(''));
+
+    // Signal nodes
+    const node = zoomGroup.append('g')
+        .selectAll('g')
+        .data(nodes)
+        .join('g')
+        .attr('class', d => 'signal-node' + (d.signal_status === 'noise' ? ' noise' : ''))
+        .call(d3.drag()
+            .on('start', (event, d) => { if (!event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+            .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+            .on('end', (event, d) => { if (!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; })
+        )
+        .on('click', (event, d) => {
+            event.stopPropagation();
+            _showSignalNodeDetail(d);
+        });
+
+    // Signal circles
+    node.append('circle')
+        .attr('r', 16)
+        .attr('fill', domColor)
+        .attr('fill-opacity', 0.6)
+        .attr('stroke', domColor)
+        .attr('stroke-width', 2);
+
+    // Source icon inside
+    node.append('text')
+        .attr('dy', 5)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', '12px')
+        .text(d => srcIcons[d.source] || '•');
+
+    // Title labels — larger, wrapped
+    node.append('text')
+        .attr('dy', 32)
+        .attr('text-anchor', 'middle')
+        .attr('font-size', '11px')
+        .attr('fill', 'var(--text-secondary)')
+        .attr('font-weight', '600')
+        .text(d => d.title.length > 45 ? d.title.substring(0, 43) + '…' : d.title);
+
+    sim.on('tick', () => {
+        link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+        linkLabel.attr('x', d => (d.source.x + d.target.x) / 2)
+            .attr('y', d => (d.source.y + d.target.y) / 2);
+        node.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+}
+
+function toggleGraphFullscreen() {
+    const tab = document.getElementById('sig-tab-graph');
+    tab.classList.toggle('graph-fullscreen');
+    // Re-render graph at new size after transition
+    if (_graphData) setTimeout(() => renderGraph(_graphData), 50);
+}
+
+// ===================== BRAINSTORM MODE =====================
+
+function openBrainstormMode() {
+    if (_selectedThreadIds.size < 2) return;
+    const overlay = document.getElementById('brainstorm-overlay');
+    const content = document.getElementById('brainstorm-content');
+    const subtitle = document.getElementById('brainstorm-subtitle');
+    overlay.classList.add('visible');
+
+    const ids = [..._selectedThreadIds];
+    const threadNames = ids.map(id => {
+        const n = _graphData?.nodes.find(n => n.id === id);
+        return n ? n.title : `Thread ${id}`;
+    });
+    subtitle.textContent = threadNames.join(' × ');
+
+    // Show selected threads while loading
+    content.innerHTML = `
+        <div class="brainstorm-threads">
+            ${ids.map(id => {
+                const n = _graphData?.nodes.find(n => n.id === id);
+                if (!n) return '';
+                const domColor = _DOMAIN_COLORS[n.domain] || '#6b7280';
+                return `<div class="brainstorm-thread-card" style="border-left:3px solid ${domColor}">
+                    <h3>${escHtml(n.title)}</h3>
+                    <p>${escHtml(n.synthesis || 'No summary')}</p>
+                    <div style="margin-top:6px"><span class="sig-card-domain" style="background:${domColor}22;color:${domColor};padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700">${escHtml(_DOMAIN_LABELS[n.domain] || n.domain)}</span> <span style="font-size:10px;color:var(--text-muted)">${n.signal_count} signals</span></div>
+                </div>`;
+            }).join('')}
+        </div>
+        <div style="text-align:center;padding:24px;color:var(--text-muted)">
+            <div style="font-size:18px;margin-bottom:8px">🧠</div>
+            Generating hypotheses...
+        </div>
+    `;
+
+    // Call brainstorm API
+    fetch('/api/signals/brainstorm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thread_ids: ids })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.error) {
+            content.querySelector('div:last-child').innerHTML = `<div style="color:var(--red)">${escHtml(result.error)}</div>`;
+            return;
+        }
+        _renderBrainstormResults(content, result, ids);
+    })
+    .catch(e => {
+        content.querySelector('div:last-child').innerHTML = `<div style="color:var(--red)">Failed to generate hypotheses</div>`;
+    });
+}
+
+function _renderBrainstormResults(container, result, threadIds) {
+    // Keep the thread cards at the top, replace the loading section
+    const threadCards = container.querySelector('.brainstorm-threads').outerHTML;
+
+    let html = threadCards;
+
+    // Connection summary
+    if (result.connection_summary) {
+        html += `<div class="brainstorm-section">
+            <div class="brainstorm-section-title">🔗 Connection</div>
+            <div style="font-size:13px;color:var(--text-secondary);line-height:1.6;padding:12px 16px;background:var(--bg-secondary);border-radius:10px;border:1px solid var(--border)">${escHtml(result.connection_summary)}</div>
+        </div>`;
+    }
+
+    // Hypotheses
+    if (result.hypotheses && result.hypotheses.length) {
+        html += `<div class="brainstorm-section">
+            <div class="brainstorm-section-title">💡 Hypotheses</div>
+            ${result.hypotheses.map(h => `
+                <div class="hypothesis-card">
+                    <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px">
+                        <h4>${escHtml(h.title)}</h4>
+                        <span class="hypothesis-confidence ${h.confidence || 'medium'}">${(h.confidence || 'medium').toUpperCase()}</span>
+                    </div>
+                    <p>${escHtml(h.reasoning)}</p>
+                    ${h.investigate ? `<div class="hypothesis-investigate" onclick="investigateHypothesis('${escHtml(h.investigate.replace(/'/g, "\\'"))}')">🔍 Investigate: ${escHtml(h.investigate)}</div>` : ''}
+                </div>
+            `).join('')}
+        </div>`;
+    }
+
+    // Second-order effects
+    if (result.second_order_effects && result.second_order_effects.length) {
+        html += `<div class="brainstorm-section">
+            <div class="brainstorm-section-title">🌊 Second-Order Effects</div>
+            ${result.second_order_effects.map(e => `
+                <div class="second-order-card">
+                    <p><strong>${escHtml(e.effect)}</strong></p>
+                    ${e.affected_sectors?.length ? `<div style="font-size:10px;color:var(--text-muted)">Sectors: ${e.affected_sectors.map(s => escHtml(s)).join(', ')}</div>` : ''}
+                    ${e.affected_companies?.length ? `<div style="font-size:10px;color:var(--text-muted)">Companies: ${e.affected_companies.map(c => escHtml(c)).join(', ')}</div>` : ''}
+                </div>
+            `).join('')}
+        </div>`;
+    }
+
+    // Questions to investigate
+    if (result.questions_to_investigate && result.questions_to_investigate.length) {
+        html += `<div class="brainstorm-section">
+            <div class="brainstorm-section-title">❓ Questions to Investigate</div>
+            ${result.questions_to_investigate.map(q => `
+                <div style="padding:8px 12px;margin-bottom:6px;background:var(--bg-secondary);border-radius:8px;border:1px solid var(--border);font-size:12px;color:var(--text-secondary);cursor:pointer" onclick="investigateHypothesis('${escHtml(q.replace(/'/g, "\\'"))}')">
+                    🔍 ${escHtml(q)}
+                </div>
+            `).join('')}
+        </div>`;
+    }
+
+    // Actions bar
+    const tids = JSON.stringify(threadIds);
+    html += `<div style="display:flex;gap:10px;margin-top:24px;padding-top:16px;border-top:1px solid var(--border)">
+        <button onclick="_linkFromBrainstorm(${escHtml(tids)})" style="padding:10px 20px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--purple);font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">🔗 Link These Patterns</button>
+        <button onclick="closeBrainstorm()" style="padding:10px 20px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:12px;cursor:pointer">Close</button>
+    </div>`;
+
+    container.innerHTML = html;
+}
+
+function _linkFromBrainstorm(threadIds) {
+    const promises = [];
+    for (let i = 0; i < threadIds.length; i++) {
+        for (let j = i + 1; j < threadIds.length; j++) {
+            promises.push(
+                fetch('/api/signals/thread-links', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ thread_a_id: threadIds[i], thread_b_id: threadIds[j], label: 'brainstorm' })
+                })
+            );
+        }
+    }
+    Promise.all(promises).then(() => {
+        // Visual feedback
+        const btn = event.target.closest('button');
+        if (btn) { btn.textContent = '✓ Linked'; btn.style.color = 'var(--green)'; btn.disabled = true; }
+    });
+}
+
+function investigateHypothesis(query) {
+    closeBrainstorm();
+    switchModule('prospecting');
+    const input = document.getElementById('prospect-niche-input');
+    if (input) input.value = query;
+}
+
+function openPastBrainstorm(brainstormId) {
+    const overlay = document.getElementById('brainstorm-overlay');
+    const content = document.getElementById('brainstorm-content');
+    const subtitle = document.getElementById('brainstorm-subtitle');
+    overlay.classList.add('visible');
+    subtitle.textContent = 'Loading...';
+    content.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted)">Loading brainstorm...</div>';
+
+    fetch(`/api/signals/brainstorms/${brainstormId}`)
+        .then(r => r.json())
+        .then(b => {
+            if (b.error) { content.innerHTML = `<div style="color:var(--red)">${escHtml(b.error)}</div>`; return; }
+            const threads = b.threads || [];
+            subtitle.textContent = threads.map(t => t.title).join(' × ');
+            // Re-use the render function
+            const result = {
+                connection_summary: b.connection_summary,
+                hypotheses: b.hypotheses || [],
+                second_order_effects: b.second_order_effects || [],
+                questions_to_investigate: b.questions_to_investigate || [],
+            };
+            // Build thread cards HTML first
+            content.innerHTML = `<div class="brainstorm-threads">
+                ${threads.map(t => {
+                    const domColor = _DOMAIN_COLORS[t.domain] || '#6b7280';
+                    return `<div class="brainstorm-thread-card" style="border-left:3px solid ${domColor}">
+                        <h3>${escHtml(t.title)}</h3>
+                        <p>${escHtml(t.synthesis || 'No summary')}</p>
+                    </div>`;
+                }).join('')}
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);margin-bottom:16px">Brainstormed ${b.created_at ? _timeAgo(b.created_at) : 'previously'}</div>`;
+            _renderBrainstormResults(content, result, b.thread_ids || []);
+        })
+        .catch(() => { content.innerHTML = '<div style="color:var(--red)">Failed to load</div>'; });
+}
+
+function closeBrainstorm() {
+    document.getElementById('brainstorm-overlay').classList.remove('visible');
+    // Reload graph to show any new links
+    if (_signalTab === 'graph') loadGraph();
+}
+
+function _prefillResearchChat(companyName) {
+    // Create a new chat and pre-fill the input with a company research prompt
+    if (typeof newChat === 'function') newChat();
+    const input = document.getElementById('chat-input');
+    if (input) {
+        input.value = `Run a full profile on ${companyName}`;
+        input.focus();
+    }
+}
+
+function _toggleRawSelect(sigId) {
+    if (_rawSelectedSignals.has(sigId)) _rawSelectedSignals.delete(sigId);
+    else _rawSelectedSignals.add(sigId);
+    // Toggle visual directly
+    const el = document.querySelector(`.sig-card-select[data-sig-id="${sigId}"]`);
+    if (el) el.classList.toggle('checked');
+    // Update create pattern bar
+    renderSignalFeed();
+}
+
+function _clearRawSelection() {
+    _rawSelectedSignals.clear();
+    renderSignalFeed();
+}
+
+function _createPatternFromSelection() {
+    if (_rawSelectedSignals.size < 2) return;
+    const ids = [..._rawSelectedSignals];
+    // Get titles for preview
+    const titles = ids.map(id => {
+        const s = _signalsCache.find(x => x.id == id);
+        return s ? s.title : '';
+    }).filter(Boolean);
+
+    const title = prompt('Name this pattern:', titles[0] ? titles[0].substring(0, 50) : 'New Pattern');
+    if (!title) return;
+
+    fetch('/api/signals/patterns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, signal_ids: ids })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            _rawSelectedSignals.clear();
+            loadSignals();
+            // Switch to patterns tab to see the new pattern
+            setTimeout(() => switchSignalTab('threads'), 500);
+        }
+    });
+}
+
+function _setSignalStatus(signalId, status, patternId) {
+    fetch(`/api/signals/${signalId}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+    }).then(() => {
+        // Refresh the pattern detail to reflect the change
+        if (patternId) openThreadDetail(patternId);
+    });
+}
+
+function _toggleSignalArticle(signalId, el) {
+    const articleDiv = document.getElementById(`sig-article-${signalId}`);
+    if (!articleDiv) return;
+    if (articleDiv.style.display === 'block') {
+        articleDiv.style.display = 'none';
+        return;
+    }
+    // Show loading, then fetch
+    articleDiv.style.display = 'block';
+    articleDiv.innerHTML = '<div style="padding:8px;font-size:11px;color:var(--text-muted)">Loading article...</div>';
+
+    fetch(`/api/signals/${signalId}/fetch-article`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok && data.body) {
+                articleDiv.innerHTML = `<div style="padding:8px 0;font-size:11px;color:var(--text-secondary);line-height:1.5;border-left:2px solid var(--border);padding-left:10px;margin-top:6px">${escHtml(data.body).substring(0, 2000)}</div>`;
+            } else {
+                articleDiv.innerHTML = `<div style="padding:8px;font-size:11px;color:var(--text-muted)">Could not load article text</div>`;
+            }
+        })
+        .catch(() => {
+            articleDiv.innerHTML = `<div style="padding:8px;font-size:11px;color:var(--red)">Failed to fetch</div>`;
+        });
+}
+
+function closeSignalDetail() {
+    _activeSignalId = null;
+    _activeThreadId = null;
+    ++_detailRequestId;
+    document.querySelectorAll('.sig-card, .thread-card').forEach(c => c.classList.remove('active'));
+    const detailBody = document.getElementById('signals-detail-body');
+    const closeBtn = document.querySelector('.signals-detail-close');
+    // Reset to empty state — recreate since innerHTML destroys it
+    detailBody.innerHTML = `
+        <div class="signals-empty" id="signals-detail-empty" style="display:flex">
+            <div style="font-size:32px;margin-bottom:12px">&#128270;</div>
+            <div>Select a pattern to view details</div>
+            <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click any pattern in the feed or graph.</div>
+        </div>`;
+    if (closeBtn) closeBtn.style.display = 'none';
+}
+
+// Structured execution data (persists for "View Last Execution" button)
+let _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'idle' };
+let _execExpandedDomains = new Set(); // track which domain cards the user has expanded
+const _SIG_SOURCE_ICONS = { fred: '📈', google_news: '📰', reddit: '💬', hackernews: '🟧' };
+const _SIG_SOURCE_LABELS = { fred: 'FRED API', google_news: 'Google News', reddit: 'Reddit', hackernews: 'Hacker News' };
+
+function runSignalScan() {
+    const btn = document.getElementById('signals-scan-btn');
+    const statusEl = document.getElementById('signals-scan-status');
+    const statusText = document.getElementById('scan-status-text');
+    btn.classList.add('scanning');
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Scanning...';
+    statusEl.style.display = 'block';
+    statusText.textContent = 'Starting scan...';
+
+    // Reset execution data
+    _execData = { domains: {}, scan: {}, synthesis: {}, entities: {}, phase: 'collecting', startedAt: new Date().toISOString() };
+    _execExpandedDomains.clear();
+
+    // Switch to execution tab and render (setTimeout ensures DOM has updated)
+    switchSignalTab('execution');
+    setTimeout(() => _renderExecutionDetail(), 0);
+
+    fetch('/api/signals/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+    }).then(response => {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        function read() {
+            reader.read().then(({ done, value }) => {
+                if (done) {
+                    _finishScan();
+                    return;
+                }
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    try {
+                        const ev = JSON.parse(line.substring(6));
+                        _handleScanEvent(ev);
+                    } catch (e) {}
+                }
+                read();
+            }).catch(() => _finishScan());
+        }
+        read();
+    }).catch(() => _finishScan());
+}
+
+function _handleScanEvent(ev) {
+    const statusText = document.getElementById('scan-status-text');
+
+    // Accumulate structured data
+    switch (ev.type) {
+        case 'domain_start':
+            _execData.domains[ev.domain] = { status: 'running', sources: {}, count: 0 };
+            statusText.textContent = `Scanning ${_DOMAIN_LABELS[ev.domain] || ev.domain}...`;
+            break;
+        case 'source_start': {
+            const dom = _execData.domains[ev.domain] || (_execData.domains[ev.domain] = { status: 'running', sources: {}, count: 0 });
+            dom.sources[ev.source] = { status: 'running', count: 0, queries: ev.queries || [] };
+            break;
+        }
+        case 'source_done': {
+            const dom = _execData.domains[ev.domain];
+            if (dom && dom.sources[ev.source]) {
+                dom.sources[ev.source].status = 'done';
+                dom.sources[ev.source].count = ev.count || 0;
+                dom.sources[ev.source].queries = ev.queries || dom.sources[ev.source].queries;
+            }
+            break;
+        }
+        case 'domain_done': {
+            const dom = _execData.domains[ev.domain];
+            if (dom) { dom.status = 'done'; dom.count = ev.count || 0; }
+            const done = Object.values(_execData.domains).filter(d => d.status === 'done').length;
+            const total = Object.keys(_execData.domains).length;
+            statusText.textContent = `Collected ${done}/${total} domains`;
+            break;
+        }
+        case 'scan_complete':
+            _execData.scan = { total_collected: ev.total_collected, new_inserted: ev.new_inserted };
+            _execData.phase = 'synthesizing';
+            statusText.textContent = `${ev.total_collected} signals (${ev.new_inserted} new)`;
+            break;
+        case 'status':
+            statusText.textContent = ev.text;
+            break;
+        case 'synthesize_start':
+            _execData.synthesis.status = 'running';
+            _execData.synthesis.signal_count = ev.signal_count;
+            _execData.synthesis.existing_threads = ev.existing_threads;
+            statusText.textContent = 'Detecting patterns...';
+            break;
+        case 'new_thread':
+            if (!_execData.synthesis.new_threads) _execData.synthesis.new_threads = [];
+            _execData.synthesis.new_threads.push({ title: ev.title, signal_count: ev.signal_count });
+            break;
+        case 'assignments_done':
+            _execData.synthesis.assigned = ev.assigned;
+            _execData.synthesis.threads_updated = ev.threads_updated;
+            break;
+        case 'synthesize_complete':
+            _execData.synthesis.status = 'done';
+            break;
+        case 'enrich_start':
+            if (!_execData.enrich) _execData.enrich = {};
+            _execData.enrich.status = 'running';
+            _execData.enrich.total = ev.count;
+            _execData.enrich.enriched = 0;
+            _execData.phase = 'enriching';
+            statusText.textContent = `Fetching ${ev.count} articles...`;
+            break;
+        case 'enrich_progress':
+            if (_execData.enrich) {
+                _execData.enrich.enriched = ev.enriched;
+                statusText.textContent = `Articles: ${ev.enriched}/${_execData.enrich.total}`;
+            }
+            break;
+        case 'enrich_complete':
+            if (!_execData.enrich) _execData.enrich = {};
+            _execData.enrich.status = 'done';
+            _execData.enrich.enriched = ev.enriched;
+            _execData.enrich.total = ev.total;
+            break;
+        case 'enrich_skip':
+            if (!_execData.enrich) _execData.enrich = {};
+            _execData.enrich.status = 'skipped';
+            break;
+        case 'entities_start':
+            _execData.entities.status = 'running';
+            _execData.entities.signal_count = ev.signal_count;
+            _execData.phase = 'entities';
+            statusText.textContent = 'Extracting entities...';
+            break;
+        case 'entities_complete':
+            _execData.entities.status = 'done';
+            _execData.entities.count = ev.count;
+            break;
+        case 'threads_ready':
+            _execData.phase = 'complete';
+            statusText.textContent = 'Scan complete';
+            break;
+        case 'error':
+        case 'synth_error':
+            statusText.textContent = ev.text || 'Error';
+            statusText.style.color = 'var(--red)';
+            break;
+    }
+
+    // Live-update the execution tab
+    _renderExecutionDetail();
+}
+
+function _renderExecutionDetail() {
+    const container = document.getElementById('sig-tab-execution');
+    if (!container) return;
+
+    try { _renderExecutionDetailInner(container); }
+    catch (e) {
+        console.error('[exec] Render error:', e);
+        container.innerHTML = '<div style="padding:20px;color:var(--red)">Execution render error: ' + e.message + '</div>';
+    }
+}
+
+function _renderExecutionDetailInner(container) {
+    const d = _execData;
+    const phase = d.phase || 'idle';
+    const phaseLabels = { collecting: 'Collecting Signals', synthesizing: 'Detecting Patterns', enriching: 'Fetching Articles', entities: 'Extracting Entities', complete: 'Complete' };
+
+    // Header with phase indicator
+    let html = `<div style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <span style="font-size:18px;font-weight:800;color:var(--text-primary)">Execution Log</span>
+            <span class="exec-step-badge ${phase === 'complete' ? 'done' : 'running'}">${phaseLabels[phase] || phase}</span>
+        </div>
+        <div style="font-size:10px;color:var(--text-muted)">${d.startedAt ? new Date(d.startedAt).toLocaleString() : ''}</div>
+    </div>`;
+
+    // Phase 1: Collection — one step per domain, expandable to show sources+queries
+    html += `<div class="exec-step open">
+        <div class="exec-step-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="exec-step-icon" style="background:rgba(59,130,246,0.15)">📡</div>
+            <div class="exec-step-info">
+                <div class="exec-step-title">Signal Collection</div>
+                <div class="exec-step-subtitle">${Object.keys(d.domains).length} domains · ${d.scan.total_collected || '...'} signals collected · ${d.scan.new_inserted ?? '...'} new</div>
+            </div>
+            <span class="exec-step-badge ${d.scan.total_collected !== undefined ? 'done' : 'running'}">${d.scan.total_collected !== undefined ? 'Done' : 'Running'}</span>
+        </div>
+        <div class="exec-step-body" style="padding-top:8px">`;
+
+    for (const [dom, domData] of Object.entries(d.domains)) {
+        const domLabel = _DOMAIN_LABELS[dom] || dom;
+        const domColor = _DOMAIN_COLORS[dom] || '#6b7280';
+        const domOpen = _execExpandedDomains.has(dom) ? ' open' : '';
+        html += `<div class="exec-step${domOpen}" style="margin-bottom:6px" data-domain="${escHtml(dom)}">
+            <div class="exec-step-header" onclick="event.stopPropagation();_toggleExecDomain('${escHtml(dom)}')" style="padding:8px 12px;cursor:pointer">
+                <span class="sig-domain-dot" style="background:${domColor};width:10px;height:10px"></span>
+                <div class="exec-step-info">
+                    <div class="exec-step-title" style="font-size:11px">${escHtml(domLabel)}</div>
+                </div>
+                <span style="font-size:10px;color:var(--text-muted);font-weight:600">${domData.count} signals</span>
+                <span class="exec-step-badge ${domData.status === 'done' ? 'done' : 'running'}" style="font-size:9px">${domData.status === 'done' ? '✓' : '...'}</span>
+            </div>
+            <div class="exec-step-body">`;
+
+        for (const [src, srcData] of Object.entries(domData.sources || {})) {
+            const srcIcon = _SIG_SOURCE_ICONS[src] || '🔗';
+            const srcLabel = _SIG_SOURCE_LABELS[src] || src;
+            html += `<div class="exec-source-row">
+                <span class="exec-source-icon" style="background:var(--bg-tertiary)">${srcIcon}</span>
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:11px;font-weight:600;color:var(--text-primary)">${escHtml(srcLabel)}</div>
+                    <div style="margin-top:3px">${(srcData.queries || []).map(q => `<span class="exec-query-chip">${escHtml(q)}</span>`).join('')}</div>
+                </div>
+                <span style="font-size:11px;font-weight:700;color:${srcData.status === 'done' ? 'var(--green)' : 'var(--text-muted)'}">${srcData.count ?? '...'}</span>
+            </div>`;
+        }
+        html += `</div></div>`;
+    }
+    html += `</div></div>`;
+
+    // Arrow
+    html += `<div class="exec-arrow">↓</div>`;
+
+    // Phase 2: Dedup + Store
+    html += `<div class="exec-step ${d.scan.new_inserted !== undefined ? 'open' : ''}">
+        <div class="exec-step-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="exec-step-icon" style="background:rgba(168,85,247,0.15)">🧹</div>
+            <div class="exec-step-info">
+                <div class="exec-step-title">Deduplication & Storage</div>
+                <div class="exec-step-subtitle">${d.scan.total_collected ?? '...'} collected → ${d.scan.new_inserted ?? '...'} new (${d.scan.total_collected && d.scan.new_inserted !== undefined ? d.scan.total_collected - d.scan.new_inserted : '...'} duplicates skipped)</div>
+            </div>
+            <span class="exec-step-badge ${d.scan.new_inserted !== undefined ? 'done' : 'running'}">${d.scan.new_inserted !== undefined ? 'Done' : '...'}</span>
+        </div>
+        <div class="exec-step-body" style="padding-top:8px">
+            <div style="font-size:11px;color:var(--text-secondary)">Signals are deduplicated via SHA-256 content hash (source + URL + title). Duplicates from previous scans are automatically skipped.</div>
+        </div>
+    </div>`;
+
+    html += `<div class="exec-arrow">↓</div>`;
+
+    // Phase 3: LLM Synthesis
+    const synth = d.synthesis || {};
+    html += `<div class="exec-step ${synth.status === 'done' ? 'open' : ''}">
+        <div class="exec-step-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="exec-step-icon" style="background:rgba(168,85,247,0.15)">🧠</div>
+            <div class="exec-step-info">
+                <div class="exec-step-title">LLM Pattern Detection</div>
+                <div class="exec-step-subtitle">${synth.signal_count || '...'} signals → ${(synth.new_threads || []).length} new patterns, ${synth.assigned || 0} assigned to existing</div>
+            </div>
+            <span class="exec-step-badge ${synth.status === 'done' ? 'done' : synth.status === 'running' ? 'running' : ''}">${synth.status === 'done' ? 'Done' : synth.status === 'running' ? 'Running' : '...'}</span>
+        </div>
+        <div class="exec-step-body" style="padding-top:8px">
+            <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px">FAST_CHAIN assigns each signal to an existing pattern or groups unmatched signals into new patterns (min 2 signals per pattern).</div>`;
+
+    if (synth.new_threads && synth.new_threads.length) {
+        html += `<div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:4px">NEW PATTERNS DETECTED</div>`;
+        for (const t of synth.new_threads) {
+            html += `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:11px"><strong>${escHtml(t.title)}</strong> <span style="color:var(--text-muted)">(${t.signal_count} signals)</span></div>`;
+        }
+    }
+    if (synth.assigned) {
+        html += `<div style="margin-top:8px;font-size:11px;color:var(--text-secondary)">${synth.assigned} signals matched to ${synth.threads_updated || 0} existing patterns (summaries updated via LLM)</div>`;
+    }
+    html += `</div></div>`;
+
+    html += `<div class="exec-arrow">↓</div>`;
+
+    // Phase 3.5: Article Enrichment
+    const enr = d.enrich || {};
+    html += `<div class="exec-step ${enr.status === 'done' ? 'open' : ''}">
+        <div class="exec-step-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="exec-step-icon" style="background:rgba(234,179,8,0.15)">📄</div>
+            <div class="exec-step-info">
+                <div class="exec-step-title">Article Text Enrichment</div>
+                <div class="exec-step-subtitle">${enr.status === 'skipped' ? 'All signals already enriched' : `${enr.enriched ?? '...'} / ${enr.total ?? '...'} articles fetched via trafilatura`}</div>
+            </div>
+            <span class="exec-step-badge ${enr.status === 'done' ? 'done' : enr.status === 'skipped' ? 'done' : enr.status === 'running' ? 'running' : ''}">${enr.status === 'done' || enr.status === 'skipped' ? 'Done' : enr.status === 'running' ? 'Running' : '...'}</span>
+        </div>
+        <div class="exec-step-body" style="padding-top:8px">
+            <div style="font-size:11px;color:var(--text-secondary)">Fetches full article text (up to 4,000 chars) for signals assigned to threads. Uses trafilatura for clean extraction (strips nav, ads, footers). Only fetches articles with missing or short body text.</div>
+        </div>
+    </div>`;
+
+    html += `<div class="exec-arrow">↓</div>`;
+
+    // Phase 4: Entity Extraction
+    const ent = d.entities || {};
+    html += `<div class="exec-step">
+        <div class="exec-step-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="exec-step-icon" style="background:rgba(34,197,94,0.15)">🏷️</div>
+            <div class="exec-step-info">
+                <div class="exec-step-title">Entity Extraction</div>
+                <div class="exec-step-subtitle">${ent.count ?? '...'} entities extracted from enriched article text</div>
+            </div>
+            <span class="exec-step-badge ${ent.status === 'done' ? 'done' : ent.status === 'running' ? 'running' : ''}">${ent.status === 'done' ? 'Done' : ent.status === 'running' ? 'Running' : '...'}</span>
+        </div>
+        <div class="exec-step-body" style="padding-top:8px">
+            <div style="font-size:11px;color:var(--text-secondary)">FAST_CHAIN extracts named entities (companies, sectors, geographies, people, regulations) from full article text. Company entities are fuzzy-matched against existing dossiers for cross-module linking.</div>
+        </div>
+    </div>`;
+
+    container.innerHTML = `<div style="padding:12px">${html}</div>`;
+}
+
+function _finishScan() {
+    const btn = document.getElementById('signals-scan-btn');
+    btn.classList.remove('scanning');
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Scan Now';
+    _renderExecutionDetail();
+    loadSignals();
+    loadSignalFreshness();
+    setTimeout(() => switchSignalTab('threads'), 1500);
+}
+
+function runResynthesize() {
+    const btn = document.getElementById('signals-resynth-btn');
+    const statusEl = document.getElementById('signals-scan-status');
+    const statusText = document.getElementById('scan-status-text');
+    btn.disabled = true;
+    btn.textContent = '🧠 Detecting...';
+    statusEl.style.display = 'block';
+    statusText.textContent = 'Re-detecting patterns...';
+
+    fetch('/api/signals/resynthesize', { method: 'POST' })
+        .then(response => {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            function read() {
+                reader.read().then(({ done, value }) => {
+                    if (done) { _finishResynth(); return; }
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        try {
+                            const ev = JSON.parse(line.substring(6));
+                            if (ev.type === 'status') statusText.textContent = ev.text;
+                            else if (ev.type === 'new_thread') statusText.textContent = `New pattern: ${ev.title}`;
+                            else if (ev.type === 'resynth_complete') statusText.textContent = `${ev.new_patterns} new patterns, ${ev.assigned} signals assigned`;
+                        } catch (e) {}
+                    }
+                    read();
+                }).catch(() => _finishResynth());
+            }
+            read();
+        })
+        .catch(() => _finishResynth());
+}
+
+function _finishResynth() {
+    const btn = document.getElementById('signals-resynth-btn');
+    btn.disabled = false;
+    btn.textContent = '🧠 Re-detect Patterns';
+    loadSignals();
+    loadSignalFreshness();
+}
+

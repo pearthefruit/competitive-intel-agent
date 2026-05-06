@@ -10,3 +10,7 @@ yt-dlp
 flask
 yfinance
 trafilatura
+pymupdf
+python-docx
+ebooklib
+html2text

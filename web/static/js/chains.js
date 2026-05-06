@@ -23,7 +23,11 @@ function loadCausalView() {
         fetch('/api/causal-paths').then(r => r.json()),
         fetch('/api/signals/threads').then(r => r.json()),
         fetch('/api/signals/threads/names').then(r => r.json()),
-    ]).then(([linkData, pathData, threadData, namesData]) => {
+        fetch('/api/narratives').then(r => r.json()).catch(function() { return { narratives: [] }; }),
+    ]).then(([linkData, pathData, threadData, namesData, narrData]) => {
+        _narrativeBundlesCache = (narrData.narratives || []).filter(function(n) {
+            return (n.thread_ids || []).length > 0;
+        });
         let activeThreads = threadData.threads || _threadsCache || [];
         // Merge missing lightweight threads so we have titles for older/inactive threads
         if (namesData && namesData.threads) {
@@ -964,14 +968,24 @@ const _CB_CHAIN_COLORS = [
     '#ef4444', '#ec4899', '#06b6d4', '#8b5cf6',
 ];
 
+// Narratives use a teal/emerald palette to visually distinguish from causal chains
+const _CB_NARRATIVE_COLORS = [
+    '#14b8a6', '#10b981', '#84cc16', '#0ea5e9',
+    '#6366f1', '#d946ef', '#f97316', '#eab308',
+];
+
+// Cache of narratives loaded for the chain board (parallel to _causalPathsCache)
+let _narrativeBundlesCache = [];
+
 // Persists node positions across re-renders (legend toggles, subtab switches, etc.)
 // Keyed by threadId. Cleared only by _cbResetLayout().
 let _cbNodePositions = new Map();
 // Closure set after each render — recomputes bezier paths for a moved node live
 let _cbPathUpdateFn  = null;
 
-// Which chains are currently dimmed (toggled via legend)
+// Which chains/narratives are currently dimmed (toggled via legend)
 let _cbDimmedChains = new Set();
+let _cbDimmedNarratives = new Set();
 
 // ── Entry point called from Board tab > Chains subtab ─────────────────────
 function _renderChainBoard() {
@@ -991,6 +1005,7 @@ function _renderChainBoard() {
             fetch('/api/causal-paths').then(r => r.json()),
             fetch('/api/signals/threads').then(r => r.json()),
             fetch('/api/signals/threads/names').then(r => r.json()),
+            fetch('/api/narratives').then(r => r.json()),
         ]).then(function(results) {
             _causalLinksCache = results[0].links || [];
             _causalPathsCache = results[1].paths || [];
@@ -1000,46 +1015,85 @@ function _renderChainBoard() {
                 if (!activeIds.has(nt.id)) activeThreads.push(nt);
             });
             _threadsCache = activeThreads;
+            _narrativeBundlesCache = (results[4].narratives || []).filter(function(n) {
+                return (n.thread_ids || []).length > 0;
+            });
             _renderChainBoard();
         }).catch(function(e) { console.warn('[chain-board] data load failed:', e); });
         return;
     }
 
-    // Chains fetched but genuinely empty
-    if (!_causalPathsCache.length) {
+    // Chains fetched but genuinely empty — also check narratives before showing empty state
+    if (!_causalPathsCache.length && !_narrativeBundlesCache.length) {
         svg.append('text')
             .attr('x', container.clientWidth / 2).attr('y', container.clientHeight / 2)
             .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 14)
-            .text('No chains yet \u2014 build chains in the Chains editor');
+            .text('No chains or narratives yet \u2014 build chains in the Chains editor or promote a hypothesis to a narrative');
         return;
     }
 
     const width  = container.clientWidth  || 900;
     const height = container.clientHeight || 600;
 
-    // ── 1. Build unique node set (one per thread across all chains) ────────
+    // ── 1. Build unique node set (one per thread across all chains + narratives) ────────
     const nodeMap = new Map();
+    function _ensureNode(tid) {
+        if (!nodeMap.has(tid)) {
+            const t = (_threadsCache || []).find(t => t.id === tid);
+            nodeMap.set(tid, {
+                id: tid,
+                title: t ? t.title || ('Thread #' + tid) : ('Thread #' + tid),
+                domain: t ? t.domain || '' : '',
+                signal_count: t ? t.signal_count || 0 : 0,
+                chainMembership: [],
+                narrativeMembership: [],
+                x: 0, y: 0, vx: 0, vy: 0,
+            });
+        }
+        return nodeMap.get(tid);
+    }
     _causalPathsCache.forEach((path, pi) => {
         const color = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
         (path.thread_ids || []).forEach(tid => {
-            if (!nodeMap.has(tid)) {
-                const t = (_threadsCache || []).find(t => t.id === tid);
-                nodeMap.set(tid, {
-                    id: tid,
-                    title: t ? t.title || ('Thread #' + tid) : ('Thread #' + tid),
-                    domain: t ? t.domain || '' : '',
-                    signal_count: t ? t.signal_count || 0 : 0,
-                    chainMembership: [],
-                    x: 0, y: 0, vx: 0, vy: 0,
-                });
-            }
-            const node = nodeMap.get(tid);
+            const node = _ensureNode(tid);
             if (!node.chainMembership.find(function(m) { return m.pathId === path.id; })) {
                 node.chainMembership.push({ pathId: path.id, color: color });
             }
         });
     });
+    _narrativeBundlesCache.forEach((narr, ni) => {
+        const color = _CB_NARRATIVE_COLORS[ni % _CB_NARRATIVE_COLORS.length];
+        (narr.thread_ids || []).forEach(tid => {
+            const node = _ensureNode(tid);
+            if (!node.narrativeMembership.find(function(m) { return m.narrativeId === narr.id; })) {
+                node.narrativeMembership.push({ narrativeId: narr.id, color: color });
+            }
+        });
+    });
     const nodes = Array.from(nodeMap.values());
+
+    // Compute display label: 1-indexed position in primary chain, or sub-claim
+    // index in primary narrative for narrative-only threads. Size still encodes
+    // signal count; tooltip carries the raw count.
+    nodes.forEach(function(n) {
+        var label = n.signal_count;
+        if (n.chainMembership.length > 0) {
+            var firstChainId = n.chainMembership[0].pathId;
+            var chain = _causalPathsCache.find(function(p) { return p.id === firstChainId; });
+            if (chain) {
+                var idx = (chain.thread_ids || []).indexOf(n.id);
+                if (idx >= 0) label = idx + 1;
+            }
+        } else if ((n.narrativeMembership || []).length > 0) {
+            var firstNarrId = n.narrativeMembership[0].narrativeId;
+            var narr = _narrativeBundlesCache.find(function(x) { return x.id === firstNarrId; });
+            if (narr) {
+                var nIdx = (narr.thread_ids || []).indexOf(n.id);
+                if (nIdx >= 0) label = nIdx + 1;
+            }
+        }
+        n._orderLabel = label;
+    });
 
     // ── 2. Build unique edges ──────────────────────────────────────────────
     const edgeMap = new Map();
@@ -1094,7 +1148,84 @@ function _renderChainBoard() {
     // ── 4. Positions: restore saved or compute via force sim ──────────────
     const MARGIN = 90;
     const usableW = width - MARGIN * 2;
+    const usableH = height - MARGIN * 2;
     const nodeR = function(n) { return Math.sqrt(n.signal_count || 1) * 4.5 + 10; };
+
+    // ── 4a. Per-narrative cluster anchors ──────────────────────────────────
+    // Strategy: if a narrative shares any threads with chains, anchor its cluster
+    // near those chain threads' X position (causal flow wins). Offset vertically
+    // above/below the chain row so clusters don't collide with chain edges.
+    // Narratives with no chain overlap fall back to a grid layout.
+    const narrAnchors = new Map(); // narrativeId -> {x, y}
+    const narrList = _narrativeBundlesCache || [];
+    // Precompute: which narratives have chain-connected threads?
+    var narrWithChainConn = [];
+    var narrWithoutChainConn = [];
+    narrList.forEach(function(narr) {
+        var chainXs = [];
+        (narr.thread_ids || []).forEach(function(tid) {
+            var node = nodeMap.get(tid);
+            if (node && node.chainMembership.length > 0 && depthMap.has(tid)) {
+                chainXs.push(MARGIN + ((depthMap.get(tid) || 0) / maxDepth) * usableW);
+            }
+        });
+        if (chainXs.length > 0) {
+            narrWithChainConn.push({ narr: narr, chainXs: chainXs });
+        } else {
+            narrWithoutChainConn.push(narr);
+        }
+    });
+    // Chain-connected narratives: anchor X = mean of connected chain X's,
+    // alternate above/below chain row with staggered Y to avoid overlap
+    narrWithChainConn.forEach(function(entry, idx) {
+        var avgX = entry.chainXs.reduce(function(a, b) { return a + b; }, 0) / entry.chainXs.length;
+        var above = idx % 2 === 0;
+        var sideIdx = Math.floor(idx / 2);
+        var yStride = Math.min(110, usableH * 0.18);
+        var anchorY = above
+            ? MARGIN + 70 + sideIdx * yStride
+            : height - MARGIN - 70 - sideIdx * yStride;
+        narrAnchors.set(entry.narr.id, { x: avgX, y: anchorY });
+    });
+    // Unconnected narratives: grid-distributed in remaining canvas space
+    if (narrWithoutChainConn.length) {
+        var cols = Math.max(1, Math.ceil(Math.sqrt(narrWithoutChainConn.length)));
+        var cellW = usableW / cols;
+        var cellH = usableH / Math.max(1, Math.ceil(narrWithoutChainConn.length / cols));
+        narrWithoutChainConn.forEach(function(narr, ui) {
+            var col = ui % cols;
+            var row = Math.floor(ui / cols);
+            narrAnchors.set(narr.id, {
+                x: MARGIN + (col + 0.5) * cellW,
+                y: MARGIN + (row + 0.5) * cellH,
+            });
+        });
+    }
+
+    // Tag each node with its layout mode + anchor
+    nodes.forEach(function(n) {
+        const inChain = (n.chainMembership || []).length > 0;
+        const inNarr  = (n.narrativeMembership || []).length > 0;
+        n._mode = inChain ? 'chain' : (inNarr ? 'narrative' : 'orphan');
+        n._anchor = null;
+        if (n._mode === 'narrative') {
+            // Use first narrative as primary anchor; spread sub-claims around it
+            const primary = n.narrativeMembership[0];
+            const anchor = narrAnchors.get(primary.narrativeId);
+            if (anchor) {
+                const narr = narrList.find(function(x) { return x.id === primary.narrativeId; });
+                const idxInNarr = narr ? (narr.thread_ids || []).indexOf(n.id) : 0;
+                const totalInNarr = narr ? (narr.thread_ids || []).length : 1;
+                // Arrange sub-claims in a small horizontal ring around the anchor
+                const angle = totalInNarr > 1 ? (idxInNarr / totalInNarr) * Math.PI * 2 : 0;
+                const ringR = Math.max(60, Math.min(140, totalInNarr * 22));
+                n._anchor = {
+                    x: anchor.x + Math.cos(angle) * ringR,
+                    y: anchor.y + Math.sin(angle) * ringR * 0.6,
+                };
+            }
+        }
+    });
 
     // Nodes with saved positions get restored; new nodes need the sim.
     const needsSim = nodes.filter(function(n) { return !_cbNodePositions.has(n.id); });
@@ -1106,6 +1237,10 @@ function _renderChainBoard() {
             if (saved) {
                 n.x = saved.x; n.y = saved.y;
                 n.fx = saved.x; n.fy = saved.y; // pin during sim
+            } else if (n._anchor) {
+                // Narrative-only nodes start near their anchor with small jitter
+                n.x = n._anchor.x + (Math.random() - 0.5) * 30;
+                n.y = n._anchor.y + (Math.random() - 0.5) * 30;
             } else {
                 const depth = depthMap.get(n.id) || 0;
                 n.x = MARGIN + (depth / maxDepth) * usableW;
@@ -1113,14 +1248,26 @@ function _renderChainBoard() {
             }
         });
         _chainBoardSim = d3.forceSimulation(nodes)
+            // Chain nodes pulled to causal depth column (no force on narrative-only)
             .force('depth', d3.forceX(function(n) {
                 return MARGIN + ((depthMap.get(n.id) || 0) / maxDepth) * usableW;
-            }).strength(0.45))
-            .force('centerY', d3.forceY(height / 2).strength(0.08))
-            .force('collide', d3.forceCollide(function(n) { return nodeR(n) + 22; }).strength(0.85))
-            .force('charge', d3.forceManyBody().strength(-220))
+            }).strength(function(n) { return n._mode === 'chain' ? 0.45 : 0; }))
+            // Narrative-only nodes pulled to their per-narrative anchor
+            .force('narrX', d3.forceX(function(n) {
+                return n._anchor ? n._anchor.x : 0;
+            }).strength(function(n) { return n._mode === 'narrative' ? 0.55 : 0; }))
+            .force('narrY', d3.forceY(function(n) {
+                return n._anchor ? n._anchor.y : 0;
+            }).strength(function(n) { return n._mode === 'narrative' ? 0.55 : 0; }))
+            // Mild Y centering for chain nodes only
+            .force('centerY', d3.forceY(height / 2).strength(function(n) {
+                return n._mode === 'chain' ? 0.08 : 0;
+            }))
+            // Bigger collide pad so labels (font-size 10, ~30px wide) don't overlap
+            .force('collide', d3.forceCollide(function(n) { return nodeR(n) + 38; }).strength(0.9))
+            .force('charge', d3.forceManyBody().strength(-260))
             .stop();
-        for (var tick = 0; tick < 150; tick++) _chainBoardSim.tick();
+        for (var tick = 0; tick < 200; tick++) _chainBoardSim.tick();
         // Unpin all nodes after sim
         nodes.forEach(function(n) { n.fx = null; n.fy = null; });
     } else {
@@ -1230,6 +1377,45 @@ function _renderChainBoard() {
         }
     });
 
+    // ── 9b. Draw narrative routes (dashed, undirected — no arrowhead) ─────
+    _narrativeBundlesCache.forEach(function(narr, ni) {
+        var color = _CB_NARRATIVE_COLORS[ni % _CB_NARRATIVE_COLORS.length];
+        var tids  = narr.thread_ids || [];
+        var narrNodes = tids.map(function(tid) { return nodeMap.get(tid); }).filter(Boolean);
+        if (narrNodes.length < 2) return;
+        var dimmed = _cbDimmedNarratives.has(narr.id);
+        // Offset narrative segments slightly downward so they don't overlap chain segments
+        var nOffset = -10 - (ni % 4) * 4;
+
+        for (var i = 0; i < narrNodes.length - 1; i++) {
+            var src = narrNodes[i], tgt = narrNodes[i + 1];
+            chainPathsG.append('path')
+                .attr('data-narrative', narr.id)
+                .attr('data-src', src.id)
+                .attr('data-tgt', tgt.id)
+                .attr('data-offset', nOffset)
+                .attr('fill', 'none')
+                .attr('stroke', color)
+                .attr('stroke-width', 2)
+                .attr('stroke-dasharray', '5 4')
+                .attr('stroke-opacity', dimmed ? 0.07 : 0.7)
+                .attr('d', _segPathD(src, tgt, nOffset))
+                .style('cursor', 'pointer')
+                .on('mouseenter', (function(nid) { return function() {
+                    if (_cbDimmedNarratives.has(nid)) return;
+                    d3.select(this).attr('stroke-width', 3.5).attr('stroke-opacity', 1);
+                }; })(narr.id))
+                .on('mouseleave', function() {
+                    d3.select(this).attr('stroke-width', 2).attr('stroke-opacity', 0.7);
+                })
+                .on('click', (function(nid) { return function(event) {
+                    event.stopPropagation();
+                    if (typeof switchSignalTab === 'function') switchSignalTab('narratives');
+                    if (typeof openNarrativeDetail === 'function') openNarrativeDetail(nid);
+                }; })(narr.id));
+        }
+    });
+
     // ── 10. Edge labels ───────────────────────────────────────────────────
     var labelG = zoomG.append('g').attr('pointer-events', 'none');
     edges.forEach(function(e) {
@@ -1307,9 +1493,18 @@ function _renderChainBoard() {
                 const p = _causalPathsCache.find(function(p) { return p.id === m.pathId; });
                 return '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:' + m.color + ';margin-right:4px"></span>' + escHtml(p ? p.name || 'Chain' : 'Chain');
             }).join('<br>');
+            const narrs = (d.narrativeMembership || []).map(function(m) {
+                const n = _narrativeBundlesCache.find(function(n) { return n.id === m.narrativeId; });
+                return '<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' + m.color + ';margin-right:4px;opacity:0.85"></span>' + escHtml(n ? n.title || 'Narrative' : 'Narrative');
+            }).join('<br>');
+            const bridgeTag = d._isBridge
+                ? '<div style="display:inline-block;margin-top:4px;padding:1px 6px;border-radius:8px;background:rgba(251,191,36,0.15);color:#fbbf24;font-size:9px;font-weight:700;letter-spacing:0.5px">BRIDGE</div>'
+                : '';
             tt.innerHTML = '<div style="font-weight:700;margin-bottom:4px">' + escHtml(d.title) + '</div>' +
                 '<div style="font-size:10px;color:var(--text-muted)">' + d.signal_count + ' signals</div>' +
-                (chains ? '<div style="margin-top:6px;font-size:10px">' + chains + '</div>' : '');
+                bridgeTag +
+                (chains ? '<div style="margin-top:6px;font-size:10px">' + chains + '</div>' : '') +
+                (narrs ? '<div style="margin-top:4px;font-size:10px">' + narrs + '</div>' : '');
             tt.style.display = 'block';
             const rect = container.getBoundingClientRect();
             tt.style.left = (ev.clientX - rect.left + 14) + 'px';
@@ -1331,25 +1526,53 @@ function _renderChainBoard() {
         const g = d3.select(this);
         const r = nodeR(d);
         const domColor = _DOMAIN_COLORS[_parseDomains(d.domain)[0]] || '#6b7280';
+        const memberships = d.chainMembership.length + (d.narrativeMembership || []).length;
+        const isBridge = memberships >= 2;
+        d._isBridge = isBridge; // surfaced in tooltip
+
+        // Bridge halo — rendered first so it sits behind everything else
+        if (isBridge) {
+            g.append('circle')
+                .attr('r', r + 20)
+                .attr('fill', 'rgba(251,191,36,0.06)')
+                .attr('stroke', '#fbbf24')
+                .attr('stroke-width', 1)
+                .attr('stroke-opacity', 0.35);
+        }
 
         // Chain membership rings (outermost first so smaller rings on top)
-        d.chainMembership.slice().reverse().forEach(function(m, ri) {
+        var ringIdx = 0;
+        d.chainMembership.slice().reverse().forEach(function(m) {
             g.append('circle')
-                .attr('r', r + 4 + ri * 5)
+                .attr('r', r + 4 + ringIdx * 5)
                 .attr('fill', 'none')
                 .attr('stroke', m.color)
                 .attr('stroke-width', 1.5)
                 .attr('stroke-dasharray', '3 2')
                 .attr('opacity', _cbDimmedChains.has(m.pathId) ? 0.08 : 0.45);
+            ringIdx++;
+        });
+        // Narrative membership rings (continuing outward, with denser dash to distinguish)
+        (d.narrativeMembership || []).slice().reverse().forEach(function(m) {
+            g.append('circle')
+                .attr('r', r + 4 + ringIdx * 5)
+                .attr('fill', 'none')
+                .attr('stroke', m.color)
+                .attr('stroke-width', 1.5)
+                .attr('stroke-dasharray', '5 3')
+                .attr('opacity', _cbDimmedNarratives.has(m.narrativeId) ? 0.08 : 0.4);
+            ringIdx++;
         });
 
         g.append('circle').attr('r', r)
-            .attr('fill', domColor + '33').attr('stroke', domColor).attr('stroke-width', 2);
+            .attr('fill', domColor + '33')
+            .attr('stroke', isBridge ? '#fbbf24' : domColor)
+            .attr('stroke-width', isBridge ? 2.5 : 2);
 
         g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
             .attr('fill', '#fff').attr('font-size', Math.min(12, r * 0.75)).attr('font-weight', 700)
             .attr('pointer-events', 'none')
-            .text(d.signal_count);
+            .text(d._orderLabel);
 
         var label = d.title.length > 30 ? d.title.slice(0, 28) + '\u2026' : d.title;
         g.append('text').attr('text-anchor', 'middle').attr('y', r + 13)
@@ -1365,8 +1588,11 @@ function _renderChainBoard() {
 function _cbRenderLegend() {
     const el = document.getElementById('causal-board-legend');
     if (!el) return;
-    if (!_causalPathsCache || !_causalPathsCache.length) { el.innerHTML = ''; return; }
-    el.innerHTML = _causalPathsCache.map(function(path, pi) {
+    const hasChains = _causalPathsCache && _causalPathsCache.length;
+    const hasNarrs  = _narrativeBundlesCache && _narrativeBundlesCache.length;
+    if (!hasChains && !hasNarrs) { el.innerHTML = ''; return; }
+
+    const chainItems = (_causalPathsCache || []).map(function(path, pi) {
         const color  = _CB_CHAIN_COLORS[pi % _CB_CHAIN_COLORS.length];
         const dimmed = _cbDimmedChains.has(path.id);
         const name   = (path.name || 'Untitled').length > 28
@@ -1378,11 +1604,40 @@ function _cbRenderLegend() {
             '<span class="cb-legend-name">' + escHtml(name) + '</span>' +
             '</div>';
     }).join('');
+
+    const narrItems = (_narrativeBundlesCache || []).map(function(narr, ni) {
+        const color  = _CB_NARRATIVE_COLORS[ni % _CB_NARRATIVE_COLORS.length];
+        const dimmed = _cbDimmedNarratives.has(narr.id);
+        const name   = (narr.title || 'Untitled').length > 28
+            ? (narr.title || 'Untitled').slice(0, 26) + '\u2026'
+            : (narr.title || 'Untitled');
+        // Square dot + dashed border to differentiate visually from chains
+        return '<div class="cb-legend-item' + (dimmed ? ' cb-legend-dimmed' : '') +
+            '" onclick="_cbToggleNarrativeDim(' + narr.id + ')" title="' + (dimmed ? 'Show' : 'Hide') + ' this narrative">' +
+            '<span class="cb-legend-dot" style="background:' + color + ';border-radius:2px;border:1px dashed rgba(255,255,255,0.4)"></span>' +
+            '<span class="cb-legend-name">' + escHtml(name) + '</span>' +
+            '</div>';
+    }).join('');
+
+    let html = '';
+    if (chainItems) {
+        html += '<div class="cb-legend-section-label" style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin:4px 0 2px;font-weight:600">Chains</div>' + chainItems;
+    }
+    if (narrItems) {
+        html += '<div class="cb-legend-section-label" style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin:8px 0 2px;font-weight:600">Narratives</div>' + narrItems;
+    }
+    el.innerHTML = html;
 }
 
 function _cbToggleChainDim(pathId) {
     if (_cbDimmedChains.has(pathId)) _cbDimmedChains.delete(pathId);
     else _cbDimmedChains.add(pathId);
+    _renderChainBoard();
+}
+
+function _cbToggleNarrativeDim(narrativeId) {
+    if (_cbDimmedNarratives.has(narrativeId)) _cbDimmedNarratives.delete(narrativeId);
+    else _cbDimmedNarratives.add(narrativeId);
     _renderChainBoard();
 }
 

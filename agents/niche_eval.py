@@ -20,7 +20,7 @@ from agents.metrics import compute_financial_metrics
 # Per-company lightweight scan
 # ---------------------------------------------------------------------------
 
-def lightweight_financial_scan(company_name, description=None, progress_cb=None):
+def lightweight_financial_scan(company_name, description=None, progress_cb=None, niche_context=None):
     """Collect lightweight financial data for a single company. No report generation.
 
     Tries Yahoo Finance + SEC EDGAR for public companies. Falls back to a single
@@ -103,10 +103,38 @@ def lightweight_financial_scan(company_name, description=None, progress_cb=None)
         except Exception as e:
             print(f"[niche_eval] SEC EDGAR failed for {company_name}: {e}")
 
-    # --- Tier 3: Web search + LLM extraction for private companies ---
+    # --- Tier 3: Type-specific estimator (restaurant / SaaS / ecommerce / app) ---
     if not ticker and result["data_quality"] == "low":
         try:
-            extracted = _research_private_company(company_name, description)
+            from scraper.revenue_estimators import estimate_revenue
+            est = estimate_revenue(
+                company_name,
+                website_url=result.get("website_url"),
+                description=description,
+                niche_context=niche_context,
+            )
+            if est and est.get("revenue"):
+                result["revenue"] = est["revenue"]
+                result["revenue_formatted"] = _format_currency(est["revenue"])
+                result["is_estimated"] = True
+                result["estimate_low"] = est.get("estimate_low")
+                result["estimate_high"] = est.get("estimate_high")
+                result["estimate_basis"] = est.get("estimate_basis")
+                result["data_quality"] = est.get("confidence", "low")
+                result["sources"].extend(est.get("sources", []))
+                if not result["employee_count"] and est.get("estimated_employees"):
+                    result["employee_count"] = est["estimated_employees"]
+                if not result["sector"] and est.get("sector"):
+                    result["sector"] = est["sector"]
+        except NotImplementedError:
+            pass  # estimator not yet built for this type — fall through to LLM
+        except Exception as e:
+            print(f"[niche_eval] Type-specific estimator failed for {company_name}: {e}")
+
+    # --- Tier 4: Web search + LLM extraction for private companies ---
+    if not ticker and result["data_quality"] == "low":
+        try:
+            extracted = _research_private_company(company_name, description, niche_context=niche_context)
             if extracted:
                 rev_latest = extracted.get("revenue_latest")
                 rev_prior = extracted.get("revenue_prior")
@@ -135,8 +163,13 @@ def lightweight_financial_scan(company_name, description=None, progress_cb=None)
                 result["hq_country"] = extracted.get("hq_country")
                 result["sector"] = extracted.get("sector")
                 result["industry"] = extracted.get("industry")
+                if extracted.get("is_estimated"):
+                    result["is_estimated"] = True
+                    result["estimate_low"] = extracted.get("estimate_low")
+                    result["estimate_high"] = extracted.get("estimate_high")
+                    result["estimate_basis"] = extracted.get("estimate_basis")
                 if extracted.get("_had_search_data"):
-                    result["data_quality"] = "medium"
+                    result["data_quality"] = "medium" if not extracted.get("is_estimated") else "low"
                     result["sources"].append("web_search")
         except Exception as e:
             print(f"[niche_eval] Private company research failed for {company_name}: {e}")
@@ -144,7 +177,7 @@ def lightweight_financial_scan(company_name, description=None, progress_cb=None)
     return result
 
 
-def _research_private_company(company_name, description=None):
+def _research_private_company(company_name, description=None, niche_context=None):
     """Search the web for financial data, then have LLM extract from results."""
     from scraper.web_search import search_web
     from agents.llm import generate_json, CHEAP_CHAIN
@@ -167,6 +200,7 @@ def _research_private_company(company_name, description=None):
     prompt = build_private_company_prompt(
         company_name, description,
         search_context="\n".join(search_snippets),
+        niche_context=niche_context,
     )
     result = generate_json(prompt, timeout=15, chain=CHEAP_CHAIN)
     if result:
@@ -178,7 +212,7 @@ def _research_private_company(company_name, description=None):
 # Batch scan
 # ---------------------------------------------------------------------------
 
-def scan_niche_financials(companies, progress_cb=None):
+def scan_niche_financials(companies, progress_cb=None, niche_context=None):
     """Scan all discovered companies in parallel for financial data.
 
     Args:
@@ -202,7 +236,7 @@ def scan_niche_financials(companies, progress_cb=None):
                 "status": "scanning",
             })
         try:
-            snapshot = lightweight_financial_scan(name, description=desc)
+            snapshot = lightweight_financial_scan(name, description=desc, niche_context=niche_context)
             if progress_cb:
                 progress_cb("niche_scan_progress", {
                     "company": name, "index": idx + 1, "total": total,
@@ -384,6 +418,10 @@ def compute_niche_aggregates(scan_results):
                 "growth_direction": s.get("growth_direction"),
                 "is_public": s.get("is_public", False),
                 "data_quality": s.get("data_quality", "low"),
+                "is_estimated": s.get("is_estimated", False),
+                "estimate_low": s.get("estimate_low"),
+                "estimate_high": s.get("estimate_high"),
+                "estimate_basis": s.get("estimate_basis"),
                 "sector": s.get("sector"),
                 "hq_country": s.get("hq_country"),
             }

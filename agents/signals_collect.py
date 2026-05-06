@@ -55,7 +55,7 @@ def _normalize_signal(item, source, domain):
     if not title:
         return None
     url = item.get("href") or item.get("url") or ""
-    body = (item.get("body") or "")[:2000]
+    body = item.get("body") or ""
     # Auto-classify domain for targeted/narrative signals
     if domain in ("targeted", "narrative"):
         domain = _classify_domain(title, body)

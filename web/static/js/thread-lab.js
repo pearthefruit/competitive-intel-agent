@@ -939,6 +939,10 @@ function _labAssignSelectedToThread(threadId, threadTitle) {
             _labSyncAndRefreshCounts();
             _labUpdateSelectionBar();
             _labShowReclusterBtn();
+            // Bump the cached signal_count so the autocomplete count is live.
+            const cached = (_threadsCache || []).find(t => t.id === threadId);
+            if (cached) cached.signal_count = (cached.signal_count || 0) + sigIds.length;
+            if (typeof _sortedThreadsCache !== 'undefined') _sortedThreadsCache = null;
         } else {
             _showToast(data.error || 'Assign failed', 'error');
         }
@@ -985,6 +989,15 @@ function _labCreateThreadFromSelected(title) {
             _labSyncAndRefreshCounts();
             _labUpdateSelectionBar();
             _labShowReclusterBtn();
+            // Refresh the thread cache so the new thread is assignable to
+            // other signals in the same Organize session.
+            fetch('/api/signals/threads')
+                .then(r => r.json())
+                .then(td => {
+                    _threadsCache = td.threads || [];
+                    if (typeof _sortedThreadsCache !== 'undefined') _sortedThreadsCache = null;
+                })
+                .catch(() => {});
         } else {
             _showToast(data.error || 'Failed to create thread', 'error');
             _labUpdateSelectionBar();

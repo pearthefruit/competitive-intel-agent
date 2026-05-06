@@ -256,7 +256,7 @@ def create_app(db_path="intel.db"):
     init_db(db_path)
 
     # CORS — allow browser extension (chrome-extension://) to hit capture + thread list.
-    _CORS_PATHS = {"/api/signals/manual", "/api/signals/threads", "/api/signals/threads/names"}
+    _CORS_PATHS = {"/api/signals/manual", "/api/signals/threads", "/api/signals/threads/names", "/api/signals/threads/create"}
 
     @app.after_request
     def _add_extension_cors(response):
@@ -1534,7 +1534,7 @@ def create_app(db_path="intel.db"):
 
                 def _run_scan():
                     try:
-                        results = scan_niche_financials(valid_companies, progress_cb=_scan_cb)
+                        results = scan_niche_financials(valid_companies, progress_cb=_scan_cb, niche_context=niche)
                         scan_holder[0] = results
                     except Exception as exc:
                         print(f"[pipeline] Niche scan error: {exc}")
@@ -2908,32 +2908,59 @@ Return JSON: {{"title": "New directional title"}}"""
             return jsonify({"error": "Query too short"}), 400
 
         conn = get_connection(db_path)
-        like = f"%{q}%"
-        rows = conn.execute(
-            """SELECT s.id as signal_id, s.title, sci.cluster_id as thread_id
+        # Split the query into words; every word must appear somewhere
+        # (title or body for signals, title for threads). This makes
+        # "ai chipmaker" match "AI-focused chipmakers" and "chipmaker racing
+        # to add AI" — not just the exact adjacent phrase.
+        words = q.split()
+        sig_clauses = ["(s.title LIKE ? COLLATE NOCASE OR s.body LIKE ? COLLATE NOCASE)"] * len(words)
+        sig_params = []
+        for w in words:
+            like_w = f"%{w}%"
+            sig_params.extend([like_w, like_w])
+        sig_where = " AND ".join(sig_clauses)
+
+        thread_clauses = ["sc.title LIKE ? COLLATE NOCASE"] * len(words)
+        thread_params = [f"%{w}%" for w in words]
+        thread_where = " AND ".join(thread_clauses)
+
+        # Signals inside threads where every query word appears in title or body.
+        sig_rows = conn.execute(
+            f"""SELECT s.id as signal_id, s.title, sci.cluster_id as thread_id
                FROM signals s
                JOIN signal_cluster_items sci ON sci.signal_id = s.id
                JOIN signal_clusters sc ON sc.id = sci.cluster_id
-               WHERE sc.domain != 'narrative'
-                 AND (s.title LIKE ? COLLATE NOCASE OR s.body LIKE ? COLLATE NOCASE)
+               WHERE sc.domain != 'narrative' AND {sig_where}
                ORDER BY sci.cluster_id""",
-            (like, like),
+            sig_params,
+        ).fetchall()
+
+        # Threads whose own title contains every query word — the query may
+        # describe a cross-signal pattern that doesn't appear verbatim in any
+        # one signal.
+        thread_rows = conn.execute(
+            f"""SELECT sc.id as thread_id FROM signal_clusters sc
+               WHERE sc.domain != 'narrative' AND {thread_where}""",
+            thread_params,
         ).fetchall()
         conn.close()
 
-        # Group by thread
         threads = {}
-        for r in rows:
+        for r in sig_rows:
             tid = r["thread_id"]
             if tid not in threads:
                 threads[tid] = {"thread_id": tid, "match_count": 0, "signals": []}
             threads[tid]["match_count"] += 1
             threads[tid]["signals"].append({"id": r["signal_id"], "title": r["title"]})
+        for r in thread_rows:
+            tid = r["thread_id"]
+            if tid not in threads:
+                threads[tid] = {"thread_id": tid, "match_count": 0, "signals": []}
 
         return jsonify({
             "query": q,
             "thread_matches": list(threads.values()),
-            "total_signals": len(rows),
+            "total_signals": len(sig_rows),
             "total_threads": len(threads),
         })
 
@@ -3222,7 +3249,7 @@ Return JSON: {{"title": "New directional title"}}"""
             "domain": domain,
             "title": title,
             "url": source_url,
-            "body": clean_content[:2000],
+            "body": clean_content,
             "published_at": parsed_date or _dt.now().strftime("%Y-%m-%d"),
             "source_name": source_tag.replace("_", " ").title(),
             "content_hash": content_hash,
@@ -3449,9 +3476,11 @@ Return JSON: {{"title": "New directional title"}}"""
             "edges": edges,
         })
 
-    @app.route("/api/signals/threads/create", methods=["POST"])
+    @app.route("/api/signals/threads/create", methods=["POST", "OPTIONS"])
     def signals_create_thread_api():
         """Create a thread manually, optionally with pasted content split into signals."""
+        if request.method == "OPTIONS":
+            return make_response("", 204)
         import hashlib
         from db import insert_signal_cluster, link_signal_to_cluster, insert_signal
         from agents.signals_collect import _classify_domain
@@ -3467,35 +3496,29 @@ Return JSON: {{"title": "New directional title"}}"""
         thread_id = insert_signal_cluster(conn, {"domain": domain, "title": title, "synthesis": ""})
         conn.execute("UPDATE signal_clusters SET last_signal_at = CURRENT_TIMESTAMP WHERE id = ?", (thread_id,))
 
-        # If paste content provided, split into signals and link to thread
+        # If paste content provided, create ONE signal and link to thread.
+        # (No splitting — callers that want multiple signals should make
+        # multiple /api/signals/manual calls with the returned thread_id.)
         signals_created = 0
         if paste:
-            import re
-            # Split on bullet points, numbered items, or double newlines
-            items = re.split(r'\n\s*[-•·]\s+|\n\s*\d+[.)]\s+|\n\s*\n', paste)
-            items = [item.strip() for item in items if item.strip() and len(item.strip()) > 15]
-            if not items:
-                items = [paste]
-
-            for item in items:
-                sig_title = item[:120].split('\n')[0].rstrip('.')
-                if len(item) > 120:
-                    sig_title = sig_title.rsplit(' ', 1)[0] + '…'
-                content_hash = hashlib.sha256(f"manual||{sig_title}".lower().strip().encode()).hexdigest()
-                sig_id = insert_signal(conn, {
-                    "source": "manual",
-                    "domain": domain,
-                    "title": sig_title,
-                    "url": "",
-                    "body": item[:2000],
-                    "published_at": "",
-                    "source_name": "Manual",
-                    "content_hash": content_hash,
-                    "source_type": "social",
-                })
-                if sig_id:
-                    link_signal_to_cluster(conn, thread_id, sig_id)
-                    signals_created += 1
+            sig_title = paste[:120].split('\n')[0].rstrip('.')
+            if len(paste) > 120:
+                sig_title = sig_title.rsplit(' ', 1)[0] + '…'
+            content_hash = hashlib.sha256(f"manual||{sig_title}".lower().strip().encode()).hexdigest()
+            sig_id = insert_signal(conn, {
+                "source": "manual",
+                "domain": domain,
+                "title": sig_title,
+                "url": "",
+                "body": paste,
+                "published_at": "",
+                "source_name": "Manual",
+                "content_hash": content_hash,
+                "source_type": "social",
+            })
+            if sig_id:
+                link_signal_to_cluster(conn, thread_id, sig_id)
+                signals_created = 1
 
         conn.commit()
         conn.close()
@@ -5500,6 +5523,461 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
 
         return Response(generate(), mimetype="text/event-stream",
                         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    # --- Research-module chat persistence ---
+
+    @app.route("/api/chats", methods=["GET"])
+    def api_chats_list():
+        from db import list_chats
+        conn = get_connection(db_path)
+        try:
+            return jsonify(list_chats(conn))
+        finally:
+            conn.close()
+
+    @app.route("/api/chats/<chat_id>", methods=["GET"])
+    def api_chats_get(chat_id):
+        from db import get_chat
+        conn = get_connection(db_path)
+        try:
+            chat = get_chat(conn, chat_id)
+            if not chat:
+                return jsonify({"error": "not found"}), 404
+            return jsonify(chat)
+        finally:
+            conn.close()
+
+    @app.route("/api/chats/<chat_id>", methods=["PUT"])
+    def api_chats_put(chat_id):
+        from db import upsert_chat
+        data = request.get_json(silent=True) or {}
+        messages = data.get("messages", [])
+        if not isinstance(messages, list):
+            return jsonify({"error": "messages must be a list"}), 400
+        title = data.get("title") or ""
+        company = data.get("company")
+        created_at = data.get("created")  # frontend epoch ms; stored as-is string
+        if isinstance(created_at, (int, float)):
+            created_at = datetime.fromtimestamp(created_at / 1000.0, tz=timezone.utc).isoformat()
+        conn = get_connection(db_path)
+        try:
+            upsert_chat(conn, chat_id, title, company, messages, created_at=created_at)
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/chats/<chat_id>", methods=["DELETE"])
+    def api_chats_delete(chat_id):
+        from db import delete_chat as _delete_chat
+        conn = get_connection(db_path)
+        try:
+            _delete_chat(conn, chat_id)
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    # ── Documents module ──────────────────────────────────────────────────────
+
+    def extract_email_sections(html_content):
+        """Parse HTML (email or article) into [{index, label, text}] sections.
+
+        Text is stored as markdown so the frontend can render rich formatting.
+        """
+        import re as _re
+        import html2text
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html_content, 'html.parser')
+
+        def _clean(text):
+            text = _re.sub(r'\n{3,}', '\n\n', text)
+            return text.strip()
+
+        # Strip noise elements before processing
+        for tag in soup.find_all(['script', 'style', 'noscript']):
+            tag.decompose()
+        noise_kw = ['related', 'recommend', 'sidebar', 'share', 'social',
+                     'more-from', 'more-stories', 'promo', 'newsletter-signup']
+        for el in soup.find_all(attrs={'class': True}):
+            cls_str = ' '.join(el.get('class', []))
+            if any(kw in cls_str.lower() for kw in noise_kw):
+                el.decompose()
+
+        h = html2text.HTML2Text()
+        h.body_width = 0
+        h.ignore_images = True
+        h.ignore_emphasis = False
+        h.protect_links = False
+        h.wrap_links = False
+        h.unicode_snob = True
+
+        def _html_to_md(el):
+            """Convert a BeautifulSoup element to markdown."""
+            return _clean(h.handle(str(el)))
+
+        # Strategy 1: headings → one section per heading (document-order traversal)
+        headings = soup.find_all(['h1', 'h2', 'h3'])
+        if headings:
+            heading_ids = {id(hd) for hd in headings}
+            block_tags = ['p', 'ul', 'ol', 'li', 'blockquote', 'pre', 'table',
+                          'figure', 'figcaption', 'div']
+            all_els = list(soup.find_all(['h1', 'h2', 'h3'] + block_tags))
+            sections = []
+            current_label = None
+            current_parts = []
+
+            for el in all_els:
+                if id(el) in heading_ids:
+                    if current_parts:
+                        md = _clean('\n\n'.join(current_parts))
+                        if md:
+                            sections.append({'index': len(sections), 'label': current_label, 'text': md})
+                    current_label = el.get_text(strip=True)
+                    current_parts = []
+                else:
+                    if el.find(['h1', 'h2', 'h3'] + block_tags):
+                        continue
+                    md = _html_to_md(el)
+                    if md:
+                        current_parts.append(md)
+
+            if current_parts:
+                md = _clean('\n\n'.join(current_parts))
+                if md:
+                    sections.append({'index': len(sections), 'label': current_label, 'text': md})
+            if sections:
+                return sections
+
+        # Strategy 2: <hr> dividers → "Section N" labels
+        body_root = soup.body or soup
+        children = list(body_root.children)
+        if soup.find('hr'):
+            sections = []
+            current, num = [], 1
+            for elem in children:
+                if getattr(elem, 'name', None) == 'hr':
+                    if current:
+                        chunk_html = ''.join(str(e) for e in current if hasattr(e, 'name') or str(e).strip())
+                        md = _clean(h.handle(chunk_html))
+                        if md:
+                            sections.append({'index': len(sections), 'label': f'Section {num}', 'text': md})
+                            num += 1
+                    current = []
+                else:
+                    current.append(elem)
+            if current:
+                chunk_html = ''.join(str(e) for e in current if hasattr(e, 'name') or str(e).strip())
+                md = _clean(h.handle(chunk_html))
+                if md:
+                    sections.append({'index': len(sections), 'label': f'Section {num}', 'text': md})
+            if sections:
+                return sections
+
+        # Strategy 3: convert full HTML to markdown, split on markdown headings
+        full_md = _clean(h.handle(str(soup)))
+        if full_md:
+            parts = _re.split(r'^(#{1,3}\s+.+)$', full_md, flags=_re.MULTILINE)
+            if len(parts) > 1:
+                sections = []
+                current_label = None
+                current_text = parts[0].strip()
+                for part in parts[1:]:
+                    if _re.match(r'^#{1,3}\s+', part):
+                        if current_text:
+                            sections.append({'index': len(sections), 'label': current_label, 'text': current_text})
+                        current_label = _re.sub(r'^#+\s+', '', part).strip()
+                        current_text = ''
+                    else:
+                        current_text = part.strip()
+                if current_text:
+                    sections.append({'index': len(sections), 'label': current_label, 'text': current_text})
+                if sections:
+                    return sections
+            return [{'index': 0, 'label': None, 'text': full_md}]
+
+        # Strategy 4: single section fallback (plain text)
+        full = _clean(soup.get_text(separator='\n'))
+        return [{'index': 0, 'label': None, 'text': full}]
+
+    @app.route("/api/documents/upload", methods=["POST"])
+    def api_documents_upload():
+        """Accept a file upload (multipart/form-data). Always saves a vault copy."""
+        import re, time as _time, tempfile
+        from scraper.document_extractor import extract_document, detect_file_type
+        from db import create_document
+
+        f = request.files.get("file")
+        if not f:
+            return jsonify({"error": "No file provided"}), 400
+
+        filename = f.filename or "document"
+        file_type = detect_file_type(filename)
+        if not file_type:
+            return jsonify({"error": f"Unsupported file type — accepted: .pdf .md .txt .docx .epub"}), 400
+
+        title = (request.form.get("title") or "").strip() or os.path.splitext(filename)[0]
+        source = (request.form.get("source") or "").strip()
+        year = int(request.form.get("year")) if request.form.get("year") else None
+
+        # Save to vault immediately (upload = always stored)
+        doc_id = f"doc_{int(_time.time() * 1000)}"
+        docs_dir = os.path.join(os.path.dirname(db_path), "documents")
+        os.makedirs(docs_dir, exist_ok=True)
+        slug = re.sub(r'[^\w-]', '_', title.lower())[:40]
+        ext = os.path.splitext(filename)[1]
+        stored_path = os.path.join(docs_dir, f"{doc_id}_{slug}{ext}")
+        f.save(stored_path)
+
+        try:
+            sections = extract_document(stored_path, file_type)
+        except Exception as e:
+            os.remove(stored_path)
+            return jsonify({"error": f"Extraction failed: {e}"}), 500
+
+        conn = get_connection(db_path)
+        try:
+            create_document(conn, doc_id, title, source, year, file_type,
+                            None, stored_path, "stored",
+                            len(sections), json.dumps(sections))
+            return jsonify({"ok": True, "id": doc_id, "section_count": len(sections)})
+        finally:
+            conn.close()
+
+    @app.route("/api/documents", methods=["GET"])
+    def api_documents_list():
+        from db import get_documents
+        conn = get_connection(db_path)
+        try:
+            return jsonify(get_documents(conn))
+        finally:
+            conn.close()
+
+    @app.route("/api/documents", methods=["POST"])
+    def api_documents_create():
+        import re
+        import shutil
+        import time as _time
+        from scraper.document_extractor import extract_document, detect_file_type
+        from db import create_document
+
+        data = request.get_json(silent=True) or {}
+        title = (data.get("title") or "").strip()
+        source = (data.get("source") or "").strip()
+        year = data.get("year") or None
+
+        # ── HTML content branch (email or article from extension) ────────
+        if data.get("file_type") in ("email", "article"):
+            html_content = data.get("content") or ""
+            if not html_content:
+                return jsonify({"error": "content required for email/article type"}), 400
+
+            file_type = data["file_type"]
+            sender = (data.get("sender") or "").strip()
+            source_url = (data.get("source_url") or "").strip()
+            sections = extract_email_sections(html_content)
+            doc_id = f"doc_{int(_time.time() * 1000)}"
+
+            docs_dir = os.path.join(os.path.dirname(db_path), "documents")
+            os.makedirs(docs_dir, exist_ok=True)
+            suffix = "email" if file_type == "email" else "article"
+            stored_path = os.path.join(docs_dir, f"{doc_id}_{suffix}.html")
+            with open(stored_path, "w", encoding="utf-8") as fh:
+                fh.write(html_content)
+
+            conn = get_connection(db_path)
+            try:
+                create_document(conn, doc_id, title or ("Email" if file_type == "email" else "Article"),
+                                source, year, file_type,
+                                None, stored_path, "stored",
+                                len(sections), json.dumps(sections),
+                                source_url=source_url, sender=sender)
+                return jsonify({"ok": True, "id": doc_id, "section_count": len(sections)})
+            finally:
+                conn.close()
+
+        # ── File-based branch ────────────────────────────────────────────
+        file_path = (data.get("file_path") or "").strip()
+        storage_mode = data.get("storage_mode", "reference")
+
+        if not file_path:
+            return jsonify({"error": "file_path required"}), 400
+        if not os.path.exists(file_path):
+            return jsonify({"error": "File not found at that path"}), 404
+
+        file_type = detect_file_type(file_path)
+        if not file_type:
+            return jsonify({"error": "Unsupported file type (.pdf .md .txt .docx .epub only)"}), 400
+
+        if not title:
+            title = os.path.splitext(os.path.basename(file_path))[0]
+
+        try:
+            sections = extract_document(file_path, file_type)
+        except Exception as e:
+            return jsonify({"error": f"Extraction failed: {e}"}), 500
+
+        doc_id = f"doc_{int(_time.time() * 1000)}"
+        stored_path = None
+
+        if storage_mode == "stored":
+            docs_dir = os.path.join(os.path.dirname(db_path), "documents")
+            os.makedirs(docs_dir, exist_ok=True)
+            slug = re.sub(r'[^\w-]', '_', title.lower())[:40]
+            ext = os.path.splitext(file_path)[1]
+            stored_path = os.path.join(docs_dir, f"{doc_id}_{slug}{ext}")
+            shutil.copy2(file_path, stored_path)
+
+        conn = get_connection(db_path)
+        try:
+            create_document(conn, doc_id, title, source, year, file_type,
+                            file_path, stored_path, storage_mode,
+                            len(sections), json.dumps(sections))
+            return jsonify({"ok": True, "id": doc_id, "section_count": len(sections)})
+        finally:
+            conn.close()
+
+    @app.route("/api/documents/<doc_id>", methods=["GET"])
+    def api_documents_get(doc_id):
+        from db import get_document, get_annotations
+        conn = get_connection(db_path)
+        try:
+            doc = get_document(conn, doc_id)
+            if not doc:
+                return jsonify({"error": "Not found"}), 404
+            doc["annotations"] = get_annotations(conn, doc_id)
+            return jsonify(doc)
+        finally:
+            conn.close()
+
+    @app.route("/api/documents/<doc_id>", methods=["PATCH"])
+    def api_documents_patch(doc_id):
+        from db import update_document_title
+        data = request.get_json(silent=True) or {}
+        title = (data.get("title") or "").strip()
+        if not title:
+            return jsonify({"error": "title required"}), 400
+        conn = get_connection(db_path)
+        try:
+            update_document_title(conn, doc_id, title)
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/documents/check-path", methods=["POST"])
+    def api_documents_check_path():
+        """Debug helper — check if a file path is accessible from the server."""
+        data = request.get_json(silent=True) or {}
+        path = (data.get("path") or "").strip()
+        if not path:
+            return jsonify({"exists": False, "error": "no path provided"})
+        exists = os.path.exists(path)
+        return jsonify({
+            "exists": exists,
+            "is_file": os.path.isfile(path) if exists else False,
+            "size_bytes": os.path.getsize(path) if exists else None,
+            "cwd": os.getcwd(),
+        })
+
+    @app.route("/api/documents/<doc_id>", methods=["DELETE"])
+    def api_documents_delete(doc_id):
+        from db import get_document, delete_document
+        conn = get_connection(db_path)
+        try:
+            doc = get_document(conn, doc_id)
+            if doc and doc.get("stored_path") and os.path.exists(doc["stored_path"]):
+                os.remove(doc["stored_path"])
+            delete_document(conn, doc_id)
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/documents/<doc_id>/save-copy", methods=["POST"])
+    def api_documents_save_copy(doc_id):
+        import re
+        import shutil
+        from db import get_document, update_document_stored_path
+        conn = get_connection(db_path)
+        try:
+            doc = get_document(conn, doc_id)
+            if not doc:
+                return jsonify({"error": "Not found"}), 404
+            if doc.get("stored_path"):
+                return jsonify({"ok": True, "stored_path": doc["stored_path"]})
+            file_path = doc.get("file_path") or ""
+            if not file_path or not os.path.exists(file_path):
+                return jsonify({"error": "Original file no longer accessible"}), 400
+            docs_dir = os.path.join(os.path.dirname(db_path), "documents")
+            os.makedirs(docs_dir, exist_ok=True)
+            slug = re.sub(r'[^\w-]', '_', doc["title"].lower())[:40]
+            ext = os.path.splitext(file_path)[1]
+            stored_path = os.path.join(docs_dir, f"{doc_id}_{slug}{ext}")
+            shutil.copy2(file_path, stored_path)
+            update_document_stored_path(conn, doc_id, stored_path)
+            return jsonify({"ok": True, "stored_path": stored_path})
+        finally:
+            conn.close()
+
+    @app.route("/api/documents/<doc_id>/annotations", methods=["POST"])
+    def api_documents_annotations_create(doc_id):
+        from db import get_document, create_annotation, insert_signal_cluster
+        from agents.signals_collect import _classify_domain
+
+        data = request.get_json(silent=True) or {}
+        selected_text = (data.get("selected_text") or "").strip()
+        if not selected_text:
+            return jsonify({"error": "selected_text required"}), 400
+
+        section_index = data.get("section_index", 0)
+        section_label = (data.get("section_label") or "").strip() or None
+        note = (data.get("note") or "").strip()
+        create_thread = data.get("create_thread", True)
+        thread_title = (data.get("thread_title") or selected_text[:80]).strip()
+
+        conn = get_connection(db_path)
+        try:
+            if not get_document(conn, doc_id):
+                return jsonify({"error": "Document not found"}), 404
+
+            thread_id = None
+            if create_thread and thread_title:
+                synthesis = selected_text
+                if note:
+                    synthesis += f"\n\n**Note:** {note}"
+                domain = _classify_domain(thread_title, synthesis)
+                thread_id = insert_signal_cluster(conn, {
+                    "domain": domain,
+                    "title": thread_title,
+                    "synthesis": synthesis,
+                })
+
+            annotation_id = create_annotation(
+                conn, doc_id, section_index, section_label,
+                selected_text, note, thread_id
+            )
+            return jsonify({"ok": True, "id": annotation_id, "thread_id": thread_id})
+        finally:
+            conn.close()
+
+    @app.route("/api/documents/<doc_id>/annotations/<int:aid>", methods=["PATCH"])
+    def api_documents_annotations_update(doc_id, aid):
+        from db import update_annotation
+        data = request.get_json(silent=True) or {}
+        conn = get_connection(db_path)
+        try:
+            update_annotation(conn, aid, data.get("note", ""))
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/documents/<doc_id>/annotations/<int:aid>", methods=["DELETE"])
+    def api_documents_annotations_delete(doc_id, aid):
+        from db import delete_annotation
+        conn = get_connection(db_path)
+        try:
+            delete_annotation(conn, aid)
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
 
     return app
 

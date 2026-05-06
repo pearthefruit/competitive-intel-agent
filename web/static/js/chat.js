@@ -101,8 +101,8 @@ function hideResumePrompt() {
 }
 
 // ===================== INIT =====================
-document.addEventListener('DOMContentLoaded', () => {
-    loadChats();
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadChats();
     renderChatList();
     loadReports();
     refreshUsageBadge();
@@ -114,8 +114,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// ===================== LOCAL STORAGE =====================
-function loadChats() {
+// ===================== CHAT PERSISTENCE =====================
+// Server is source of truth; localStorage is a crash-safety cache.
+// Per-chat hash of last-synced body — skips unchanged PUTs.
+const _syncedHash = new Map();
+let _syncTimer = null;
+let _syncInFlight = false;
+
+async function loadChats() {
+    // Try server first — if it answers, it wins over any local copy.
+    try {
+        const resp = await fetch('/api/chats');
+        if (resp.ok) {
+            const list = await resp.json();
+            chats = list.map(c => ({
+                id: c.id,
+                title: c.title || '',
+                company: c.company || null,
+                messages: c.messages || [],
+                created: c.created_at ? Date.parse(c.created_at) || Date.now() : Date.now(),
+            }));
+            // Seed hash map so first save() doesn't re-PUT every chat.
+            for (const c of chats) _syncedHash.set(c.id, JSON.stringify(c));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+            return;
+        }
+    } catch (e) {
+        console.warn('[chat] server load failed, falling back to localStorage', e);
+    }
     try { chats = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
     catch { chats = []; }
 }
@@ -123,6 +149,71 @@ function loadChats() {
 function saveChats() {
     if (chats.length > 30) chats = chats.slice(0, 30);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+    if (_syncTimer) clearTimeout(_syncTimer);
+    _syncTimer = setTimeout(_flushChatSync, 600);
+}
+
+async function _flushChatSync() {
+    _syncTimer = null;
+    if (_syncInFlight) { saveChats(); return; }  // re-schedule
+    _syncInFlight = true;
+    try {
+        for (const c of chats) {
+            const serialized = JSON.stringify(c);
+            if (_syncedHash.get(c.id) === serialized) continue;
+            const resp = await fetch(`/api/chats/${encodeURIComponent(c.id)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: serialized,
+            });
+            if (resp.ok) _syncedHash.set(c.id, serialized);
+        }
+    } catch (e) {
+        console.warn('[chat] sync failed', e);
+    } finally {
+        _syncInFlight = false;
+    }
+}
+
+function _setSyncStatus(status) {
+    const el = document.getElementById('chat-sync-status');
+    if (!el) return;
+    clearTimeout(el._hideTimer);
+    if (status === 'saving') {
+        el.textContent = 'Saving...';
+        el.className = 'chat-sync-status saving';
+        el.style.opacity = '1';
+    } else if (status === 'saved') {
+        el.textContent = 'Saved';
+        el.className = 'chat-sync-status saved';
+        el.style.opacity = '1';
+        el._hideTimer = setTimeout(() => { el.style.opacity = '0'; }, 2000);
+    } else if (status === 'failed') {
+        el.textContent = 'Sync failed — changes in local storage only';
+        el.className = 'chat-sync-status failed';
+        el.style.opacity = '1';
+    }
+}
+
+async function _syncChatNow(chat) {
+    _setSyncStatus('saving');
+    const serialized = JSON.stringify(chat);
+    try {
+        const resp = await fetch(`/api/chats/${encodeURIComponent(chat.id)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: serialized,
+        });
+        if (resp.ok) {
+            _syncedHash.set(chat.id, serialized);
+            _setSyncStatus('saved');
+        } else {
+            _setSyncStatus('failed');
+        }
+    } catch (e) {
+        console.warn('[chat] immediate sync failed', e);
+        _setSyncStatus('failed');
+    }
 }
 
 function getActiveChat() {
@@ -146,6 +237,7 @@ function switchModule(mod) {
     document.getElementById(`workspace-${mod}`).classList.add('active');
     if (mod === 'prospecting') { loadCampaigns(); _loadLenses(); }
     if (mod === 'signals') { loadSignals(); loadSignalFreshness(); }
+    if (mod === 'documents') { loadDocuments(); }
 }
 
 // ===================== CHAT LIST =====================
@@ -198,7 +290,10 @@ function loadChat(id) {
 
 function deleteChat(id) {
     chats = chats.filter(c => c.id !== id);
-    saveChats();
+    _syncedHash.delete(id);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(chats));
+    fetch(`/api/chats/${encodeURIComponent(id)}`, { method: 'DELETE' })
+        .catch(e => console.warn('[chat] server delete failed', e));
     if (id === activeChatId) {
         if (chats.length) loadChat(chats[0].id);
         else newChat();
@@ -2539,6 +2634,7 @@ async function processChat(chat) {
     if (t) t.remove();
 
     saveChats();
+    _syncChatNow(chat);
     renderMessages();
     renderChatList();
     refreshSidebar();

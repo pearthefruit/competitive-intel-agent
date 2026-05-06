@@ -155,7 +155,7 @@ def _extract_rsc_reviews(soup, company_name):
             unique.append({
                 "title": f"Blind review — {company_name}",
                 "href": f"https://www.teamblind.com/company/{company_name}/reviews",
-                "body": s[:2000],
+                "body": s,
                 "date": "",
                 "source": "blind",
             })
@@ -185,7 +185,7 @@ def _extract_post_links(soup, page_url):
         results.append({
             "title": text[:200],
             "href": href,
-            "body": text[:2000],
+            "body": text,
             "date": "",
             "source": "blind",
         })

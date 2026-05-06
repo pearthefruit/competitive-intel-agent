@@ -30,6 +30,10 @@
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
             <span>Research</span>
         </div>
+        <div class="module-item" data-module="documents" onclick="switchModule('documents')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+            <span>Docs</span>
+        </div>
         <div class="module-sidebar-spacer"></div>
         <div class="module-sidebar-llm" id="global-llm-badge" onclick="toggleUsagePanel()" title="LLM usage today">
             <span id="global-llm-text" style="font-size:9px;color:var(--text-muted);writing-mode:vertical-lr;text-orientation:mixed">—</span>
@@ -113,6 +117,7 @@
                     oninput="autoResize(this)"></textarea>
                 <button class="send-btn" id="send-btn" onclick="sendMessage()">Send</button>
             </div>
+            <div class="chat-sync-status" id="chat-sync-status"></div>
         </div>
     </div>
 
@@ -230,6 +235,123 @@
         </div>
     </div><!-- /workspace-prospecting -->
 
+    <!-- WORKSPACE: DOCUMENTS — read, annotate, thread -->
+    <div class="workspace" id="workspace-documents">
+        <!-- PANE 1: Document list -->
+        <div class="doc-list-pane" id="doc-list-pane">
+            <div class="doc-list-header">
+                <span class="doc-list-title">Documents</span>
+                <button class="doc-import-btn" onclick="openImportModal()" title="Import document">+ Import</button>
+            </div>
+            <div class="doc-list" id="doc-list">
+                <div class="doc-empty-state">No documents yet.<br>Import a PDF, Markdown, Word, or EPUB file.</div>
+            </div>
+        </div>
+
+        <!-- PANE 2: Document text view -->
+        <div class="doc-text-pane" id="doc-text-pane">
+            <div class="doc-text-empty" id="doc-text-empty">
+                <div class="doc-text-empty-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" width="48" height="48"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                </div>
+                <div>Select a document to start reading</div>
+            </div>
+            <div class="doc-text-header" id="doc-text-header" style="display:none">
+                <div class="doc-text-meta">
+                    <div class="doc-text-doctitle" id="doc-text-doctitle"></div>
+                    <div class="doc-text-source" id="doc-text-source"></div>
+                </div>
+                <div class="doc-text-actions">
+                    <button class="doc-action-btn" id="doc-save-copy-btn" onclick="saveDocCopy()" style="display:none" title="Save a permanent copy to vault">Save copy</button>
+                    <button class="doc-action-btn doc-action-btn-danger" onclick="deleteActiveDoc()" title="Delete document">Delete</button>
+                </div>
+            </div>
+            <div class="doc-text-body" id="doc-text-body"></div>
+        </div>
+
+        <!-- PANE 3: Annotations panel -->
+        <div class="doc-annotations-pane" id="doc-annotations-pane">
+            <div class="doc-ann-header">
+                <span class="doc-ann-title">Annotations</span>
+                <span class="doc-ann-count" id="doc-ann-count">0</span>
+            </div>
+            <div class="doc-ann-list" id="doc-ann-list">
+                <div class="doc-ann-empty">Highlight text in the document to create annotations.</div>
+            </div>
+        </div>
+
+        <!-- Annotation popover (positioned by JS) -->
+        <div class="doc-ann-popover" id="doc-ann-popover" style="display:none">
+            <div class="doc-ann-popover-quote" id="doc-ann-popover-quote"></div>
+            <textarea class="doc-ann-popover-note" id="doc-ann-popover-note" placeholder="Add a note (optional)..." rows="2"></textarea>
+            <input class="doc-ann-popover-title" id="doc-ann-popover-title" placeholder="Thread title..." type="text">
+            <div class="doc-ann-popover-row">
+                <label class="doc-ann-popover-check">
+                    <input type="checkbox" id="doc-ann-create-thread" checked>
+                    <span>Create thread</span>
+                </label>
+                <div class="doc-ann-popover-btns">
+                    <button class="doc-ann-popover-cancel" onclick="closeAnnotationPopover()">Cancel</button>
+                    <button class="doc-ann-popover-save" onclick="saveAnnotation()">Save</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Import modal -->
+        <input type="file" id="doc-file-picker" accept=".pdf,.md,.markdown,.txt,.docx,.epub" style="display:none" onchange="onFilePicked(this)">
+        <div class="doc-import-overlay" id="doc-import-overlay" style="display:none">
+            <div class="doc-import-modal">
+                <div class="doc-import-modal-header">
+                    <span>Import Document</span>
+                    <button class="doc-import-close" onclick="closeImportModal()">&times;</button>
+                </div>
+                <div class="doc-import-body">
+                    <label class="doc-import-label">File</label>
+                    <div class="doc-import-path-row">
+                        <input class="doc-import-input" id="doc-import-path" type="text" placeholder="Paste a path, or click Browse →" oninput="onImportPathChange()">
+                        <button class="doc-browse-btn" onclick="document.getElementById('doc-file-picker').click()">Browse</button>
+                    </div>
+                    <div class="doc-import-temp-warn" id="doc-import-temp-warn" style="display:none">
+                        ⚠ This looks like a temporary file. Consider saving a copy.
+                    </div>
+                    <div class="doc-import-row">
+                        <div class="doc-import-field">
+                            <label class="doc-import-label">Title</label>
+                            <input class="doc-import-input" id="doc-import-title" type="text" placeholder="Auto-detected from filename">
+                        </div>
+                        <div class="doc-import-field doc-import-field-sm">
+                            <label class="doc-import-label">Year</label>
+                            <input class="doc-import-input" id="doc-import-year" type="number" placeholder="2025" min="1900" max="2099">
+                        </div>
+                    </div>
+                    <label class="doc-import-label">Source / Publisher</label>
+                    <input class="doc-import-input" id="doc-import-source" type="text" placeholder="Deloitte, McKinsey, etc.">
+                    <label class="doc-import-label">Storage</label>
+                    <div class="doc-import-storage">
+                        <label class="doc-import-radio">
+                            <input type="radio" name="storage_mode" value="reference" id="doc-storage-ref" checked>
+                            <div>
+                                <div class="doc-import-radio-title">Reference only</div>
+                                <div class="doc-import-radio-sub">File stays at original path</div>
+                            </div>
+                        </label>
+                        <label class="doc-import-radio">
+                            <input type="radio" name="storage_mode" value="stored" id="doc-storage-stored">
+                            <div>
+                                <div class="doc-import-radio-title">Save copy to vault</div>
+                                <div class="doc-import-radio-sub">Permanent access even if original moves</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+                <div class="doc-import-footer">
+                    <span class="doc-import-error" id="doc-import-error"></span>
+                    <button class="doc-import-submit" id="doc-import-submit" onclick="submitImport()">Import</button>
+                </div>
+            </div>
+        </div>
+    </div><!-- /workspace-documents -->
+
     <!-- WORKSPACE: SIGNALS — 3-pane macro signal monitoring -->
     <div class="workspace" id="workspace-signals">
         <!-- PANE 1: Domain Filter Sidebar -->
@@ -264,7 +386,7 @@
             <!-- Thread creation panel (collapsed by default) -->
             <div id="thread-create-panel" style="display:none;padding:8px 12px;border-bottom:1px solid var(--border)">
                 <input type="text" id="tc-title" placeholder="Thread title…" style="width:100%;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:12px;outline:none;box-sizing:border-box">
-                <textarea id="tc-paste" placeholder="Optional: paste a LinkedIn News article or list of related items to auto-create signals…" style="width:100%;min-height:60px;max-height:160px;margin-top:6px;padding:8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:11px;font-family:inherit;line-height:1.4;resize:vertical;outline:none;box-sizing:border-box"></textarea>
+                <textarea id="tc-paste" placeholder="Optional: body for the first signal in this thread…" style="width:100%;min-height:60px;max-height:160px;margin-top:6px;padding:8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:11px;font-family:inherit;line-height:1.4;resize:vertical;outline:none;box-sizing:border-box"></textarea>
                 <button id="tc-submit" onclick="_tcCreate()" style="width:100%;margin-top:6px;padding:6px;font-size:11px;font-weight:600;border:none;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--purple));color:white;cursor:pointer;transition:all 0.15s">Create Thread</button>
             </div>
 
@@ -634,6 +756,7 @@
     <script src="{{ url_for('static', filename='js/execution.js') }}"></script>
     <script src="{{ url_for('static', filename='js/timeline.js') }}"></script>
     <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/documents.js') }}"></script>
 
 <!-- Narrative Create Modal -->
 <div class="narrative-modal-overlay" id="narrative-modal" style="display:none" onclick="if(event.target===this)closeNarrativeModal()">

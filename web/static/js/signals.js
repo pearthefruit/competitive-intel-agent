@@ -165,6 +165,7 @@ function _toggleSidebarCollapse() {
 
 var _signalsCache = [];  // var: read/written from base.html (detail pane, search) outside this module
 var _threadsCache = [];  // var: accessed from board.js (separate script scope)
+var _allThreadsNames = null; // full untruncated thread list for assign dropdown
 let _signalsDomainFilter = 'all'; // kept for backward compat — derived from _activeDomains
 let _signalsSourceTypeFilter = 'all';
 
@@ -366,6 +367,7 @@ function loadSignals() {
     ]).then(([sigData, threadData, brainstormData]) => {
         _signalsCache = sigData.signals || [];
         _threadsCache = threadData.threads || [];
+        _allThreadsNames = null; // invalidate so assign dropdown re-fetches fresh list
         _renderFeedFilters(_signalTab);
         renderSignalFeed();
         renderThreadFeed();
@@ -388,10 +390,11 @@ function loadSignals() {
 //    where extension-triggered refresh didn't fire or tab was hidden).
 window._signalVaultRefresh = function() {
     if (typeof loadSignals === 'function') loadSignals();
-    // If board or chains subtab is visible, reload that too
     if (typeof _signalTab !== 'undefined' && _signalTab === 'graph' && typeof loadBoard === 'function') {
         loadBoard();
     }
+    if (typeof loadDocuments === 'function') loadDocuments();
+    if (typeof loadCampaigns === 'function') loadCampaigns();
     _lastSignalsLoadAt = Date.now();
 };
 
@@ -741,9 +744,9 @@ function _showAssignDropdown(signalIds, isBulk) {
     document.body.appendChild(dd);
     const input = dd.querySelector('#sig-assign-search');
     const list = dd.querySelector('#sig-assign-list');
-    const render = (q) => {
+    const render = (allThreads, q) => {
         q = (q || '').toLowerCase().trim();
-        const threads = [...(_threadsCache || [])].sort((a, b) => (b.signal_count || 0) - (a.signal_count || 0));
+        const threads = [...allThreads].sort((a, b) => (b.signal_count || 0) - (a.signal_count || 0));
         const filtered = q ? threads.filter(t => (t.title || '').toLowerCase().includes(q)) : threads.slice(0, 20);
         const exactMatch = q && threads.some(t => (t.title || '').toLowerCase() === q);
         const createBtn = q && !exactMatch
@@ -756,14 +759,27 @@ function _showAssignDropdown(signalIds, isBulk) {
             </div>`
         ).join('') || '<div style="padding:12px 16px;color:var(--text-muted);font-size:12px">No threads found</div>';
     };
-    render('');
-    input.addEventListener('input', () => render(input.value));
+    const initAssignDropdown = (allThreads) => {
+        render(allThreads, '');
+        input.addEventListener('input', () => render(allThreads, input.value));
+    };
+    if (_allThreadsNames) {
+        initAssignDropdown(_allThreadsNames);
+    } else {
+        list.innerHTML = '<div style="padding:12px 16px;color:var(--text-muted);font-size:12px">Loading...</div>';
+        fetch('/api/signals/threads/names')
+            .then(r => r.json())
+            .then(data => {
+                _allThreadsNames = data.threads || [];
+                initAssignDropdown(_allThreadsNames);
+            });
+    }
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') dd.remove();
         if (e.key === 'Enter') {
             const v = input.value.trim();
             if (!v) return;
-            const match = (_threadsCache || []).find(t => (t.title || '').toLowerCase() === v.toLowerCase());
+            const match = (_allThreadsNames || _threadsCache || []).find(t => (t.title || '').toLowerCase() === v.toLowerCase());
             _doAssignSignals(signalIds, match ? match.id : null, match ? null : v, isBulk);
         }
     });

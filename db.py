@@ -364,6 +364,16 @@ CREATE TABLE IF NOT EXISTS causal_paths (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Research-module chat sessions (persisted server-side; capped at 30 newest)
+CREATE TABLE IF NOT EXISTS chats (
+    id TEXT PRIMARY KEY,
+    title TEXT,
+    company TEXT,
+    messages_json TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Directed causal links between threads (temporal/causal view)
 CREATE TABLE IF NOT EXISTS causal_links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -378,6 +388,31 @@ CREATE TABLE IF NOT EXISTS causal_links (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(cause_thread_id, effect_thread_id)
+);
+
+CREATE TABLE IF NOT EXISTS documents (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    source TEXT,
+    year INTEGER,
+    file_type TEXT NOT NULL,
+    file_path TEXT,
+    stored_path TEXT,
+    storage_mode TEXT DEFAULT 'reference',
+    section_count INTEGER,
+    extracted_text_json TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS document_annotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id TEXT REFERENCES documents(id) ON DELETE CASCADE,
+    section_index INTEGER,
+    section_label TEXT,
+    selected_text TEXT NOT NULL,
+    note TEXT,
+    thread_id INTEGER REFERENCES signal_clusters(id) ON DELETE SET NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -428,6 +463,8 @@ def _migrate_db(conn):
         ("signals", "engagement_json", "TEXT"),
         ("brainstorms", "thread_titles_json", "TEXT"),
         ("llm_usage", "duration_ms", "INTEGER"),
+        ("documents", "source_url", "TEXT"),
+        ("documents", "sender", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -876,6 +913,72 @@ def get_dossier_by_company(conn, company_name):
     dossier["events"] = [dict(e) for e in events]
 
     return dossier
+
+
+CHAT_CAP = 30
+
+
+def list_chats(conn):
+    """Return newest 30 chats with full messages. Capped at 30 for bounded payload."""
+    rows = conn.execute(
+        """SELECT id, title, company, messages_json, created_at, updated_at
+           FROM chats ORDER BY updated_at DESC LIMIT ?""",
+        (CHAT_CAP,),
+    ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["messages"] = json.loads(d.pop("messages_json") or "[]")
+        except Exception:
+            d["messages"] = []
+        out.append(d)
+    return out
+
+
+def get_chat(conn, chat_id):
+    """Return a single chat with full messages array, or None."""
+    row = conn.execute(
+        "SELECT id, title, company, messages_json, created_at, updated_at FROM chats WHERE id = ?",
+        (chat_id,),
+    ).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    try:
+        d["messages"] = json.loads(d.pop("messages_json") or "[]")
+    except Exception:
+        d["messages"] = []
+    return d
+
+
+def upsert_chat(conn, chat_id, title, company, messages, created_at=None):
+    """Insert or replace a chat, then trim storage to the 30 most recently updated."""
+    messages_json = json.dumps(messages or [])
+    now = datetime.now(timezone.utc).isoformat()
+    existing = conn.execute("SELECT created_at FROM chats WHERE id = ?", (chat_id,)).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE chats SET title = ?, company = ?, messages_json = ?, updated_at = ? WHERE id = ?",
+            (title, company, messages_json, now, chat_id),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO chats (id, title, company, messages_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (chat_id, title, company, messages_json, created_at or now, now),
+        )
+    conn.execute(
+        """DELETE FROM chats WHERE id NOT IN (
+             SELECT id FROM chats ORDER BY updated_at DESC LIMIT ?
+           )""",
+        (CHAT_CAP,),
+    )
+    conn.commit()
+
+
+def delete_chat(conn, chat_id):
+    conn.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
+    conn.commit()
 
 
 def get_all_dossiers(conn, hide_empty=False):
@@ -2538,7 +2641,7 @@ def insert_narrative(conn, data):
 
 
 def get_narratives(conn, status="all", limit=50):
-    """Fetch narratives with thread counts."""
+    """Fetch narratives with thread counts + ordered thread_ids."""
     where = "WHERE n.status = ?" if status != "all" else ""
     params = [status, limit] if status != "all" else [limit]
     rows = conn.execute(
@@ -2564,6 +2667,12 @@ def get_narratives(conn, status="all", limit=50):
         d = dict(r)
         d["sub_claims"] = json.loads(d["sub_claims_json"]) if d.get("sub_claims_json") else []
         d["search_queries"] = json.loads(d["search_queries_json"]) if d.get("search_queries_json") else []
+        # Ordered thread IDs for board rendering (matches sub_claims order via id)
+        tid_rows = conn.execute(
+            "SELECT id FROM signal_clusters WHERE narrative_id = ? ORDER BY id",
+            (d["id"],),
+        ).fetchall()
+        d["thread_ids"] = [t["id"] for t in tid_rows]
         result.append(d)
     return result
 
@@ -3509,4 +3618,98 @@ def update_board_note(conn, note_id, text=None, x=None, y=None, color=None):
 def delete_board_note(conn, note_id):
     """Delete a board note."""
     conn.execute("DELETE FROM board_notes WHERE id = ?", (note_id,))
+    conn.commit()
+
+
+# ── Document helpers ────────────────────────────────────────────────────
+
+def create_document(conn, doc_id, title, source, year, file_type, file_path,
+                    stored_path, storage_mode, section_count, extracted_text_json,
+                    source_url=None, sender=None):
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """INSERT INTO documents
+           (id, title, source, year, file_type, file_path, stored_path, storage_mode,
+            section_count, extracted_text_json, source_url, sender, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (doc_id, title, source, year, file_type, file_path, stored_path, storage_mode,
+         section_count, extracted_text_json, source_url, sender, now),
+    )
+    conn.commit()
+
+
+def get_documents(conn):
+    rows = conn.execute(
+        """SELECT d.id, d.title, d.source, d.year, d.file_type, d.file_path,
+                  d.stored_path, d.storage_mode, d.section_count, d.created_at,
+                  d.sender, d.source_url,
+                  COUNT(a.id) as annotation_count
+           FROM documents d
+           LEFT JOIN document_annotations a ON a.document_id = d.id
+           GROUP BY d.id
+           ORDER BY d.created_at DESC"""
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_document(conn, doc_id):
+    row = conn.execute(
+        "SELECT * FROM documents WHERE id = ?", (doc_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def update_document_stored_path(conn, doc_id, stored_path):
+    conn.execute(
+        "UPDATE documents SET stored_path = ?, storage_mode = 'stored' WHERE id = ?",
+        (stored_path, doc_id),
+    )
+    conn.commit()
+
+
+def delete_document(conn, doc_id):
+    conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+    conn.commit()
+
+
+def create_annotation(conn, document_id, section_index, section_label,
+                      selected_text, note, thread_id=None):
+    now = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        """INSERT INTO document_annotations
+           (document_id, section_index, section_label, selected_text, note, thread_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (document_id, section_index, section_label, selected_text, note, thread_id, now),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_annotations(conn, document_id):
+    rows = conn.execute(
+        """SELECT a.*, sc.title as thread_title
+           FROM document_annotations a
+           LEFT JOIN signal_clusters sc ON sc.id = a.thread_id
+           WHERE a.document_id = ?
+           ORDER BY a.section_index, a.created_at""",
+        (document_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_annotation(conn, annotation_id, note):
+    conn.execute(
+        "UPDATE document_annotations SET note = ? WHERE id = ?",
+        (note, annotation_id),
+    )
+    conn.commit()
+
+
+def delete_annotation(conn, annotation_id):
+    conn.execute("DELETE FROM document_annotations WHERE id = ?", (annotation_id,))
+    conn.commit()
+
+
+def update_document_title(conn, doc_id, title):
+    conn.execute("UPDATE documents SET title = ? WHERE id = ?", (title, doc_id))
     conn.commit()

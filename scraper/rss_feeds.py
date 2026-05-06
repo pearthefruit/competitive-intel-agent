@@ -183,7 +183,7 @@ def fetch_rss_feed(feed_key, max_results=15, days_back=7):
         results.append({
             "title": title,
             "href": href,
-            "body": body[:2000],
+            "body": body,
             "date": date_str,
             "source": feed["source_name"],
             "source_type": feed["source_type"],
