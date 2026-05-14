@@ -1,4 +1,4 @@
-# Competitive Intelligence Agent
+# Signal Vault
 
 A competitive intelligence platform that scrapes job boards, analyzes financials, maps competitors, and generates consulting-ready intelligence briefings — from the terminal or a three-pane web dashboard.
 
