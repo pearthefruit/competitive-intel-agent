@@ -17,3 +17,15 @@ venv/
 # IDE
 .vscode/
 .idea/
+
+# Local Claude Code settings
+.claude/
+
+# User data / vault storage
+documents/
+screenshots/
+
+# DB variants and backups
+*.db.*
+intel_backup*.json
+intel_nuke*.json
