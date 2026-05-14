@@ -414,6 +414,25 @@ CREATE TABLE IF NOT EXISTS document_annotations (
     thread_id INTEGER REFERENCES signal_clusters(id) ON DELETE SET NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Source documents: raw content fetched during analysis runs (articles, SEC data, etc.)
+CREATE TABLE IF NOT EXISTS source_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dossier_id INTEGER NOT NULL REFERENCES dossiers(id) ON DELETE CASCADE,
+    source_type TEXT NOT NULL,
+    url TEXT,
+    title TEXT,
+    content TEXT,
+    raw_data TEXT,
+    fetched_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Links source documents to the specific analysis run that used them
+CREATE TABLE IF NOT EXISTS analysis_sources (
+    analysis_id INTEGER NOT NULL REFERENCES dossier_analyses(id) ON DELETE CASCADE,
+    source_id   INTEGER NOT NULL REFERENCES source_documents(id) ON DELETE CASCADE,
+    PRIMARY KEY (analysis_id, source_id)
+);
 """
 
 
@@ -3713,3 +3732,68 @@ def delete_annotation(conn, annotation_id):
 def update_document_title(conn, doc_id, title):
     conn.execute("UPDATE documents SET title = ? WHERE id = ?", (title, doc_id))
     conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Source document persistence
+# ---------------------------------------------------------------------------
+
+def save_source_document(conn, dossier_id, source_type, url, title, content, raw_data=None):
+    """Persist a fetched source document. Returns the new row id."""
+    now = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        """INSERT INTO source_documents (dossier_id, source_type, url, title, content, raw_data, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (dossier_id, source_type, url, title, content, raw_data, now),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def link_sources_to_analysis(conn, analysis_id, source_ids):
+    """Associate source document ids with a completed analysis run."""
+    for sid in source_ids:
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO analysis_sources (analysis_id, source_id) VALUES (?, ?)",
+                (analysis_id, sid),
+            )
+        except Exception:
+            pass
+    conn.commit()
+
+
+def get_sources_for_dossier(conn, dossier_id, source_type=None):
+    """Return all source documents for a dossier, newest first."""
+    if source_type:
+        rows = conn.execute(
+            """SELECT sd.*, GROUP_CONCAT(sa.analysis_id) as analysis_ids
+               FROM source_documents sd
+               LEFT JOIN analysis_sources sa ON sa.source_id = sd.id
+               WHERE sd.dossier_id = ? AND sd.source_type = ?
+               GROUP BY sd.id ORDER BY sd.fetched_at DESC""",
+            (dossier_id, source_type),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT sd.*, GROUP_CONCAT(sa.analysis_id) as analysis_ids
+               FROM source_documents sd
+               LEFT JOIN analysis_sources sa ON sa.source_id = sd.id
+               WHERE sd.dossier_id = ?
+               GROUP BY sd.id ORDER BY sd.fetched_at DESC""",
+            (dossier_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_sources_for_analysis(conn, analysis_id):
+    """Return source documents used in a specific analysis run."""
+    rows = conn.execute(
+        """SELECT sd.*
+           FROM source_documents sd
+           JOIN analysis_sources sa ON sa.source_id = sd.id
+           WHERE sa.analysis_id = ?
+           ORDER BY sd.fetched_at""",
+        (analysis_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]

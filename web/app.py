@@ -1025,6 +1025,36 @@ def create_app(db_path="intel.db"):
             s.pop("lens_config_json", None)
         return jsonify(scores)
 
+    @app.route("/api/dossiers/<path:company_name>/sources")
+    def get_dossier_sources(company_name):
+        """Get all source documents for a company dossier."""
+        from db import get_sources_for_dossier, get_or_create_dossier
+        conn = get_connection(db_path)
+        dossier_id = get_or_create_dossier(conn, company_name)
+        source_type = request.args.get("source_type")
+        sources = get_sources_for_dossier(conn, dossier_id, source_type=source_type)
+        conn.close()
+        # Strip heavy content from list view; client fetches full content on demand
+        include_content = request.args.get("include_content", "0") == "1"
+        if not include_content:
+            for s in sources:
+                s["content_preview"] = (s.get("content") or "")[:300]
+                s.pop("content", None)
+                s.pop("raw_data", None)
+        return jsonify(sources)
+
+    @app.route("/api/sources/<int:source_id>")
+    def get_source_document(source_id):
+        """Get full content of a single source document."""
+        conn = get_connection(db_path)
+        row = conn.execute(
+            "SELECT * FROM source_documents WHERE id = ?", (source_id,)
+        ).fetchone()
+        conn.close()
+        if not row:
+            return jsonify({"error": "Not found"}), 404
+        return jsonify(dict(row))
+
     # --- ICP Profile API ---
 
     @app.route("/api/icp-profiles")

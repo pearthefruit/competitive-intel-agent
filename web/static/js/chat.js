@@ -1811,8 +1811,13 @@ function showBriefing(dossier, b, _targetEl) {
         html += _briefingSection('Source Reports', srcHtml, false);
     }
 
+    // Source Documents placeholder — populated async after render
+    html += _briefingSection('Source Documents', '<div id="source-docs-body"><span style="color:var(--text-muted);font-size:12px">Loading...</span></div>', false);
+
     const writeTarget = _targetEl || document.getElementById('right-content');
     writeTarget.innerHTML = html;
+
+    _loadSourcesSection(dossier.company_name);
 
     if (!isSplitTarget) {
         openRightPane();
@@ -1820,6 +1825,98 @@ function showBriefing(dossier, b, _targetEl) {
         if (rp.classList.contains('expanded')) {
             _buildCardGrid(rp);
         }
+    }
+}
+
+// ========== SOURCE DOCUMENTS ==========
+
+const _SOURCE_TYPE_LABELS = {
+    sec_xbrl: 'SEC EDGAR (XBRL)', sec_8k: 'SEC 8-K Filings',
+    yahoo_finance: 'Yahoo Finance', analyst: 'Analyst Estimates',
+    propublica: 'ProPublica 990', article: 'Articles',
+    reddit: 'Reddit', reddit_rss: 'Reddit (RSS)', hackernews: 'Hacker News',
+    blind: 'Blind', '1point3acres': '1Point3Acres', tiktok: 'TikTok',
+    google_news: 'Google News', news: 'News',
+};
+const _SOURCE_TYPE_ICONS = {
+    sec_xbrl: '📊', sec_8k: '📄', yahoo_finance: '📈', analyst: '🔬',
+    propublica: '🏛️', article: '📰', reddit: '💬', reddit_rss: '💬',
+    hackernews: '🔥', blind: '👁️', '1point3acres': '🌍', tiktok: '🎵',
+    google_news: '📡', news: '📰',
+};
+
+async function _loadSourcesSection(companyName) {
+    const el = document.getElementById('source-docs-body');
+    if (!el) return;
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/sources`);
+        if (!resp.ok) {
+            el.innerHTML = '<span style="color:var(--text-muted);font-size:12px">No sources saved.</span>';
+            return;
+        }
+        const sources = await resp.json();
+        if (!sources.length) {
+            el.innerHTML = '<span style="color:var(--text-muted);font-size:12px">No source documents yet. Run financial or sentiment analysis to capture sources.</span>';
+            return;
+        }
+        const byType = {};
+        sources.forEach(s => {
+            const t = s.source_type || 'other';
+            if (!byType[t]) byType[t] = [];
+            byType[t].push(s);
+        });
+        let html = '<div class="source-docs-list">';
+        Object.entries(byType).forEach(([type, items]) => {
+            const label = _SOURCE_TYPE_LABELS[type] || type;
+            const icon = _SOURCE_TYPE_ICONS[type] || '📄';
+            html += `<div class="source-type-group">
+                <div class="source-type-header">${icon} <strong>${escHtml(label)}</strong> <span class="source-count">${items.length}</span></div>
+                <div class="source-items">`;
+            items.forEach(src => {
+                const date = src.fetched_at ? new Date(src.fetched_at).toLocaleDateString() : '';
+                const title = src.title || src.url || 'Untitled';
+                const preview = src.content_preview || '';
+                const urlHtml = src.url ? `<a href="${escHtml(src.url)}" target="_blank" class="source-item-url" onclick="event.stopPropagation()">↗</a>` : '';
+                html += `<div class="source-item" onclick="_expandSource(${src.id}, this)">
+                    <div class="source-item-header">
+                        <span class="source-item-title">${escHtml(title.substring(0,100))}${urlHtml}</span>
+                        ${date ? `<span class="source-item-date">${date}</span>` : ''}
+                    </div>
+                    ${preview ? `<div class="source-item-preview">${escHtml(preview)}</div>` : ''}
+                    <div class="source-item-full" id="source-full-${src.id}" style="display:none"></div>
+                </div>`;
+            });
+            html += '</div></div>';
+        });
+        html += `<div style="padding:6px 0;font-size:11px;color:var(--text-muted)">${sources.length} source document${sources.length !== 1 ? 's' : ''} saved</div>`;
+        html += '</div>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Error loading sources.</span>';
+    }
+}
+
+async function _expandSource(sourceId, itemEl) {
+    const fullEl = document.getElementById(`source-full-${sourceId}`);
+    if (!fullEl) return;
+    if (fullEl.style.display !== 'none') {
+        fullEl.style.display = 'none';
+        return;
+    }
+    if (!fullEl.dataset.loaded) {
+        fullEl.innerHTML = '<span style="color:var(--text-muted);font-size:11px">Loading...</span>';
+        fullEl.style.display = 'block';
+        try {
+            const resp = await fetch(`/api/sources/${sourceId}`);
+            const src = await resp.json();
+            const content = src.content || '(no content)';
+            fullEl.innerHTML = `<pre class="source-content-pre">${escHtml(content)}</pre>`;
+            fullEl.dataset.loaded = '1';
+        } catch(e) {
+            fullEl.innerHTML = '<span style="color:var(--text-muted)">Error loading content.</span>';
+        }
+    } else {
+        fullEl.style.display = 'block';
     }
 }
 

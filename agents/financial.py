@@ -1,9 +1,11 @@
 """Agent: Financial Analysis — SEC EDGAR for US-listed, Yahoo Finance for foreign-listed, web search for private."""
 
+import json
 from datetime import datetime
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
+from db import get_connection, save_source_document, link_sources_to_analysis
 from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, get_recent_filings, format_financials_for_prompt, get_8k_filings, format_8k_for_prompt
 from scraper.stock_data import get_stock_data, format_stock_data_for_prompt, get_extended_financials, format_extended_financials_for_prompt
 from scraper.web_search import search_web, search_news, format_search_results, dedup_results
@@ -21,6 +23,29 @@ def _result_detail(results, max_items=15):
         if title:
             lines.append(f'• {title}' + (f'  ({url})' if url else ''))
     return '\n'.join(lines) if lines else ''
+
+
+def _save_and_link_sources(company, dossier_result, pending_sources):
+    """Persist collected source documents and link them to the analysis run."""
+    if not dossier_result or not pending_sources:
+        return
+    try:
+        conn = get_connection()
+        dossier_id = dossier_result["dossier_id"]
+        analysis_id = dossier_result["analysis_id"]
+        source_ids = []
+        for s in pending_sources:
+            sid = save_source_document(
+                conn, dossier_id, s["source_type"], s.get("url"),
+                s.get("title"), s.get("content"), s.get("raw_data"),
+            )
+            source_ids.append(sid)
+        if analysis_id and source_ids:
+            link_sources_to_analysis(conn, analysis_id, source_ids)
+        conn.close()
+        print(f"[sources] Saved {len(source_ids)} source documents for {company}")
+    except Exception as e:
+        print(f"[sources] Error saving source documents: {e}")
 
 
 def financial_analysis(company, progress_cb=None):
@@ -93,6 +118,7 @@ def _analyze_public(company, cik_info, _cb=None):
     edgar_name = cik_info["company_name"]
 
     print(f"[financial] Found: {edgar_name} (ticker: {ticker}, CIK: {cik})")
+    _pending_sources = []
 
     # Fetch EDGAR data
     _cb("source_start", {"source": "xbrl", "label": "XBRL Financials", "detail": f"Fetching company facts for CIK {cik}"})
@@ -115,6 +141,16 @@ def _analyze_public(company, cik_info, _cb=None):
     financials_text = format_financials_for_prompt(financials, filings)
     xbrl_detail = "Metrics: " + ", ".join(financials.keys()) + f"\n{len(filings)} recent filings"
     _cb("source_done", {"source": "xbrl", "status": "done", "summary": f"{len(financials)} metrics, {len(filings)} filings", "detail": xbrl_detail})
+    try:
+        _pending_sources.append({
+            "source_type": "sec_xbrl",
+            "url": f"https://data.sec.gov/api/xbrl/companyfacts/CIK{int(cik):010d}.json",
+            "title": f"SEC EDGAR XBRL: {edgar_name}",
+            "content": financials_text,
+            "raw_data": json.dumps({"financials": financials, "filings": filings}),
+        })
+    except Exception:
+        pass
 
     # Fetch live market data (stock price, market cap, valuation ratios)
     _cb("source_start", {"source": "yahoo_finance", "label": "Yahoo Finance", "detail": f"Market data for {ticker}"})
@@ -126,6 +162,16 @@ def _analyze_public(company, cik_info, _cb=None):
         print(f"[financial] Got market data: price={stock_data.get('price')}, market_cap={stock_data.get('market_cap')}")
         yf_detail = '\n'.join(f"• {k}: {v}" for k, v in stock_data.items() if v is not None and k not in ('_raw',))
         _cb("source_done", {"source": "yahoo_finance", "status": "done", "summary": f"price={stock_data.get('price')}, cap={stock_data.get('market_cap')}", "detail": yf_detail})
+        try:
+            _pending_sources.append({
+                "source_type": "yahoo_finance",
+                "url": None,
+                "title": f"Yahoo Finance: {ticker}",
+                "content": market_text,
+                "raw_data": json.dumps({k: v for k, v in stock_data.items() if k != '_raw'}),
+            })
+        except Exception:
+            pass
     else:
         print(f"[financial] Could not fetch live market data for {ticker} — report will use SEC data only")
         _cb("source_done", {"source": "yahoo_finance", "status": "skipped", "summary": "Unavailable"})
@@ -143,6 +189,13 @@ def _analyze_public(company, cik_info, _cb=None):
             financials_text += "\n" + ext_text
             print(f"[financial] Added analyst estimates and news")
             _cb("source_done", {"source": "analyst", "status": "done", "summary": "Analyst estimates added"})
+            _pending_sources.append({
+                "source_type": "analyst",
+                "url": None,
+                "title": f"Analyst Estimates + News: {ticker}",
+                "content": ext_text,
+                "raw_data": None,
+            })
     else:
         _cb("source_done", {"source": "analyst", "status": "skipped", "summary": "No data"})
 
@@ -151,10 +204,21 @@ def _analyze_public(company, cik_info, _cb=None):
     print(f"[financial] Fetching recent 8-K filing events...")
     eight_k = get_8k_filings(cik)
     if eight_k:
-        financials_text += "\n" + format_8k_for_prompt(eight_k)
+        eight_k_text = format_8k_for_prompt(eight_k)
+        financials_text += "\n" + eight_k_text
         print(f"[financial] Added {len(eight_k)} 8-K filing events")
         eight_k_detail = '\n'.join(f"• {e.get('form', '8-K')} ({e.get('date', 'N/A')}): {', '.join(e.get('items', []))}" for e in eight_k[:10])
         _cb("source_done", {"source": "8k_filings", "status": "done", "summary": f"{len(eight_k)} events", "detail": eight_k_detail})
+        try:
+            _pending_sources.append({
+                "source_type": "sec_8k",
+                "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=8-K",
+                "title": f"SEC 8-K Filings: {edgar_name}",
+                "content": eight_k_text,
+                "raw_data": json.dumps(eight_k),
+            })
+        except Exception:
+            pass
     else:
         _cb("source_done", {"source": "8k_filings", "status": "skipped", "summary": "None found"})
 
@@ -214,6 +278,7 @@ def _analyze_public(company, cik_info, _cb=None):
 
     print(f"[financial] Report saved to {filename}")
     dossier_result = save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    _save_and_link_sources(company, dossier_result, _pending_sources)
 
     # Overlay computed metrics onto LLM-extracted key facts for precision
     if fin_metrics and dossier_result:
@@ -275,6 +340,7 @@ def _analyze_non_sec(company, _cb=None):
     """Analyze a company not in SEC EDGAR using ProPublica 990 + Yahoo Finance + web search."""
     _cb = _cb or (lambda *a: None)
     print(f"[financial] Searching for financial data on {company}...")
+    _pending_sources = []
 
     # Try ProPublica Nonprofit Explorer first (free, no auth, structured 990 data)
     _cb("source_start", {"source": "propublica", "label": "ProPublica 990", "detail": f"Nonprofit lookup for {company}"})
@@ -290,6 +356,16 @@ def _analyze_non_sec(company, _cb=None):
                 print(f"[financial] Got Form 990 data — {len(financials['filings'])} years of filings")
                 pp_detail = f"Name: {match['name']}\nEIN: {match['ein']}\n{len(financials['filings'])} years of Form 990 data"
                 _cb("source_done", {"source": "propublica", "status": "done", "summary": f"{len(financials['filings'])} years of 990 filings", "detail": pp_detail})
+                try:
+                    _pending_sources.append({
+                        "source_type": "propublica",
+                        "url": f"https://projects.propublica.org/nonprofits/organizations/{match['ein']}",
+                        "title": f"ProPublica 990: {match['name']} (EIN {match['ein']})",
+                        "content": nonprofit_data,
+                        "raw_data": json.dumps({"name": match.get("name"), "ein": match.get("ein"), "filings": financials.get("filings", [])}),
+                    })
+                except Exception:
+                    pass
             else:
                 print(f"[financial] Nonprofit matched but no 990 filings found")
                 _cb("source_done", {"source": "propublica", "status": "skipped", "summary": "Matched but no filings"})
@@ -329,6 +405,18 @@ def _analyze_non_sec(company, _cb=None):
     # Deduplicate (normalized title matching, keeps highest-quality source)
     unique_results = dedup_results(all_results)
 
+    # Persist articles with body content
+    for r in unique_results:
+        body = r.get("body", "")
+        if body:
+            _pending_sources.append({
+                "source_type": r.get("source", "article"),
+                "url": r.get("href") or r.get("url"),
+                "title": (r.get("title") or "")[:500],
+                "content": body,
+                "raw_data": None,
+            })
+
     # Log fetch stats so we can see how much content actually made it through
     fetched = [r for r in unique_results if len(r.get("body", "")) > 300]
     snippet_only = [r for r in unique_results if 0 < len(r.get("body", "")) <= 300]
@@ -351,6 +439,16 @@ def _analyze_non_sec(company, _cb=None):
             market_text = format_stock_data_for_prompt(stock_data)
             search_text += f"\n\nLIVE MARKET DATA (from Yahoo Finance, ticker: {ticker}):\n{market_text}"
             print(f"[financial] Got market data: price={stock_data.get('price')}, market_cap={stock_data.get('market_cap')}")
+            try:
+                _pending_sources.append({
+                    "source_type": "yahoo_finance",
+                    "url": None,
+                    "title": f"Yahoo Finance: {ticker}",
+                    "content": market_text,
+                    "raw_data": json.dumps({k: v for k, v in stock_data.items() if k != '_raw'}),
+                })
+            except Exception:
+                pass
 
         # Fetch full financial statements + analyst data + news
         print(f"[financial] Fetching financial statements and analyst data for {ticker}...")
@@ -361,6 +459,13 @@ def _analyze_non_sec(company, _cb=None):
             if ext_text:
                 search_text += "\n" + ext_text
                 has_statements = "income_stmt" in extended
+                _pending_sources.append({
+                    "source_type": "analyst",
+                    "url": None,
+                    "title": f"Analyst Estimates + Financials: {ticker}",
+                    "content": ext_text,
+                    "raw_data": None,
+                })
                 if has_statements:
                     print(f"[financial] Got full financial statements — this company has structured data comparable to SEC filers")
         yf2_parts = [f"Ticker: {ticker}"]
@@ -413,6 +518,7 @@ def _analyze_non_sec(company, _cb=None):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[financial] Report saved to {filename}")
-    save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    dossier_result = save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    _save_and_link_sources(company, dossier_result, _pending_sources)
     _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)

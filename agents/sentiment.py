@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
+from db import get_connection, save_source_document, link_sources_to_analysis
 from scraper.web_search import search_web, search_news, search_reddit, search_tiktok, format_search_results, dedup_results
 from scraper.google_news import search_google_news
 from scraper.hackernews import search_hackernews
@@ -34,6 +35,7 @@ def sentiment_analysis(company, progress_cb=None):
             Events emitted: source_start, source_done, generating, report_saved
     """
     _cb = progress_cb or (lambda *a: None)
+    _pending_sources = []
     print(f"\n[sentiment] Analyzing employee sentiment for {company}...")
 
     # Multiple targeted searches
@@ -166,6 +168,17 @@ def sentiment_analysis(company, progress_cb=None):
                 print(f"[sentiment] TikTok returned {len(tiktok_items)} videos with content")
                 tiktok_detail = '\n'.join(f"• {t.get('title', 'Video')[:80]}  ({t.get('url', '')})" for t in tiktok_items[:5])
                 _cb("source_done", {"source": "tiktok", "status": "done", "summary": f"{len(tiktok_items)} videos", "detail": tiktok_detail})
+                # Save full TikTok content (transcript + description) before truncation
+                for t in tiktok_items:
+                    full_content = (t.get("transcript") or t.get("description") or "")
+                    if full_content:
+                        _pending_sources.append({
+                            "source_type": "tiktok",
+                            "url": t.get("url"),
+                            "title": (t.get("title") or "TikTok video")[:500],
+                            "content": full_content,
+                            "raw_data": None,
+                        })
                 # Also add as search results for dedup/formatting
                 for t in tiktok_items:
                     all_results.append({
@@ -189,6 +202,19 @@ def sentiment_analysis(company, progress_cb=None):
 
     # Deduplicate (normalized title matching, keeps highest-quality source)
     unique = dedup_results(all_results)
+
+    # Persist sources with body content (TikTok already saved above with full transcript)
+    for r in unique:
+        body = r.get("body", "")
+        src = r.get("source", "article")
+        if body and src != "tiktok":
+            _pending_sources.append({
+                "source_type": src,
+                "url": r.get("href") or r.get("url"),
+                "title": (r.get("title") or "")[:500],
+                "content": body,
+                "raw_data": None,
+            })
 
     search_text = format_search_results(unique)
 
@@ -224,6 +250,30 @@ def sentiment_analysis(company, progress_cb=None):
     filename.write_text(report, encoding="utf-8")
 
     print(f"[sentiment] Report saved to {filename}")
-    save_to_dossier(company, "sentiment", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    dossier_result = save_to_dossier(company, "sentiment", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    _flush_sources(company, dossier_result, _pending_sources)
     _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)
+
+
+def _flush_sources(company, dossier_result, pending_sources):
+    """Persist collected source documents and link them to the analysis run."""
+    if not dossier_result or not pending_sources:
+        return
+    try:
+        conn = get_connection()
+        dossier_id = dossier_result["dossier_id"]
+        analysis_id = dossier_result["analysis_id"]
+        source_ids = []
+        for s in pending_sources:
+            sid = save_source_document(
+                conn, dossier_id, s["source_type"], s.get("url"),
+                s.get("title"), s.get("content"), s.get("raw_data"),
+            )
+            source_ids.append(sid)
+        if analysis_id and source_ids:
+            link_sources_to_analysis(conn, analysis_id, source_ids)
+        conn.close()
+        print(f"[sources] Saved {len(source_ids)} source documents for {company}")
+    except Exception as e:
+        print(f"[sources] Error saving source documents: {e}")

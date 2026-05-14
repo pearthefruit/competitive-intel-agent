@@ -1182,7 +1182,7 @@ def save_to_dossier(company, analysis_type, report_file=None, report_text=None,
 
         # Store the analysis
         _cb('source_start', {'source': 'save', 'label': 'Save to Dossier', 'detail': f'Persisting to {company} dossier'})
-        add_dossier_analysis(
+        analysis_id = add_dossier_analysis(
             conn, dossier_id, analysis_type,
             report_file=report_file,
             key_facts_json=key_facts_json,
@@ -1194,7 +1194,7 @@ def save_to_dossier(company, analysis_type, report_file=None, report_text=None,
         save_detail = f"Company: {company}\nType: {analysis_type}\nReport: {report_file or 'N/A'}\nModel: {model_used or 'N/A'}"
         _cb('source_done', {'source': 'save', 'status': 'done', 'summary': f'Saved {analysis_type} to {company} dossier', 'detail': save_detail})
         _cb('analysis_done', {'analysis_type': 'dossier'})
-        return dossier_id
+        return {"dossier_id": dossier_id, "analysis_id": analysis_id}
     except Exception as e:
         print(f"[dossier] Error saving to dossier: {e}")
         _cb('source_done', {'source': 'save', 'status': 'error', 'summary': str(e)[:80]})
