@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
+from db import get_connection, save_source_document, link_sources_to_analysis
 from scraper.site_crawler import crawl_site
 from prompts.pricing import build_pricing_prompt
 
@@ -53,6 +54,7 @@ def _extract_pricing_content(page):
 def pricing_analysis(url, company_name=None, progress_cb=None):
     """Crawl a website and analyze its pricing strategy. Returns report path or None."""
     _cb = progress_cb or (lambda *a: None)
+    _pending_sources = []
 
     if not url.startswith("http"):
         url = f"https://{url}"
@@ -72,6 +74,19 @@ def pricing_analysis(url, company_name=None, progress_cb=None):
     crawl_detail = '\n'.join(f"• {p.get('url', '?')}  ({p.get('word_count', 0)} words)" for p in pages[:10])
     _cb('source_done', {'source': 'crawler', 'status': 'done', 'summary': f'{len(pages)} pages crawled', 'detail': crawl_detail})
     _cb('analysis_done', {'analysis_type': 'crawl'})
+
+    # Collect crawled pages as source documents
+    for p in pages:
+        page_text = p.get("text") or p.get("content") or p.get("body") or ""
+        if page_text:
+            source_type = "pricing_page" if _is_pricing_page(p) else "web"
+            _pending_sources.append({
+                "source_type": source_type,
+                "url": p.get("url"),
+                "title": (p.get("title") or "")[:500],
+                "content": page_text[:50000],
+                "raw_data": None,
+            })
 
     # --- Phase 2: Pricing Detection ---
     _cb('analysis_start', {'analysis_type': 'pricing_detect', 'label': 'Pricing Detection'})
@@ -142,5 +157,38 @@ def pricing_analysis(url, company_name=None, progress_cb=None):
     _cb('analysis_done', {'analysis_type': 'report'})
 
     dossier_name = company_name or domain
-    save_to_dossier(dossier_name, "pricing", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    dossier_result = save_to_dossier(dossier_name, "pricing", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    _flush_sources(dossier_name, dossier_result, _pending_sources)
     return str(filename)
+
+
+def _flush_sources(company, dossier_result, pending_sources):
+    if not dossier_result or not pending_sources:
+        return
+    # Deduplicate by URL
+    seen_urls = set()
+    deduped = []
+    for s in pending_sources:
+        url = s.get("url")
+        if url and url in seen_urls:
+            continue
+        if url:
+            seen_urls.add(url)
+        deduped.append(s)
+    try:
+        conn = get_connection()
+        dossier_id = dossier_result["dossier_id"]
+        analysis_id = dossier_result["analysis_id"]
+        source_ids = []
+        for s in deduped:
+            sid = save_source_document(
+                conn, dossier_id, s["source_type"], s.get("url"),
+                s.get("title"), s.get("content"), s.get("raw_data"),
+            )
+            source_ids.append(sid)
+        if analysis_id and source_ids:
+            link_sources_to_analysis(conn, analysis_id, source_ids)
+        conn.close()
+        print(f"[sources] Saved {len(source_ids)} source documents for {company}")
+    except Exception as e:
+        print(f"[sources] Error saving source documents: {e}")

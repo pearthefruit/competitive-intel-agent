@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from agents.llm import generate_text, generate_json, save_to_dossier, get_temporal_context, FAST_CHAIN, unique_report_path
+from db import get_connection, save_source_document, link_sources_to_analysis
 from scraper.patents import (
     search_patents, search_patents_with_name,
     format_patents_for_prompt,
@@ -141,6 +142,7 @@ def _search_with_name_variations(company, max_results=25, company_industry="", p
 def patent_analysis(company, progress_cb=None):
     """Analyze a company's patent portfolio. Returns report path or None."""
     _cb = progress_cb or (lambda *a: None)
+    _pending_sources = []
     print(f"\n[patents] Analyzing patent portfolio for {company}...")
 
     # --- Phase 1: Industry Lookup ---
@@ -173,6 +175,16 @@ def patent_analysis(company, progress_cb=None):
     )
 
     if patents:
+        for p in patents:
+            content = p.get("patent_abstract") or p.get("abstract") or p.get("description") or ""
+            if content:
+                _pending_sources.append({
+                    "source_type": "patent",
+                    "url": p.get("patent_url") or p.get("url"),
+                    "title": (p.get("patent_title") or p.get("title") or "")[:500],
+                    "content": content[:50000],
+                    "raw_data": None,
+                })
         patents_text = format_patents_for_prompt(patents, total_count)
         # Note the matched name if different from input
         extra_context = ""
@@ -192,6 +204,15 @@ def patent_analysis(company, progress_cb=None):
             _cb('source_done', {'source': 'web_fallback', 'status': 'error', 'summary': 'No patent info found via any method'})
             _cb('analysis_done', {'analysis_type': 'search'})
             return None
+        for r in results:
+            if r.get("body"):
+                _pending_sources.append({
+                    "source_type": "web",
+                    "url": r.get("href") or r.get("url"),
+                    "title": (r.get("title") or "")[:500],
+                    "content": r.get("body", "")[:50000],
+                    "raw_data": None,
+                })
         web_detail = '\n'.join(f"• {r.get('title', '')[:80]}  ({r.get('href', '')})" for r in results[:10])
         _cb('source_done', {'source': 'web_fallback', 'status': 'done', 'summary': f'{len(results)} web results', 'detail': web_detail})
         search_text = format_search_results(results)
@@ -231,5 +252,38 @@ def patent_analysis(company, progress_cb=None):
     _cb('report_saved', {'path': str(filename)})
     _cb('analysis_done', {'analysis_type': 'report'})
 
-    save_to_dossier(company, "patents", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    dossier_result = save_to_dossier(company, "patents", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    _flush_sources(company, dossier_result, _pending_sources)
     return str(filename)
+
+
+def _flush_sources(company, dossier_result, pending_sources):
+    if not dossier_result or not pending_sources:
+        return
+    # Deduplicate by URL
+    seen_urls = set()
+    deduped = []
+    for s in pending_sources:
+        url = s.get("url")
+        if url and url in seen_urls:
+            continue
+        if url:
+            seen_urls.add(url)
+        deduped.append(s)
+    try:
+        conn = get_connection()
+        dossier_id = dossier_result["dossier_id"]
+        analysis_id = dossier_result["analysis_id"]
+        source_ids = []
+        for s in deduped:
+            sid = save_source_document(
+                conn, dossier_id, s["source_type"], s.get("url"),
+                s.get("title"), s.get("content"), s.get("raw_data"),
+            )
+            source_ids.append(sid)
+        if analysis_id and source_ids:
+            link_sources_to_analysis(conn, analysis_id, source_ids)
+        conn.close()
+        print(f"[sources] Saved {len(source_ids)} source documents for {company}")
+    except Exception as e:
+        print(f"[sources] Error saving source documents: {e}")

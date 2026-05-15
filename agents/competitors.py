@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
+from db import get_connection, save_source_document, link_sources_to_analysis
 from scraper.web_search import search_web, search_news, search_reddit, search_youtube, format_search_results, dedup_results
 from scraper.google_news import search_google_news
 from scraper.hackernews import search_hackernews
@@ -19,6 +20,7 @@ def _result_titles(results, max_items=5):
 def competitor_analysis(company, progress_cb=None):
     """Map the competitive landscape for a company. Returns report path or None."""
     _cb = progress_cb or (lambda *a: None)
+    _pending_sources = []
     print(f"\n[competitors] Mapping competitive landscape for {company}...")
 
     # --- Phase 1: Web Search ---
@@ -35,6 +37,15 @@ def competitor_analysis(company, progress_cb=None):
         _cb('source_start', {'source': f'web_{i}', 'label': f'"{query}"', 'detail': f'Query {i+1} of {len(queries)}'})
         results = search_web(query, max_results=5)
         all_results.extend(results)
+        for r in results:
+            if r.get("body"):
+                _pending_sources.append({
+                    "source_type": "web",
+                    "url": r.get("href") or r.get("url"),
+                    "title": (r.get("title") or "")[:500],
+                    "content": r.get("body", "")[:50000],
+                    "raw_data": None,
+                })
         _cb('source_done', {'source': f'web_{i}', 'status': 'done' if results else 'skipped',
              'summary': f'{len(results)} results', 'detail': _result_titles(results)})
 
@@ -52,6 +63,15 @@ def competitor_analysis(company, progress_cb=None):
     _cb('source_start', {'source': 'ddg_news', 'label': 'DDG News', 'detail': f'"{company} competition market"'})
     news = search_news(f"{company} competition market", max_results=3)
     all_results.extend(news)
+    for r in news:
+        if r.get("body"):
+            _pending_sources.append({
+                "source_type": "google_news",
+                "url": r.get("href") or r.get("url"),
+                "title": (r.get("title") or "")[:500],
+                "content": r.get("body", "")[:50000],
+                "raw_data": None,
+            })
     _cb('source_done', {'source': 'ddg_news', 'status': 'done' if news else 'skipped',
          'summary': f'{len(news)} results', 'detail': _result_titles(news)})
 
@@ -59,6 +79,15 @@ def competitor_analysis(company, progress_cb=None):
     _cb('source_start', {'source': 'google_news', 'label': 'Google News', 'detail': f'"{company} competition market share"'})
     gnews = search_google_news(f"{company} competition market share", max_results=5, days_back=30)
     all_results.extend(gnews)
+    for r in gnews:
+        if r.get("body"):
+            _pending_sources.append({
+                "source_type": "google_news",
+                "url": r.get("href") or r.get("url"),
+                "title": (r.get("title") or "")[:500],
+                "content": r.get("body", "")[:50000],
+                "raw_data": None,
+            })
     _cb('source_done', {'source': 'google_news', 'status': 'done' if gnews else 'skipped',
          'summary': f'{len(gnews)} results', 'detail': _result_titles(gnews)})
 
@@ -66,6 +95,15 @@ def competitor_analysis(company, progress_cb=None):
     _cb('source_start', {'source': 'reddit', 'label': 'Reddit', 'detail': f'"{company} vs alternatives competitors"'})
     reddit = search_reddit(f"{company} vs alternatives competitors", max_results=3)
     all_results.extend(reddit)
+    for r in reddit:
+        if r.get("body"):
+            _pending_sources.append({
+                "source_type": "reddit",
+                "url": r.get("href") or r.get("url"),
+                "title": (r.get("title") or "")[:500],
+                "content": r.get("body", "")[:50000],
+                "raw_data": None,
+            })
     _cb('source_done', {'source': 'reddit', 'status': 'done' if reddit else 'skipped',
          'summary': f'{len(reddit)} results', 'detail': _result_titles(reddit)})
 
@@ -73,6 +111,15 @@ def competitor_analysis(company, progress_cb=None):
     _cb('source_start', {'source': 'youtube', 'label': 'YouTube', 'detail': f'"{company} vs competitors comparison"'})
     yt = search_youtube(f"{company} vs competitors comparison", max_results=2)
     all_results.extend(yt)
+    for r in yt:
+        if r.get("body"):
+            _pending_sources.append({
+                "source_type": "youtube",
+                "url": r.get("href") or r.get("url"),
+                "title": (r.get("title") or "")[:500],
+                "content": r.get("body", "")[:50000],
+                "raw_data": None,
+            })
     _cb('source_done', {'source': 'youtube', 'status': 'done' if yt else 'skipped',
          'summary': f'{len(yt)} results', 'detail': _result_titles(yt)})
 
@@ -80,6 +127,15 @@ def competitor_analysis(company, progress_cb=None):
     _cb('source_start', {'source': 'hackernews', 'label': 'Hacker News', 'detail': f'"{company} vs alternatives"'})
     hn = search_hackernews(f"{company} vs alternatives", max_results=3)
     all_results.extend(hn)
+    for r in hn:
+        if r.get("body"):
+            _pending_sources.append({
+                "source_type": "hackernews",
+                "url": r.get("href") or r.get("url"),
+                "title": (r.get("title") or "")[:500],
+                "content": r.get("body", "")[:50000],
+                "raw_data": None,
+            })
     _cb('source_done', {'source': 'hackernews', 'status': 'done' if hn else 'skipped',
          'summary': f'{len(hn)} results', 'detail': _result_titles(hn)})
 
@@ -128,5 +184,38 @@ def competitor_analysis(company, progress_cb=None):
     _cb('report_saved', {'path': str(filename)})
     _cb('analysis_done', {'analysis_type': 'report'})
 
-    save_to_dossier(company, "competitors", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    dossier_result = save_to_dossier(company, "competitors", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    _flush_sources(company, dossier_result, _pending_sources)
     return str(filename)
+
+
+def _flush_sources(company, dossier_result, pending_sources):
+    if not dossier_result or not pending_sources:
+        return
+    # Deduplicate by URL
+    seen_urls = set()
+    deduped = []
+    for s in pending_sources:
+        url = s.get("url")
+        if url and url in seen_urls:
+            continue
+        if url:
+            seen_urls.add(url)
+        deduped.append(s)
+    try:
+        conn = get_connection()
+        dossier_id = dossier_result["dossier_id"]
+        analysis_id = dossier_result["analysis_id"]
+        source_ids = []
+        for s in deduped:
+            sid = save_source_document(
+                conn, dossier_id, s["source_type"], s.get("url"),
+                s.get("title"), s.get("content"), s.get("raw_data"),
+            )
+            source_ids.append(sid)
+        if analysis_id and source_ids:
+            link_sources_to_analysis(conn, analysis_id, source_ids)
+        conn.close()
+        print(f"[sources] Saved {len(source_ids)} source documents for {company}")
+    except Exception as e:
+        print(f"[sources] Error saving source documents: {e}")

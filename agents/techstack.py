@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
+from db import get_connection, save_source_document, link_sources_to_analysis
 from scraper.site_crawler import crawl_site
 from scraper.tech_detect import detect_technologies, format_tech_for_prompt
 from prompts.techstack import build_techstack_prompt
@@ -183,6 +184,7 @@ def techstack_analysis(url, max_pages=5, company_name=None, db_path=None, progre
             Events emitted: source_start, source_done, generating, report_saved
     """
     _cb = progress_cb or (lambda *a: None)
+    _pending_sources = []
 
     # Ensure URL has scheme
     if not url.startswith("http"):
@@ -200,6 +202,18 @@ def techstack_analysis(url, max_pages=5, company_name=None, db_path=None, progre
         return None
     crawl_detail = '\n'.join(f"• {p.get('url', '?')}  ({p.get('word_count', 0)} words)" for p in pages[:10])
     _cb("source_done", {"source": "crawl", "status": "done", "summary": f"{len(pages)} pages crawled", "detail": crawl_detail})
+
+    # Collect crawled pages as source documents
+    for p in pages:
+        page_text = p.get("text") or p.get("content") or p.get("body") or ""
+        if page_text:
+            _pending_sources.append({
+                "source_type": "web_crawl",
+                "url": p.get("url"),
+                "title": (p.get("title") or "")[:500],
+                "content": page_text[:50000],
+                "raw_data": None,
+            })
 
     # Detect technologies
     _cb("source_start", {"source": "tech_detect", "label": "Tech Detection", "detail": f"Fingerprinting technologies on {domain}"})
@@ -233,6 +247,13 @@ def techstack_analysis(url, max_pages=5, company_name=None, db_path=None, progre
                   f"{len(hiring_stats.get('top_skills', []))} skills identified")
             hiring_detail = f"Total roles: {hiring_stats['total_roles']}\nTop skills: {', '.join(hiring_stats.get('top_skills', [])[:15])}"
             _cb("source_done", {"source": "hiring_data", "status": "done", "summary": f"{hiring_stats['total_roles']} roles, {len(hiring_stats.get('top_skills', []))} skills", "detail": hiring_detail})
+            _pending_sources.append({
+                "source_type": "hiring_data",
+                "url": None,
+                "title": f"{company_name} hiring tech signals"[:500],
+                "content": hiring_section[:50000],
+                "raw_data": None,
+            })
         else:
             print(f"[techstack] No hiring data found for '{company_name}' — report will cover website stack only")
             _cb("source_done", {"source": "hiring_data", "status": "skipped", "summary": f"No data for '{company_name}'"})
@@ -274,6 +295,39 @@ def techstack_analysis(url, max_pages=5, company_name=None, db_path=None, progre
 
     print(f"[techstack] Report saved to {filename}")
     dossier_name = company_name or domain
-    save_to_dossier(dossier_name, "techstack", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    dossier_result = save_to_dossier(dossier_name, "techstack", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
+    _flush_sources(dossier_name, dossier_result, _pending_sources)
     _cb("report_saved", {"path": str(filename), "model": model})
     return str(filename)
+
+
+def _flush_sources(company, dossier_result, pending_sources):
+    if not dossier_result or not pending_sources:
+        return
+    # Deduplicate by URL
+    seen_urls = set()
+    deduped = []
+    for s in pending_sources:
+        url = s.get("url")
+        if url and url in seen_urls:
+            continue
+        if url:
+            seen_urls.add(url)
+        deduped.append(s)
+    try:
+        conn = get_connection()
+        dossier_id = dossier_result["dossier_id"]
+        analysis_id = dossier_result["analysis_id"]
+        source_ids = []
+        for s in deduped:
+            sid = save_source_document(
+                conn, dossier_id, s["source_type"], s.get("url"),
+                s.get("title"), s.get("content"), s.get("raw_data"),
+            )
+            source_ids.append(sid)
+        if analysis_id and source_ids:
+            link_sources_to_analysis(conn, analysis_id, source_ids)
+        conn.close()
+        print(f"[sources] Saved {len(source_ids)} source documents for {company}")
+    except Exception as e:
+        print(f"[sources] Error saving source documents: {e}")
