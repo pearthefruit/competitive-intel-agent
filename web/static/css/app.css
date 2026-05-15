@@ -6214,10 +6214,15 @@
 .source-type-header {
     padding: 7px 12px; background: var(--bg-secondary);
     font-size: 12px; display: flex; align-items: center; gap: 6px;
+    cursor: pointer; user-select: none;
 }
+.source-type-header:hover { background: var(--bg-hover); }
+.source-type-chevron { margin-left: auto; font-size: 10px; color: var(--text-muted); transition: transform .15s; }
+.source-type-group.collapsed .source-type-chevron { transform: rotate(-90deg); }
+.source-type-group.collapsed .source-items { display: none; }
 .source-count {
     background: var(--accent); color: #fff;
-    border-radius: 10px; padding: 1px 7px; font-size: 11px; margin-left: auto;
+    border-radius: 10px; padding: 1px 7px; font-size: 11px;
 }
 .source-item {
     padding: 8px 12px; border-top: 1px solid var(--border);

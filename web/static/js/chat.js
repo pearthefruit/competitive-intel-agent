@@ -1870,7 +1870,7 @@ async function _loadSourcesSection(companyName) {
             const label = _SOURCE_TYPE_LABELS[type] || type;
             const icon = _SOURCE_TYPE_ICONS[type] || '📄';
             html += `<div class="source-type-group">
-                <div class="source-type-header">${icon} <strong>${escHtml(label)}</strong> <span class="source-count">${items.length}</span></div>
+                <div class="source-type-header" onclick="this.closest('.source-type-group').classList.toggle('collapsed')">${icon} <strong>${escHtml(label)}</strong> <span class="source-count">${items.length}</span><span class="source-type-chevron">&#9660;</span></div>
                 <div class="source-items">`;
             items.forEach(src => {
                 const date = src.fetched_at ? new Date(src.fetched_at).toLocaleDateString() : '';
@@ -3580,7 +3580,9 @@ function _buildBriefingDashboard(content) {
     }
 
     html += `<div class="dash-grid">${cards}</div>`;
+    html += _briefingSection('Source Documents', '<div id="source-docs-body"><span style="color:var(--text-muted);font-size:12px">Loading...</span></div>', false);
     content.innerHTML = html;
+    if (dossier) _loadSourcesSection(dossier.company_name);
 
     /* Equalize card heights per row — if a card's content is less than
        half the tallest card in its row, let it keep its natural height
