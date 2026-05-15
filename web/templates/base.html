@@ -473,6 +473,7 @@
                     <button class="sig-feed-tab" data-tab="narratives" onclick="switchSignalTab('narratives')">Narratives</button>
                     <button class="sig-feed-tab" data-tab="graph" onclick="switchSignalTab('graph')">Board</button>
                     <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
+                    <button class="sig-feed-tab" data-tab="feed-sources" onclick="switchSignalTab('feed-sources')">Feed Sources</button>
                 </div>
             </div>
             <div id="signals-filter-bar" style="padding:6px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
@@ -631,6 +632,39 @@
                         <div style="font-size:32px;margin-bottom:12px">&#9881;</div>
                         <div>No scan executed yet</div>
                         <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click <strong>Scan Now</strong> to see the execution pipeline.</div>
+                    </div>
+                </div>
+
+                <!-- Feed Sources view -->
+                <div class="sig-tab-content" id="sig-tab-feed-sources" style="padding:16px">
+                    <div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:16px">Sources</div>
+                    <!-- Social Accounts subsection -->
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em">Social Accounts</div>
+                        <button onclick="alert('coming soon')" style="padding:4px 10px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);border-radius:6px;color:#60a5fa;font-size:11px;font-weight:600;cursor:pointer">+ Add Account</button>
+                    </div>
+                    <div id="feed-social-accounts"></div>
+                    <!-- Built-in Sources subsection -->
+                    <div style="margin-top:22px;margin-bottom:10px">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:2px">Built-in Sources</div>
+                        <div style="font-size:11px;color:var(--text-muted)">Populated via Run Scan</div>
+                    </div>
+                    <div id="feed-builtin-sources"></div>
+                    <!-- Fetch modal -->
+                    <div id="feed-fetch-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center">
+                        <div style="background:#111;border:1px solid rgba(255,255,255,0.12);border-radius:12px;padding:24px;width:100%;max-width:640px;max-height:85vh;overflow-y:auto;position:relative">
+                            <button onclick="closeFetchModal()" style="position:absolute;top:12px;right:12px;background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;line-height:1">&#x2715;</button>
+                            <div id="feed-modal-title" style="font-size:15px;font-weight:600;margin-bottom:16px"></div>
+                            <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+                                <label style="font-size:12px;color:var(--text-muted);white-space:nowrap">Days back</label>
+                                <input type="number" id="feed-days-input" value="7" min="1" max="90" style="width:64px;padding:4px 8px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);border-radius:6px;font-size:13px;outline:none">
+                                <button id="feed-preview-btn" onclick="_feedPreviewClick()" style="padding:5px 14px;background:rgba(59,130,246,0.15);border:1px solid rgba(59,130,246,0.4);border-radius:6px;color:#60a5fa;font-size:12px;font-weight:600;cursor:pointer">Preview</button>
+                            </div>
+                            <div id="feed-preview-area"></div>
+                            <div id="feed-import-bar" style="display:none;margin-top:16px;text-align:right">
+                                <button id="feed-import-btn" onclick="_feedImportClick()" style="padding:6px 18px;background:linear-gradient(135deg,#3b82f6,#a855f7);border:none;border-radius:6px;color:#fff;font-size:13px;font-weight:600;cursor:pointer">Import signals</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 

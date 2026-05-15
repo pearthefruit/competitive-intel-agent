@@ -433,6 +433,19 @@ CREATE TABLE IF NOT EXISTS analysis_sources (
     source_id   INTEGER NOT NULL REFERENCES source_documents(id) ON DELETE CASCADE,
     PRIMARY KEY (analysis_id, source_id)
 );
+
+-- Feed accounts: social accounts to ingest (Instagram Reels, etc.)
+CREATE TABLE IF NOT EXISTS feed_accounts (
+    id INTEGER PRIMARY KEY,
+    handle TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT 'instagram',
+    user_id TEXT,
+    label TEXT,
+    last_fetched_at TEXT,
+    last_taken_at INTEGER,
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -3797,3 +3810,37 @@ def get_sources_for_analysis(conn, analysis_id):
         (analysis_id,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Feed account helpers ──────────────────────────────────────────────
+
+def get_feed_accounts(conn):
+    rows = conn.execute("SELECT * FROM feed_accounts ORDER BY created_at").fetchall()
+    return [dict(r) for r in rows]
+
+
+def upsert_feed_account(conn, handle, platform, user_id=None, label=None):
+    existing = conn.execute(
+        "SELECT id FROM feed_accounts WHERE handle = ? AND platform = ?", (handle, platform)
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE feed_accounts SET user_id = COALESCE(?, user_id), label = COALESCE(?, label) WHERE id = ?",
+            (user_id, label, existing["id"]),
+        )
+        conn.commit()
+        return existing["id"]
+    cur = conn.execute(
+        "INSERT INTO feed_accounts (handle, platform, user_id, label) VALUES (?, ?, ?, ?)",
+        (handle, platform, user_id, label),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_feed_account_fetch(conn, account_id, last_fetched_at, last_taken_at):
+    conn.execute(
+        "UPDATE feed_accounts SET last_fetched_at = ?, last_taken_at = ? WHERE id = ?",
+        (last_fetched_at, last_taken_at, account_id),
+    )
+    conn.commit()

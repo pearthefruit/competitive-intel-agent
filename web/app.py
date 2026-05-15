@@ -6009,6 +6009,401 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
         finally:
             conn.close()
 
+    # ── Feed ingestor routes ───────────────────────────────────────────
+
+    @app.route("/api/signals/feed-accounts", methods=["GET"])
+    def feed_accounts_list():
+        from db import get_feed_accounts, upsert_feed_account
+        conn = get_connection(db_path)
+        try:
+            accounts = get_feed_accounts(conn)
+            # Seed @dualassets if table is empty
+            if not accounts:
+                upsert_feed_account(conn, "dualassets", "instagram",
+                                    user_id="76923923363", label="Dual Assets — daily market recaps")
+                accounts = get_feed_accounts(conn)
+            return jsonify({"accounts": accounts})
+        finally:
+            conn.close()
+
+    @app.route("/api/signals/source-stats", methods=["GET"])
+    def source_stats():
+        from db import get_feed_accounts, upsert_feed_account
+        conn = get_connection(db_path)
+        try:
+            # Feed accounts (social)
+            accounts = get_feed_accounts(conn)
+            if not accounts:
+                upsert_feed_account(conn, "dualassets", "instagram",
+                                    user_id="76923923363", label="Dual Assets — daily market recaps")
+                accounts = get_feed_accounts(conn)
+            # Per-source signal stats — grouped by source_name only, colored by primary domain
+            import re as _re
+            rows = conn.execute("""
+                SELECT source_name,
+                       COUNT(*) as count,
+                       MAX(collected_at) as last_seen,
+                       (SELECT domain FROM signals s2
+                        WHERE s2.source_name = s.source_name
+                        GROUP BY domain ORDER BY COUNT(*) DESC LIMIT 1) as primary_domain,
+                       (SELECT url FROM signals s2
+                        WHERE s2.source_name = s.source_name
+                          AND s2.url IS NOT NULL AND s2.url != ''
+                          AND s2.url NOT LIKE '%google.com%'
+                          AND s2.url NOT LIKE '%reddit.com%'
+                          AND s2.url NOT LIKE '%instagram.com%'
+                        LIMIT 1) as sample_url
+                FROM signals s
+                WHERE source_name IS NOT NULL AND source_name != ''
+                  AND (source_type IS NULL OR source_type != 'instagram_feed')
+                GROUP BY source_name
+                ORDER BY count DESC
+            """).fetchall()
+
+            source_stats_list = []
+            for row in rows:
+                d = dict(row)
+                # For reddit: extract distinct subreddits from URLs
+                if (d.get("source_name") or "").lower() == "reddit":
+                    sub_rows = conn.execute(
+                        "SELECT DISTINCT url FROM signals WHERE source_name='reddit' "
+                        "AND url LIKE '%reddit.com/r/%' LIMIT 20"
+                    ).fetchall()
+                    subs = []
+                    seen = set()
+                    for sr in sub_rows:
+                        m = _re.search(r"/r/([^/]+)", sr["url"] or "")
+                        if m:
+                            name = "r/" + m.group(1)
+                            if name not in seen:
+                                seen.add(name)
+                                subs.append(name)
+                    d["subreddits"] = subs[:6]
+                source_stats_list.append(d)
+
+            return jsonify({"source_stats": source_stats_list, "feed_accounts": accounts})
+        finally:
+            conn.close()
+
+    @app.route("/api/signals/ingest-feed", methods=["POST"])
+    def feed_ingest():
+        import hashlib
+        from datetime import datetime, timezone, timedelta
+        from db import (get_feed_accounts, upsert_feed_account, update_feed_account_fetch,
+                        insert_signals_batch, sanitize_domain)
+        from scraper.instagram_feed import resolve_user_id, fetch_new_posts
+        from prompts.instagram_signals import build_signal_extraction_prompt
+        from agents.llm import generate_json, FAST_CHAIN
+
+        data = request.get_json(silent=True) or {}
+        dry_run = bool(data.get("dry_run", True))
+
+        # ── Fast path: frontend sends pre-selected signal objects ──────────
+        pre_signals = data.get("signals")
+        if pre_signals and isinstance(pre_signals, list) and not dry_run:
+            _TYPE_DOMAIN_FP = {
+                "macro": "economics",
+                "earnings": "finance",
+                "m_and_a": "finance",
+                "market_move": "finance",
+                "regulatory": "regulatory",
+                "geopolitical": "geopolitics",
+                "crypto": "finance",
+                "product_launch": "tech_ai",
+                "leadership": "tech_ai",
+            }
+
+            def _content_hash_fp(source, url, title):
+                raw = f"{source}|{url or ''}|{title or ''}".lower().strip()
+                return hashlib.sha256(raw.encode()).hexdigest()
+
+            clean_signals = []
+            for sig in pre_signals:
+                if not isinstance(sig, dict) or not sig.get("title"):
+                    continue
+                title = sig["title"].strip()
+                handle_fp = (sig.get("handle") or "unknown").strip().lstrip("@")
+                post_url = sig.get("post_url") or ""
+                post_date = sig.get("post_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                published_at = post_date + "T00:00:00+00:00"
+                sig_type = sig.get("signal_type", "macro")
+                from db import sanitize_domain as _sd
+                raw_domain = _TYPE_DOMAIN_FP.get(sig_type, "economics")
+                domain = _sd(sig.get("domain") or raw_domain)
+                clean_signals.append({
+                    "source": "instagram",
+                    "source_type": "instagram_feed",
+                    "source_name": f"@{handle_fp}",
+                    "domain": domain,
+                    "title": title,
+                    "body": sig.get("body", ""),
+                    "url": post_url,
+                    "published_at": published_at,
+                    "content_hash": _content_hash_fp("instagram", post_url, title),
+                    "raw_json": None,
+                    "author": f"@{handle_fp}",
+                    "author_context": sig.get("company_or_ticker"),
+                    "engagement_json": None,
+                })
+
+            if not clean_signals:
+                return jsonify({"imported": 0, "keyword_assigned": 0, "llm_assigned": 0,
+                                "review_queue": 0, "dry_run": False})
+
+            conn = get_connection(db_path)
+            try:
+                new_count, _ = insert_signals_batch(conn, clean_signals)
+                hashes = [s["content_hash"] for s in clean_signals]
+                if hashes:
+                    placeholders = ",".join("?" * len(hashes))
+                    new_signals = [dict(r) for r in conn.execute(
+                        f"SELECT * FROM signals WHERE content_hash IN ({placeholders})", hashes
+                    ).fetchall()]
+                else:
+                    new_signals = []
+
+                kw_count = 0
+                llm_count = 0
+                review_count = 0
+                if new_signals:
+                    from agents.signals_classify import keyword_assign
+                    from agents.signals_synthesize import synthesize_into_threads
+                    kw_result = keyword_assign(conn, new_signals)
+                    kw_count = len(kw_result["assigned"])
+                    needs_llm = kw_result["needs_llm"]
+                    needs_review = kw_result["needs_review"]
+                    if needs_llm:
+                        try:
+                            llm_result = synthesize_into_threads(conn, needs_llm)
+                            llm_count = llm_result.get("assigned_count", 0)
+                            review_count = llm_result.get("unassigned_count", len(needs_llm) - llm_count) + len(needs_review)
+                        except Exception as e:
+                            print(f"[ingest_feed] LLM classify error (fast path): {e}")
+                            review_count = len(needs_llm) + len(needs_review)
+                    else:
+                        review_count = len(needs_review)
+
+                conn.commit()
+                return jsonify({
+                    "imported": new_count,
+                    "keyword_assigned": kw_count,
+                    "llm_assigned": llm_count,
+                    "review_queue": review_count,
+                    "dry_run": False,
+                })
+            finally:
+                conn.close()
+
+        # ── Standard path: fetch + extract from Instagram ─────────────────
+        handle = (data.get("handle") or "dualassets").strip().lstrip("@")
+        since_days = int(data.get("since_days") or 7)
+
+        # Resolve user_id
+        user_id = resolve_user_id(handle)
+        if not user_id:
+            return jsonify({"error": f"Could not resolve user_id for @{handle}"}), 400
+
+        # Ensure account record exists
+        conn = get_connection(db_path)
+        try:
+            account_id = upsert_feed_account(conn, handle, "instagram", user_id=user_id)
+            accounts = [a for a in get_feed_accounts(conn) if a["id"] == account_id]
+            account = accounts[0] if accounts else {}
+        finally:
+            conn.close()
+
+        # Determine since_timestamp
+        since_ts = int((datetime.now(timezone.utc) - timedelta(days=since_days)).timestamp())
+
+        # Fetch posts
+        try:
+            posts = fetch_new_posts(user_id, since_timestamp=since_ts, max_posts=20)
+        except RuntimeError as e:
+            return jsonify({"error": str(e)}), 429 if "rate limit" in str(e).lower() else 502
+
+        if not posts:
+            if dry_run:
+                return jsonify({"posts_found": 0, "signals_extracted": [], "dry_run": True})
+            return jsonify({"imported": 0, "keyword_assigned": 0, "llm_assigned": 0,
+                            "review_queue": 0, "dry_run": False})
+
+        # signal_type → domain mapping
+        _TYPE_DOMAIN = {
+            "macro": "economics",
+            "earnings": "finance",
+            "m_and_a": "finance",
+            "market_move": "finance",
+            "regulatory": "regulatory",
+            "geopolitical": "geopolitics",
+            "crypto": "finance",
+            "product_launch": "tech_ai",
+            "leadership": "tech_ai",
+        }
+
+        def _content_hash(source, url, title):
+            raw = f"{source}|{url or ''}|{title or ''}".lower().strip()
+            return hashlib.sha256(raw.encode()).hexdigest()
+
+        # Extract signals from each post via LLM
+        post_results = []
+        all_signal_dicts = []
+
+        for post in posts:
+            caption = post["caption"]
+            if not caption.strip():
+                continue
+            post_date = datetime.fromtimestamp(post["taken_at"], tz=timezone.utc).strftime("%Y-%m-%d")
+            prompt = build_signal_extraction_prompt(caption, post_date, handle)
+
+            try:
+                extracted = generate_json(prompt, timeout=30, chain=FAST_CHAIN)
+            except Exception as e:
+                print(f"[ingest_feed] LLM error for post {post['shortcode']}: {e}")
+                extracted = None
+
+            if extracted is None:
+                # LLM completely failed — surface error in preview
+                post_results.append({
+                    "post_shortcode": post["shortcode"],
+                    "post_url": post["url"],
+                    "post_date": datetime.fromtimestamp(post["taken_at"], tz=timezone.utc).strftime("%Y-%m-%d"),
+                    "post_caption": post["caption"][:500],
+                    "signals": [],
+                    "llm_error": True,
+                })
+                continue
+            # Unwrap common LLM dict-wrapping patterns e.g. {"signals": [...]}
+            if isinstance(extracted, dict):
+                for v in extracted.values():
+                    if isinstance(v, list):
+                        extracted = v
+                        break
+                else:
+                    extracted = []
+            if not isinstance(extracted, list):
+                extracted = []
+
+            post_url = post["url"]
+            published_at = datetime.fromtimestamp(post["taken_at"], tz=timezone.utc).isoformat()
+            signals_for_post = []
+
+            for sig in extracted:
+                if not isinstance(sig, dict) or not sig.get("title"):
+                    continue
+                title = sig["title"].strip()
+                sig_type = sig.get("signal_type", "macro")
+                raw_domain = _TYPE_DOMAIN.get(sig_type, "economics")
+                domain = sanitize_domain(raw_domain)
+                signal_dict = {
+                    "source": "instagram",
+                    "source_type": "instagram_feed",
+                    "source_name": f"@{handle}",
+                    "domain": domain,
+                    "title": title,
+                    "body": sig.get("body", ""),
+                    "url": post_url,
+                    "published_at": published_at,
+                    "content_hash": _content_hash("instagram", post_url, title),
+                    "raw_json": None,
+                    "author": f"@{handle}",
+                    "author_context": sig.get("company_or_ticker"),
+                    "engagement_json": None,
+                    # Extra fields for dry-run preview (not stored in DB)
+                    "_confidence": sig.get("confidence", 0.0),
+                    "_signal_type": sig_type,
+                    "_company_or_ticker": sig.get("company_or_ticker"),
+                }
+                signals_for_post.append(signal_dict)
+                all_signal_dicts.append(signal_dict)
+
+            post_results.append({
+                "post_shortcode": post["shortcode"],
+                "post_url": post_url,
+                "post_date": post_date,
+                "post_caption": caption[:500],
+                "signals": [
+                    {
+                        "title": s["title"],
+                        "body": s["body"],
+                        "signal_type": s["_signal_type"],
+                        "confidence": s["_confidence"],
+                        "company_or_ticker": s["_company_or_ticker"],
+                        "domain": s["domain"],
+                    }
+                    for s in signals_for_post
+                ],
+            })
+
+        if dry_run:
+            total_sigs = sum(len(p["signals"]) for p in post_results)
+            return jsonify({
+                "posts_found": len(posts),
+                "signals_extracted": post_results,
+                "dry_run": True,
+                "total_signals": total_sigs,
+            })
+
+        # Commit path — strip internal _fields before inserting
+        clean_signals = []
+        for s in all_signal_dicts:
+            clean = {k: v for k, v in s.items() if not k.startswith("_")}
+            clean_signals.append(clean)
+
+        conn = get_connection(db_path)
+        try:
+            new_count, _ = insert_signals_batch(conn, clean_signals)
+
+            # Fetch newly inserted signals (by content_hash lookup)
+            hashes = [s["content_hash"] for s in clean_signals]
+            if hashes:
+                placeholders = ",".join("?" * len(hashes))
+                new_signals = [dict(r) for r in conn.execute(
+                    f"SELECT * FROM signals WHERE content_hash IN ({placeholders})", hashes
+                ).fetchall()]
+            else:
+                new_signals = []
+
+            # Tier 1: TF-IDF assignment
+            kw_count = 0
+            llm_count = 0
+            review_count = 0
+            if new_signals:
+                from agents.signals_classify import keyword_assign
+                from agents.signals_synthesize import synthesize_into_threads
+                kw_result = keyword_assign(conn, new_signals)
+                kw_count = len(kw_result["assigned"])
+                needs_llm = kw_result["needs_llm"]
+                needs_review = kw_result["needs_review"]
+
+                # Tier 2: LLM assignment for medium-confidence signals
+                if needs_llm:
+                    try:
+                        llm_result = synthesize_into_threads(conn, needs_llm)
+                        llm_count = llm_result.get("assigned_count", 0)
+                        review_count = llm_result.get("unassigned_count", len(needs_llm) - llm_count) + len(needs_review)
+                    except Exception as e:
+                        print(f"[ingest_feed] LLM classify error: {e}")
+                        review_count = len(needs_llm) + len(needs_review)
+                else:
+                    review_count = len(needs_review)
+
+            conn.commit()
+
+            # Update fetch timestamp
+            latest_taken_at = max((p["taken_at"] for p in posts), default=0)
+            now_iso = datetime.now(timezone.utc).isoformat()
+            update_feed_account_fetch(conn, account_id, now_iso, latest_taken_at)
+
+            return jsonify({
+                "imported": new_count,
+                "keyword_assigned": kw_count,
+                "llm_assigned": llm_count,
+                "review_queue": review_count,
+                "dry_run": False,
+            })
+        finally:
+            conn.close()
+
     return app
 
 

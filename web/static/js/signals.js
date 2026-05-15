@@ -296,7 +296,7 @@ var _discoveryBreadcrumb = [];  // var: accessed from board.js (separate script 
 var _discoveryResults = [];  // var: read/written from base.html outside this module
 var _rawSelectedSignals = new Set(); // selected signal IDs in Raw tab for pattern creation
 
-const _TAB_TITLES = { raw: 'Signals', threads: 'Threads', narratives: 'Narratives', graph: 'Board', causal: 'Chains', execution: 'Execution' };
+const _TAB_TITLES = { raw: 'Signals', threads: 'Threads', narratives: 'Narratives', graph: 'Board', causal: 'Chains', execution: 'Execution', 'feed-sources': 'Sources' };
 const _TAB_HAS_ADD = { raw: true, threads: true, narratives: true, causal: true };
 
 function switchSignalTab(tab) {
@@ -308,6 +308,7 @@ function switchSignalTab(tab) {
     if (tab === 'graph') loadBoard();
     if (tab === 'narratives') loadNarratives();
     if (tab === 'causal') loadCausalView();
+    if (tab === 'feed-sources') loadFeedSources();
     // Update sidebar title + add button
     const titleEl = document.querySelector('.signals-sidebar-title');
     if (titleEl) titleEl.textContent = _TAB_TITLES[tab] || 'Signals';
@@ -323,9 +324,9 @@ function switchSignalTab(tab) {
         if (searchInput) searchInput.placeholder = `Filter ${(_TAB_TITLES[tab] || 'signals').toLowerCase()}…`;
     }
     _renderFeedFilters(tab);
-    // Toggle shared detail pane — raw tab has its own inline detail, causal has inspector
+    // Toggle shared detail pane — raw, graph, causal, feed-sources have no shared detail
     const sharedDetail = document.getElementById('signals-detail');
-    if (tab === 'raw' || tab === 'graph' || tab === 'causal') {
+    if (tab === 'raw' || tab === 'graph' || tab === 'causal' || tab === 'feed-sources') {
         if (sharedDetail) sharedDetail.style.display = 'none';
     } else {
         if (sharedDetail) sharedDetail.style.display = '';
@@ -2491,4 +2492,318 @@ function _loadRelatedThreads(threadId) {
         });
 }
 const _entIcon = {company: '🏢', sector: '📊', geography: '📍', person: '👤', regulation: '⚖️', concept: '💡', event: '📅'};
+
+// ── Feed Sources ──────────────────────────────────────────────────────
+
+var _feedModalHandle = null;
+var _feedPreviewSignals = new Map(); // key: "feed-sig-{postIdx}-{sigIdx}" → full signal object
+var _feedSelectedSignals = [];       // signal objects currently checked for import
+
+function loadFeedSources() {
+    fetch('/api/signals/source-stats')
+        .then(r => r.json())
+        .then(data => {
+            // ── Social Accounts section ──
+            const socialEl = document.getElementById('feed-social-accounts');
+            const accounts = data.feed_accounts || [];
+            if (socialEl) {
+                if (!accounts.length) {
+                    socialEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:16px 0;text-align:center">No social accounts configured.</div>';
+                } else {
+                    socialEl.innerHTML = accounts.map(a => {
+                        const lastFetch = a.last_fetched_at
+                            ? new Date(a.last_fetched_at).toLocaleString()
+                            : 'Never';
+                        return `<div style="border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);border-radius:8px;padding:12px 16px;margin-bottom:10px;display:flex;align-items:center;gap:12px">
+                            <div style="flex:1;min-width:0">
+                                <div style="font-size:13px;font-weight:600;color:var(--text-primary)">@${escHtml(a.handle)}</div>
+                                <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Last fetched: ${escHtml(lastFetch)}</div>
+                            </div>
+                            <span style="padding:1px 7px;border-radius:10px;background:rgba(168,85,247,0.12);color:#c084fc;font-size:10px;font-weight:600;border:1px solid rgba(168,85,247,0.3)">${escHtml(a.platform.toUpperCase())}</span>
+                            <button onclick="openFetchModal('${escHtml(a.handle)}', ${a.id})" style="padding:5px 12px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);border-radius:6px;color:#60a5fa;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">Fetch New</button>
+                        </div>`;
+                    }).join('');
+                }
+            }
+
+            // ── Built-in Sources section ──
+            const builtinEl = document.getElementById('feed-builtin-sources');
+            const stats = data.source_stats || [];
+            if (builtinEl) {
+                if (!stats.length) {
+                    builtinEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:16px 0;text-align:center">No signals ingested yet — run a scan to populate.</div>';
+                } else {
+                    var _srcBadge = {
+                        news: {bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.3)', color: '#60a5fa'},
+                        rss:  {bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)', color: '#c084fc'},
+                        api:  {bg: 'rgba(22,163,74,0.12)',  border: 'rgba(22,163,74,0.3)',  color: '#4ade80'},
+                        reddit: {bg: 'rgba(249,115,22,0.12)', border: 'rgba(249,115,22,0.3)', color: '#fb923c'}
+                    };
+                    // Domain → badge color
+                    const _domainBadge = {
+                        economics:   {bg:'rgba(245,158,11,0.15)',  border:'rgba(245,158,11,0.4)',  color:'#fbbf24', label:'ECONOMICS'},
+                        finance:     {bg:'rgba(34,197,94,0.15)',   border:'rgba(34,197,94,0.4)',   color:'#4ade80', label:'FINANCE'},
+                        geopolitics: {bg:'rgba(239,68,68,0.15)',   border:'rgba(239,68,68,0.4)',   color:'#f87171', label:'GEOPOLITICS'},
+                        tech_ai:     {bg:'rgba(59,130,246,0.15)',  border:'rgba(59,130,246,0.4)',  color:'#60a5fa', label:'TECH / AI'},
+                        labor:       {bg:'rgba(168,85,247,0.15)',  border:'rgba(168,85,247,0.4)',  color:'#c084fc', label:'LABOR'},
+                        regulatory:  {bg:'rgba(6,182,212,0.15)',   border:'rgba(6,182,212,0.4)',   color:'#22d3ee', label:'REGULATORY'},
+                    };
+                    builtinEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px">' +
+                        stats.map(s => {
+                        const dk = _domainBadge[s.primary_domain] || {bg:'rgba(107,114,128,0.12)', border:'rgba(107,114,128,0.3)', color:'#9ca3af', label:(s.primary_domain||'OTHER').toUpperCase()};
+                        const lastSeen = s.last_seen ? new Date(s.last_seen).toLocaleDateString() : '—';
+
+                        // Build the source hint line
+                        let hintHtml;
+                        if (s.subreddits && s.subreddits.length) {
+                            // Reddit: show subreddit pills
+                            hintHtml = s.subreddits.map(r =>
+                                `<span style="font-size:9px;color:#fb923c;background:rgba(249,115,22,0.12);border:1px solid rgba(249,115,22,0.3);border-radius:6px;padding:1px 5px">${escHtml(r)}</span>`
+                            ).join(' ');
+                        } else if (s.sample_url) {
+                            let host;
+                            try { host = new URL(s.sample_url).hostname.replace(/^www\./, ''); } catch(e) { host = s.sample_url.slice(0,30); }
+                            hintHtml = `<a href="${escHtml(s.sample_url)}" target="_blank" style="font-size:10px;color:var(--accent);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(host)}</a>`;
+                        } else {
+                            hintHtml = `<span style="font-size:10px;color:var(--text-muted)">via scan</span>`;
+                        }
+
+                        return `<div style="border:1px solid var(--border);background:var(--bg-tertiary);border-radius:8px;padding:8px 12px">
+                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+                                <div style="flex:1;font-size:12px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.source_name)}</div>
+                                <span style="padding:1px 6px;border-radius:6px;background:${dk.bg};border:1px solid ${dk.border};color:${dk.color};font-size:9px;font-weight:700;flex-shrink:0;letter-spacing:0.03em">${dk.label}</span>
+                            </div>
+                            <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0">
+                                <div style="min-width:0;overflow:hidden">${hintHtml}</div>
+                                <span style="font-size:10px;color:var(--text-muted);white-space:nowrap;flex-shrink:0">${s.count} · ${escHtml(lastSeen)}</span>
+                            </div>
+                        </div>`;
+                    }).join('') + '</div>';
+                }
+            }
+        })
+        .catch(e => console.error('[feed] loadFeedSources error:', e));
+}
+
+function openFetchModal(handle, accountId) {
+    _feedModalHandle = handle;
+    _feedPreviewSignals = new Map();
+    _feedSelectedSignals = [];
+    const modal = document.getElementById('feed-fetch-modal');
+    const title = document.getElementById('feed-modal-title');
+    if (!modal || !title) return;
+    title.textContent = `Fetch from @${handle}`;
+    document.getElementById('feed-preview-area').innerHTML = '';
+    document.getElementById('feed-import-bar').style.display = 'none';
+    modal.style.display = 'flex';
+}
+
+function closeFetchModal() {
+    const modal = document.getElementById('feed-fetch-modal');
+    if (modal) modal.style.display = 'none';
+    _feedModalHandle = null;
+    _feedPreviewSignals = new Map();
+    _feedSelectedSignals = [];
+}
+
+function _feedPreviewClick() {
+    const sinceDays = parseInt(document.getElementById('feed-days-input').value) || 7;
+    runFeedPreview(_feedModalHandle, sinceDays);
+}
+
+function _feedImportClick() {
+    commitFeedImport();
+}
+
+function _feedUpdateSelection() {
+    _feedSelectedSignals = [];
+    document.querySelectorAll('.feed-sig-cb').forEach(function(cb) {
+        var card = cb.closest('.feed-sig-card');
+        if (cb.checked) {
+            _feedSelectedSignals.push(_feedPreviewSignals.get(cb.dataset.sigId));
+            if (card) {
+                card.style.opacity = '1';
+                card.style.border = '1px solid rgba(59,130,246,0.3)';
+                card.style.borderStyle = 'solid';
+            }
+        } else {
+            if (card) {
+                card.style.opacity = '0.4';
+                card.style.border = '1px dashed rgba(255,255,255,0.06)';
+            }
+        }
+    });
+    var total = _feedPreviewSignals.size;
+    var n = _feedSelectedSignals.length;
+    var counter = document.getElementById('feed-sel-counter');
+    if (counter) counter.textContent = n + ' of ' + total + ' selected';
+    var importBtn = document.getElementById('feed-import-btn');
+    if (importBtn) {
+        importBtn.disabled = n === 0;
+        importBtn.textContent = n === 0 ? 'Import signals' : ('Import ' + n + ' signal' + (n !== 1 ? 's' : ''));
+    }
+}
+
+function _feedSelectGreen() {
+    document.querySelectorAll('.feed-sig-cb').forEach(function(cb) {
+        var conf = parseFloat(cb.dataset.confidence || '0');
+        cb.checked = conf >= 0.8;
+    });
+    _feedUpdateSelection();
+}
+
+function runFeedPreview(handle, sinceDays) {
+    const area = document.getElementById('feed-preview-area');
+    const btn = document.getElementById('feed-preview-btn');
+    const importBar = document.getElementById('feed-import-bar');
+    if (!area) return;
+    area.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0">Fetching and analyzing posts...</div>';
+    if (importBar) importBar.style.display = 'none';
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    _feedPreviewSignals = new Map();
+    _feedSelectedSignals = [];
+
+    fetch('/api/signals/ingest-feed', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({handle: handle, since_days: sinceDays, dry_run: true})
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                area.innerHTML = `<div style="color:#f87171;font-size:12px;padding:8px 0">Error: ${escHtml(data.error)}</div>`;
+                return;
+            }
+            const posts = data.signals_extracted || [];
+            if (!posts.length) {
+                area.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0">No new posts found in this time window.</div>';
+                return;
+            }
+
+            // Build preview signals map
+            posts.forEach(function(p, postIdx) {
+                p.signals.forEach(function(s, sigIdx) {
+                    var sigId = 'feed-sig-' + postIdx + '-' + sigIdx;
+                    _feedPreviewSignals.set(sigId, {
+                        title: s.title,
+                        body: s.body,
+                        signal_type: s.signal_type,
+                        confidence: s.confidence,
+                        company_or_ticker: s.company_or_ticker,
+                        domain: s.domain,
+                        post_url: p.post_url,
+                        post_date: p.post_date,
+                        handle: handle
+                    });
+                });
+            });
+
+            var totalSigs = _feedPreviewSignals.size;
+
+            // Controls row
+            var controlsHtml = `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 10px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:6px">
+                <button onclick="_feedSelectGreen()" style="padding:4px 10px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.3);border-radius:6px;color:#4ade80;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">Select all green (≥80%)</button>
+                <a href="#" onclick="_feedSelectAll();return false;" style="color:var(--text-muted);font-size:11px;text-decoration:underline;white-space:nowrap">Select all</a>
+                <a href="#" onclick="_feedDeselectAll();return false;" style="color:var(--text-muted);font-size:11px;text-decoration:underline;white-space:nowrap">Deselect all</a>
+                <div style="flex:1"></div>
+                <span id="feed-sel-counter" style="font-size:11px;color:var(--text-muted);white-space:nowrap">${totalSigs} of ${totalSigs} selected</span>
+            </div>`;
+
+            var postsHtml = posts.map(function(p, postIdx) {
+                var sigHtml = p.signals.map(function(s, sigIdx) {
+                    var sigId = 'feed-sig-' + postIdx + '-' + sigIdx;
+                    var confPct = Math.round((s.confidence || 0) * 100);
+                    var confColor = confPct >= 80 ? '#22c55e' : confPct >= 50 ? '#eab308' : '#f87171';
+                    var chipHtml = s.company_or_ticker
+                        ? `<span style="padding:1px 7px;border-radius:10px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);color:#60a5fa;font-size:10px">${escHtml(s.company_or_ticker)}</span>`
+                        : '';
+                    return `<div class="feed-sig-card" style="position:relative;padding:8px 10px;border:1px solid rgba(59,130,246,0.3);border-radius:6px;margin-bottom:6px;background:rgba(255,255,255,0.02);opacity:1;transition:opacity 0.15s">
+                        <input type="checkbox" class="feed-sig-cb" id="${sigId}" data-sig-id="${sigId}" data-confidence="${s.confidence || 0}" checked
+                            style="position:absolute;top:8px;right:8px;width:14px;height:14px;cursor:pointer;accent-color:#3b82f6"
+                            onchange="_feedUpdateSelection()">
+                        <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:4px;padding-right:22px">
+                            <div style="flex:1;font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(s.title)}</div>
+                            <span style="padding:1px 7px;border-radius:10px;background:rgba(255,255,255,0.06);color:var(--text-muted);font-size:10px;white-space:nowrap">${escHtml(s.signal_type || '')}</span>
+                        </div>
+                        ${s.body ? `<div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">${escHtml(s.body)}</div>` : ''}
+                        <div style="display:flex;align-items:center;gap:8px">
+                            ${chipHtml}
+                            <div style="flex:1;height:4px;background:rgba(255,255,255,0.08);border-radius:2px;overflow:hidden">
+                                <div style="height:100%;width:${confPct}%;background:${confColor};border-radius:2px"></div>
+                            </div>
+                            <span style="font-size:10px;color:var(--text-muted)">${confPct}%</span>
+                        </div>
+                    </div>`;
+                }).join('');
+                return `<div style="margin-bottom:14px">
+                    <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;display:flex;align-items:center;gap:8px">
+                        <span style="font-weight:600;color:var(--text-secondary)">${escHtml(p.post_date)}</span>
+                        <a href="${escHtml(p.post_url)}" target="_blank" style="color:var(--accent);font-size:10px">open ↗</a>
+                        <span>${p.signals.length} signal${p.signals.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-style:italic;max-height:48px;overflow:hidden">${escHtml((p.post_caption || '').substring(0, 200))}${(p.post_caption || '').length > 200 ? '…' : ''}</div>
+                    ${p.llm_error ? '<div style="font-size:11px;color:#f87171;padding:6px 10px;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);border-radius:6px">⚠ LLM extraction failed — all providers busy. Try again in a moment.</div>' : sigHtml}
+                </div>`;
+            }).join('<div style="height:1px;background:var(--border);margin:12px 0"></div>');
+
+            area.innerHTML = controlsHtml + postsHtml;
+
+            // All start checked — populate _feedSelectedSignals
+            _feedPreviewSignals.forEach(function(sig) { _feedSelectedSignals.push(sig); });
+
+            if (importBar && totalSigs > 0) {
+                importBar.style.display = 'block';
+                var importBtn = document.getElementById('feed-import-btn');
+                if (importBtn) {
+                    importBtn.disabled = false;
+                    importBtn.textContent = 'Import ' + totalSigs + ' signal' + (totalSigs !== 1 ? 's' : '');
+                }
+            }
+        })
+        .catch(e => {
+            area.innerHTML = `<div style="color:#f87171;font-size:12px;padding:8px 0">Request failed: ${escHtml(String(e))}</div>`;
+        })
+        .finally(() => {
+            if (btn) { btn.disabled = false; btn.textContent = 'Preview'; }
+        });
+}
+
+function _feedSelectAll() {
+    document.querySelectorAll('.feed-sig-cb').forEach(function(cb) { cb.checked = true; });
+    _feedUpdateSelection();
+}
+
+function _feedDeselectAll() {
+    document.querySelectorAll('.feed-sig-cb').forEach(function(cb) { cb.checked = false; });
+    _feedUpdateSelection();
+}
+
+function commitFeedImport() {
+    var btn = document.getElementById('feed-import-btn');
+    if (!_feedSelectedSignals.length) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
+
+    fetch('/api/signals/ingest-feed', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({signals: _feedSelectedSignals, dry_run: false})
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                alert(`Import failed: ${data.error}`);
+                return;
+            }
+            const msg = `Imported ${data.imported} signals — ${data.keyword_assigned} auto-assigned, ${data.llm_assigned} LLM-assigned, ${data.review_queue} in review queue.`;
+            alert(msg);
+            closeFetchModal();
+            loadFeedSources();
+            // Refresh signal feed so imported items appear
+            loadSignals();
+        })
+        .catch(e => alert(`Request failed: ${e}`))
+        .finally(() => {
+            if (btn) { btn.disabled = false; btn.textContent = 'Import signals'; }
+        });
+}
 
