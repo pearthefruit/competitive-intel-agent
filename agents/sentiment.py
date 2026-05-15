@@ -12,6 +12,7 @@ from scraper.reddit_rss import search_reddit_rss
 from scraper.onepoint3acres import search_1point3acres
 from scraper.blind import search_blind
 from scraper.tiktok import fetch_tiktok_from_search_results, format_tiktok_for_prompt
+from scraper.instagram import find_instagram_handle, fetch_instagram_posts, format_instagram_for_prompt
 from prompts.sentiment import build_sentiment_prompt
 
 
@@ -196,8 +197,47 @@ def sentiment_analysis(company, progress_cb=None):
         print(f"[sentiment] TikTok search failed (yt-dlp may not be installed): {e}")
         _cb("source_done", {"source": "tiktok", "status": "error", "summary": str(e)[:80]})
 
+    # Instagram (brand/culture posts, employee content, hashtag signals)
+    _cb("source_start", {"source": "instagram", "label": "Instagram", "detail": "Finding company profile and fetching posts"})
+    instagram_text = ""
+    try:
+        print("[sentiment] Searching for company Instagram handle...")
+        handle = find_instagram_handle(company)
+        if handle:
+            print(f"[sentiment] Found Instagram handle: @{handle}, fetching posts...")
+            ig_posts = fetch_instagram_posts(handle, max_posts=15)
+            if ig_posts:
+                instagram_text = format_instagram_for_prompt(ig_posts)
+                ig_detail = '\n'.join(f"• {p.get('title', '')[:80]}" for p in ig_posts[:5])
+                _cb("source_done", {"source": "instagram", "status": "done", "summary": f"{len(ig_posts)} posts from @{handle}", "detail": ig_detail})
+                for p in ig_posts:
+                    caption = p.get("caption") or ""
+                    if caption:
+                        _pending_sources.append({
+                            "source_type": "instagram",
+                            "url": p.get("url"),
+                            "title": (p.get("title") or "Instagram post")[:500],
+                            "content": caption[:50000],
+                            "raw_data": None,
+                        })
+                    all_results.append({
+                        "title": p.get("title", "Instagram post"),
+                        "href": p.get("url", ""),
+                        "body": caption[:500],
+                        "date": p.get("date", ""),
+                        "source": "instagram",
+                    })
+            else:
+                _cb("source_done", {"source": "instagram", "status": "skipped", "summary": f"@{handle} — no posts retrieved (private or rate-limited)"})
+        else:
+            print(f"[sentiment] No Instagram handle found for {company}")
+            _cb("source_done", {"source": "instagram", "status": "skipped", "summary": "Handle not found"})
+    except Exception as e:
+        print(f"[sentiment] Instagram scrape failed: {e}")
+        _cb("source_done", {"source": "instagram", "status": "error", "summary": str(e)[:80]})
+
     if not all_results:
-        print("[sentiment] No results from any source (web, news, Reddit, Blind, Fishbowl, HN, 1P3A, TikTok)")
+        print("[sentiment] No results from any source (web, news, Reddit, Blind, Fishbowl, HN, 1P3A, TikTok, Instagram)")
         return None
 
     # Deduplicate (normalized title matching, keeps highest-quality source)
@@ -207,7 +247,7 @@ def sentiment_analysis(company, progress_cb=None):
     for r in unique:
         body = r.get("body", "")
         src = r.get("source", "article")
-        if body and src != "tiktok":
+        if body and src not in ("tiktok", "instagram"):
             _pending_sources.append({
                 "source_type": src,
                 "url": r.get("href") or r.get("url"),
@@ -221,6 +261,10 @@ def sentiment_analysis(company, progress_cb=None):
     # Append TikTok transcript/caption data (richer than the snippet in search results)
     if tiktok_text:
         search_text += "\n\n## TikTok Video Content\n\n" + tiktok_text
+
+    # Append Instagram post captions
+    if instagram_text:
+        search_text += "\n\n## Instagram Posts\n\n" + instagram_text
 
     # Generate report
     prompt = build_sentiment_prompt(company, search_text)

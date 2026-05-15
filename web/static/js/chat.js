@@ -1835,14 +1835,17 @@ const _SOURCE_TYPE_LABELS = {
     yahoo_finance: 'Yahoo Finance', analyst: 'Analyst Estimates',
     propublica: 'ProPublica 990', article: 'Articles',
     reddit: 'Reddit', reddit_rss: 'Reddit (RSS)', hackernews: 'Hacker News',
-    blind: 'Blind', '1point3acres': '1Point3Acres', tiktok: 'TikTok',
+    blind: 'Blind', '1point3acres': '1Point3Acres', tiktok: 'TikTok', instagram: 'Instagram',
     google_news: 'Google News', news: 'News',
+    web_crawl: 'Web Crawl', hiring_data: 'Hiring Data', patent: 'Patents',
+    pricing_page: 'Pricing Page', youtube: 'YouTube', web: 'Web',
 };
 const _SOURCE_TYPE_ICONS = {
     sec_xbrl: '📊', sec_8k: '📄', yahoo_finance: '📈', analyst: '🔬',
     propublica: '🏛️', article: '📰', reddit: '💬', reddit_rss: '💬',
-    hackernews: '🔥', blind: '👁️', '1point3acres': '🌍', tiktok: '🎵',
+    hackernews: '🔥', blind: '👁️', '1point3acres': '🌍', tiktok: '🎵', instagram: '📸',
     google_news: '📡', news: '📰',
+    web_crawl: '🌐', hiring_data: '💼', patent: '⚗️', pricing_page: '💰', youtube: '▶️', web: '🔗',
 };
 
 async function _loadSourcesSection(companyName) {
