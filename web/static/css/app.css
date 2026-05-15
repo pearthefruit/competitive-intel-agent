@@ -1547,8 +1547,9 @@
             font-size: 12px;
             color: var(--text-muted);
             transition: transform 0.2s;
+            transform: rotate(-90deg);
         }
-        .briefing-section.open .briefing-section-chevron { transform: rotate(180deg); }
+        .briefing-section.open .briefing-section-chevron { transform: rotate(0deg); }
         .briefing-section-body {
             display: none;
             padding: 12px;
