@@ -203,6 +203,7 @@ function _applyGlobalDomainFilter() {
     if (_signalTab === 'graph') loadBoard();
     if (_signalTab === 'narratives') loadNarratives();
     if (_signalTab === 'causal') { _renderCausalThreadPicker(); _renderCausalEditor(); }
+    if (_signalTab === 'feed-sources') renderFeedSources();
 }
 
 function _renderDomainChips() {
@@ -2496,14 +2497,109 @@ const _entIcon = {company: '🏢', sector: '📊', geography: '📍', person: '�
 // ── Feed Sources ──────────────────────────────────────────────────────
 
 var _feedModalHandle = null;
-var _feedPreviewSignals = new Map(); // key: "feed-sig-{postIdx}-{sigIdx}" → full signal object
-var _feedSelectedSignals = [];       // signal objects currently checked for import
+var _feedPreviewSignals = new Map();
+var _feedSelectedSignals = [];
+var _feedSourcesCache = [];   // signal_sources rows from /api/signal-sources
+
+const _FEED_SOURCE_TYPE_LABELS = {
+    reddit: 'REDDIT', google_news: 'GOOGLE NEWS', hn: 'HACKERNEWS',
+    fred: 'FRED', rss: 'RSS', web: 'WEB',
+};
+const _FEED_SOURCE_TYPE_COLORS = {
+    reddit:      {bg:'rgba(249,115,22,0.15)',  border:'rgba(249,115,22,0.4)',  color:'#fb923c'},
+    google_news: {bg:'rgba(59,130,246,0.15)',  border:'rgba(59,130,246,0.4)',  color:'#60a5fa'},
+    hn:          {bg:'rgba(245,158,11,0.15)',  border:'rgba(245,158,11,0.4)',  color:'#fbbf24'},
+    fred:        {bg:'rgba(34,197,94,0.15)',   border:'rgba(34,197,94,0.4)',   color:'#4ade80'},
+    rss:         {bg:'rgba(107,114,128,0.15)', border:'rgba(107,114,128,0.4)', color:'#9ca3af'},
+    web:         {bg:'rgba(168,85,247,0.15)',  border:'rgba(168,85,247,0.4)',  color:'#c084fc'},
+};
+
+function _detectSourceType(url) {
+    if (!url) return 'rss';
+    if (url.includes('reddit.com'))       return 'reddit';
+    if (url.includes('news.google.com'))  return 'google_news';
+    if (url.includes('hnrss.org') || url.includes('hacker-news.firebaseio')) return 'hn';
+    if (url.includes('fred.stlouisfed'))  return 'fred';
+    return 'rss';
+}
+
+function _feedDomainBadgeStyle(domain) {
+    const color = (_DOMAIN_COLORS && _DOMAIN_COLORS[domain]) || '#6b7280';
+    return {bg: color + '22', border: color + '44', color: color,
+            label: (_DOMAIN_LABELS && _DOMAIN_LABELS[domain]) || domain};
+}
+
+function renderFeedSources() {
+    const el = document.getElementById('feed-builtin-sources');
+    if (!el) return;
+    const sources = _feedSourcesCache;
+    if (!sources.length) {
+        el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:32px 0;text-align:center">No sources configured — click <strong>+ Add Source</strong> to get started.</div>';
+        return;
+    }
+    const filtered = (typeof _activeDomains !== 'undefined')
+        ? sources.filter(s => _activeDomains.has(s.domain))
+        : sources;
+    if (!filtered.length) {
+        el.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:16px 0;text-align:center">No sources in the selected categories.</div>';
+        return;
+    }
+    el.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;align-items:start">' +
+        filtered.map(s => {
+            const dk   = _feedDomainBadgeStyle(s.domain);
+            const tc   = _FEED_SOURCE_TYPE_COLORS[s.source_type] || _FEED_SOURCE_TYPE_COLORS.rss;
+            const tlbl = _FEED_SOURCE_TYPE_LABELS[s.source_type] || s.source_type.toUpperCase();
+            const enabled = !!s.enabled;
+            const count = s.signal_count || 0;
+
+            let urlHtml = '';
+            if (s.url) {
+                let host;
+                try { host = new URL(s.url).hostname.replace(/^www\./, ''); } catch(e) { host = s.url.slice(0,30); }
+                urlHtml = `<a href="${escHtml(s.url)}" target="_blank" style="font-size:10px;color:var(--accent);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block">${escHtml(host)}</a>`;
+            }
+
+            // Card dims when disabled, but toggle row stays fully opaque
+            return `<div style="border:1px solid ${enabled ? 'var(--border)' : 'rgba(255,255,255,0.05)'};background:var(--bg-tertiary);border-radius:8px;padding:8px 12px;transition:border-color 0.15s">
+                <div style="opacity:${enabled ? '1' : '0.4'};transition:opacity 0.15s">
+                    <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">
+                        <div style="flex:1;font-size:12px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(s.name)}">${escHtml(s.name)}</div>
+                        <span style="padding:1px 5px;border-radius:5px;background:${dk.bg};border:1px solid ${dk.border};color:${dk.color};font-size:8px;font-weight:700;flex-shrink:0;letter-spacing:0.03em">${escHtml(dk.label)}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">
+                        <span style="padding:1px 5px;border-radius:4px;background:${tc.bg};border:1px solid ${tc.border};color:${tc.color};font-size:8px;font-weight:600;flex-shrink:0">${escHtml(tlbl)}</span>
+                        <div style="flex:1;min-width:0">${urlHtml}</div>
+                    </div>
+                    <div style="font-size:10px;color:var(--text-muted)">${count} signal${count !== 1 ? 's' : ''}</div>
+                </div>
+                <div style="border-top:1px solid rgba(255,255,255,0.06);margin-top:7px;padding-top:6px;display:flex;align-items:center;justify-content:space-between;gap:6px">
+                    <span style="font-size:9px;font-weight:600;color:${enabled ? '#4ade80' : 'var(--text-muted)'}">${enabled ? '● Active' : '○ Disabled'}</span>
+                    <div style="display:flex;gap:4px">
+                        <button class="feed-src-toggle-btn" onclick="_feedToggleEnabled(${s.id},${enabled})"
+                            style="font-size:9px;padding:2px 7px;border-radius:4px;cursor:pointer;font-weight:600;transition:background 0.15s,color 0.15s;
+                                   background:${enabled ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)'};
+                                   border:1px solid ${enabled ? 'rgba(239,68,68,0.3)' : 'rgba(34,197,94,0.3)'};
+                                   color:${enabled ? '#f87171' : '#4ade80'}"
+                            onmouseover="this.style.background='${enabled ? 'rgba(239,68,68,0.25)' : 'rgba(34,197,94,0.25)'}'"
+                            onmouseout="this.style.background='${enabled ? 'rgba(239,68,68,0.1)' : 'rgba(34,197,94,0.1)'}'">
+                            ${enabled ? 'Disable' : 'Enable'}
+                        </button>
+                        ${!s.is_builtin ? `<button onclick="_feedDeleteSource(${s.id})"
+                            style="font-size:9px;padding:2px 7px;border-radius:4px;cursor:pointer;font-weight:600;
+                                   background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);color:#f87171;transition:background 0.15s"
+                            onmouseover="this.style.background='rgba(239,68,68,0.2)'"
+                            onmouseout="this.style.background='rgba(239,68,68,0.08)'">✕</button>` : ''}
+                    </div>
+                </div>
+            </div>`;
+        }).join('') + '</div>';
+}
 
 function loadFeedSources() {
+    // ── Social Accounts (unchanged) ──
     fetch('/api/signals/source-stats')
         .then(r => r.json())
         .then(data => {
-            // ── Social Accounts section ──
             const socialEl = document.getElementById('feed-social-accounts');
             const accounts = data.feed_accounts || [];
             if (socialEl) {
@@ -2511,9 +2607,7 @@ function loadFeedSources() {
                     socialEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:16px 0;text-align:center">No social accounts configured.</div>';
                 } else {
                     socialEl.innerHTML = accounts.map(a => {
-                        const lastFetch = a.last_fetched_at
-                            ? new Date(a.last_fetched_at).toLocaleString()
-                            : 'Never';
+                        const lastFetch = a.last_fetched_at ? new Date(a.last_fetched_at).toLocaleString() : 'Never';
                         return `<div style="border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);border-radius:8px;padding:12px 16px;margin-bottom:10px;display:flex;align-items:center;gap:12px">
                             <div style="flex:1;min-width:0">
                                 <div style="font-size:13px;font-weight:600;color:var(--text-primary)">@${escHtml(a.handle)}</div>
@@ -2525,64 +2619,115 @@ function loadFeedSources() {
                     }).join('');
                 }
             }
-
-            // ── Built-in Sources section ──
-            const builtinEl = document.getElementById('feed-builtin-sources');
-            const stats = data.source_stats || [];
-            if (builtinEl) {
-                if (!stats.length) {
-                    builtinEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:16px 0;text-align:center">No signals ingested yet — run a scan to populate.</div>';
-                } else {
-                    var _srcBadge = {
-                        news: {bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.3)', color: '#60a5fa'},
-                        rss:  {bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.3)', color: '#c084fc'},
-                        api:  {bg: 'rgba(22,163,74,0.12)',  border: 'rgba(22,163,74,0.3)',  color: '#4ade80'},
-                        reddit: {bg: 'rgba(249,115,22,0.12)', border: 'rgba(249,115,22,0.3)', color: '#fb923c'}
-                    };
-                    // Domain → badge color
-                    const _domainBadge = {
-                        economics:   {bg:'rgba(245,158,11,0.15)',  border:'rgba(245,158,11,0.4)',  color:'#fbbf24', label:'ECONOMICS'},
-                        finance:     {bg:'rgba(34,197,94,0.15)',   border:'rgba(34,197,94,0.4)',   color:'#4ade80', label:'FINANCE'},
-                        geopolitics: {bg:'rgba(239,68,68,0.15)',   border:'rgba(239,68,68,0.4)',   color:'#f87171', label:'GEOPOLITICS'},
-                        tech_ai:     {bg:'rgba(59,130,246,0.15)',  border:'rgba(59,130,246,0.4)',  color:'#60a5fa', label:'TECH / AI'},
-                        labor:       {bg:'rgba(168,85,247,0.15)',  border:'rgba(168,85,247,0.4)',  color:'#c084fc', label:'LABOR'},
-                        regulatory:  {bg:'rgba(6,182,212,0.15)',   border:'rgba(6,182,212,0.4)',   color:'#22d3ee', label:'REGULATORY'},
-                    };
-                    builtinEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px">' +
-                        stats.map(s => {
-                        const dk = _domainBadge[s.primary_domain] || {bg:'rgba(107,114,128,0.12)', border:'rgba(107,114,128,0.3)', color:'#9ca3af', label:(s.primary_domain||'OTHER').toUpperCase()};
-                        const lastSeen = s.last_seen ? new Date(s.last_seen).toLocaleDateString() : '—';
-
-                        // Build the source hint line
-                        let hintHtml;
-                        if (s.subreddits && s.subreddits.length) {
-                            // Reddit: show subreddit pills
-                            hintHtml = s.subreddits.map(r =>
-                                `<span style="font-size:9px;color:#fb923c;background:rgba(249,115,22,0.12);border:1px solid rgba(249,115,22,0.3);border-radius:6px;padding:1px 5px">${escHtml(r)}</span>`
-                            ).join(' ');
-                        } else if (s.sample_url) {
-                            let host;
-                            try { host = new URL(s.sample_url).hostname.replace(/^www\./, ''); } catch(e) { host = s.sample_url.slice(0,30); }
-                            hintHtml = `<a href="${escHtml(s.sample_url)}" target="_blank" style="font-size:10px;color:var(--accent);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(host)}</a>`;
-                        } else {
-                            hintHtml = `<span style="font-size:10px;color:var(--text-muted)">via scan</span>`;
-                        }
-
-                        return `<div style="border:1px solid var(--border);background:var(--bg-tertiary);border-radius:8px;padding:8px 12px">
-                            <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-                                <div style="flex:1;font-size:12px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.source_name)}</div>
-                                <span style="padding:1px 6px;border-radius:6px;background:${dk.bg};border:1px solid ${dk.border};color:${dk.color};font-size:9px;font-weight:700;flex-shrink:0;letter-spacing:0.03em">${dk.label}</span>
-                            </div>
-                            <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;min-width:0">
-                                <div style="min-width:0;overflow:hidden">${hintHtml}</div>
-                                <span style="font-size:10px;color:var(--text-muted);white-space:nowrap;flex-shrink:0">${s.count} · ${escHtml(lastSeen)}</span>
-                            </div>
-                        </div>`;
-                    }).join('') + '</div>';
-                }
-            }
         })
-        .catch(e => console.error('[feed] loadFeedSources error:', e));
+        .catch(e => console.error('[feed] source-stats error:', e));
+
+    // ── Configured Sources (from signal_sources table) ──
+    fetch('/api/signal-sources')
+        .then(r => r.json())
+        .then(data => {
+            _feedSourcesCache = data.sources || [];
+            renderFeedSources();
+        })
+        .catch(e => console.error('[feed] signal-sources error:', e));
+}
+
+function _feedToggleEnabled(sourceId, currentlyEnabled) {
+    fetch(`/api/signal-sources/${sourceId}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled: currentlyEnabled ? 0 : 1}),
+    })
+    .then(r => r.json())
+    .then(() => {
+        const s = _feedSourcesCache.find(x => x.id === sourceId);
+        if (s) s.enabled = currentlyEnabled ? 0 : 1;
+        renderFeedSources();
+    })
+    .catch(e => console.error('[feed] toggle error:', e));
+}
+
+function _feedDeleteSource(sourceId) {
+    const s = _feedSourcesCache.find(x => x.id === sourceId);
+    const name = s ? s.name : 'this source';
+    if (!confirm(`Remove "${name}"? Existing signals from this source are kept.`)) return;
+    fetch(`/api/signal-sources/${sourceId}`, {method: 'DELETE'})
+        .then(r => r.json())
+        .then(() => {
+            _feedSourcesCache = _feedSourcesCache.filter(x => x.id !== sourceId);
+            renderFeedSources();
+        })
+        .catch(e => console.error('[feed] delete error:', e));
+}
+
+// ── Add Source modal ──
+
+function openAddSourceModal() {
+    const modal = document.getElementById('feed-add-source-modal');
+    if (!modal) return;
+    document.getElementById('feed-add-url').value = '';
+    document.getElementById('feed-add-name').value = '';
+    document.getElementById('feed-add-domain').value = 'economics';
+    document.getElementById('feed-add-type-badge').textContent = '';
+    document.getElementById('feed-add-error').textContent = '';
+    modal.style.display = 'flex';
+    document.getElementById('feed-add-url').focus();
+}
+
+function closeAddSourceModal() {
+    const modal = document.getElementById('feed-add-source-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function _feedAddUrlInput() {
+    const url = (document.getElementById('feed-add-url').value || '').trim();
+    const stype = _detectSourceType(url);
+    const badge = document.getElementById('feed-add-type-badge');
+    if (badge) {
+        const tc = _FEED_SOURCE_TYPE_COLORS[stype] || _FEED_SOURCE_TYPE_COLORS.rss;
+        badge.textContent = _FEED_SOURCE_TYPE_LABELS[stype] || stype.toUpperCase();
+        badge.style.cssText = `padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;background:${tc.bg};border:1px solid ${tc.border};color:${tc.color};margin-left:6px`;
+    }
+    // Auto-fill name from URL
+    const nameEl = document.getElementById('feed-add-name');
+    if (nameEl && !nameEl.value) {
+        try {
+            if (url.includes('reddit.com/r/')) {
+                const m = url.match(/\/r\/([^/]+)/);
+                if (m) nameEl.value = 'r/' + m[1];
+            } else if (url) {
+                nameEl.value = new URL(url).hostname.replace(/^www\./, '');
+            }
+        } catch(e) {}
+    }
+}
+
+function submitAddSource() {
+    const url    = (document.getElementById('feed-add-url').value || '').trim();
+    const name   = (document.getElementById('feed-add-name').value || '').trim();
+    const domain = document.getElementById('feed-add-domain').value;
+    const errEl  = document.getElementById('feed-add-error');
+
+    if (!url || !name) { if (errEl) errEl.textContent = 'URL and name are required.'; return; }
+    if (errEl) errEl.textContent = '';
+
+    const stype = _detectSourceType(url);
+    const btn = document.getElementById('feed-add-submit-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+
+    fetch('/api/signal-sources', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name, source_type: stype, url, domain}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) { if (errEl) errEl.textContent = data.error; return; }
+        closeAddSourceModal();
+        loadFeedSources();
+    })
+    .catch(e => { if (errEl) errEl.textContent = 'Request failed.'; })
+    .finally(() => { if (btn) { btn.disabled = false; btn.textContent = 'Add Source'; } });
 }
 
 function openFetchModal(handle, accountId) {

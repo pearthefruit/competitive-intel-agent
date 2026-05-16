@@ -1964,14 +1964,13 @@ def create_app(db_path="intel.db"):
 
             def _run_scan():
                 try:
-                    if domains:
-                        all_sigs = []
-                        for dom in domains:
-                            sigs = collect_domain_signals(dom, max_per_source=8, progress_cb=_cb)
-                            all_sigs.extend(sigs)
-                        result_box[0] = all_sigs
-                    else:
-                        result_box[0] = collect_all_domains(max_per_source=8, progress_cb=_cb)
+                    from agents.signals_collect import collect_from_db_sources
+                    result_box[0] = collect_from_db_sources(
+                        db_path,
+                        domains=domains if domains else None,
+                        max_per_source=8,
+                        progress_cb=_cb,
+                    )
                 except Exception as exc:
                     print(f"[signals] Scan error: {exc}")
                     scan_q.put(("error", {"text": str(exc)}))
@@ -6025,6 +6024,63 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
             return jsonify({"accounts": accounts})
         finally:
             conn.close()
+
+    # ── Signal Sources CRUD ───────────────────────────────────────────
+
+    @app.route("/api/signal-sources", methods=["GET"])
+    def list_signal_sources():
+        from db import get_signal_sources
+        conn = get_connection(db_path)
+        try:
+            sources = get_signal_sources(conn)
+            # Enrich with per-source signal counts (match on source_name)
+            for s in sources:
+                s["signal_count"] = conn.execute(
+                    "SELECT COUNT(*) FROM signals WHERE source_name=?", (s["name"],)
+                ).fetchone()[0]
+            return jsonify({"sources": sources})
+        finally:
+            conn.close()
+
+    @app.route("/api/signal-sources", methods=["POST"])
+    def add_signal_source_api():
+        from db import add_signal_source
+        data = request.json or {}
+        name        = (data.get("name") or "").strip()
+        source_type = data.get("source_type") or "rss"
+        url         = (data.get("url") or "").strip()
+        domain      = data.get("domain") or "economics"
+        if not name or not url:
+            return jsonify({"error": "name and url are required"}), 400
+        conn = get_connection(db_path)
+        try:
+            new_id = add_signal_source(conn, name, source_type, url, domain)
+            return jsonify({"id": new_id, "ok": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/signal-sources/<int:source_id>", methods=["PATCH"])
+    def update_signal_source_api(source_id):
+        from db import update_signal_source
+        data = request.json or {}
+        conn = get_connection(db_path)
+        try:
+            update_signal_source(conn, source_id, **data)
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    @app.route("/api/signal-sources/<int:source_id>", methods=["DELETE"])
+    def delete_signal_source_api(source_id):
+        from db import delete_signal_source
+        conn = get_connection(db_path)
+        try:
+            delete_signal_source(conn, source_id)
+            return jsonify({"ok": True})
+        finally:
+            conn.close()
+
+    # ─────────────────────────────────────────────────────────────────
 
     @app.route("/api/signals/source-stats", methods=["GET"])
     def source_stats():

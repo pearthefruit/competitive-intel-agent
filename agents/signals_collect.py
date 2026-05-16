@@ -565,3 +565,114 @@ def targeted_search(query, days_back=30, progress_cb=None):
 
     _cb("search_complete", {"total": len(results), "sources": len(audit)})
     return results, audit
+
+
+# ── DB-driven collection (replaces hardcoded collectors) ─────────────
+
+def _fetch_source_signals(source, max_results=20):
+    """Fetch signals from one DB-configured signal_source row."""
+    stype  = source["source_type"]
+    url    = source.get("url") or ""
+    domain = source["domain"]
+    name   = source["name"]
+
+    try:
+        if stype == "fred":
+            from scraper.fred_api import get_key_indicators
+            indicators = get_key_indicators()
+            signals = []
+            for ind in indicators:
+                direction_emoji = {"up": "↑", "down": "↓", "stable": "→"}.get(ind["direction"], "→")
+                title = f"{ind['label']}: {ind['latest_value']}{ind['unit']} {direction_emoji}"
+                if ind["change"] is not None:
+                    title += f" ({ind['change']:+.2f})"
+                signals.append({
+                    "source": "fred", "domain": domain, "title": title,
+                    "url": f"https://fred.stlouisfed.org/series/{ind['series_id']}",
+                    "body": f"{ind['label']} as of {ind['latest_date']}.",
+                    "published_at": ind["latest_date"],
+                    "source_name": "FRED",
+                    "source_type": "data_point",
+                    "content_hash": _content_hash("fred", ind["series_id"],
+                                                  f"{ind['latest_date']}:{ind['latest_value']}"),
+                })
+            return signals
+
+        if stype in ("rss", "reddit", "hn", "google_news"):
+            from scraper.rss_feeds import fetch_rss_by_url
+            src_type_label = (
+                "government" if ".gov" in url
+                else "social" if "reddit.com" in url
+                else "news"
+            )
+            items = fetch_rss_by_url(url, source_name=name, source_type=src_type_label,
+                                     max_results=max_results, days_back=7)
+            out = []
+            for item in items:
+                sig = _normalize_signal(item, stype, domain)
+                if sig:
+                    sig["source_name"] = name
+                    out.append(sig)
+            return out
+
+        if stype == "web":
+            import httpx
+            try:
+                import trafilatura
+                resp = httpx.get(url, timeout=15, follow_redirects=True,
+                                 headers={"User-Agent": "Mozilla/5.0"})
+                text = trafilatura.extract(resp.text) or ""
+                if not text:
+                    return []
+                sig = _normalize_signal({"title": name, "href": url,
+                                         "body": text[:2000], "date": ""}, "web", domain)
+                return [sig] if sig else []
+            except Exception as e:
+                print(f"[signals] web fetch error {url}: {e}")
+                return []
+
+    except Exception as e:
+        print(f"[signals] Error fetching source '{name}': {e}")
+    return []
+
+
+def collect_from_db_sources(db_path, domains=None, max_per_source=20, progress_cb=None):
+    """Collect signals from DB-configured signal_sources.
+
+    Replaces the hardcoded domain collectors — every enabled source row is fetched.
+    Signals from disabled sources are skipped. Preserves per-domain progress events
+    compatible with the existing SSE pipeline.
+    """
+    from db import get_connection, get_signal_sources
+
+    _cb = progress_cb or (lambda *a: None)
+    conn = get_connection(db_path)
+    sources = get_signal_sources(conn, domains=domains, enabled_only=True)
+    conn.close()
+
+    all_signals = []
+    seen_hashes = set()
+
+    # Group by domain so we can emit domain_start / domain_done events
+    domain_map = {}
+    for s in sources:
+        domain_map.setdefault(s["domain"], []).append(s)
+
+    for domain, domain_srcs in domain_map.items():
+        _cb("domain_start", {"domain": domain})
+        domain_count = 0
+        for src in domain_srcs:
+            _cb("source_start", {"source": src["source_type"], "domain": domain, "name": src["name"]})
+            sigs = _fetch_source_signals(src, max_per_source)
+            added = 0
+            for sig in sigs:
+                if sig and sig.get("content_hash") not in seen_hashes:
+                    seen_hashes.add(sig["content_hash"])
+                    all_signals.append(sig)
+                    added += 1
+                    domain_count += 1
+            _cb("source_done", {"source": src["source_type"], "count": added, "name": src["name"]})
+        _cb("domain_done", {"domain": domain, "count": domain_count, "total": len(all_signals)})
+
+    _cb("scan_complete", {"total": len(all_signals)})
+    return all_signals

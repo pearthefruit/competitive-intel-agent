@@ -446,6 +446,18 @@ CREATE TABLE IF NOT EXISTS feed_accounts (
     enabled INTEGER DEFAULT 1,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Configurable signal sources (RSS, Reddit, Google News, HN, FRED, web)
+CREATE TABLE IF NOT EXISTS signal_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'rss',
+    url TEXT,
+    domain TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    is_builtin INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -506,12 +518,127 @@ def _migrate_db(conn):
     conn.commit()
 
 
+_BUILTIN_SIGNAL_SOURCES = [
+    # ── Government RSS ──────────────────────────────────────────────────
+    {"name": "Al Jazeera",                   "source_type": "rss",         "url": "https://www.aljazeera.com/xml/rss/all.xml",                                                                                          "domain": "geopolitics"},
+    {"name": "Federal Reserve",              "source_type": "rss",         "url": "https://www.federalreserve.gov/feeds/press_all.xml",                                                                                  "domain": "economics"},
+    {"name": "FDA",                          "source_type": "rss",         "url": "https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/press-releases/rss.xml",                                           "domain": "regulatory"},
+    {"name": "CDC",                          "source_type": "rss",         "url": "https://tools.cdc.gov/api/v2/resources/media/132608.rss",                                                                             "domain": "regulatory"},
+    {"name": "SEC",                          "source_type": "rss",         "url": "https://www.sec.gov/news/pressreleases.rss",                                                                                          "domain": "finance"},
+    {"name": "NASA",                         "source_type": "rss",         "url": "https://www.nasa.gov/rss/dyn/breaking_news.rss",                                                                                      "domain": "tech_ai"},
+    {"name": "Dept. of Energy",              "source_type": "rss",         "url": "https://www.energy.gov/rss.xml",                                                                                                      "domain": "economics"},
+    {"name": "WHO",                          "source_type": "rss",         "url": "https://www.who.int/rss-feeds/news-english.xml",                                                                                      "domain": "regulatory"},
+    {"name": "White House (Exec. Orders)",   "source_type": "rss",         "url": "https://www.whitehouse.gov/presidential-actions/feed/",                                                                               "domain": "geopolitics"},
+    {"name": "White House (News)",           "source_type": "rss",         "url": "https://www.whitehouse.gov/news/feed/",                                                                                               "domain": "geopolitics"},
+    {"name": "White House (Briefings)",      "source_type": "rss",         "url": "https://www.whitehouse.gov/briefings-statements/feed/",                                                                               "domain": "geopolitics"},
+    # ── FRED ────────────────────────────────────────────────────────────
+    {"name": "FRED Economic Indicators",     "source_type": "fred",        "url": "https://fred.stlouisfed.org",                                                                                                         "domain": "economics"},
+    # ── Google News RSS ─────────────────────────────────────────────────
+    {"name": "Google News: Economy & GDP",   "source_type": "google_news", "url": "https://news.google.com/rss/search?q=economy+GDP+growth+recession&hl=en-US&gl=US&ceid=US:en",                                        "domain": "economics"},
+    {"name": "Google News: Inflation",       "source_type": "google_news", "url": "https://news.google.com/rss/search?q=inflation+CPI+consumer+prices&hl=en-US&gl=US&ceid=US:en",                                      "domain": "economics"},
+    {"name": "Google News: Jobs Market",     "source_type": "google_news", "url": "https://news.google.com/rss/search?q=unemployment+jobs+report+labor+market&hl=en-US&gl=US&ceid=US:en",                              "domain": "economics"},
+    {"name": "Google News: SEC Filings",     "source_type": "google_news", "url": "https://news.google.com/rss/search?q=SEC+13F+filing+institutional+investor&hl=en-US&gl=US&ceid=US:en",                              "domain": "finance"},
+    {"name": "Google News: Earnings",        "source_type": "google_news", "url": "https://news.google.com/rss/search?q=earnings+report+quarterly+results&hl=en-US&gl=US&ceid=US:en",                                  "domain": "finance"},
+    {"name": "Google News: M&A / IPO",       "source_type": "google_news", "url": "https://news.google.com/rss/search?q=IPO+SPAC+acquisition+merger+deal&hl=en-US&gl=US&ceid=US:en",                                   "domain": "finance"},
+    {"name": "Google News: Market Outlook",  "source_type": "google_news", "url": "https://news.google.com/rss/search?q=sector+rotation+market+outlook&hl=en-US&gl=US&ceid=US:en",                                     "domain": "finance"},
+    {"name": "Google News: Trade & Tariffs", "source_type": "google_news", "url": "https://news.google.com/rss/search?q=trade+policy+tariff+sanctions&hl=en-US&gl=US&ceid=US:en",                                      "domain": "geopolitics"},
+    {"name": "Google News: Supply Chain",    "source_type": "google_news", "url": "https://news.google.com/rss/search?q=supply+chain+disruption+geopolitical&hl=en-US&gl=US&ceid=US:en",                               "domain": "geopolitics"},
+    {"name": "Google News: Export Controls", "source_type": "google_news", "url": "https://news.google.com/rss/search?q=export+controls+technology+ban&hl=en-US&gl=US&ceid=US:en",                                     "domain": "geopolitics"},
+    {"name": "Google News: AI & Tech",       "source_type": "google_news", "url": "https://news.google.com/rss/search?q=AI+breakthrough+regulation+technology&hl=en-US&gl=US&ceid=US:en",                              "domain": "tech_ai"},
+    {"name": "Google News: Layoffs",         "source_type": "google_news", "url": "https://news.google.com/rss/search?q=layoffs+hiring+freeze+workforce+reduction&hl=en-US&gl=US&ceid=US:en",                          "domain": "labor"},
+    {"name": "Google News: Workforce",       "source_type": "google_news", "url": "https://news.google.com/rss/search?q=hiring+surge+talent+shortage+skills+gap&hl=en-US&gl=US&ceid=US:en",                            "domain": "labor"},
+    {"name": "Google News: Remote Work",     "source_type": "google_news", "url": "https://news.google.com/rss/search?q=remote+work+return+office+workforce+trends&hl=en-US&gl=US&ceid=US:en",                         "domain": "labor"},
+    {"name": "Google News: SEC Enforcement", "source_type": "google_news", "url": "https://news.google.com/rss/search?q=SEC+enforcement+regulation+compliance&hl=en-US&gl=US&ceid=US:en",                              "domain": "regulatory"},
+    {"name": "Google News: FDA Approvals",   "source_type": "google_news", "url": "https://news.google.com/rss/search?q=FDA+approval+regulation+pharmaceutical&hl=en-US&gl=US&ceid=US:en",                             "domain": "regulatory"},
+    {"name": "Google News: Antitrust",       "source_type": "google_news", "url": "https://news.google.com/rss/search?q=antitrust+investigation+monopoly+regulation&hl=en-US&gl=US&ceid=US:en",                        "domain": "regulatory"},
+    {"name": "Google News: Data Privacy",    "source_type": "google_news", "url": "https://news.google.com/rss/search?q=data+privacy+GDPR+regulation&hl=en-US&gl=US&ceid=US:en",                                       "domain": "regulatory"},
+    # ── HackerNews via hnrss.org ────────────────────────────────────────
+    {"name": "HN: Artificial Intelligence",  "source_type": "hn",          "url": "https://hnrss.org/newest?q=artificial+intelligence&count=20",                                                                         "domain": "tech_ai"},
+    {"name": "HN: Machine Learning",         "source_type": "hn",          "url": "https://hnrss.org/newest?q=machine+learning+LLM&count=20",                                                                           "domain": "tech_ai"},
+    {"name": "HN: Tech Regulation",          "source_type": "hn",          "url": "https://hnrss.org/newest?q=tech+regulation+antitrust&count=20",                                                                      "domain": "tech_ai"},
+    {"name": "HN: M&A & Funding",            "source_type": "hn",          "url": "https://hnrss.org/newest?q=acquisition+IPO+funding&count=20",                                                                         "domain": "finance"},
+    {"name": "HN: Antitrust",                "source_type": "hn",          "url": "https://hnrss.org/newest?q=regulation+antitrust+enforcement&count=20",                                                               "domain": "regulatory"},
+    # ── Reddit subreddits ───────────────────────────────────────────────
+    {"name": "r/technology",         "source_type": "reddit", "url": "https://www.reddit.com/r/technology/new/.rss",         "domain": "tech_ai"},
+    {"name": "r/business",           "source_type": "reddit", "url": "https://www.reddit.com/r/business/new/.rss",           "domain": "economics"},
+    {"name": "r/startups",           "source_type": "reddit", "url": "https://www.reddit.com/r/startups/new/.rss",           "domain": "tech_ai"},
+    {"name": "r/Entrepreneur",       "source_type": "reddit", "url": "https://www.reddit.com/r/Entrepreneur/new/.rss",       "domain": "economics"},
+    {"name": "r/news",               "source_type": "reddit", "url": "https://www.reddit.com/r/news/new/.rss",               "domain": "geopolitics"},
+    {"name": "r/investing",          "source_type": "reddit", "url": "https://www.reddit.com/r/investing/new/.rss",          "domain": "finance"},
+    {"name": "r/stocks",             "source_type": "reddit", "url": "https://www.reddit.com/r/stocks/new/.rss",             "domain": "finance"},
+    {"name": "r/wallstreetbets",     "source_type": "reddit", "url": "https://www.reddit.com/r/wallstreetbets/new/.rss",     "domain": "finance"},
+    {"name": "r/SecurityAnalysis",   "source_type": "reddit", "url": "https://www.reddit.com/r/SecurityAnalysis/new/.rss",   "domain": "finance"},
+    {"name": "r/economics",          "source_type": "reddit", "url": "https://www.reddit.com/r/economics/new/.rss",          "domain": "economics"},
+    {"name": "r/programming",        "source_type": "reddit", "url": "https://www.reddit.com/r/programming/new/.rss",        "domain": "tech_ai"},
+    {"name": "r/SaaS",               "source_type": "reddit", "url": "https://www.reddit.com/r/SaaS/new/.rss",               "domain": "tech_ai"},
+    {"name": "r/cscareerquestions",  "source_type": "reddit", "url": "https://www.reddit.com/r/cscareerquestions/new/.rss",  "domain": "labor"},
+    {"name": "r/LateStageCapitalism","source_type": "reddit", "url": "https://www.reddit.com/r/LateStageCapitalism/new/.rss","domain": "labor"},
+    {"name": "r/Political_Revolution","source_type":"reddit",  "url": "https://www.reddit.com/r/Political_Revolution/new/.rss","domain": "geopolitics"},
+    {"name": "r/TrueReddit",         "source_type": "reddit", "url": "https://www.reddit.com/r/TrueReddit/new/.rss",         "domain": "geopolitics"},
+]
+
+
+def _seed_signal_sources(conn):
+    """Seed built-in signal sources on first run. Idempotent — skips if already seeded."""
+    count = conn.execute("SELECT COUNT(*) FROM signal_sources WHERE is_builtin=1").fetchone()[0]
+    if count > 0:
+        return
+    conn.executemany(
+        "INSERT OR IGNORE INTO signal_sources (name, source_type, url, domain, enabled, is_builtin) VALUES (?,?,?,?,1,1)",
+        [(s["name"], s["source_type"], s["url"], s["domain"]) for s in _BUILTIN_SIGNAL_SOURCES],
+    )
+    conn.commit()
+
+
+def get_signal_sources(conn, domains=None, enabled_only=False):
+    """Return signal sources as list of dicts, optionally filtered."""
+    conditions, params = [], []
+    if enabled_only:
+        conditions.append("enabled=1")
+    if domains:
+        conditions.append(f"domain IN ({','.join('?'*len(domains))})")
+        params.extend(domains)
+    q = "SELECT * FROM signal_sources"
+    if conditions:
+        q += " WHERE " + " AND ".join(conditions)
+    q += " ORDER BY domain, source_type, name"
+    return [dict(r) for r in conn.execute(q, params).fetchall()]
+
+
+def add_signal_source(conn, name, source_type, url, domain):
+    """Insert a user-added signal source. Returns new row id."""
+    conn.execute(
+        "INSERT INTO signal_sources (name, source_type, url, domain, enabled, is_builtin) VALUES (?,?,?,?,1,0)",
+        (name, source_type, url, domain),
+    )
+    conn.commit()
+    return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
+def update_signal_source(conn, source_id, **kwargs):
+    """Update allowed fields on a signal source: name, domain, enabled, url."""
+    allowed = {"name", "domain", "enabled", "url"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed}
+    if not updates:
+        return
+    set_clause = ", ".join(f"{k}=?" for k in updates)
+    conn.execute(f"UPDATE signal_sources SET {set_clause} WHERE id=?", (*updates.values(), source_id))
+    conn.commit()
+
+
+def delete_signal_source(conn, source_id):
+    """Delete a signal source. Existing signals from this source are preserved."""
+    conn.execute("DELETE FROM signal_sources WHERE id=?", (source_id,))
+    conn.commit()
+
+
 def init_db(db_path="intel.db"):
     conn = get_connection(db_path)
     conn.executescript(SCHEMA)
     _migrate_db(conn)
     ensure_default_icp_profile(conn)
     ensure_preset_lenses(conn)
+    _seed_signal_sources(conn)
     conn.commit()
     conn.close()
 
