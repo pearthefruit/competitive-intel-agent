@@ -4,9 +4,16 @@ No credentials required — uses public mobile API with standard browser headers
 Rate limit handling: raises RuntimeError on 429 so caller can surface to user.
 """
 
+import os
 import re
+import subprocess
+import tempfile
 import time
 import requests
+
+# Module-level Whisper model cache — keyed by model_size string.
+# Avoids reloading the model on every transcription call.
+_whisper_model_cache = {}
 
 _HARDCODED_IDS = {
     "dualassets": "76923923363",
@@ -152,3 +159,71 @@ def fetch_new_posts(user_id, since_timestamp=None, max_posts=20):
         time.sleep(0.5)  # polite pause between pages
 
     return sorted(collected, key=lambda p: p["taken_at"])
+
+
+def whisper_enabled() -> bool:
+    """Return True if Whisper transcription is both enabled (via env var) and importable."""
+    if os.environ.get("WHISPER_ENABLED", "").lower() not in ("1", "true"):
+        return False
+    try:
+        import whisper  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def transcribe_reel(url, model_size=None) -> "str | None":
+    """Download audio from an Instagram reel and transcribe it via OpenAI Whisper.
+
+    Args:
+        url: Instagram reel URL (e.g. https://www.instagram.com/reel/ABC123/)
+        model_size: Whisper model size string. Defaults to WHISPER_MODEL env var or "base".
+
+    Returns:
+        Transcript string, or None on any failure.
+
+    Note: The caller is responsible for checking whisper_enabled() before calling this.
+    The Whisper model is cached at module level — first call is slow, subsequent calls fast.
+    """
+    if model_size is None:
+        model_size = os.environ.get("WHISPER_MODEL", "base")
+
+    tmp_path = tempfile.mktemp(suffix=".mp3")
+    try:
+        # Step 1: Download audio-only via yt-dlp
+        cmd = [
+            "yt-dlp",
+            "-x",
+            "--audio-format", "mp3",
+            "--no-playlist",
+            "--quiet",
+            "--no-warnings",
+            "-o", tmp_path,
+            url,
+        ]
+        result = subprocess.run(cmd, timeout=120, capture_output=True)
+        if result.returncode != 0:
+            print(f"[instagram_feed] yt-dlp failed for {url}: {result.stderr.decode(errors='replace')[:300]}")
+            return None
+
+        # Step 2: Load (or retrieve cached) Whisper model
+        import whisper  # imported here so module loads even if whisper isn't installed
+        if model_size not in _whisper_model_cache:
+            print(f"[instagram_feed] Loading Whisper model '{model_size}' (first use)...")
+            _whisper_model_cache[model_size] = whisper.load_model(model_size)
+        model = _whisper_model_cache[model_size]
+
+        # Step 3: Transcribe
+        transcript_text = model.transcribe(tmp_path)["text"]
+        return transcript_text.strip() or None
+
+    except Exception as e:
+        print(f"[instagram_feed] transcribe_reel error for {url}: {e}")
+        return None
+    finally:
+        # Step 4: Always clean up temp file
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass

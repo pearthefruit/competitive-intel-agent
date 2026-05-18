@@ -6141,18 +6141,24 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
         finally:
             conn.close()
 
+    @app.route("/api/signals/whisper-status", methods=["GET"])
+    def whisper_status():
+        from scraper.instagram_feed import whisper_enabled
+        return jsonify({"available": whisper_enabled()})
+
     @app.route("/api/signals/ingest-feed", methods=["POST"])
     def feed_ingest():
         import hashlib
         from datetime import datetime, timezone, timedelta
         from db import (get_feed_accounts, upsert_feed_account, update_feed_account_fetch,
                         insert_signals_batch, sanitize_domain)
-        from scraper.instagram_feed import resolve_user_id, fetch_new_posts
+        from scraper.instagram_feed import resolve_user_id, fetch_new_posts, whisper_enabled, transcribe_reel
         from prompts.instagram_signals import build_signal_extraction_prompt
         from agents.llm import generate_json, FAST_CHAIN
 
         data = request.get_json(silent=True) or {}
         dry_run = bool(data.get("dry_run", True))
+        use_whisper = bool(data.get("use_whisper", False))
 
         # ── Fast path: frontend sends pre-selected signal objects ──────────
         pre_signals = data.get("signals")
@@ -6200,11 +6206,18 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
                     "author": f"@{handle_fp}",
                     "author_context": sig.get("company_or_ticker"),
                     "engagement_json": None,
+                    "_route_to": sig.get("route_to", "thread"),
                 })
 
             if not clean_signals:
                 return jsonify({"imported": 0, "keyword_assigned": 0, "llm_assigned": 0,
-                                "review_queue": 0, "dry_run": False})
+                                "review_queue": 0, "signal_only": 0, "dry_run": False})
+
+            # Separate route_to before inserting (insert_signals_batch doesn't expect _route_to)
+            thread_hashes = {s["content_hash"] for s in clean_signals if s.get("_route_to") != "signal"}
+            signal_only_count = sum(1 for s in clean_signals if s.get("_route_to") == "signal")
+            for s in clean_signals:
+                s.pop("_route_to", None)
 
             conn = get_connection(db_path)
             try:
@@ -6212,9 +6225,11 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
                 hashes = [s["content_hash"] for s in clean_signals]
                 if hashes:
                     placeholders = ",".join("?" * len(hashes))
-                    new_signals = [dict(r) for r in conn.execute(
+                    all_new = [dict(r) for r in conn.execute(
                         f"SELECT * FROM signals WHERE content_hash IN ({placeholders})", hashes
                     ).fetchall()]
+                    # Only run thread assignment on signals the user routed to threads
+                    new_signals = [s for s in all_new if s["content_hash"] in thread_hashes]
                 else:
                     new_signals = []
 
@@ -6245,6 +6260,7 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
                     "keyword_assigned": kw_count,
                     "llm_assigned": llm_count,
                     "review_queue": review_count,
+                    "signal_only": signal_only_count,
                     "dry_run": False,
                 })
             finally:
@@ -6306,10 +6322,16 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
 
         for post in posts:
             caption = post["caption"]
-            if not caption.strip():
+            # Attempt Whisper transcription if requested and available
+            transcript = None
+            if use_whisper and whisper_enabled():
+                transcript = transcribe_reel(post["url"])
+            content = transcript if transcript else caption
+            post["used_transcript"] = transcript is not None
+            if not content.strip():
                 continue
             post_date = datetime.fromtimestamp(post["taken_at"], tz=timezone.utc).strftime("%Y-%m-%d")
-            prompt = build_signal_extraction_prompt(caption, post_date, handle)
+            prompt = build_signal_extraction_prompt(content, post_date, handle)
 
             try:
                 extracted = generate_json(prompt, timeout=30, chain=FAST_CHAIN)
@@ -6324,6 +6346,7 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
                     "post_url": post["url"],
                     "post_date": datetime.fromtimestamp(post["taken_at"], tz=timezone.utc).strftime("%Y-%m-%d"),
                     "post_caption": post["caption"][:500],
+                    "used_transcript": post.get("used_transcript", False),
                     "signals": [],
                     "llm_error": True,
                 })
@@ -6377,6 +6400,7 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
                 "post_url": post_url,
                 "post_date": post_date,
                 "post_caption": caption[:500],
+                "used_transcript": post.get("used_transcript", False),
                 "signals": [
                     {
                         "title": s["title"],

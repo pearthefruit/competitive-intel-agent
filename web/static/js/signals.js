@@ -2501,6 +2501,33 @@ var _feedPreviewSignals = new Map();
 var _feedSelectedSignals = [];
 var _feedSourcesCache = [];   // signal_sources rows from /api/signal-sources
 
+// Signal types that are atomic data points → route to Signal (skip thread assignment)
+// Everything else defaults to Thread
+const _FEED_DEFAULT_ROUTE = {
+    market_move: 'signal',
+    crypto:      'signal',
+};
+
+function _feedSetRoute(sigId, route, btn) {
+    var sig = _feedPreviewSignals.get(sigId);
+    if (!sig) return;
+    sig.route_to = route;
+    var card = btn.closest('.feed-sig-card');
+    if (card) {
+        card.querySelectorAll('[data-route]').forEach(function(b) {
+            var active = b.dataset.route === route;
+            if (b.dataset.route === 'signal') {
+                b.style.background = active ? 'rgba(234,179,8,0.25)' : 'rgba(255,255,255,0.04)';
+                b.style.color = active ? '#fbbf24' : 'var(--text-muted)';
+            } else {
+                b.style.background = active ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.04)';
+                b.style.color = active ? '#60a5fa' : 'var(--text-muted)';
+            }
+        });
+    }
+    _feedUpdateSelection();
+}
+
 const _FEED_SOURCE_TYPE_LABELS = {
     reddit: 'REDDIT', google_news: 'GOOGLE NEWS', hn: 'HACKERNEWS',
     fred: 'FRED', rss: 'RSS', web: 'WEB',
@@ -2741,6 +2768,44 @@ function openFetchModal(handle, accountId) {
     document.getElementById('feed-preview-area').innerHTML = '';
     document.getElementById('feed-import-bar').style.display = 'none';
     modal.style.display = 'flex';
+
+    // Check if Whisper is available and show/hide toggle accordingly
+    fetch('/api/signals/whisper-status')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            var row = document.getElementById('feed-whisper-row');
+            if (!row) return;
+            if (d.available) {
+                row.style.display = 'flex';
+                // Wire toggle animation (only once — check if already wired)
+                var toggle = document.getElementById('feed-whisper-toggle');
+                if (toggle && !toggle._whisperWired) {
+                    toggle._whisperWired = true;
+                    toggle.addEventListener('change', function() {
+                        var track = document.getElementById('feed-whisper-track');
+                        var thumb = document.getElementById('feed-whisper-thumb');
+                        if (!track || !thumb) return;
+                        if (toggle.checked) {
+                            track.style.background = 'rgba(59,130,246,0.7)';
+                            thumb.style.left = '17px';
+                        } else {
+                            track.style.background = 'rgba(255,255,255,0.1)';
+                            thumb.style.left = '3px';
+                        }
+                    });
+                }
+            } else {
+                row.style.display = 'none';
+                // Uncheck if hidden so use_whisper is never accidentally sent as true
+                var toggle = document.getElementById('feed-whisper-toggle');
+                if (toggle) toggle.checked = false;
+            }
+        })
+        .catch(function() {
+            // Silently hide toggle on error
+            var row = document.getElementById('feed-whisper-row');
+            if (row) row.style.display = 'none';
+        });
 }
 
 function closeFetchModal() {
@@ -2780,12 +2845,22 @@ function _feedUpdateSelection() {
     });
     var total = _feedPreviewSignals.size;
     var n = _feedSelectedSignals.length;
+    var nSignal = _feedSelectedSignals.filter(function(s) { return s.route_to === 'signal'; }).length;
+    var nThread = n - nSignal;
     var counter = document.getElementById('feed-sel-counter');
-    if (counter) counter.textContent = n + ' of ' + total + ' selected';
+    if (counter) {
+        var parts = [];
+        if (nSignal) parts.push(nSignal + ' signal' + (nSignal !== 1 ? 's' : ''));
+        if (nThread) parts.push(nThread + ' thread' + (nThread !== 1 ? 's' : ''));
+        counter.textContent = n + ' of ' + total + ' selected' + (parts.length ? '  ·  ' + parts.join(', ') : '');
+    }
     var importBtn = document.getElementById('feed-import-btn');
     if (importBtn) {
         importBtn.disabled = n === 0;
-        importBtn.textContent = n === 0 ? 'Import signals' : ('Import ' + n + ' signal' + (n !== 1 ? 's' : ''));
+        var btnParts = [];
+        if (nSignal) btnParts.push(nSignal + ' signal' + (nSignal !== 1 ? 's' : ''));
+        if (nThread) btnParts.push(nThread + ' thread' + (nThread !== 1 ? 's' : ''));
+        importBtn.textContent = n === 0 ? 'Import' : 'Import ' + (btnParts.length ? btnParts.join(' + ') : n);
     }
 }
 
@@ -2808,10 +2883,13 @@ function runFeedPreview(handle, sinceDays) {
     _feedPreviewSignals = new Map();
     _feedSelectedSignals = [];
 
+    var whisperToggle = document.getElementById('feed-whisper-toggle');
+    var useWhisper = whisperToggle ? whisperToggle.checked : false;
+
     fetch('/api/signals/ingest-feed', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({handle: handle, since_days: sinceDays, dry_run: true})
+        body: JSON.stringify({handle: handle, since_days: sinceDays, dry_run: true, use_whisper: useWhisper})
     })
         .then(r => r.json())
         .then(data => {
@@ -2838,7 +2916,8 @@ function runFeedPreview(handle, sinceDays) {
                         domain: s.domain,
                         post_url: p.post_url,
                         post_date: p.post_date,
-                        handle: handle
+                        handle: handle,
+                        route_to: _FEED_DEFAULT_ROUTE[s.signal_type] || 'thread',
                     });
                 });
             });
@@ -2862,6 +2941,11 @@ function runFeedPreview(handle, sinceDays) {
                     var chipHtml = s.company_or_ticker
                         ? `<span style="padding:1px 7px;border-radius:10px;background:rgba(59,130,246,0.12);border:1px solid rgba(59,130,246,0.3);color:#60a5fa;font-size:10px">${escHtml(s.company_or_ticker)}</span>`
                         : '';
+                    var routeTo = _FEED_DEFAULT_ROUTE[s.signal_type] || 'thread';
+                    var rSigBg = routeTo === 'signal' ? 'rgba(234,179,8,0.25)' : 'rgba(255,255,255,0.04)';
+                    var rSigCo = routeTo === 'signal' ? '#fbbf24' : 'var(--text-muted)';
+                    var rThBg  = routeTo === 'thread'  ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.04)';
+                    var rThCo  = routeTo === 'thread'  ? '#60a5fa' : 'var(--text-muted)';
                     return `<div class="feed-sig-card" style="position:relative;padding:8px 10px;border:1px solid rgba(59,130,246,0.3);border-radius:6px;margin-bottom:6px;background:rgba(255,255,255,0.02);opacity:1;transition:opacity 0.15s">
                         <input type="checkbox" class="feed-sig-cb" id="${sigId}" data-sig-id="${sigId}" data-confidence="${s.confidence || 0}" checked
                             style="position:absolute;top:8px;right:8px;width:14px;height:14px;cursor:pointer;accent-color:#3b82f6"
@@ -2877,14 +2961,26 @@ function runFeedPreview(handle, sinceDays) {
                                 <div style="height:100%;width:${confPct}%;background:${confColor};border-radius:2px"></div>
                             </div>
                             <span style="font-size:10px;color:var(--text-muted)">${confPct}%</span>
+                            <div style="display:inline-flex;border:1px solid rgba(255,255,255,0.1);border-radius:4px;overflow:hidden;flex-shrink:0">
+                                <button data-route="signal" onclick="_feedSetRoute('${sigId}','signal',this)"
+                                    style="padding:2px 7px;font-size:9px;font-weight:600;border:none;cursor:pointer;transition:background 0.12s,color 0.12s;background:${rSigBg};color:${rSigCo}">Signal</button>
+                                <button data-route="thread" onclick="_feedSetRoute('${sigId}','thread',this)"
+                                    style="padding:2px 7px;font-size:9px;font-weight:600;border:none;border-left:1px solid rgba(255,255,255,0.08);cursor:pointer;transition:background 0.12s,color 0.12s;background:${rThBg};color:${rThCo}">Thread</button>
+                            </div>
                         </div>
                     </div>`;
                 }).join('');
+                var transcriptBadge = useWhisper
+                    ? (p.used_transcript
+                        ? '<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:rgba(34,197,94,0.12);color:#4ade80;border:1px solid rgba(34,197,94,0.3)">📝 transcript</span>'
+                        : '<span style="font-size:9px;padding:1px 6px;border-radius:10px;background:rgba(255,255,255,0.05);color:var(--text-muted);border:1px solid rgba(255,255,255,0.08)">💬 caption</span>')
+                    : '';
                 return `<div style="margin-bottom:14px">
                     <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;display:flex;align-items:center;gap:8px">
                         <span style="font-weight:600;color:var(--text-secondary)">${escHtml(p.post_date)}</span>
                         <a href="${escHtml(p.post_url)}" target="_blank" style="color:var(--accent);font-size:10px">open ↗</a>
                         <span>${p.signals.length} signal${p.signals.length !== 1 ? 's' : ''}</span>
+                        ${transcriptBadge}
                     </div>
                     <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;font-style:italic;max-height:48px;overflow:hidden">${escHtml((p.post_caption || '').substring(0, 200))}${(p.post_caption || '').length > 200 ? '…' : ''}</div>
                     ${p.llm_error ? '<div style="font-size:11px;color:#f87171;padding:6px 10px;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.2);border-radius:6px">⚠ LLM extraction failed — all providers busy. Try again in a moment.</div>' : sigHtml}
@@ -2936,17 +3032,21 @@ function commitFeedImport() {
         .then(r => r.json())
         .then(data => {
             if (data.error) {
-                alert(`Import failed: ${data.error}`);
+                _showToast('Import failed: ' + data.error, 'error');
                 return;
             }
-            const msg = `Imported ${data.imported} signals — ${data.keyword_assigned} auto-assigned, ${data.llm_assigned} LLM-assigned, ${data.review_queue} in review queue.`;
-            alert(msg);
+            var parts = [];
+            if (data.signal_only > 0) parts.push(data.signal_only + ' added as raw signal' + (data.signal_only !== 1 ? 's' : ''));
+            if (data.keyword_assigned > 0) parts.push(data.keyword_assigned + ' auto-assigned to threads');
+            if (data.llm_assigned > 0) parts.push(data.llm_assigned + ' LLM-assigned');
+            if (data.review_queue > 0) parts.push(data.review_queue + ' in review queue');
+            _showToast('Imported ' + data.imported + (parts.length ? ' — ' + parts.join(', ') : '') + '.', 'success');
             closeFetchModal();
             loadFeedSources();
             // Refresh signal feed so imported items appear
             loadSignals();
         })
-        .catch(e => alert(`Request failed: ${e}`))
+        .catch(function(e) { _showToast('Request failed: ' + e, 'error'); })
         .finally(() => {
             if (btn) { btn.disabled = false; btn.textContent = 'Import signals'; }
         });
