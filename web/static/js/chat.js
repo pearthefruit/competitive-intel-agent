@@ -1463,6 +1463,7 @@ function showBriefing(dossier, b, _targetEl) {
     if (!isSplitTarget) {
         _activeBriefingData = b;
         _activeDossierData = dossier;
+        if (typeof onDossierSelected === 'function') onDossierSelected(dossier.company_name);
     }
     const rp = document.getElementById('right-pane');
     const identity = b.subject_identity || {};
@@ -2314,6 +2315,7 @@ async function generateLensConfig() {
 
 function showLegacyDossierDetail(d) {
     _activeDossierData = d;
+    if (typeof onDossierSelected === 'function') onDossierSelected(d.company_name);
     const rp = document.getElementById('right-pane');
     document.getElementById('right-company').textContent = d.company_name;
     document.getElementById('right-type').textContent = d.sector || 'Company Dossier';
@@ -2605,6 +2607,12 @@ function renderMessages() {
             <div class="quick-action" onclick="quickAction('freeform')">Ask Anything<span>Free-form research question</span></div>
         </div>
     </div>` + html + `</div>`;
+    // Intercept source: sentinel links in all assistant message bubbles
+    if (typeof interceptSourceLinks === 'function') {
+        container.querySelectorAll('.msg-assistant .msg-bubble').forEach(msgEl => {
+            interceptSourceLinks(msgEl);
+        });
+    }
     _scrollChatBottom();
 }
 
@@ -3081,6 +3089,7 @@ function closeRightPane() {
     }
     if (rp.classList.contains('expanded')) collapseReport();
     rp.classList.remove('open');
+    if (typeof onRightPaneClosed === 'function') onRightPaneClosed();
     rp.style.width = '';
     rp.style.minWidth = '';
     currentReportFilename = null;

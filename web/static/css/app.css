@@ -3390,6 +3390,26 @@
             padding: 20px;
         }
 
+        /* --- Source RAG UI --- */
+        .right-pane-tabs { display:flex;gap:2px;padding:0 8px; }
+        .rp-tab { background:none;border:none;border-bottom:2px solid transparent;color:var(--text-muted);cursor:pointer;font-size:12px;padding:6px 10px;transition:color .15s,border-color .15s; }
+        .rp-tab:hover { color:var(--text-primary); }
+        .rp-tab.active { color:var(--text-primary);border-bottom-color:var(--accent-blue, #3b82f6); }
+        .source-card { background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:border-color .15s; }
+        .source-card:hover { border-color:rgba(99,102,241,0.5); }
+        .source-card-title { font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:3px; }
+        .source-card-meta { font-size:11px;color:var(--text-muted);display:flex;gap:6px;align-items:center; }
+        .source-type-badge { font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(99,102,241,0.2);color:#a5b4fc;text-transform:uppercase;font-weight:600; }
+        .source-group-label { font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);padding:8px 0 4px;font-weight:600; }
+        .chat-with-sources-btn { width:100%;padding:8px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:6px;color:#a5b4fc;cursor:pointer;font-size:12px;transition:background .15s; }
+        .chat-with-sources-btn:hover { background:rgba(99,102,241,0.25); }
+        .source-viewer-nav { border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap; }
+        .source-section-tab { background:none;border:none;border-bottom:2px solid transparent;color:var(--text-muted);cursor:pointer;font-size:11px;padding:6px 8px;white-space:nowrap;transition:color .15s; }
+        .source-section-tab:hover { color:var(--text-primary); }
+        .source-section-tab.active { color:var(--text-primary);border-bottom-color:#a855f7; }
+        .source-highlight { background:rgba(251,191,36,0.25);border-radius:2px;padding:1px 0; }
+        .source-link-btn { display:inline-block; }
+
         /* --- SPLIT VIEW --- */
         .right-pane { position: relative; }
         .split-container {
