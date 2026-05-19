@@ -141,6 +141,7 @@ FOLLOW_UP_TOOL_NAMES = CORE_TOOL_NAMES | {
     "landscape_analysis", "collect", "classify", "analyze",
     "discover_prospects", "score_prospect", "get_scored_prospects",
     "score_lens", "list_lenses", "get_lens_scores",
+    "search_sources",
 }
 
 
@@ -792,6 +793,47 @@ TOOL_SCHEMAS = [
                     "company": {"type": "string", "description": "Company name"},
                 },
                 "required": ["company"]
+            }
+        }
+    },
+    # --- RAG Source Search ---
+    {
+        "type": "function",
+        "function": {
+            "name": "search_sources",
+            "description": (
+                "Search raw source documents captured during analysis of a specific company. "
+                "Use when the user asks what a specific document says — "
+                "'show me the 10-K', 'what does the MD&A say about X', "
+                "'find the 8-K about the acquisition', 'what did the filings say about Y'. "
+                "Only works for companies where financial analysis has been run. "
+                "Returns relevant passages with source citations and scores."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural language description of what you are looking for in the source documents"
+                    },
+                    "company": {
+                        "type": "string",
+                        "description": "Company name exactly as it appears in the system"
+                    },
+                    "source_type": {
+                        "type": "string",
+                        "description": "Optional: filter to a specific source type — 'sec_10k', 'sec_8k', 'news_article', 'propublica'"
+                    },
+                    "section_key": {
+                        "type": "string",
+                        "description": "Optional: for 10-Ks, filter to a specific section — 'item1', 'item1a', 'item7', 'item7a', 'item8'"
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Number of results to return (default 8, max 20)"
+                    }
+                },
+                "required": ["query", "company"]
             }
         }
     },

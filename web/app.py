@@ -1045,15 +1045,134 @@ def create_app(db_path="intel.db"):
 
     @app.route("/api/sources/<int:source_id>")
     def get_source_document(source_id):
-        """Get full content of a single source document."""
+        """Get full content of a single source document, including its sections."""
         conn = get_connection(db_path)
-        row = conn.execute(
-            "SELECT * FROM source_documents WHERE id = ?", (source_id,)
-        ).fetchone()
-        conn.close()
-        if not row:
-            return jsonify({"error": "Not found"}), 404
-        return jsonify(dict(row))
+        try:
+            row = conn.execute(
+                "SELECT * FROM source_documents WHERE id = ?", (source_id,)
+            ).fetchone()
+            if not row:
+                conn.close()
+                return jsonify({"error": "Not found"}), 404
+            doc = dict(row)
+            # Parse metadata_json if present
+            import json as _json
+            if doc.get("metadata_json"):
+                try:
+                    doc["metadata"] = _json.loads(doc["metadata_json"])
+                except Exception:
+                    doc["metadata"] = {}
+            else:
+                doc["metadata"] = {}
+            # Fetch sections for structured documents (10-Ks)
+            section_rows = conn.execute(
+                """SELECT id, section_key, section_label, word_count, content
+                   FROM source_sections WHERE source_doc_id = ?
+                   ORDER BY id""",
+                (source_id,),
+            ).fetchall()
+            doc["sections"] = [dict(s) for s in section_rows]
+            return jsonify(doc)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+
+    @app.route("/api/companies/<path:company_name>/sources")
+    def get_company_sources(company_name):
+        """Get all captured RAG source documents for a company.
+
+        Query params:
+          ?analysis_type=financial  — filter to financial source types
+                                      (sec_10k, sec_8k, propublica, sec_xbrl)
+        """
+        import json as _json
+        FINANCIAL_SOURCE_TYPES = {"sec_10k", "sec_8k", "propublica", "sec_xbrl"}
+        analysis_type = request.args.get("analysis_type")
+
+        conn = get_connection(db_path)
+        try:
+            dossier = get_dossier_by_company(conn, company_name)
+            if not dossier:
+                return jsonify({"error": "Company not found"}), 404
+
+            dossier_id = dossier["id"]
+            rows = conn.execute(
+                """SELECT id, source_type, title, url, source_date,
+                          metadata_json, fetched_at
+                   FROM source_documents
+                   WHERE dossier_id = ?
+                   ORDER BY fetched_at DESC""",
+                (dossier_id,),
+            ).fetchall()
+
+            sources = []
+            for r in rows:
+                doc = dict(r)
+                # Apply optional analysis_type filter
+                if analysis_type == "financial" and doc["source_type"] not in FINANCIAL_SOURCE_TYPES:
+                    continue
+                # Parse metadata
+                if doc.get("metadata_json"):
+                    try:
+                        doc["metadata"] = _json.loads(doc["metadata_json"])
+                    except Exception:
+                        doc["metadata"] = {}
+                else:
+                    doc["metadata"] = {}
+                doc.pop("metadata_json", None)
+                doc["has_sections"] = (doc["source_type"] == "sec_10k")
+                doc["captured_at"] = doc.pop("fetched_at", None)
+                sources.append(doc)
+
+            return jsonify({"sources": sources, "total": len(sources)})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+
+    @app.route("/api/sources/search", methods=["POST"])
+    def search_source_documents():
+        """Semantic search over captured source chunks for a company.
+
+        Request body:
+          { "query": "...", "company": "...",
+            "source_type": "sec_10k",   // optional
+            "section_key": "item_7",    // optional
+            "top_k": 8 }               // optional, default 8, max 20
+
+        Returns array of result objects with chunk_text, score, source info.
+        """
+        from agents.source_capture import search_sources as _search_sources
+        import json as _json
+
+        data = request.json or {}
+        query = (data.get("query") or "").strip()
+        company = (data.get("company") or "").strip()
+        source_type = data.get("source_type") or None
+        section_key = data.get("section_key") or None
+        top_k = min(int(data.get("top_k", 8)), 20)
+
+        if not query or not company:
+            return jsonify({"error": "query and company are required"}), 400
+
+        conn = get_connection(db_path)
+        try:
+            dossier = get_dossier_by_company(conn, company)
+            if not dossier:
+                return jsonify({"error": "Company not found"}), 400
+
+            results = _search_sources(
+                conn, query, dossier["id"],
+                source_type=source_type,
+                section_key=section_key,
+                top_k=top_k,
+            )
+            return jsonify(results)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
 
     # --- ICP Profile API ---
 

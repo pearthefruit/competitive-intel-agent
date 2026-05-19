@@ -1275,6 +1275,68 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                 lines.append(f"| {s.get('lens_name', '?')} | {s.get('overall_score', 0)}/100 | {s.get('overall_label', '?')} | {(s.get('scored_at') or '?')[:10]} |")
             return "\n".join(lines)
 
+        # --- RAG Source Search ---
+        elif name == "search_sources":
+            from agents.source_capture import search_sources as _search_sources
+            from db import get_connection as _get_connection, get_dossier_by_company
+
+            query   = args.get("query", "").strip()
+            company = args.get("company", "").strip()
+            stype   = args.get("source_type")
+            section = args.get("section_key")
+            top_k   = min(int(args.get("top_k", 8)), 20)
+
+            if not query or not company:
+                tool_result = "query and company are required"
+            else:
+                if progress_callback:
+                    progress_callback(f"Searching captured sources for {company}: {query}")
+
+                conn_local = None
+                try:
+                    conn_local = _get_connection(db_path)
+                    dossier = get_dossier_by_company(conn_local, company)
+                    if not dossier:
+                        tool_result = (
+                            f"No dossier found for '{company}'. "
+                            f"Run a financial analysis on this company first."
+                        )
+                    else:
+                        results = _search_sources(
+                            conn_local, query, dossier["id"],
+                            source_type=stype, section_key=section, top_k=top_k
+                        )
+                        if not results:
+                            tool_result = (
+                                f"No relevant passages found in captured sources for '{company}' "
+                                f"matching: {query}\n"
+                                f"Sources may not have been captured yet — run a financial analysis first."
+                            )
+                        else:
+                            parts = []
+                            for r in results:
+                                label = r.get("section_label") or r.get("source_type", "").replace("_", " ").title()
+                                score_pct = int(r.get("score", 0) * 100)
+                                text = (r.get("chunk_text") or "").strip()[:600]
+                                parts.append(
+                                    f"**{r.get('source_title', 'Source')}** — {label} [{score_pct}% match]\n"
+                                    f"{text}\n"
+                                    f"[Source: {r.get('url', '')}](source:{r.get('source_doc_id', '')})"
+                                )
+                            tool_result = (
+                                f"Found {len(results)} relevant passage(s) in {company}'s captured sources:\n\n"
+                                + "\n\n---\n\n".join(parts)
+                            )
+                except Exception as e:
+                    tool_result = f"Source search failed: {e}"
+                finally:
+                    try:
+                        if conn_local:
+                            conn_local.close()
+                    except Exception:
+                        pass
+            return tool_result
+
         else:
             return f"Unknown tool: {name}"
 
