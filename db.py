@@ -463,7 +463,7 @@ CREATE TABLE IF NOT EXISTS source_chunks (
 CREATE INDEX IF NOT EXISTS idx_src_sections_doc   ON source_sections(source_doc_id);
 CREATE INDEX IF NOT EXISTS idx_src_chunks_doc     ON source_chunks(source_doc_id);
 CREATE INDEX IF NOT EXISTS idx_src_chunks_section ON source_chunks(source_section_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_src_docs_dedup ON source_documents(dedup_key) WHERE dedup_key IS NOT NULL;
+-- idx_src_docs_dedup created in _migrate_db after dedup_key column is added
 
 -- Feed accounts: social accounts to ingest (Instagram Reels, etc.)
 CREATE TABLE IF NOT EXISTS feed_accounts (
@@ -550,6 +550,16 @@ def _migrate_db(conn):
         except sqlite3.OperationalError:
             pass  # Column already exists
     conn.commit()
+
+    # Create dedup index after column migration (column must exist first)
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_src_docs_dedup "
+            "ON source_documents(dedup_key) WHERE dedup_key IS NOT NULL"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
 
 
 _BUILTIN_SIGNAL_SOURCES = [
