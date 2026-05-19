@@ -5,6 +5,12 @@ from urllib.parse import quote
 
 import httpx
 
+try:
+    from bs4 import BeautifulSoup as _BeautifulSoup
+    _BS4_AVAILABLE = True
+except ImportError:
+    _BS4_AVAILABLE = False
+
 EDGAR_HEADERS = {
     "User-Agent": "CompetitiveIntelAgent contact@example.com",
     "Accept": "application/json",
@@ -452,6 +458,8 @@ def get_8k_filings(cik, max_filings=15):
                 "date": dates[i] if i < len(dates) else "",
                 "description": descriptions[i] if i < len(descriptions) else "",
                 "url": filing_url,
+                "accession_number": accession,
+                "items": [],  # 8-K item list (e.g. "Item 2.02") not in submissions JSON
             })
             if len(filings) >= max_filings:
                 break
@@ -506,3 +514,173 @@ def format_8k_for_prompt(filings):
         lines.append(line)
 
     return "\n".join(lines)
+
+
+# ── 10-K section extraction for RAG indexing ───────────────────────────────────────────────
+
+# Sections worth capturing for semantic search. Keyed by the lowercase anchor
+# name used in EDGAR HTML (e.g. <a name="item1">).
+SECTION_LABELS = {
+    "item1":  "Business",
+    "item1a": "Risk Factors",
+    "item2":  "Properties",
+    "item7":  "Management Discussion & Analysis",
+    "item7a": "Quantitative Disclosures About Market Risk",
+    "item8":  "Financial Statements",
+}
+
+# Maximum filing HTML size we will parse (5 MB)
+_MAX_10K_BYTES = 5 * 1024 * 1024
+
+
+def _extract_text_between(tag_start, tag_end, soup):
+    """Return plain text of all content between two BS4 tag objects.
+
+    Iterates siblings of tag_start until tag_end is reached.
+    Block-level elements get paragraph separator treatment.
+    """
+    from bs4 import Tag, NavigableString
+    parts = []
+    node = tag_start.next_sibling
+    while node is not None and node != tag_end:
+        if isinstance(node, NavigableString):
+            t = str(node).strip()
+            if t:
+                parts.append(t)
+        elif isinstance(node, Tag):
+            block_tags = {"p", "div", "tr", "li", "h1", "h2", "h3",
+                          "h4", "h5", "h6", "br"}
+            inner = node.get_text(separator=" ").strip()
+            if inner:
+                if node.name in block_tags:
+                    parts.append("\n\n" + inner)
+                else:
+                    parts.append(" " + inner)
+        node = node.next_sibling
+
+    raw = " ".join(parts)
+    raw = re.sub(r" {2,}", " ", raw)
+    raw = re.sub(r"\n{3,}", "\n\n", raw)
+    return raw.strip()
+
+
+def fetch_10k_sections(cik, filings):
+    """Fetch and extract key sections from the most recent 10-K filing.
+
+    Takes the filings list from get_recent_filings() and finds the most
+    recent 10-K or 10-K/A. Fetches the HTML, parses named anchors for
+    the sections in SECTION_LABELS, and returns plain extracted text.
+
+    Returns dict:
+        {fiscal_year, form_type, filed_date, url,
+         sections: [{section_key, section_label, content, word_count}]}
+    Returns None on any failure (non-fatal).
+    """
+    if not _BS4_AVAILABLE:
+        print("[edgar] fetch_10k_sections: BeautifulSoup not available — skipping")
+        return None
+
+    # Find most recent 10-K or 10-K/A in filings list
+    target = None
+    for f in filings:
+        if f.get("form") in ("10-K", "10-K/A") and f.get("url"):
+            target = f
+            break
+
+    if not target:
+        print("[edgar] fetch_10k_sections: no 10-K filing with URL found")
+        return None
+
+    filing_url = target["url"]
+    filed_date = target.get("date", "")
+    form_type = target.get("form", "10-K")
+    fiscal_year = filed_date[:4] if filed_date else ""
+
+    print(f"[edgar] Fetching 10-K sections from {filing_url}...")
+
+    try:
+        html_headers = dict(EDGAR_HEADERS)
+        html_headers["Accept"] = "text/html,application/xhtml+xml"
+        http = httpx.Client(headers=html_headers, timeout=30, follow_redirects=True)
+        try:
+            resp = http.get(filing_url)
+        finally:
+            http.close()
+
+        if resp.status_code != 200:
+            print(f"[edgar] fetch_10k_sections: HTTP {resp.status_code} — skipping")
+            return None
+
+        if len(resp.content) > _MAX_10K_BYTES:
+            mb = len(resp.content) / 1024 / 1024
+            print(f"[edgar] fetch_10k_sections: filing too large ({mb:.1f} MB > 5 MB) — skipping")
+            return None
+
+        html = resp.text
+    except Exception as e:
+        print(f"[edgar] fetch_10k_sections: fetch failed — {e}")
+        return None
+
+    try:
+        soup = _BeautifulSoup(html, "html.parser")
+    except Exception as e:
+        print(f"[edgar] fetch_10k_sections: parse failed — {e}")
+        return None
+
+    # Build ordered key list and locate each anchor
+    ordered_keys = list(SECTION_LABELS.keys())
+    anchor_map = {}
+    for key in ordered_keys:
+        tag = (
+            soup.find("a", attrs={"name": key})
+            or soup.find("a", attrs={"name": key.upper()})
+            or soup.find("a", attrs={"id": key})
+            or soup.find("a", attrs={"id": key.upper()})
+        )
+        if tag:
+            anchor_map[key] = tag
+
+    if not anchor_map:
+        print("[edgar] fetch_10k_sections: no named section anchors found in filing HTML")
+        return None
+
+    found_keys = [k for k in ordered_keys if k in anchor_map]
+    sections = []
+
+    for i, key in enumerate(found_keys):
+        start_tag = anchor_map[key]
+        end_tag = None
+        if i + 1 < len(found_keys):
+            end_tag = anchor_map[found_keys[i + 1]]
+
+        try:
+            content = _extract_text_between(start_tag, end_tag, soup)
+        except Exception as e:
+            print(f"[edgar] fetch_10k_sections: text extraction failed for {key} — {e}")
+            content = ""
+
+        if not content.strip():
+            continue
+
+        word_count = len(content.split())
+        sections.append({
+            "section_key": key,
+            "section_label": SECTION_LABELS[key],
+            "content": content,
+            "word_count": word_count,
+        })
+        print(f"[edgar]   {key} ({SECTION_LABELS[key]}): {word_count} words")
+
+    if not sections:
+        print("[edgar] fetch_10k_sections: no section content extracted")
+        return None
+
+    print(f"[edgar] 10-K sections extracted: {len(sections)} sections "
+          f"({form_type}, filed {filed_date})")
+    return {
+        "fiscal_year": fiscal_year,
+        "form_type": form_type,
+        "filed_date": filed_date,
+        "url": filing_url,
+        "sections": sections,
+    }

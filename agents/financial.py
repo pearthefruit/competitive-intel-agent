@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
-from db import get_connection, save_source_document, link_sources_to_analysis
+from db import get_connection, save_source_document, link_sources_to_analysis, get_dossier_by_company
 from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, get_recent_filings, format_financials_for_prompt, get_8k_filings, format_8k_for_prompt
 from scraper.stock_data import get_stock_data, format_stock_data_for_prompt, get_extended_financials, format_extended_financials_for_prompt
 from scraper.web_search import search_web, search_news, format_search_results, dedup_results
@@ -25,21 +25,88 @@ def _result_detail(results, max_items=15):
     return '\n'.join(lines) if lines else ''
 
 
-def _save_and_link_sources(company, dossier_result, pending_sources):
-    """Persist collected source documents and link them to the analysis run."""
-    if not dossier_result or not pending_sources:
+def _save_and_link_sources(company, dossier_result, pending_sources, _10k_data=None):
+    """Persist collected source documents and link them to the analysis run.
+
+    Uses capture_and_embed() for dedup + embedding. Falls back to the legacy
+    save_source_document() path if source_capture is unavailable (non-fatal).
+    _10k_data: optional dict from fetch_10k_sections() — sections indexed separately.
+    """
+    if not dossier_result:
         return
+    try:
+        from agents.source_capture import capture_and_embed
+        _use_rag = True
+    except Exception:
+        _use_rag = False
+
     try:
         conn = get_connection()
         dossier_id = dossier_result["dossier_id"]
         analysis_id = dossier_result["analysis_id"]
         source_ids = []
-        for s in pending_sources:
-            sid = save_source_document(
-                conn, dossier_id, s["source_type"], s.get("url"),
-                s.get("title"), s.get("content"), s.get("raw_data"),
-            )
-            source_ids.append(sid)
+
+        # Numerical API data — already structured in dossiers, no value embedding.
+        # Always save via legacy path to avoid dedup_key collisions (these have url=None).
+        _no_rag_types = {"yahoo_finance", "analyst", "sec_xbrl"}
+
+        for s in (pending_sources or []):
+            try:
+                if _use_rag and s["source_type"] not in _no_rag_types:
+                    sid, _ = capture_and_embed(
+                        conn,
+                        dossier_id=dossier_id,
+                        source_type=s["source_type"],
+                        title=s.get("title"),
+                        url=s.get("url"),
+                        content=s.get("content"),
+                        metadata=None,
+                        source_date=s.get("source_date"),
+                        sections=None,
+                        dedup_kwargs=s.get("dedup_kwargs"),
+                    )
+                else:
+                    sid = save_source_document(
+                        conn, dossier_id, s["source_type"], s.get("url"),
+                        s.get("title"), s.get("content"), s.get("raw_data"),
+                    )
+                source_ids.append(sid)
+            except Exception as e:
+                print(f"[sources] Failed to save source '{s.get('title', '')}': {e}")
+
+        # Index 10-K sections separately (structured document with section boundaries)
+        if _10k_data and _use_rag:
+            try:
+                import json as _json
+                fiscal_year = _10k_data.get("fiscal_year", "")
+                meta = {
+                    "fiscal_year": fiscal_year,
+                    "form_type": _10k_data.get("form_type"),
+                    "filed_date": _10k_data.get("filed_date"),
+                    "section_index": [
+                        {"key": sec["section_key"], "label": sec["section_label"],
+                         "word_count": sec.get("word_count", 0)}
+                        for sec in _10k_data.get("sections", [])
+                    ],
+                }
+                sid, is_new = capture_and_embed(
+                    conn,
+                    dossier_id=dossier_id,
+                    source_type="sec_10k",
+                    title=f"10-K {fiscal_year} — {company}",
+                    url=_10k_data.get("url"),
+                    content=None,
+                    metadata=meta,
+                    source_date=_10k_data.get("filed_date"),
+                    sections=_10k_data.get("sections"),
+                    dedup_kwargs={"company": company, "fiscal_year": fiscal_year},
+                )
+                source_ids.append(sid)
+                status = "new" if is_new else "already indexed"
+                print(f"[sources] 10-K sections ({status}): {len(_10k_data.get('sections', []))} sections")
+            except Exception as e:
+                print(f"[sources] 10-K section indexing failed (non-fatal): {e}")
+
         if analysis_id and source_ids:
             link_sources_to_analysis(conn, analysis_id, source_ids)
         conn.close()
@@ -138,6 +205,15 @@ def _analyze_public(company, cik_info, _cb=None):
         return _analyze_non_sec(company, _cb)
 
     filings = get_recent_filings(cik)
+
+    # Fetch 10-K sections for RAG indexing (non-blocking — failure doesn't affect report)
+    from scraper.sec_edgar import fetch_10k_sections
+    _10k_data = None
+    try:
+        _10k_data = fetch_10k_sections(cik, filings)
+    except Exception as e:
+        print(f"[financial] 10-K section extraction failed (non-fatal): {e}")
+
     financials_text = format_financials_for_prompt(financials, filings)
     xbrl_detail = "Metrics: " + ", ".join(financials.keys()) + f"\n{len(filings)} recent filings"
     _cb("source_done", {"source": "xbrl", "status": "done", "summary": f"{len(financials)} metrics, {len(filings)} filings", "detail": xbrl_detail})
@@ -210,13 +286,19 @@ def _analyze_public(company, cik_info, _cb=None):
         eight_k_detail = '\n'.join(f"• {e.get('form', '8-K')} ({e.get('date', 'N/A')}): {', '.join(e.get('items', []))}" for e in eight_k[:10])
         _cb("source_done", {"source": "8k_filings", "status": "done", "summary": f"{len(eight_k)} events", "detail": eight_k_detail})
         try:
-            _pending_sources.append({
-                "source_type": "sec_8k",
-                "url": f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=8-K",
-                "title": f"SEC 8-K Filings: {edgar_name}",
-                "content": eight_k_text,
-                "raw_data": json.dumps(eight_k),
-            })
+            # Save individual 8-K filings (not a concatenated blob) for per-filing dedup
+            for filing_event in eight_k:
+                _pending_sources.append({
+                    "source_type": "sec_8k",
+                    "url": filing_event.get("url") or f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=8-K",
+                    "title": f"8-K {filing_event.get('date', '')} — {filing_event.get('description', '')}",
+                    "content": filing_event.get("description", ""),
+                    "source_date": filing_event.get("date"),
+                    "dedup_kwargs": {
+                        "company": company,
+                        "accession_number": filing_event.get("accession_number") or filing_event.get("date", ""),
+                    },
+                })
         except Exception:
             pass
     else:
@@ -278,7 +360,7 @@ def _analyze_public(company, cik_info, _cb=None):
 
     print(f"[financial] Report saved to {filename}")
     dossier_result = save_to_dossier(company, "financial", report_file=str(filename), report_text=report, model_used=model, progress_cb=_cb)
-    _save_and_link_sources(company, dossier_result, _pending_sources)
+    _save_and_link_sources(company, dossier_result, _pending_sources, _10k_data=_10k_data)
 
     # Overlay computed metrics onto LLM-extracted key facts for precision
     if fin_metrics and dossier_result:
@@ -405,16 +487,18 @@ def _analyze_non_sec(company, _cb=None):
     # Deduplicate (normalized title matching, keeps highest-quality source)
     unique_results = dedup_results(all_results)
 
-    # Persist articles with body content
+    # Persist articles with body content — include URL-based dedup_kwargs
     for r in unique_results:
         body = r.get("body", "")
         if body:
+            article_url = r.get("href") or r.get("url") or ""
             _pending_sources.append({
-                "source_type": r.get("source", "article"),
-                "url": r.get("href") or r.get("url"),
+                "source_type": r.get("source", "news_article"),
+                "url": article_url,
                 "title": (r.get("title") or "")[:500],
                 "content": body,
                 "raw_data": None,
+                "dedup_kwargs": {"url": article_url},
             })
 
     # Log fetch stats so we can see how much content actually made it through

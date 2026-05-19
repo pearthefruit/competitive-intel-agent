@@ -424,6 +424,9 @@ CREATE TABLE IF NOT EXISTS source_documents (
     title TEXT,
     content TEXT,
     raw_data TEXT,
+    dedup_key TEXT,
+    source_date TEXT,
+    metadata_json TEXT,
     fetched_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -433,6 +436,34 @@ CREATE TABLE IF NOT EXISTS analysis_sources (
     source_id   INTEGER NOT NULL REFERENCES source_documents(id) ON DELETE CASCADE,
     PRIMARY KEY (analysis_id, source_id)
 );
+
+-- Sections of large structured documents (e.g. 10-K items).
+-- One row per section, extracted at capture time.
+CREATE TABLE IF NOT EXISTS source_sections (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_doc_id   INTEGER NOT NULL REFERENCES source_documents(id) ON DELETE CASCADE,
+    section_key     TEXT NOT NULL,
+    section_label   TEXT NOT NULL,
+    content         TEXT NOT NULL,
+    word_count      INTEGER,
+    fetched_at      TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Embedding chunks for semantic search across all captured sources.
+CREATE TABLE IF NOT EXISTS source_chunks (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_doc_id     INTEGER NOT NULL REFERENCES source_documents(id) ON DELETE CASCADE,
+    source_section_id INTEGER REFERENCES source_sections(id) ON DELETE CASCADE,
+    chunk_index       INTEGER NOT NULL,
+    chunk_text        TEXT NOT NULL,
+    embedding         BLOB NOT NULL,
+    created_at        TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_src_sections_doc   ON source_sections(source_doc_id);
+CREATE INDEX IF NOT EXISTS idx_src_chunks_doc     ON source_chunks(source_doc_id);
+CREATE INDEX IF NOT EXISTS idx_src_chunks_section ON source_chunks(source_section_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_src_docs_dedup ON source_documents(dedup_key) WHERE dedup_key IS NOT NULL;
 
 -- Feed accounts: social accounts to ingest (Instagram Reels, etc.)
 CREATE TABLE IF NOT EXISTS feed_accounts (
@@ -509,6 +540,9 @@ def _migrate_db(conn):
         ("llm_usage", "duration_ms", "INTEGER"),
         ("documents", "source_url", "TEXT"),
         ("documents", "sender", "TEXT"),
+        ("source_documents", "dedup_key", "TEXT"),
+        ("source_documents", "source_date", "TEXT"),
+        ("source_documents", "metadata_json", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -3878,13 +3912,22 @@ def update_document_title(conn, doc_id, title):
 # Source document persistence
 # ---------------------------------------------------------------------------
 
-def save_source_document(conn, dossier_id, source_type, url, title, content, raw_data=None):
-    """Persist a fetched source document. Returns the new row id."""
+def save_source_document(conn, dossier_id, source_type, url, title, content,
+                          raw_data=None, dedup_key=None, source_date=None,
+                          metadata_json=None):
+    """Persist a fetched source document. Returns the new row id.
+
+    New keyword params (dedup_key, source_date, metadata_json) are optional
+    and default to None for full backward compatibility with existing callers.
+    """
     now = datetime.now(timezone.utc).isoformat()
     cur = conn.execute(
-        """INSERT INTO source_documents (dossier_id, source_type, url, title, content, raw_data, fetched_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (dossier_id, source_type, url, title, content, raw_data, now),
+        """INSERT INTO source_documents
+               (dossier_id, source_type, url, title, content, raw_data,
+                dedup_key, source_date, metadata_json, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (dossier_id, source_type, url, title, content, raw_data,
+         dedup_key, source_date, metadata_json, now),
     )
     conn.commit()
     return cur.lastrowid
@@ -3936,6 +3979,120 @@ def get_sources_for_analysis(conn, analysis_id):
            ORDER BY sd.fetched_at""",
         (analysis_id,),
     ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── RAG source helpers (Phase 1a) ────────────────────────────────────────────
+
+def get_source_by_dedup_key(conn, dedup_key):
+    """Look up a source_document by its dedup_key. Returns dict or None."""
+    row = conn.execute(
+        "SELECT * FROM source_documents WHERE dedup_key = ? LIMIT 1",
+        (dedup_key,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_source_document(conn, dossier_id, source_type, url, title,
+                            content, raw_data, dedup_key, source_date,
+                            metadata_json):
+    """Insert a new source_document row with dedup/date/metadata columns.
+
+    Returns (id, is_new). If dedup_key already exists, returns existing id
+    with is_new=False without modifying the existing row.
+    """
+    # Re-check inside the same connection to avoid TOCTOU races
+    existing = get_source_by_dedup_key(conn, dedup_key)
+    if existing:
+        return (existing["id"], False)
+
+    now = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute(
+        """INSERT INTO source_documents
+               (dossier_id, source_type, url, title, content, raw_data,
+                dedup_key, source_date, metadata_json, fetched_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (dossier_id, source_type, url, title, content, raw_data,
+         dedup_key, source_date, metadata_json, now),
+    )
+    conn.commit()
+    return (cur.lastrowid, True)
+
+
+def save_source_sections(conn, source_doc_id, sections):
+    """Batch-insert section rows for a structured source document.
+
+    sections: list of {section_key, section_label, content} dicts.
+    Returns list of inserted row ids (in same order as input).
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    ids = []
+    for s in sections:
+        content = s.get("content") or ""
+        word_count = len(content.split()) if content else 0
+        cur = conn.execute(
+            """INSERT INTO source_sections
+                   (source_doc_id, section_key, section_label, content,
+                    word_count, fetched_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (source_doc_id, s["section_key"], s["section_label"],
+             content, word_count, now),
+        )
+        ids.append(cur.lastrowid)
+    conn.commit()
+    return ids
+
+
+def save_source_chunks(conn, source_doc_id, chunks, source_section_id=None):
+    """Batch-insert chunk + embedding rows.
+
+    chunks: list of {chunk_index, chunk_text, embedding_bytes} dicts.
+    source_section_id: integer FK to source_sections (None for flat sources).
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    conn.executemany(
+        """INSERT INTO source_chunks
+               (source_doc_id, source_section_id, chunk_index, chunk_text,
+                embedding, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        [
+            (source_doc_id, source_section_id,
+             c["chunk_index"], c["chunk_text"], c["embedding_bytes"], now)
+            for c in chunks
+        ],
+    )
+    conn.commit()
+
+
+def get_chunks_for_company(conn, dossier_id, source_type=None):
+    """Return all embedding chunks for a dossier, joined with source metadata.
+
+    Includes: chunk_text, embedding, source_doc_id, source_type, title, url,
+    section_key, section_label.
+    Optionally filter by source_type.
+    """
+    if source_type:
+        rows = conn.execute(
+            """SELECT sc.chunk_text, sc.embedding, sc.source_doc_id,
+                      sd.source_type, sd.title, sd.url,
+                      ss.section_key, ss.section_label
+               FROM source_chunks sc
+               JOIN source_documents sd ON sd.id = sc.source_doc_id
+               LEFT JOIN source_sections ss ON ss.id = sc.source_section_id
+               WHERE sd.dossier_id = ? AND sd.source_type = ?""",
+            (dossier_id, source_type),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT sc.chunk_text, sc.embedding, sc.source_doc_id,
+                      sd.source_type, sd.title, sd.url,
+                      ss.section_key, ss.section_label
+               FROM source_chunks sc
+               JOIN source_documents sd ON sd.id = sc.source_doc_id
+               LEFT JOIN source_sections ss ON ss.id = sc.source_section_id
+               WHERE sd.dossier_id = ?""",
+            (dossier_id,),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
