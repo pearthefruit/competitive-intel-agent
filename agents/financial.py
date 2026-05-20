@@ -48,7 +48,7 @@ def _save_and_link_sources(company, dossier_result, pending_sources, _10k_data=N
 
         # Numerical API data — already structured in dossiers, no value embedding.
         # Always save via legacy path to avoid dedup_key collisions (these have url=None).
-        _no_rag_types = {"yahoo_finance", "analyst", "sec_xbrl"}
+        _no_rag_types = {"yahoo_finance", "sec_xbrl"}
 
         for s in (pending_sources or []):
             try:
@@ -271,6 +271,7 @@ def _analyze_public(company, cik_info, _cb=None):
                 "title": f"Analyst Estimates + News: {ticker}",
                 "content": ext_text,
                 "raw_data": None,
+                "dedup_kwargs": {"ticker": ticker, "date": datetime.now().strftime("%Y-%m-%d")},
             })
     else:
         _cb("source_done", {"source": "analyst", "status": "skipped", "summary": "No data"})
@@ -489,17 +490,18 @@ def _analyze_non_sec(company, _cb=None):
 
     # Persist articles with body content — include URL-based dedup_kwargs
     for r in unique_results:
-        body = r.get("body", "")
-        if body:
-            article_url = r.get("href") or r.get("url") or ""
-            _pending_sources.append({
-                "source_type": r.get("source", "news_article"),
-                "url": article_url,
-                "title": (r.get("title") or "")[:500],
-                "content": body,
-                "raw_data": None,
-                "dedup_kwargs": {"url": article_url},
-            })
+        body = r.get("body") or r.get("snippet") or ""
+        article_url = r.get("href") or r.get("url") or ""
+        if not body and not article_url:
+            continue
+        _pending_sources.append({
+            "source_type": r.get("source", "news_article"),
+            "url": article_url,
+            "title": (r.get("title") or "")[:500],
+            "content": body or r.get("title", ""),
+            "raw_data": None,
+            "dedup_kwargs": {"url": article_url},
+        })
 
     # Log fetch stats so we can see how much content actually made it through
     fetched = [r for r in unique_results if len(r.get("body", "")) > 300]
@@ -549,6 +551,7 @@ def _analyze_non_sec(company, _cb=None):
                     "title": f"Analyst Estimates + Financials: {ticker}",
                     "content": ext_text,
                     "raw_data": None,
+                    "dedup_kwargs": {"ticker": ticker, "date": datetime.now().strftime("%Y-%m-%d")},
                 })
                 if has_statements:
                     print(f"[financial] Got full financial statements — this company has structured data comparable to SEC filers")

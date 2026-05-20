@@ -1318,10 +1318,11 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                                 label = r.get("section_label") or r.get("source_type", "").replace("_", " ").title()
                                 score_pct = int(r.get("score", 0) * 100)
                                 text = (r.get("chunk_text") or "").strip()[:600]
+                                chunk_hint = (r.get("chunk_text") or "").strip()[:80].replace("\n", " ")
                                 parts.append(
                                     f"**{r.get('source_title', 'Source')}** — {label} [{score_pct}% match]\n"
                                     f"{text}\n"
-                                    f"[Source: {r.get('url', '')}](source:{r.get('source_doc_id', '')})"
+                                    f'["{chunk_hint}…"](source:{r.get("source_doc_id", "")})'
                                 )
                             tool_result = (
                                 f"Found {len(results)} relevant passage(s) in {company}'s captured sources:\n\n"

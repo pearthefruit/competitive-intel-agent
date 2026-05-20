@@ -18,11 +18,11 @@ function switchRightPaneTab(tab) {
     document.getElementById('rp-tab-sources').classList.toggle('active', tab === 'sources');
     // Show/hide panels
     document.getElementById('right-content').style.display = tab === 'report' ? '' : 'none';
-    document.getElementById('sources-panel').style.display = tab === 'sources' ? '' : 'none';
+    document.getElementById('sources-panel').style.display = tab === 'sources' ? 'flex' : 'none';
     document.getElementById('source-viewer-panel').style.display = 'none';
     // Load sources if switching to sources tab
-    if (tab === 'sources' && window._activeDossierData) {
-        _loadSourcesForCompany(window._activeDossierData.company_name);
+    if (tab === 'sources' && _activeDossierData) {
+        _loadSourcesForCompany(_activeDossierData.company_name);
     }
 }
 
@@ -100,7 +100,10 @@ async function _loadSourcesForCompany(company) {
             }
         }
         container.innerHTML = html;
-        if (chatBtn) chatBtn.style.display = '';
+        if (chatBtn) {
+            chatBtn.style.display = '';
+            chatBtn.dataset.company = company;
+        }
     } catch (e) {
         container.innerHTML = `<div style="color:var(--text-muted);font-size:12px;padding:8px">Error loading sources: ${e.message}</div>`;
     }
@@ -190,21 +193,15 @@ function _highlightInBody(container, text) {
 // ── Source Mode chat ─────────────────────────────────────────────────────────
 
 function enterSourceMode() {
-    if (!window._activeDossierData) return;
-    _sourceModeActive = true;
-    _sourceModeCompany = window._activeDossierData.company_name;
-
-    const banner = document.getElementById('source-mode-banner');
-    if (banner) {
-        banner.style.display = 'flex';
-        const label = document.getElementById('source-mode-label');
-        if (label) label.textContent = `Source Mode — ${_sourceModeCompany}`;
+    const btn = document.getElementById('chat-with-sources-btn');
+    const company = (btn && btn.dataset.company)
+        || (_activeDossierData && _activeDossierData.company_name);
+    if (!company) return;
+    _sourceModeActive  = true;
+    _sourceModeCompany = company;
+    if (typeof openSourceOverlay === 'function') {
+        openSourceOverlay(company);
     }
-    const input = document.getElementById('chat-input') || document.querySelector('#chat-input,textarea[placeholder]');
-    if (input) input.placeholder = `Ask about ${_sourceModeCompany}'s captured sources…`;
-
-    // Switch right pane back to sources tab so user can see what we're searching
-    switchRightPaneTab('sources');
 }
 
 function exitSourceMode() {
@@ -225,15 +222,16 @@ function getSourceModeCompany() { return _sourceModeCompany; }
 // ── Source link interception ─────────────────────────────────────────────────
 
 function interceptSourceLinks(msgEl) {
-    // Replace [Source: url](source:123) sentinel pattern with clickable button
-    // The pattern comes from the chat tool handler in agents/chat.py
     if (!msgEl) return;
     const anchors = msgEl.querySelectorAll('a[href^="source:"]');
+    let firstCitation = null;
     anchors.forEach(a => {
         const href = a.getAttribute('href') || '';
         const sourceId = href.replace('source:', '').trim();
-        const chunkText = a.textContent || '';
+        // Strip the surrounding quotes we embed as the chunk hint
+        const chunkText = a.textContent.replace(/^[""]|[""]…?$/g, '').trim();
         if (!sourceId) return;
+        if (!firstCitation) firstCitation = { id: parseInt(sourceId), text: chunkText };
         const btn = document.createElement('button');
         btn.className = 'source-link-btn';
         btn.style.cssText = 'background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:4px;color:#a5b4fc;cursor:pointer;font-size:11px;padding:2px 8px;margin-left:4px';
@@ -241,6 +239,10 @@ function interceptSourceLinks(msgEl) {
         btn.onclick = () => openSourceViewer(parseInt(sourceId), chunkText);
         a.replaceWith(btn);
     });
+    // In Source Mode: auto-open the first cited source with the chunk highlighted
+    if (firstCitation && _sourceModeActive) {
+        openSourceViewer(firstCitation.id, firstCitation.text);
+    }
 }
 
 
