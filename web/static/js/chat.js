@@ -1059,7 +1059,9 @@ function renderScoreRing(score, size) {
 function renderSubScore(label, score, algoData) {
     const cc = _scoreColorClass(score);
     let infoIcon = '';
+    let tipHtml = '';
     if (algoData && algoData.algorithmic_score !== undefined) {
+        // DMS hybrid scoring: algorithmic base → LLM adjustment
         const algoScore = algoData.algorithmic_score;
         const conf = algoData.algorithmic_confidence;
         const signals = algoData.signals_used || [];
@@ -1069,18 +1071,36 @@ function renderSubScore(label, score, algoData) {
         let tipRows = signals.map(s => `<div class="methodology-tip-row">${escHtml(s)}</div>`).join('');
         if (!tipRows) tipRows = '<div class="methodology-tip-row" style="font-style:italic">No structured signals</div>';
         const tipId = 'algo-tip-' + label.replace(/[^a-zA-Z]/g, '');
-        infoIcon = ` <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('${tipId}')" style="font-size:11px">&#9432;</span>
-            <div class="methodology-tip" id="${tipId}">
+        infoIcon = ` <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('${tipId}')" style="font-size:11px">&#9432;</span>`;
+        tipHtml = `<div class="methodology-tip sub-score-tip" id="${tipId}">
                 <div class="methodology-tip-title">Algorithmic Base: ${algoScore}/100 → Final: ${score}/100 (${deltaStr})</div>
                 <div class="methodology-tip-row"><strong>Confidence:</strong> ${confPct}</div>
                 <div style="margin-top:4px;font-size:12px;font-weight:600;color:var(--text-secondary)">Signals:</div>
                 ${tipRows}
             </div>`;
+    } else if (algoData && algoData.signals && algoData.signals.length > 0) {
+        // Lens scoring: pure LLM, show evidence signals as tooltip
+        const signals = algoData.signals;
+        const tipId = 'lens-tip-' + label.replace(/[^a-zA-Z]/g, '');
+        let tipRows = signals.map(s => {
+            const txt = escHtml(s.text || '');
+            return s.url
+                ? `<div class="methodology-tip-row"><a href="${escHtml(s.url)}" target="_blank" style="color:var(--accent);text-decoration:none">${txt}</a></div>`
+                : `<div class="methodology-tip-row">${txt}</div>`;
+        }).join('');
+        infoIcon = ` <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('${tipId}')" style="font-size:11px">&#9432;</span>`;
+        tipHtml = `<div class="methodology-tip sub-score-tip" id="${tipId}">
+                <div class="methodology-tip-title">Evidence Signals · Score: ${score}/100</div>
+                ${tipRows}
+            </div>`;
     }
-    return `<div class="sub-score-row">
-        <span class="sub-score-label">${escHtml(label)}${infoIcon}</span>
-        <div class="sub-score-bar"><div class="sub-score-fill" style="width:${score}%;background:var(--${cc === 'vanguard' ? 'green' : cc === 'contender' ? 'accent' : cc === 'exposed' ? 'yellow' : 'red'})"></div></div>
-        <span class="sub-score-value score-${cc}">${score}</span>
+    return `<div class="sub-score-row-wrap">
+        <div class="sub-score-row">
+            <span class="sub-score-label">${escHtml(label)}${infoIcon}</span>
+            <div class="sub-score-bar"><div class="sub-score-fill" style="width:${score}%;background:var(--${cc === 'vanguard' ? 'green' : cc === 'contender' ? 'accent' : cc === 'exposed' ? 'yellow' : 'red'})"></div></div>
+            <span class="sub-score-value score-${cc}">${score}</span>
+        </div>
+        ${tipHtml}
     </div>`;
 }
 
@@ -1136,6 +1156,16 @@ function _renderScoringSection(scoring, isFullBriefing) {
         html += `<span class="score-${cc}">&#9679;</span> ${tier.min_score}+ ${escHtml(tier.label)} &nbsp;`;
     });
     html += `</div></div></div></div>`;
+
+    // Edit button — only for lens-based scoring (not the default DMS briefing)
+    if (lensInfo.id) {
+        const _li = lensInfo;
+        html += `<div style="text-align:center;margin-top:6px">
+            <button data-lens-id="${_li.id}" data-lens-name="${escHtml(_li.name||'')}" data-lens-desc="${escHtml(_li.description||'')}" data-opps-label="${escHtml(_li.opportunities_label||'')}"
+                onclick="openLensEdit(parseInt(this.dataset.lensId),this.dataset.lensName,this.dataset.lensDesc,this.dataset.oppsLabel)"
+                style="background:none;border:1px solid var(--border);color:var(--text-muted);font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer">Edit Lens</button>
+        </div>`;
+    }
 
     if (!isFullBriefing) {
         html += `<div style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:4px;font-style:italic">Scoring overlay — briefing content reflects a different lens</div>`;
@@ -1965,7 +1995,13 @@ function _renderLensDetail(ls) {
         <div class="lens-detail-header">
             ${renderScoreRing(s, 80)}
             <div class="lens-detail-meta">
-                <div class="lens-detail-label">${escHtml(ls.lens_name)}</div>
+                <div style="display:flex;align-items:center;gap:8px">
+                    <div class="lens-detail-label">${escHtml(ls.lens_name)}</div>
+                    <button data-lens-id="${ls.lens_id}" data-lens-name="${escHtml(ls.lens_name)}" data-lens-desc="${escHtml(ls.lens_description || '')}" data-opps-label="${escHtml((ls.lens_config || {}).opportunities_label || '')}"
+                        onclick="openLensEdit(parseInt(this.dataset.lensId), this.dataset.lensName, this.dataset.lensDesc, this.dataset.oppsLabel)"
+                        title="Edit lens name / description"
+                        style="background:none;border:1px solid var(--border);color:var(--text-muted);font-size:11px;padding:2px 7px;border-radius:4px;cursor:pointer;flex-shrink:0;line-height:1.4">Edit</button>
+                </div>
                 <div class="lens-detail-tier score-${cc}">${escHtml(label)}</div>
                 ${ls.scored_at ? `<div class="lens-detail-scored">Scored ${_formatLensDate(ls.scored_at)}</div>` : ''}
             </div>
@@ -1978,7 +2014,7 @@ function _renderLensDetail(ls) {
         const ds = sub.score || 0;
         const color = _dimColorHex(ds);
         const wPct = Math.round((dim.weight || 0) * 100) + '%';
-        const rationale = sub.rationale || 'No data available';
+        const rationale = sub.rationale || '';
         const signals = (sub.signals || []);
 
         let signalHtml = signals.map(sig => {
@@ -2008,7 +2044,7 @@ function _renderLensDetail(ls) {
             </div>
             <div class="icp-dim-bar"><div class="icp-dim-fill" style="width:${ds}%;background:${color}"></div></div>
             <div class="icp-dim-card-body">
-                <div class="icp-dim-rationale">${_renderCitedText(rationale)}</div>
+                ${rationale ? `<div class="icp-dim-rationale">${_renderCitedText(rationale)}</div>` : ''}
                 ${signalHtml ? `<div class="icp-dim-signals">${signalHtml}</div>` : ''}
             </div>
         </div>`;
@@ -2165,7 +2201,7 @@ async function _executeGenerateBriefing(companyName, lensId) {
     if (_briefingInProgress) return;
     _briefingInProgress = true;
 
-    // Switch to target company's view first so "Generating..." shows on the right dossier
+    // Switch dossier view to target company
     if (activeDossierName !== companyName) {
         await openDossier(companyName);
     }
@@ -2180,6 +2216,8 @@ async function _executeGenerateBriefing(companyName, lensId) {
         _briefingInProgress = false;
     };
 
+    showToast(`Generating briefing for ${companyName}…`);
+
     try {
         const body = lensId ? {lens_id: lensId} : {};
         const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/briefing`, {
@@ -2192,6 +2230,7 @@ async function _executeGenerateBriefing(companyName, lensId) {
             _briefingInProgress = false;
             await loadCompanies();
             await openDossier(companyName);
+            showToast(`Briefing ready for ${companyName}`, 'success');
         } else {
             showToast(data.error || 'Briefing generation failed', 'error', 8000);
             resetBtns();
@@ -2203,6 +2242,96 @@ async function _executeGenerateBriefing(companyName, lensId) {
 }
 
 // ========== LENS BUILDER MODAL ==========
+
+async function openLensEdit(lensId, lensName, lensDesc, oppsLabel) {
+    document.querySelector('.lens-edit-overlay')?.remove();
+    // If description is blank, fetch it live from the API
+    if (!lensDesc) {
+        try {
+            const r = await fetch(`/api/lenses/${lensId}`);
+            const d = await r.json();
+            if (d.id) { lensDesc = d.description || ''; oppsLabel = oppsLabel || (d.config || {}).opportunities_label || ''; }
+        } catch(e) {}
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'niche-builder-overlay lens-edit-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.innerHTML = `<div class="niche-builder-modal" style="max-width:480px">
+        <div class="niche-builder-header">
+            <h2>Edit Lens</h2>
+            <button class="icp-wizard-close" onclick="this.closest('.lens-edit-overlay').remove()">&times;</button>
+        </div>
+        <div class="niche-builder-body">
+            <div class="icp-field">
+                <label>Lens Name</label>
+                <input type="text" id="le-name" value="${escHtml(lensName)}" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px">
+            </div>
+            <div class="icp-field">
+                <label>Description</label>
+                <textarea id="le-description" rows="4" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px;resize:vertical">${escHtml(lensDesc)}</textarea>
+            </div>
+            <div class="icp-field">
+                <label>Opportunities Section Label</label>
+                <input type="text" id="le-opps-label" value="${escHtml(oppsLabel || '')}" placeholder="e.g. Investment Opportunities, Value Creation Opportunities" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px;font-size:13px">
+                <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Changes immediately. Re-score to update opportunity content.</div>
+            </div>
+        </div>
+        <div class="niche-builder-footer">
+            <button class="briefing-btn" onclick="this.closest('.lens-edit-overlay').remove()">Cancel</button>
+            <button class="briefing-btn briefing-btn-primary" id="le-save-btn" onclick="saveLensEdit(${lensId})">Save</button>
+        </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const escHandler = (e) => { if (e.key === 'Escape') overlay.remove(); };
+    document.addEventListener('keydown', escHandler);
+    overlay._escHandler = escHandler;
+    setTimeout(() => document.getElementById('le-name')?.focus(), 100);
+}
+
+async function saveLensEdit(lensId) {
+    const name = document.getElementById('le-name')?.value.trim();
+    const description = document.getElementById('le-description')?.value.trim();
+    if (!name) { showToast('Lens name is required', 'error'); return; }
+    const btn = document.getElementById('le-save-btn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+        const oppsLabel = document.getElementById('le-opps-label')?.value.trim() || '';
+        const config_patch = {};
+        if (oppsLabel) config_patch.opportunities_label = oppsLabel;
+        const resp = await fetch(`/api/lenses/${lensId}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name, description, ...(Object.keys(config_patch).length ? {config_patch} : {})}),
+        });
+        const data = await resp.json();
+        if (!data.ok) { showToast(data.error || 'Failed to update lens', 'error'); btn.disabled = false; btn.textContent = 'Save'; return; }
+        _cachedLenses = null;
+        document.querySelector('.lens-edit-overlay')?.remove();
+        showToast(`Lens "${name}" updated`, 'success');
+        // Refresh the visible lens detail and pills if a dossier is active
+        if (_activeDossierData) {
+            const company = _activeDossierData.company_name;
+            const r = await fetch(`/api/dossiers/${encodeURIComponent(company)}/lens-scores`);
+            const scores = await r.json();
+            _activeDossierData.lens_scores = scores;
+            const activeIdx = parseInt(document.querySelector('.lens-pill.active')?.dataset.lensIdx ?? '0');
+            const pillBar = document.querySelector('.lens-bar');
+            if (pillBar) pillBar.innerHTML = scores.map((ls, i) => {
+                const s = ls.overall_score || 0;
+                const cc = _scoreColorClass(s);
+                return `<div class="lens-pill${i === activeIdx ? ' active' : ''}" onclick="expandLensDetail('${escHtml(company)}',${i})" data-lens-idx="${i}">
+                    <span class="lens-pill-score score-${cc}">${s}</span>
+                    <span class="lens-pill-name">${escHtml(ls.lens_name)}</span>
+                </div>`;
+            }).join('');
+            const container = document.getElementById('lens-detail-container');
+            if (container && scores[activeIdx]) container.innerHTML = _renderLensDetail(scores[activeIdx]);
+        }
+    } catch (e) {
+        showToast('Error updating lens: ' + e.message, 'error');
+        btn.disabled = false; btn.textContent = 'Save';
+    }
+}
 
 function closeLensBuilder() {
     const overlay = document.querySelector('.lens-builder-overlay');
@@ -3253,9 +3382,15 @@ function _buildBriefingDashboard(content) {
         if (scored) {
             const lsScore = scored.overall_score || 0;
             const lcc = _scoreColorClass(lsScore);
-            html += `<div class="lens-pill${isActive ? ' active' : ''}" onclick="handleDashLensPillClick(${lens.id}, false)">
+            const editBtn = isActive
+                ? ` <button data-lens-id="${lens.id}" data-lens-name="${escHtml(lens.name)}" data-lens-desc="${escHtml(scored.lens_description || '')}" data-opps-label="${escHtml((scored.lens_config || {}).opportunities_label || '')}"
+                    onclick="event.stopPropagation();openLensEdit(parseInt(this.dataset.lensId),this.dataset.lensName,this.dataset.lensDesc,this.dataset.oppsLabel)"
+                    title="Edit lens" style="background:none;border:1px solid var(--border);color:var(--text-muted);font-size:10px;padding:1px 5px;border-radius:3px;cursor:pointer;flex-shrink:0;line-height:1.4;margin-left:4px">Edit</button>`
+                : '';
+            html += `<div class="lens-pill${isActive ? ' active' : ''}" onclick="handleDashLensPillClick(${lens.id}, false)" style="display:flex;align-items:center">
                 <span class="lens-pill-score score-${lcc}">${lsScore}</span>
                 <span class="lens-pill-name">${escHtml(lens.name)}</span>
+                ${editBtn}
             </div>`;
         } else {
             html += `<div class="lens-pill lens-pill-unscored" onclick="handleDashLensPillClick(${lens.id}, false)">
@@ -3346,6 +3481,11 @@ function _buildBriefingDashboard(content) {
                 ${confLine ? `<div class="dash-hero-meta">${escHtml(confLine)}</div>` : ''}
             </div>
             <div class="dash-hero-bars">${barsHtml}</div>
+            ${isLensOverride && lensInfo.id ? `<div style="margin-top:8px;text-align:center">
+                <button data-lens-id="${lensInfo.id}" data-lens-name="${escHtml(lensInfo.name||'')}" data-lens-desc="${escHtml(lensInfo.description||'')}" data-opps-label="${escHtml(lensInfo.opportunities_label||'')}"
+                    onclick="openLensEdit(parseInt(this.dataset.lensId),this.dataset.lensName,this.dataset.lensDesc,this.dataset.oppsLabel)"
+                    style="background:none;border:1px solid var(--border);color:var(--text-muted);font-size:11px;padding:3px 10px;border-radius:4px;cursor:pointer">&#9998; Edit Lens</button>
+            </div>` : ''}
         </div>
         <div class="dash-hero-right">
             <div class="dash-hero-right-title">Score Rationale</div>
@@ -3378,8 +3518,9 @@ function _buildBriefingDashboard(content) {
             </div>`;
         });
         oppHtml += '</div>';
-        const oppTitle = `Consulting Opportunities <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('dash-scope-methodology')">&#9432;</span>
-            <div class="methodology-tip" id="dash-scope-methodology" style="display:none">
+        const _oppLabel = (isLensOverride && (_activeDashboardLens?.lens_config?.opportunities_label || _activeDashboardLens?.score_data?._lens?.opportunities_label)) || 'Consulting Opportunities';
+        const oppTitle = `<span style="position:relative">${escHtml(_oppLabel)} <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('dash-scope-methodology')">&#9432;</span>
+            <div class="methodology-tip" id="dash-scope-methodology" style="display:none;position:absolute;top:100%;left:0;z-index:200;min-width:260px;max-width:380px;width:max-content">
                 <div class="methodology-tip-title">Scope Estimation Methodology</div>
                 Estimates based on typical Big 4 / MBB engagement structures (blended daily rate ~$3-5K/consultant):
                 <div class="methodology-tip-row"><strong>$500K-1M, 3-6 mo</strong> — Small team (2-3). Assessments, strategy design, POC, governance frameworks.</div>
@@ -3387,7 +3528,7 @@ function _buildBriefingDashboard(content) {
                 <div class="methodology-tip-row"><strong>$2-5M, 9-18 mo</strong> — Large team (6-10). Multi-workstream programs, enterprise rollout. $10B+ revenue companies.</div>
                 <div class="methodology-tip-row"><strong>$5M+, 12-24 mo</strong> — Full transformation (10+). Company-wide digital transformation. $50B+ companies only.</div>
                 <div class="methodology-tip-note">Scaled to company size using revenue, headcount, and hiring velocity. Conservative estimates preferred.</div>
-            </div>`;
+            </div></span>`;
         html += `<div class="dash-card" style="margin-bottom:16px">
             <div class="dash-card-title">${oppTitle}</div>
             ${oppHtml}
@@ -3395,8 +3536,9 @@ function _buildBriefingDashboard(content) {
     } else if (isLensOverride) {
         const rescoreLensId = _activeDashboardLens.lens_id || '';
         const rescoreCompany = escHtml((dossier || {}).company_name || '');
+        const _oppLabelFallback = (_activeDashboardLens?.lens_config?.opportunities_label || _activeDashboardLens?.score_data?._lens?.opportunities_label) || 'Consulting Opportunities';
         html += `<div class="dash-card" style="margin-bottom:16px">
-            <div class="dash-card-title">Consulting Opportunities</div>
+            <div class="dash-card-title">${escHtml(_oppLabelFallback)}</div>
             <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">
                 Opportunities not available for this lens score version.
                 <span style="color:var(--accent);cursor:pointer" onclick="_scoreLensViaDashPill('${rescoreCompany}', ${rescoreLensId})">Rescore to generate.</span>
