@@ -1654,6 +1654,10 @@ function loadBoard() {
                 _applyBoardFilters();
                 if (_boardHighlights.length) { _applyBoardHighlights(); _renderHighlightPills(); }
             }, 50);
+            // Overlay predictions panel (Phase 4 — Surface 3)
+            if (typeof _overlayPredictionsOnBoard === 'function') {
+                _overlayPredictionsOnBoard();
+            }
         });
 }
 

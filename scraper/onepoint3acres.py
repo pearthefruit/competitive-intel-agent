@@ -10,6 +10,7 @@ among Chinese/international tech workers.
 
 import json
 import re
+import time
 from datetime import datetime
 
 import httpx
@@ -76,6 +77,62 @@ def _generate_slugs(company_name):
             seen.add(s)
             unique.append(s)
     return unique
+
+
+def _fetch_post_content(post_url):
+    """Fetch the full interview description from an individual post page.
+
+    1point3acres embeds content in __NEXT_DATA__ just like the listing page.
+    Returns the content string, or None if unavailable (login-gated or error).
+    """
+    try:
+        resp = httpx.get(post_url, headers=_HEADERS, follow_redirects=True, timeout=12)
+        if resp.status_code != 200:
+            return None
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        next_data_tag = soup.find("script", id="__NEXT_DATA__")
+        if next_data_tag and next_data_tag.string:
+            try:
+                page_data = json.loads(next_data_tag.string)
+                queries = (
+                    page_data.get("props", {})
+                    .get("pageProps", {})
+                    .get("trpcState", {})
+                    .get("json", {})
+                    .get("queries", [])
+                )
+                for q in queries:
+                    state_data = q.get("state", {}).get("data", {})
+                    if not isinstance(state_data, dict):
+                        continue
+                    # Direct content fields
+                    for field in ("content", "body", "message", "description", "text"):
+                        val = state_data.get(field)
+                        if isinstance(val, str) and len(val) > 80:
+                            return val
+                    # Nested under common keys
+                    for key in ("thread", "post", "data", "item"):
+                        nested = state_data.get(key)
+                        if isinstance(nested, dict):
+                            for field in ("content", "body", "message", "description"):
+                                val = nested.get(field)
+                                if isinstance(val, str) and len(val) > 80:
+                                    return val
+            except Exception:
+                pass
+
+        # BeautifulSoup fallback — look for main content container
+        for selector in (".message-body", ".post-message", ".postcontent",
+                         "[class*='message']", "[class*='content']", "article", "main"):
+            el = soup.select_one(selector)
+            if el:
+                text = el.get_text(separator="\n", strip=True)
+                if len(text) > 100:
+                    return text[:8000]
+        return None
+    except Exception:
+        return None
 
 
 def _fetch_posts_for_slug(slug):
@@ -164,16 +221,20 @@ def search_1point3acres(company_name, max_results=24):
             meta_parts = [p for p in [category, job_type, fresh] if p]
             meta_str = ", ".join(meta_parts)
 
-            # Combine Chinese + English title + metadata
-            body = en_subject or subject
-            if meta_str:
-                body += f" [{meta_str}]"
-            if replies:
-                body += f" ({replies} replies)"
-            if subject != en_subject and en_subject:
-                body += f" — Original: {subject}"
-
             post_url = f"https://www.1point3acres.com/interview/post/{tid}"
+
+            # Try to fetch the actual post content; fall back to metadata summary
+            full_content = _fetch_post_content(post_url)
+            if full_content:
+                body = full_content
+            else:
+                body = en_subject or subject
+                if meta_str:
+                    body += f" [{meta_str}]"
+                if replies:
+                    body += f" ({replies} replies)"
+                if subject != en_subject and en_subject:
+                    body += f" — Original: {subject}"
 
             results.append({
                 "title": en_subject or subject,
@@ -182,6 +243,9 @@ def search_1point3acres(company_name, max_results=24):
                 "date": date_str,
                 "source": "1point3acres",
             })
+
+            # Small delay to avoid rate-limiting individual post fetches
+            time.sleep(0.4)
 
         return results
 

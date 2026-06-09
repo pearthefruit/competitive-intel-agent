@@ -1286,6 +1286,18 @@
             animation: popover-in 0.15s ease;
             display: none;
         }
+        /* Sub-score tips float over content — no layout displacement */
+        .sub-score-row-wrap { position: relative; }
+        .sub-score-tip {
+            position: absolute;
+            top: calc(100% + 2px);
+            left: 0;
+            z-index: 200;
+            min-width: 260px;
+            max-width: 380px;
+            width: max-content;
+            margin: 0;
+        }
         .methodology-tip-title {
             font-size: 12px;
             font-weight: 600;

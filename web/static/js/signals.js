@@ -297,19 +297,23 @@ var _discoveryBreadcrumb = [];  // var: accessed from board.js (separate script 
 var _discoveryResults = [];  // var: read/written from base.html outside this module
 var _rawSelectedSignals = new Set(); // selected signal IDs in Raw tab for pattern creation
 
-const _TAB_TITLES = { raw: 'Signals', threads: 'Threads', narratives: 'Narratives', graph: 'Board', causal: 'Chains', execution: 'Execution', 'feed-sources': 'Sources' };
+const _TAB_TITLES = { raw: 'Signals', threads: 'Threads', narratives: 'Narratives', graph: 'Board', causal: 'Chains', execution: 'Execution', 'feed-sources': 'Sources', predictions: 'Predictions' };
 const _TAB_HAS_ADD = { raw: true, threads: true, narratives: true, causal: true };
 
 function switchSignalTab(tab) {
     _signalTab = tab;
     document.querySelectorAll('.sig-feed-tab').forEach(t => t.classList.remove('active'));
+    const _tabBtn = document.querySelector(`.sig-feed-tab[data-tab="${tab}"]`);
+    if (!_tabBtn) { tab = 'raw'; _signalTab = 'raw'; }  // tab removed/unknown → fall back to Signals
     document.querySelector(`.sig-feed-tab[data-tab="${tab}"]`).classList.add('active');
     document.querySelectorAll('.sig-tab-content').forEach(c => c.classList.remove('active'));
-    document.getElementById(`sig-tab-${tab}`).classList.add('active');
+    const _tabContent = document.getElementById(`sig-tab-${tab}`);
+    if (_tabContent) _tabContent.classList.add('active');
     if (tab === 'graph') loadBoard();
     if (tab === 'narratives') loadNarratives();
     if (tab === 'causal') loadCausalView();
     if (tab === 'feed-sources') loadFeedSources();
+    if (tab === 'predictions' && typeof loadPredictions === 'function') loadPredictions();
     // Update sidebar title + add button
     const titleEl = document.querySelector('.signals-sidebar-title');
     if (titleEl) titleEl.textContent = _TAB_TITLES[tab] || 'Signals';
@@ -325,9 +329,9 @@ function switchSignalTab(tab) {
         if (searchInput) searchInput.placeholder = `Filter ${(_TAB_TITLES[tab] || 'signals').toLowerCase()}…`;
     }
     _renderFeedFilters(tab);
-    // Toggle shared detail pane — raw, graph, causal, feed-sources have no shared detail
+    // Toggle shared detail pane — raw, graph, causal, feed-sources, predictions have no shared detail
     const sharedDetail = document.getElementById('signals-detail');
-    if (tab === 'raw' || tab === 'graph' || tab === 'causal' || tab === 'feed-sources') {
+    if (tab === 'raw' || tab === 'graph' || tab === 'causal' || tab === 'feed-sources' || tab === 'predictions') {
         if (sharedDetail) sharedDetail.style.display = 'none';
     } else {
         if (sharedDetail) sharedDetail.style.display = '';
@@ -394,6 +398,9 @@ window._signalVaultRefresh = function() {
     if (typeof loadSignals === 'function') loadSignals();
     if (typeof _signalTab !== 'undefined' && _signalTab === 'graph' && typeof loadBoard === 'function') {
         loadBoard();
+    }
+    if (typeof _signalTab !== 'undefined' && _signalTab === 'predictions' && typeof loadPredictions === 'function') {
+        loadPredictions();
     }
     if (typeof loadDocuments === 'function') loadDocuments();
     if (typeof loadCampaigns === 'function') loadCampaigns();
@@ -1277,11 +1284,17 @@ function openSignalDetail(signalId) {
                 ${s.url && (!s.body || s.body.length < 500) ? `<button id="sig-fetch-btn-${s.id}" onclick="fetchArticleText(${s.id})" style="padding:6px 14px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--accent);font-size:11px;font-weight:600;cursor:pointer">Load full article</button>` : ''}
                 ${s.url ? `<a href="${escHtml(s.url)}" target="_blank" rel="noopener" style="color:var(--text-muted);font-size:11px;text-decoration:none">Open source &rarr;</a>` : ''}
             </div>
+            <div id="signal-detail-predictions-${s.id}" style="padding:0 20px 12px"></div>
         </div>
     `;
 
     // Populate thread assignments section
     _renderSignalDetailThreads(s);
+
+    // Inject predictions ribbon (Phase 4 — Surface 1)
+    if (typeof _renderPredictionsRibbon === 'function') {
+        _renderPredictionsRibbon('signal', s.id, document.getElementById('signal-detail-predictions-' + s.id));
+    }
 }
 
 function _renderSignalDetailThreads(s) {
@@ -1627,6 +1640,7 @@ function openThreadDetail(threadId) {
                         <div style="font-size:11px;font-weight:700;color:var(--text-secondary);margin-bottom:2px">Actions</div>
                         ${_buildThreadActions(thread, entities)}
                     </div>
+                    <div id="thread-detail-predictions-${thread.id}" style="padding:0 20px 12px"></div>
                 </div>
             `;
             // Store signals for search/filter
@@ -1634,6 +1648,16 @@ function openThreadDetail(threadId) {
             window._threadDetailId = thread.id;
             // Load related threads asynchronously
             setTimeout(() => _loadRelatedThreads(thread.id), 100);
+
+            // Inject predictions ribbon (Phase 4 — Surface 1)
+            if (typeof _renderPredictionsRibbon === 'function') {
+                _renderPredictionsRibbon('thread', thread.id, document.getElementById('thread-detail-predictions-' + thread.id));
+            }
+
+            // Update board overlay panel for this thread if on board tab (Phase 4 — Surface 3)
+            if (_signalTab === 'graph' && typeof _updateBoardPredPanelForThread === 'function') {
+                _updateBoardPredPanelForThread(thread.id);
+            }
 
             // Auto-apply highlight keywords to signal search if highlights are active
             if (_boardHighlights.length) {
@@ -2767,6 +2791,12 @@ function openFetchModal(handle, accountId) {
     title.textContent = `Fetch from @${handle}`;
     document.getElementById('feed-preview-area').innerHTML = '';
     document.getElementById('feed-import-bar').style.display = 'none';
+    // Reset to the simple default each open: options collapsed, last 1 day
+    const opts = document.getElementById('feed-options');
+    if (opts) opts.style.display = 'none';
+    const daysInput = document.getElementById('feed-days-input');
+    if (daysInput) daysInput.value = '1';
+    _feedSyncDaysLabel();
     modal.style.display = 'flex';
 
     // Check if Whisper is available and show/hide toggle accordingly
@@ -2817,8 +2847,22 @@ function closeFetchModal() {
 }
 
 function _feedPreviewClick() {
-    const sinceDays = parseInt(document.getElementById('feed-days-input').value) || 7;
+    const sinceDays = parseInt(document.getElementById('feed-days-input').value) || 1;
     runFeedPreview(_feedModalHandle, sinceDays);
+}
+
+function _feedToggleOptions() {
+    const opts = document.getElementById('feed-options');
+    if (!opts) return;
+    opts.style.display = (!opts.style.display || opts.style.display === 'none') ? 'block' : 'none';
+}
+
+function _feedSyncDaysLabel() {
+    const input = document.getElementById('feed-days-input');
+    const hint = document.getElementById('feed-range-hint');
+    if (!input || !hint) return;
+    const d = parseInt(input.value) || 1;
+    hint.textContent = 'last ' + d + ' day' + (d !== 1 ? 's' : '');
 }
 
 function _feedImportClick() {

@@ -219,6 +219,21 @@ CREATE TABLE IF NOT EXISTS lens_scores (
     UNIQUE(dossier_id, lens_id)
 );
 
+CREATE TABLE IF NOT EXISTS eval_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    company_name TEXT NOT NULL,
+    lens_id INTEGER REFERENCES lenses(id),
+    run_number INTEGER NOT NULL,
+    input_snapshot TEXT,
+    score_json TEXT NOT NULL,
+    overall_score INTEGER,
+    overall_label TEXT,
+    dim_scores TEXT,
+    model TEXT,
+    ran_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Signals: raw items collected from data sources for macro monitoring
 CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -488,6 +503,36 @@ CREATE TABLE IF NOT EXISTS signal_sources (
     enabled INTEGER NOT NULL DEFAULT 1,
     is_builtin INTEGER NOT NULL DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Predictions: falsifiable forward-looking claims generated from signals/threads/narratives
+CREATE TABLE IF NOT EXISTS predictions (
+    id INTEGER PRIMARY KEY,
+    parent_kind TEXT NOT NULL,       -- 'signal' | 'thread' | 'narrative'
+    parent_id INTEGER NOT NULL,
+    claim TEXT NOT NULL,             -- "if X, then Y will be observable via Z by date D"
+    mechanism TEXT,                  -- why this effect would occur
+    horizon_days INTEGER,            -- time horizon in days
+    expected_by TEXT,                -- ISO date string
+    falsifier TEXT,                  -- what would prove this wrong
+    confidence INTEGER,              -- 1-5, LLM-assigned
+    status TEXT DEFAULT 'open',      -- open | confirmed | refuted | expired | dismissed
+    resolved_at TEXT,
+    resolved_by_signal_id INTEGER REFERENCES signals(id),
+    resolution_note TEXT,
+    indicator_type TEXT,             -- 'leading' | 'concurrent' | 'lagging'
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Prediction evidence: signals that support or refute a prediction
+CREATE TABLE IF NOT EXISTS prediction_evidence (
+    prediction_id INTEGER NOT NULL REFERENCES predictions(id) ON DELETE CASCADE,
+    signal_id INTEGER NOT NULL REFERENCES signals(id) ON DELETE CASCADE,
+    stance TEXT NOT NULL,            -- 'supports' | 'refutes' | 'partial'
+    weight REAL,                     -- 0-1 LLM-assigned
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY(prediction_id, signal_id)
 );
 """
 
@@ -2419,7 +2464,8 @@ def save_lens_score(conn, dossier_id, lens_id, overall_score, overall_label, sco
 def get_lens_scores_for_dossier(conn, dossier_id):
     """Get all lens scores for a dossier, joined with lens name/slug."""
     rows = conn.execute(
-        """SELECT ls.*, l.name as lens_name, l.slug as lens_slug, l.config_json as lens_config_json
+        """SELECT ls.*, l.name as lens_name, l.slug as lens_slug,
+                  l.description as lens_description, l.config_json as lens_config_json
            FROM lens_scores ls JOIN lenses l ON ls.lens_id = l.id
            WHERE ls.dossier_id = ? ORDER BY ls.scored_at DESC""",
         (dossier_id,),
@@ -2429,6 +2475,52 @@ def get_lens_scores_for_dossier(conn, dossier_id):
         d = dict(row)
         d["score_data"] = json.loads(d["score_json"]) if d.get("score_json") else {}
         d["lens_config"] = json.loads(d["lens_config_json"]) if d.get("lens_config_json") else {}
+        result.append(d)
+    return result
+
+
+def save_eval_run(conn, run_id, company_name, lens_id, run_number, input_snapshot, score_data, model=None):
+    """Insert one eval run. Does not touch lens_scores — eval data is isolated."""
+    now = datetime.now(timezone.utc).isoformat()
+    sub_scores = score_data.get("sub_scores", {})
+    dim_scores = {k: v.get("score") for k, v in sub_scores.items() if isinstance(v, dict)}
+    conn.execute(
+        """INSERT INTO eval_runs
+           (run_id, company_name, lens_id, run_number, input_snapshot, score_json,
+            overall_score, overall_label, dim_scores, model, ran_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            run_id, company_name, lens_id, run_number,
+            json.dumps(input_snapshot) if isinstance(input_snapshot, dict) else input_snapshot,
+            json.dumps(score_data),
+            score_data.get("overall_score"),
+            score_data.get("overall_label"),
+            json.dumps(dim_scores),
+            model,
+            now,
+        ),
+    )
+
+
+def get_eval_runs(conn, run_id=None, company_name=None, lens_id=None):
+    """Fetch eval runs, optionally filtered. Returns list of dicts with parsed score_data."""
+    clauses, params = [], []
+    if run_id:
+        clauses.append("run_id = ?"); params.append(run_id)
+    if company_name:
+        clauses.append("company_name = ? COLLATE NOCASE"); params.append(company_name)
+    if lens_id:
+        clauses.append("lens_id = ?"); params.append(lens_id)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM eval_runs {where} ORDER BY company_name, run_number",
+        params,
+    ).fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["score_data"] = json.loads(d["score_json"]) if d.get("score_json") else {}
+        d["dim_scores_parsed"] = json.loads(d["dim_scores"]) if d.get("dim_scores") else {}
         result.append(d)
     return result
 

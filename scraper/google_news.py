@@ -7,6 +7,7 @@ more recent news coverage with proper date and source metadata.
 import re
 import time
 import threading
+import concurrent.futures
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 from xml.etree import ElementTree as ET
@@ -90,7 +91,7 @@ def _parse_pub_date(date_str):
         return date_str
 
 
-def search_google_news(query, max_results=10, days_back=None):
+def search_google_news(query, max_results=10, days_back=None, fetch_content=False):
     """Search Google News via RSS feed.
 
     Args:
@@ -177,4 +178,21 @@ def search_google_news(query, max_results=10, days_back=None):
             break
 
     print(f"[google_news] Found {len(results)} results for: {query[:60]}")
+
+    if fetch_content and results:
+        from scraper.web_search import fetch_page_text
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_r = {
+                executor.submit(fetch_page_text, r["href"]): r
+                for r in results if r.get("href") and "news.google.com" not in r["href"]
+            }
+            for future in concurrent.futures.as_completed(future_to_r):
+                r = future_to_r[future]
+                try:
+                    text = future.result()
+                except Exception:
+                    text = ""
+                if text:
+                    r["body"] = text
+
     return results

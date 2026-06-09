@@ -50,7 +50,7 @@ def sentiment_analysis(company, progress_cb=None):
 
     all_results = []
     for query in queries:
-        results = search_web(query, max_results=3)
+        results = search_web(query, max_results=3, fetch_content=True)
         all_results.extend(results)
 
     web_count = len(all_results)
@@ -65,9 +65,9 @@ def sentiment_analysis(company, progress_cb=None):
     print("[sentiment] Scraping Blind for employee reviews and discussions...")
     blind = search_blind(company, max_results=15)
     if not blind:
-        # Fallback to DDG snippets if direct scrape fails
+        # Fallback to DDG with full content fetch if direct scrape fails
         print("[sentiment] Direct Blind scrape returned nothing, falling back to DDG...")
-        blind = search_web(f"site:teamblind.com {company} reviews", max_results=3)
+        blind = search_web(f"site:teamblind.com {company} reviews", max_results=3, fetch_content=True)
     all_results.extend(blind)
     if blind:
         print(f"[sentiment] Blind returned {len(blind)} results")
@@ -90,10 +90,10 @@ def sentiment_analysis(company, progress_cb=None):
 
     # News about workplace/culture (DDG + Google News)
     _cb("source_start", {"source": "news", "label": "News", "detail": "DDG news + Google News for workplace coverage"})
-    news = search_news(f"{company} employees workplace culture", max_results=3)
+    news = search_news(f"{company} employees workplace culture", max_results=3, fetch_content=True)
     all_results.extend(news)
     print("[sentiment] Searching Google News for workplace/culture coverage...")
-    gnews = search_google_news(f"{company} employees workplace culture", max_results=5, days_back=30)
+    gnews = search_google_news(f"{company} employees workplace culture", max_results=5, days_back=30, fetch_content=True)
     all_results.extend(gnews)
     news_count = len(news) + len(gnews)
     if news_count:
@@ -305,16 +305,38 @@ def _flush_sources(company, dossier_result, pending_sources):
     if not dossier_result or not pending_sources:
         return
     try:
+        from agents.source_capture import capture_and_embed
+        _use_rag = True
+    except Exception:
+        _use_rag = False
+    try:
         conn = get_connection()
         dossier_id = dossier_result["dossier_id"]
         analysis_id = dossier_result["analysis_id"]
         source_ids = []
         for s in pending_sources:
-            sid = save_source_document(
-                conn, dossier_id, s["source_type"], s.get("url"),
-                s.get("title"), s.get("content"), s.get("raw_data"),
-            )
-            source_ids.append(sid)
+            try:
+                if _use_rag:
+                    sid, _ = capture_and_embed(
+                        conn,
+                        dossier_id=dossier_id,
+                        source_type=s["source_type"],
+                        title=s.get("title"),
+                        url=s.get("url"),
+                        content=s.get("content"),
+                        metadata=None,
+                        source_date=s.get("source_date"),
+                        sections=None,
+                        dedup_kwargs=s.get("dedup_kwargs"),
+                    )
+                else:
+                    sid = save_source_document(
+                        conn, dossier_id, s["source_type"], s.get("url"),
+                        s.get("title"), s.get("content"), s.get("raw_data"),
+                    )
+                source_ids.append(sid)
+            except Exception as e:
+                print(f"[sources] Failed to save source '{s.get('title', '')}': {e}")
         if analysis_id and source_ids:
             link_sources_to_analysis(conn, analysis_id, source_ids)
         conn.close()

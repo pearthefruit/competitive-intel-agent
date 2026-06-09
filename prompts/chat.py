@@ -151,6 +151,7 @@ def get_tool_schemas(tier="full"):
     full: All tools (~17K chars) — first round of each user message
     follow_up: Core + key tools (~6K chars) — subsequent tool-call rounds
     minimal: Think + search (~1K chars) — context overflow recovery
+    source_mode: search_sources only — Source Interrogation overlay (pure RAG)
     """
     if tier == "full":
         return TOOL_SCHEMAS
@@ -158,6 +159,8 @@ def get_tool_schemas(tier="full"):
         return [t for t in TOOL_SCHEMAS if t["function"]["name"] in FOLLOW_UP_TOOL_NAMES]
     if tier == "minimal":
         return [t for t in TOOL_SCHEMAS if t["function"]["name"] in {"think", "web_search", "get_current_datetime"}]
+    if tier == "source_mode":
+        return [t for t in TOOL_SCHEMAS if t["function"]["name"] == "search_sources"]
     return TOOL_SCHEMAS
 
 

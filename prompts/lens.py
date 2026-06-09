@@ -8,6 +8,41 @@ Two prompt builders:
 import json
 
 
+def _build_opportunities_schema(opportunities_label):
+    """Return an engagement_opportunities schema entry adapted to the lens type."""
+    label = (opportunities_label or "Consulting Opportunities").lower()
+    if any(w in label for w in ("investment", "trading", "stock", "equity")):
+        return [{
+            "service": "investment thesis or strategy name",
+            "priority": "high | medium | low",
+            "evidence": "specific financial or operational data points with [source] tags",
+            "detail": "2-3 sentences — investment rationale and expected return driver",
+            "estimated_scope": "e.g. 'Long, 12-24 month horizon' | 'Watch: entry at $X' | 'Short-term catalyst play'",
+            "why_now": "specific catalyst, valuation trigger, or timing signal",
+            "source_analyses": ["analysis_type1", "analysis_type2"],
+        }]
+    elif any(w in label for w in ("value creation", "pe ", "private equity", "acquisition")):
+        return [{
+            "service": "value creation lever name",
+            "priority": "high | medium | low",
+            "evidence": "specific performance gap or market data with [source] tags",
+            "detail": "2-3 sentences — how this lever creates value post-acquisition",
+            "estimated_scope": "e.g. 'Year 1-2: $X EBITDA impact' | '3-year exit uplift'",
+            "why_now": "current performance gap or acquisition context",
+            "source_analyses": ["analysis_type1", "analysis_type2"],
+        }]
+    else:
+        return [{
+            "service": "consulting service name",
+            "priority": "high | medium | low",
+            "evidence": "string with [source] tags — specific data points",
+            "detail": "2-3 sentences — why this is a real need",
+            "estimated_scope": "e.g. '$1-3M, 6-12 months'",
+            "why_now": "1-2 sentences — company-specific timing trigger explaining urgency",
+            "source_analyses": ["analysis_type1", "analysis_type2"],
+        }]
+
+
 def build_lens_scoring_prompt(company_name, lens_config, reports, website_url=None):
     """Build a dynamic scoring prompt from a lens config and analysis reports.
 
@@ -26,6 +61,7 @@ def build_lens_scoring_prompt(company_name, lens_config, reports, website_url=No
     scoring_context = lens_config.get("scoring_context", "You are an analyst evaluating a company.")
     angle_guidance = lens_config.get("angle_guidance", "")
     risk_focus = lens_config.get("risk_focus", "")
+    opportunities_label = lens_config.get("opportunities_label", "Consulting Opportunities")
 
     website_note = f"\n**Website:** {website_url}" if website_url else ""
 
@@ -82,17 +118,7 @@ def build_lens_scoring_prompt(company_name, lens_config, reports, website_url=No
             "estimated_revenue": "string or null",
             "estimated_employees": "string or null",
         },
-        "engagement_opportunities": [
-            {
-                "service": "consulting service name",
-                "priority": "high | medium | low",
-                "evidence": "string with [source] tags — specific data points",
-                "detail": "2-3 sentences — why this is a real need",
-                "estimated_scope": "e.g. '$1-3M, 6-12 months'",
-                "why_now": "1-2 sentences — company-specific timing trigger explaining urgency",
-                "source_analyses": ["analysis_type1", "analysis_type2"],
-            }
-        ],
+        "engagement_opportunities": _build_opportunities_schema(opportunities_label),
         "risk_profile": [
             {"category": "string", "description": "string with [source] tags", "severity": "high | medium | low"}
         ],
@@ -201,6 +227,7 @@ _LENS_CONFIG_SCHEMA = {
         {"min_score": 0, "label": "[Domain] Dark Spot"},
     ],
     "score_label": "Short Score Name (e.g. 'Workforce Maturity Score')",
+    "opportunities_label": "Label for the engagement opportunities section (e.g. 'Investment Opportunities', 'Value Creation Opportunities', 'Consulting Opportunities')",
     "scoring_context": "You are a ... consultant evaluating ...",
     "angle_guidance": "Focus on ...",
     "risk_focus": "key risk areas to watch for",

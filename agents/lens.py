@@ -296,7 +296,7 @@ def score_with_lens(company_name, lens_id, db_path="intel.db", website_url=None,
         for d in dimensions
     ]
     score_data["_analyses_used"] = {atype: path for atype, path in report_paths.items()}
-    score_data["_lens"] = {"id": lens["id"], "name": lens_name, "slug": lens["slug"], "score_label": config.get("score_label", "Lens Score")}
+    score_data["_lens"] = {"id": lens["id"], "name": lens_name, "slug": lens["slug"], "score_label": config.get("score_label", "Lens Score"), "opportunities_label": config.get("opportunities_label", "Consulting Opportunities"), "description": lens.get("description") or ""}
     score_data["_lens_labels"] = labels
 
     print(f"[lens] {company_name} [{lens_name}]: {score_data['overall_score']}/100 — {score_data['overall_label']}")
@@ -413,8 +413,9 @@ def _build_lens_report(company_name, lens, score_data, website_url=None):
 
     # Engagement opportunities
     opps = score_data.get("engagement_opportunities", [])
+    opp_label = config.get("opportunities_label") or "Consulting Opportunities"
     if opps:
-        lines.extend(["## Consulting Opportunities", ""])
+        lines.extend([f"## {opp_label}", ""])
         for opp in opps:
             svc = opp.get("service", "Unknown")
             priority = opp.get("priority", "medium")

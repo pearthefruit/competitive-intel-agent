@@ -55,6 +55,40 @@ All analysis commands: `collect`, `classify`, `analyze`, `financial`, `competito
 - **Native UI helpers**: `_showToast()`, `_showConfirm()`, `_showInlineInput()` — zero browser dialogs remaining (R8).
 - **Resizable detail pane**: Drag handle, width persisted to localStorage, default 380px. Dynamic titles per context (Signal/Thread/Narrative/Review Queue).
 
+### Agent Source Memory (RAG)
+
+**Status:** BUILT (2026-05-19). Phase 1 fully implemented. 37.8 MB indexed.
+
+A source capture + embedding layer scoped to the Research module. Agents save raw source content at run time; users interrogate it via "Source Mode" chat in the right pane.
+
+- **Files:** `agents/source_capture.py` (dedup + insert + embed), hook in `agents/financial.py` via `source_cb` param
+- **Schema:** `source_documents`, `source_sections` (Item 1/1A/7/7A/8 for 10-Ks stored separately), `source_chunks` (embeddings)
+- **Embeddings:** MiniLM, SQLite BLOBs, numpy flat search. Short sources (<600 words) stored as single chunk; 10-Ks section-indexed.
+- **Dedup:** by source identity (10-K: company+fiscal_year; 8-K: accession_number; other: URL hash)
+- **Chat:** `search_sources` tool, scoped to one company. Source Mode suppresses all other agent tools.
+- **UI:** Sources tab in Research right pane → "Chat with these sources" → Source Mode header banner
+- **Phase 1 (done):** financial agent (10-Ks, 8-Ks, news articles)
+- **Phase 2 (TODO):** sentiment agent (Reddit, Blind, news)
+- **Phase 3 (TODO):** competitors agent
+- Storage estimate: ~1MB per company per full financial run
+
+### Documents Module
+
+**Status:** BUILT (2026-05-24, buggy). Full spec at `memory/signalvault-documents-spec.md`.
+
+A reading and capture surface for long-form research documents. User reads → highlights passages → annotations become threads. The module stays thin — synthesis happens through existing threads/narratives/chains.
+
+- **Supported types:** PDF (PyMuPDF), Markdown, plain text, DOCX (python-docx), EPUB (ebooklib), email (extension-extracted HTML)
+- **Storage modes:** Reference (opens from original path) or Stored (vault copy at `documents/{id}_{slug}.{ext}`). Emails always stored.
+- **Schema:** `documents` (title, source, year, file_type, file_path, stored_path, extracted_text_json), `document_annotations` (selected_text, note, section_index, thread_id)
+- **Extraction:** all formats produce `extracted_text_json` — array of `{index, label, text}` sections
+- **Annotation → Thread flow:** select text → popover → LLM generates thread title (non-blocking) → thread created with `[document]` source tag
+- **Email ingestion:** extension detects Gmail (Phase 1), Substack/Outlook (Phase 2). Mode switcher in popup: Signal | Document. Extracts subject/sender/body HTML → sectioned by H1-H3 headings → `<hr>` splits → paragraph blocks.
+- **API:** `POST /api/documents`, `GET /api/documents`, `GET /api/documents/<id>`, `POST /api/documents/<id>/annotations`, etc.
+- **Embeddings:** MiniLM (same stack as Source RAG). `backfill_embeddings.py` for retroactive indexing.
+- **Phase 2 (TODO):** "Propose narratives" button — LLM clusters document threads into narrative stubs
+- **Phase 3 (TODO):** PDF.js rendering (layout-faithful, bounding-box annotations)
+
 ### Two Modules
 
 - **Research** — three-pane layout: navigation (Reports/Dossiers/Chat) | chat with SSE streaming + tool execution | report/dossier/briefing viewer
@@ -120,6 +154,12 @@ Five-tab intelligence monitoring workspace: Signals -> Threads -> Narratives -> 
 
 ## Planned Improvements
 
+- **Predictions System** (spec ready, NOT YET BUILT): Falsifiable second-order effects generated from signals/threads/narratives. Structure: "if X, then Y observable via Z by date D." Open predictions sit as latent expectations; incoming signals get checked against them. Replaces raw signal counts as the evidence backbone for narratives. Schema: `predictions` + `prediction_evidence` tables. Full spec at `memory/signalvault-predictions-spec.md`. Phase 1: schema + LLM generator on manual capture + simple Predictions tab.
+- **Thread naming and dedup**: titles too generic (e.g. "Labor Market Trends" duplicated); fuzzy dedup misses same-domain near-dupes
+- **Keyboard nav — `e` key**: edit signal body in Global Signals module (all other keys built)
+- **Documents module bug fixes**: module is functional but buggy (2026-05-24)
+- **Source RAG Phase 2**: sentiment agent (Reddit, Blind, news)
+- **Source RAG Phase 3**: competitors agent
 - **Temporal analysis smarts**: Skip same-day comparisons, compare against oldest analysis for long-term trends, minimum 24h gap before flagging changes
 - **Multi-source job collection**: Multiple ATS boards per company
 - **Briefing diff view**: Side-by-side comparison between analysis runs

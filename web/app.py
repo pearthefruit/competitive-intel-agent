@@ -957,14 +957,25 @@ def create_app(db_path="intel.db"):
 
     @app.route("/api/lenses/<int:lens_id>", methods=["PUT"])
     def update_lens_api(lens_id):
-        """Update a lens config."""
-        from db import update_lens
+        """Update a lens config. Supports config_patch to merge individual fields."""
+        from db import update_lens, get_lens
+        import json as _json
         data = request.json or {}
         try:
             conn = get_connection(db_path)
+            config_json = None
+            if "config_patch" in data:
+                existing = get_lens(conn, lens_id)
+                if existing:
+                    cfg = dict(existing.get("config") or {})
+                    cfg.update(data["config_patch"])
+                    config_json = _json.dumps(cfg)
+            elif "config" in data:
+                cfg = data["config"]
+                config_json = _json.dumps(cfg) if isinstance(cfg, dict) else cfg
             update_lens(conn, lens_id,
                        name=data.get("name"), description=data.get("description"),
-                       config_json=data.get("config"))
+                       config_json=config_json)
             conn.close()
             return jsonify({"ok": True})
         except Exception as e:
@@ -1871,23 +1882,26 @@ def create_app(db_path="intel.db"):
         from datetime import datetime
         today = datetime.now().strftime("%A, %B %d, %Y")
         context = data.get("context")
+        is_source_mode = context and context.get("type") == "source_mode"
         system_content = SYSTEM_PROMPT + f"\n\n[TODAY] The current date is {today}. Always use the current year ({datetime.now().year}) in search queries and when referencing time. Never assume an older date."
         if context and context.get("company"):
             context_text = _build_context_injection(context["company"], db_path)
             if context_text:
                 system_content += "\n\n" + context_text
+        if is_source_mode:
+            system_content += "\n\n[SOURCE MODE] You are in Source Interrogation mode. You ONLY have access to the search_sources tool. Do NOT attempt to call any other tool. Answer questions exclusively from the captured sources retrieved via search_sources. If the sources don't contain the answer, say so directly."
 
         history = [{"role": "system", "content": system_content}] + messages
 
         def generate():
           try:
-            yield from _generate_inner(history, today, db_path)
+            yield from _generate_inner(history, today, db_path, is_source_mode)
           except Exception as e:
             import traceback
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'text': f'Server error: {str(e)[:300]}'})}\n\n"
 
-        def _generate_inner(history, today, db_path):
+        def _generate_inner(history, today, db_path, is_source_mode=False):
             try:
                 llm = ChatLLM()
             except RuntimeError as e:
@@ -1899,9 +1913,12 @@ def create_app(db_path="intel.db"):
             date_suffix = f"\n\n[TODAY] The current date is {today}. Use {datetime.now().year} in searches."
 
             for round_num in range(max_rounds):
+                # Source mode: only search_sources tool, every round
+                if is_source_mode:
+                    current_tools = get_tool_schemas("source_mode")
                 # Dynamic tool selection: full tools on round 1, core tools after
                 # This drops from ~17K chars of schemas to ~6K on follow-up rounds
-                if round_num == 0:
+                elif round_num == 0:
                     current_tools = TOOL_SCHEMAS
                 else:
                     current_tools = get_tool_schemas("follow_up")
@@ -3423,6 +3440,31 @@ Return JSON: {{"title": "New directional title"}}"""
 
         conn.commit()
 
+        # ── Async prediction generation ────────────────────────────
+        try:
+            from agents.predictions import generate_predictions_async
+            generate_predictions_async(
+                sig_id,
+                title,
+                clean_content,
+                domain,
+                db_factory=lambda: get_connection(db_path),
+            )
+        except Exception as _pred_err:
+            print(f"[capture] prediction generation launch error: {_pred_err}")
+
+        # ── Async evidence matching against open predictions ───────
+        try:
+            from agents.predictions import match_predictions_async
+            match_predictions_async(
+                sig_id,
+                title,
+                clean_content,
+                db_factory=lambda: get_connection(db_path),
+            )
+        except Exception as _match_err:
+            print(f"[capture] prediction matching launch error: {_match_err}")
+
         # ── Thread assignment ──────────────────────────────────────
         # If the caller specified thread_id explicitly (browser extension),
         # honor it. Otherwise fall back to TF-IDF auto-assignment.
@@ -3493,6 +3535,169 @@ Return JSON: {{"title": "New directional title"}}"""
             "thread_assignment": thread_assignment,
             "parsed_format": "linkedin" if is_linkedin_format else "raw",
         })
+
+    # ── Predictions ────────────────────────────────────────────────────
+
+    @app.route("/api/predictions", methods=["GET"])
+    def list_predictions():
+        """List predictions with evidence counts, optionally filtered by status.
+        ?board=1  — lightweight board overlay mode: returns open+confirmed with parent info only.
+        ?status=X — filter by status (open|confirmed|refuted|dismissed|expired).
+        """
+        status = request.args.get('status', '')
+        board_mode = request.args.get('board', '') == '1'
+
+        if board_mode:
+            # Lightweight query for board overlay — skip evidence join for performance
+            query = """
+                SELECT id,
+                       SUBSTR(claim, 1, 60) || CASE WHEN LENGTH(claim) > 60 THEN '…' ELSE '' END AS claim,
+                       expected_by, status, confidence, indicator_type, parent_kind, parent_id
+                FROM predictions
+                WHERE status IN ('open', 'confirmed')
+            """
+            params = []
+            if status:
+                query += " AND status = ?"
+                params.append(status)
+            query += " ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, expected_by ASC"
+            conn = get_connection(db_path)
+            rows = conn.execute(query, params).fetchall()
+            conn.close()
+            return jsonify({'data': [dict(r) for r in rows]})
+
+        query = """
+            SELECT p.*,
+                   COUNT(pe.signal_id) as evidence_count,
+                   SUM(CASE WHEN pe.stance='supports' THEN 1 ELSE 0 END) as supports_count,
+                   SUM(CASE WHEN pe.stance='refutes' THEN 1 ELSE 0 END) as refutes_count,
+                   SUM(CASE WHEN pe.stance='partial' THEN 1 ELSE 0 END) as partial_count
+            FROM predictions p
+            LEFT JOIN prediction_evidence pe ON pe.prediction_id = p.id
+            WHERE 1=1
+        """
+        params = []
+        if status:
+            query += " AND p.status = ?"
+            params.append(status)
+        query += " GROUP BY p.id ORDER BY CASE p.status WHEN 'open' THEN 0 ELSE 1 END, p.expected_by ASC"
+
+        conn = get_connection(db_path)
+        rows = conn.execute(query, params).fetchall()
+        conn.close()
+        return jsonify({'data': [dict(r) for r in rows]})
+
+    @app.route("/api/predictions/<int:pred_id>/evidence", methods=["GET"])
+    def prediction_evidence_list(pred_id):
+        """Get signals linked as evidence for a prediction."""
+        conn = get_connection(db_path)
+        rows = conn.execute("""
+            SELECT pe.stance, pe.weight, pe.note, pe.created_at,
+                   s.id as signal_id, s.title, s.url as source_url, s.published_at, s.domain  -- signals.url aliased for JS clarity
+            FROM prediction_evidence pe
+            JOIN signals s ON s.id = pe.signal_id
+            WHERE pe.prediction_id = ?
+            ORDER BY pe.weight DESC, pe.created_at DESC
+        """, (pred_id,)).fetchall()
+        conn.close()
+        return jsonify({'data': [dict(r) for r in rows]})
+
+    @app.route("/api/predictions/<int:pred_id>", methods=["PATCH"])
+    def update_prediction(pred_id):
+        """Resolve a prediction: confirmed, refuted, or dismissed."""
+        body = request.get_json() or {}
+        status = body.get('status')
+        resolution_note = body.get('resolution_note', '')
+
+        if status not in ('confirmed', 'refuted', 'dismissed'):
+            return jsonify({'error': 'Invalid status'}), 400
+
+        conn = get_connection(db_path)
+        conn.execute(
+            "UPDATE predictions SET status=?, resolved_at=datetime('now'), resolution_note=? WHERE id=?",
+            (status, resolution_note, pred_id)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({'data': {'id': pred_id, 'status': status}})
+
+    @app.route("/api/predictions/for/<parent_kind>/<int:parent_id>", methods=["GET"])
+    def predictions_for_parent(parent_kind, parent_id):
+        """Get open predictions for a specific signal/thread/narrative (ribbon surface)."""
+        if parent_kind not in ('signal', 'thread', 'narrative'):
+            return jsonify({'error': 'Invalid parent_kind'}), 400
+        conn = get_connection(db_path)
+        rows = conn.execute("""
+            SELECT id, claim, expected_by, status, confidence, indicator_type
+            FROM predictions
+            WHERE parent_kind = ? AND parent_id = ?
+            ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, expected_by ASC
+            LIMIT 5
+        """, (parent_kind, parent_id)).fetchall()
+        conn.close()
+        return jsonify({'data': [dict(r) for r in rows]})
+
+    @app.route("/api/predictions/backfill", methods=["POST"])
+    def backfill_predictions():
+        """Generate predictions for signals that have none. Runs async, returns count."""
+        body = request.get_json() or {}
+        limit = min(int(body.get('limit', 50)), 200)  # cap at 200 per call
+
+        conn = get_connection(db_path)
+        rows = conn.execute("""
+            SELECT s.id, s.title, s.body, s.domain
+            FROM signals s
+            WHERE NOT EXISTS (
+                SELECT 1 FROM predictions p
+                WHERE p.parent_kind = 'signal' AND p.parent_id = s.id
+            )
+            ORDER BY s.collected_at DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+        conn.close()
+
+        if not rows:
+            return jsonify({'data': {'processed': 0, 'message': 'No signals need backfill.'}})
+
+        from agents.predictions import generate_predictions_async
+        count = 0
+        for row in rows:
+            generate_predictions_async(
+                row['id'],
+                row['title'] or '',
+                row['body'] or '',
+                row['domain'] or 'general',
+                db_factory=lambda: get_connection(db_path)
+            )
+            count += 1
+
+        return jsonify({'data': {
+            'processed': count,
+            'message': f'Generating predictions for {count} signals in background. Check back in ~{count * 3} seconds.'
+        }})
+
+    @app.route("/api/signals/<int:signal_id>/generate-predictions", methods=["POST"])
+    def signal_generate_predictions(signal_id):
+        """Manually trigger prediction generation for a specific signal."""
+        conn = get_connection(db_path)
+        row = conn.execute(
+            "SELECT id, title, body, domain FROM signals WHERE id = ?", (signal_id,)
+        ).fetchone()
+        conn.close()
+
+        if not row:
+            return jsonify({'error': 'Signal not found'}), 404
+
+        from agents.predictions import generate_predictions_async
+        generate_predictions_async(
+            row['id'],
+            row['title'] or '',
+            row['body'] or '',
+            row['domain'] or 'general',
+            db_factory=lambda: get_connection(db_path)
+        )
+
+        return jsonify({'data': {'message': 'Generating predictions in background. Check back in ~10 seconds.'}})
 
     @app.route("/api/signals/search", methods=["POST"])
     def signals_targeted_search_api():
@@ -3670,6 +3875,14 @@ Return JSON: {{"title": "New directional title"}}"""
 
         conn.commit()
         conn.close()
+
+        # Phase 3: generate predictions for this new thread in background
+        from agents.predictions import generate_thread_predictions_async
+        generate_thread_predictions_async(
+            thread_id, title, paste or title,
+            lambda: get_connection(db_path)
+        )
+
         return jsonify({"ok": True, "thread_id": thread_id, "signals_created": signals_created})
 
     @app.route("/api/signals/patterns", methods=["POST"])
@@ -4779,6 +4992,7 @@ Return ONLY the JSON."""
         })
 
         # Create a thread for each sub-claim
+        created_threads = []
         for sc in sub_claims:
             cluster_id = insert_signal_cluster(conn, {
                 "domain": "narrative",
@@ -4786,8 +5000,18 @@ Return ONLY the JSON."""
                 "synthesis": "",
             })
             link_thread_to_narrative(conn, cluster_id, narrative_id)
+            created_threads.append((cluster_id, sc["claim"]))
 
         conn.close()
+
+        # Phase 3: generate predictions for each sub-claim thread in background
+        from agents.predictions import generate_thread_predictions_async
+        for cluster_id, claim in created_threads:
+            generate_thread_predictions_async(
+                cluster_id, claim, claim,
+                lambda: get_connection(db_path)
+            )
+
         return jsonify({
             "ok": True,
             "narrative_id": narrative_id,
@@ -4824,6 +5048,87 @@ Return ONLY the JSON."""
         delete_narrative(conn, narrative_id)
         conn.close()
         return jsonify({"ok": True})
+
+    @app.route("/api/narratives/<int:narrative_id>/prediction-scorecard", methods=["GET"])
+    def narratives_prediction_scorecard_api(narrative_id):
+        """Phase 3: Prediction scorecard for a narrative.
+
+        For each thread in the narrative, aggregates predictions with
+        parent_kind='thread' AND parent_kind='signal' for signals in that thread.
+        Returns per-thread breakdown + overall narrative summary.
+        """
+        conn = get_connection(db_path)
+
+        # Verify narrative exists
+        narrative_row = conn.execute(
+            "SELECT id, title FROM narratives WHERE id = ?", (narrative_id,)
+        ).fetchone()
+        if not narrative_row:
+            conn.close()
+            return jsonify({"error": "Not found"}), 404
+
+        # Get threads for this narrative
+        threads = conn.execute(
+            "SELECT id, title FROM signal_clusters WHERE narrative_id = ? ORDER BY id",
+            (narrative_id,),
+        ).fetchall()
+
+        thread_breakdowns = []
+        overall = {"total": 0, "open": 0, "confirmed": 0, "refuted": 0, "expired": 0, "dismissed": 0}
+
+        for thread in threads:
+            tid = thread["id"]
+
+            # Thread-level predictions
+            thread_preds = conn.execute(
+                """SELECT status, COUNT(*) as cnt FROM predictions
+                   WHERE parent_kind = 'thread' AND parent_id = ?
+                   GROUP BY status""",
+                (tid,),
+            ).fetchall()
+
+            # Signal-level predictions for signals in this thread
+            signal_preds = conn.execute(
+                """SELECT p.status, COUNT(*) as cnt FROM predictions p
+                   JOIN signal_cluster_items sci ON p.parent_id = sci.signal_id
+                   WHERE p.parent_kind = 'signal' AND sci.cluster_id = ?
+                   GROUP BY p.status""",
+                (tid,),
+            ).fetchall()
+
+            counts = {"total": 0, "open": 0, "confirmed": 0, "refuted": 0, "expired": 0, "dismissed": 0}
+            for row in list(thread_preds) + list(signal_preds):
+                status = row["status"]
+                cnt = row["cnt"]
+                counts["total"] += cnt
+                if status in counts:
+                    counts[status] += cnt
+
+            resolved = counts["confirmed"] + counts["refuted"]
+            confidence = round(counts["confirmed"] / resolved * 100) if resolved > 0 else None
+
+            thread_breakdowns.append({
+                "thread_id": tid,
+                "thread_title": thread["title"],
+                "counts": counts,
+                "confidence_pct": confidence,
+            })
+
+            for key in ("total", "open", "confirmed", "refuted", "expired", "dismissed"):
+                overall[key] += counts[key]
+
+        overall_resolved = overall["confirmed"] + overall["refuted"]
+        overall_confidence = (
+            round(overall["confirmed"] / overall_resolved * 100)
+            if overall_resolved > 0 else None
+        )
+
+        conn.close()
+        return jsonify({
+            "narrative_id": narrative_id,
+            "overall": {**overall, "confidence_pct": overall_confidence},
+            "threads": thread_breakdowns,
+        })
 
     # ===================== BOARD =====================
 
@@ -5415,6 +5720,14 @@ Return JSON:
 
         conn.commit()
         conn.close()
+
+        # Phase 3: generate predictions for this new sub-claim thread in background
+        from agents.predictions import generate_thread_predictions_async
+        generate_thread_predictions_async(
+            thread_id, claim[:100], claim,
+            lambda: get_connection(db_path)
+        )
+
         return jsonify({"ok": True, "thread_id": thread_id})
 
     @app.route("/api/narratives/<int:narrative_id>/search", methods=["POST"])
@@ -6387,7 +6700,7 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
 
         # ── Standard path: fetch + extract from Instagram ─────────────────
         handle = (data.get("handle") or "dualassets").strip().lstrip("@")
-        since_days = int(data.get("since_days") or 7)
+        since_days = int(data.get("since_days") or 1)
 
         # Resolve user_id
         user_id = resolve_user_id(handle)

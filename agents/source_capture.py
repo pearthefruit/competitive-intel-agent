@@ -36,6 +36,10 @@ def dedup_key(source_type: str, **kwargs) -> str:
         ticker = (kwargs.get("ticker") or "").lower().strip()
         date = (kwargs.get("date") or "").strip()
         return f"analyst|{ticker}|{date}"
+    elif source_type == "yahoo_finance":
+        ticker = (kwargs.get("ticker") or "").lower().strip()
+        date = (kwargs.get("source_date") or "").strip()
+        return f"yahoo_finance|{ticker}|{date}"
     else:
         url = (kwargs.get("url") or "").strip().lower()
         h = hashlib.sha256(url.encode()).hexdigest()[:20]

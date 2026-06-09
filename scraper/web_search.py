@@ -73,7 +73,7 @@ def _extract_article_bs4(html, max_chars=3000):
     return text[:max_chars] if text else ""
 
 
-def fetch_page_text(url, max_chars=3000):
+def fetch_page_text(url, max_chars=8000):
     """Fetch and extract article text from a URL.
 
     Extraction chain: trafilatura → BS4 semantic selectors → BS4 full page.
@@ -217,12 +217,12 @@ def search_web(query, max_results=5, fetch_content=False):
 
 
 def search_reddit(query, max_results=5):
-    """Search Reddit — tries DDG first, falls back to direct RSS feeds.
+    """Search Reddit — tries DDG first (with full content fetch), falls back to RSS.
 
     Returns list of dicts with: title, href, body.
     """
-    # Try DDG site-scoped search first
-    results = search_web(f"site:reddit.com {query}", max_results=max_results)
+    # Try DDG site-scoped search first, fetch full page text for each result
+    results = search_web(f"site:reddit.com {query}", max_results=max_results, fetch_content=True)
     if results:
         return results
 
@@ -277,7 +277,7 @@ def format_news_for_prompt(articles, max_chars=2000):
 def format_search_results(results, max_body_chars=2000):
     """Format web/news search results for LLM context.
 
-    When fetch_content=True was used, each result's body can contain up to 3000
+    When fetch_content=True was used, each result's body can contain up to 8000
     chars of page text.  Truncating to 200 chars (the old default) threw away
     almost all of that, which is why private-company financial reports were
     missing recent data.  Now we pass through up to max_body_chars per result so

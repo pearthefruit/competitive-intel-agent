@@ -149,6 +149,17 @@ async function sovOpenSourceViewer(sourceId, highlightText) {
         _sovSections = doc.sections || [];
         title.textContent = doc.title || 'Source';
 
+        // Wire up the "Open" link
+        const urlLink = document.getElementById('sov-viewer-url');
+        if (urlLink) {
+            if (doc.url) {
+                urlLink.href = doc.url;
+                urlLink.style.display = '';
+            } else {
+                urlLink.style.display = 'none';
+            }
+        }
+
         if (_sovSections.length) {
             tabs.innerHTML = _sovSections.map((s, i) =>
                 `<button class="sov-section-tab ${i === 0 ? 'active' : ''}"
@@ -157,10 +168,25 @@ async function sovOpenSourceViewer(sourceId, highlightText) {
             ).join('');
             _sovRenderSection(0);
         } else {
-            const text = doc.content || '(no content)';
-            body.innerHTML = `<div style="white-space:pre-wrap">${_sovEsc(text)}</div>`;
-            if (_sovHighlightText) _sovApplyHighlight(body, _sovHighlightText);
-            _sovInitDocSelection(body);
+            const content = doc.content || '';
+            if (content.length < 300 && doc.url) {
+                const dateStr = doc.source_date ? doc.source_date.slice(0, 10) : '';
+                body.innerHTML = `
+                    <div style="display:flex;flex-direction:column;gap:12px;padding:4px 0">
+                        <div style="font-size:13px;font-weight:600;color:var(--text-primary);line-height:1.5">${_sovEsc(doc.title || 'Untitled')}</div>
+                        ${dateStr ? `<div style="font-size:11px;color:var(--text-muted)">${dateStr}</div>` : ''}
+                        ${content ? `<div style="font-size:12px;color:var(--text-secondary);line-height:1.6;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:10px 12px">${_sovEsc(content)}</div>` : ''}
+                        <a href="${_sovEsc(doc.url)}" target="_blank"
+                           style="display:inline-flex;align-items:center;gap:6px;color:#a5b4fc;font-size:11px;text-decoration:none;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.25);border-radius:6px;padding:6px 10px;width:fit-content">
+                            ↗ View full post on ${_sovEsc(doc.source_type || 'source')}
+                        </a>
+                        <div style="font-size:10px;color:var(--text-muted)">Full content may require login on the source site.</div>
+                    </div>`;
+            } else {
+                body.innerHTML = `<div style="white-space:pre-wrap;line-height:1.7">${_sovEsc(content || '(no content)')}</div>`;
+                if (_sovHighlightText) _sovApplyHighlight(body, _sovHighlightText);
+                _sovInitDocSelection(body);
+            }
         }
     } catch (e) {
         body.innerHTML = `<div style="color:var(--text-muted)">Error: ${e.message}</div>`;

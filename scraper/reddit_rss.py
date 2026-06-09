@@ -199,14 +199,13 @@ def search_reddit_rss(query, max_results=10, subreddits=None, fetch_comments_top
         for r in all_results[:fetch_comments_top_n]:
             if r.get("href"):
                 time.sleep(0.5)
-                comments = fetch_post_comments(r["href"], limit=5)
+                comments = fetch_post_comments(r["href"], limit=10)
                 if comments:
-                    # Append comment text to the post body
-                    comment_text = " | ".join(
-                        c["body"][:200] for c in comments[:3] if c["body"]
+                    comment_blocks = "\n\n".join(
+                        f"[comment] {c['body'][:800]}" for c in comments[:5] if c["body"]
                     )
-                    if comment_text:
-                        r["body"] = (r["body"] + " — Top comments: " + comment_text)[:500]
+                    if comment_blocks:
+                        r["body"] = r["body"] + "\n\n" + comment_blocks
 
     # Trim to requested count
     all_results = all_results[:max_results]

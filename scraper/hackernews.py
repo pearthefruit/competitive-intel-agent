@@ -55,10 +55,18 @@ def search_stories(query, max_results=10, sort="relevance"):
             points = hit.get("points", 0)
             num_comments = hit.get("num_comments", 0)
 
+            # Build body: self-post text (Ask HN / Show HN) + stats
+            story_text = _clean_html(hit.get("story_text") or "")
+            body_parts = []
+            if story_text:
+                body_parts.append(story_text)
+            body_parts.append(f"{points} points, {num_comments} comments on Hacker News")
+            body = "\n\n".join(body_parts)
+
             results.append({
                 "title": title,
                 "href": url,
-                "body": f"{points} points, {num_comments} comments on Hacker News",
+                "body": body,
                 "date": hit.get("created_at", ""),
                 "points": points,
                 "num_comments": num_comments,
@@ -130,15 +138,14 @@ def search_hackernews(query, max_results=10, sort="relevance", fetch_comments_to
         for story in stories[:fetch_comments_top_n]:
             hn_id = story.get("hn_id")
             if hn_id:
-                comments = fetch_comments(hn_id, max_comments=5)
+                comments = fetch_comments(hn_id, max_comments=10)
                 if comments:
-                    comment_text = " | ".join(
-                        c["body"][:200] for c in comments[:3] if c["body"]
+                    comment_blocks = "\n\n".join(
+                        f"[comment by {c['author']}] {c['body'][:800]}"
+                        for c in comments[:5] if c["body"]
                     )
-                    if comment_text:
-                        story["body"] = (
-                            story["body"] + " — Top comments: " + comment_text
-                        )[:600]
+                    if comment_blocks:
+                        story["body"] = story["body"] + "\n\n" + comment_blocks
 
     print(f"[hackernews] Found {len(stories)} stories")
     return stories

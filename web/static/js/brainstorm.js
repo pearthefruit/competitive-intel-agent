@@ -584,7 +584,7 @@ function _renderReviewGroups() {
         const suggPills = (g.all_suggestions || []).map((s, si) => {
             const pct = Math.round(s.score * 100);
             const isTop = si === 0 && pct > 15;
-            return `<div onclick="_bulkAssignGroup(${gi},${s.thread_id})" data-rq-pill-tid="${s.thread_id}" data-rq-pill-title="${escHtml(s.thread_title)}" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
+            return `<div onclick="_bulkAssignGroup(${gi},${s.thread_id},${JSON.stringify(s.thread_title).replace(/\"/g, '&quot;')})" data-rq-pill-tid="${s.thread_id}" data-rq-pill-title="${escHtml(s.thread_title)}" class="sig-rq-suggestion-pill ${isTop ? 'top' : ''}">
                 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.thread_title)}</span>
                 <span style="font-size:11px;color:var(--text-muted);font-weight:600;flex-shrink:0">${pct}%</span>
             </div>`;
@@ -665,7 +665,7 @@ function _renderReviewGroups() {
     _updateRqNavHighlight();
 }
 
-function _bulkAssignGroup(gi, threadId) {
+function _bulkAssignGroup(gi, threadId, titleHint) {
     const group = _reviewGroupsCache.groups[gi];
     if (!group) return;
     const sigIds = group.signals.map(s => s.id);
@@ -676,7 +676,7 @@ function _bulkAssignGroup(gi, threadId) {
         body: JSON.stringify({ signal_ids: sigIds, thread_id: threadId })
     }).then(r => r.json()).then(data => {
         if (data.ok && groupEl) {
-            const threadTitle = (_threadsCache.find(t => t.id === threadId) || {}).title || `Thread #${threadId}`;
+            const threadTitle = titleHint || (_threadsCache.find(t => t.id === threadId) || {}).title || `Thread #${threadId}`;
             groupEl.innerHTML = `<div style="padding:10px;display:flex;align-items:center;justify-content:space-between">
                 <span style="font-size:12px;color:var(--green)">&#10003; ${sigIds.length} assigned to ${escHtml(threadTitle)}</span>
                 <button onclick="_undoBulkAssign(${gi},${threadId})" style="padding:3px 8px;background:none;border:1px solid var(--border);border-radius:4px;font-size:10px;color:var(--text-muted);cursor:pointer">Undo</button>
@@ -1255,6 +1255,8 @@ function closeSignalDetail() {
             </div>`;
     }
     if (closeBtn) closeBtn.style.display = 'none';
+    // Clear board predictions panel when detail pane closes (Phase 4 — Surface 3)
+    if (typeof _clearBoardPredPanel === 'function') _clearBoardPredPanel();
 }
 
 // Structured execution data (persists for "View Last Execution" button)

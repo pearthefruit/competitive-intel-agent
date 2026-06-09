@@ -131,6 +131,17 @@ async function openSourceViewer(sourceId, highlightText) {
         const doc = await resp.json();
         _currentSections = doc.sections || [];
 
+        // Wire up the "Open" external link
+        const urlLink = document.getElementById('source-viewer-url');
+        if (urlLink) {
+            if (doc.url) {
+                urlLink.href = doc.url;
+                urlLink.style.display = '';
+            } else {
+                urlLink.style.display = 'none';
+            }
+        }
+
         if (_currentSections.length > 0) {
             // 10-K with sections — render section tabs
             sectionTabs.innerHTML = _currentSections.map((s, i) =>
@@ -140,10 +151,26 @@ async function openSourceViewer(sourceId, highlightText) {
             ).join('');
             _renderSectionContent(0);
         } else {
-            // Short source — render flat content
-            const content = doc.content || '(no content)';
-            body.innerHTML = `<pre style="white-space:pre-wrap;font-family:inherit">${_escHtml(content)}</pre>`;
-            if (highlightText) _highlightInBody(body, highlightText);
+            const content = doc.content || '';
+            if (content.length < 300 && doc.url) {
+                // Short content (scraped metadata only) — show structured card
+                const meta = doc.metadata || {};
+                const dateStr = doc.source_date ? doc.source_date.slice(0, 10) : '';
+                body.innerHTML = `
+                    <div style="display:flex;flex-direction:column;gap:12px;padding:4px 0">
+                        <div style="font-size:14px;font-weight:600;color:var(--text-primary);line-height:1.5">${_escHtml(doc.title || 'Untitled')}</div>
+                        ${dateStr ? `<div style="font-size:11px;color:var(--text-muted)">${dateStr}</div>` : ''}
+                        ${content ? `<div style="font-size:13px;color:var(--text-secondary);line-height:1.6;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:10px 12px">${_escHtml(content)}</div>` : ''}
+                        <a href="${_escHtml(doc.url)}" target="_blank"
+                           style="display:inline-flex;align-items:center;gap:6px;color:#a5b4fc;font-size:12px;text-decoration:none;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.25);border-radius:6px;padding:7px 12px;width:fit-content">
+                            ↗ View full post on ${_escHtml(doc.source_type || 'source')}
+                        </a>
+                        <div style="font-size:11px;color:var(--text-muted);line-height:1.5">Full content may require login on the source site.</div>
+                    </div>`;
+            } else {
+                body.innerHTML = `<div style="white-space:pre-wrap;line-height:1.7">${_escHtml(content || '(no content)')}</div>`;
+                if (highlightText) _highlightInBody(body, highlightText);
+            }
         }
 
         // Open the right pane if not open

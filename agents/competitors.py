@@ -192,7 +192,12 @@ def competitor_analysis(company, progress_cb=None):
 def _flush_sources(company, dossier_result, pending_sources):
     if not dossier_result or not pending_sources:
         return
-    # Deduplicate by URL
+    try:
+        from agents.source_capture import capture_and_embed
+        _use_rag = True
+    except Exception:
+        _use_rag = False
+    # Pre-dedup by URL before RAG dedup to avoid redundant embed calls
     seen_urls = set()
     deduped = []
     for s in pending_sources:
@@ -208,11 +213,28 @@ def _flush_sources(company, dossier_result, pending_sources):
         analysis_id = dossier_result["analysis_id"]
         source_ids = []
         for s in deduped:
-            sid = save_source_document(
-                conn, dossier_id, s["source_type"], s.get("url"),
-                s.get("title"), s.get("content"), s.get("raw_data"),
-            )
-            source_ids.append(sid)
+            try:
+                if _use_rag:
+                    sid, _ = capture_and_embed(
+                        conn,
+                        dossier_id=dossier_id,
+                        source_type=s["source_type"],
+                        title=s.get("title"),
+                        url=s.get("url"),
+                        content=s.get("content"),
+                        metadata=None,
+                        source_date=s.get("source_date"),
+                        sections=None,
+                        dedup_kwargs=s.get("dedup_kwargs"),
+                    )
+                else:
+                    sid = save_source_document(
+                        conn, dossier_id, s["source_type"], s.get("url"),
+                        s.get("title"), s.get("content"), s.get("raw_data"),
+                    )
+                source_ids.append(sid)
+            except Exception as e:
+                print(f"[sources] Failed to save source '{s.get('title', '')}': {e}")
         if analysis_id and source_ids:
             link_sources_to_analysis(conn, analysis_id, source_ids)
         conn.close()

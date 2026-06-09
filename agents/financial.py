@@ -6,7 +6,8 @@ from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
 from db import get_connection, save_source_document, link_sources_to_analysis, get_dossier_by_company
-from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, get_recent_filings, format_financials_for_prompt, get_8k_filings, format_8k_for_prompt
+import concurrent.futures
+from scraper.sec_edgar import lookup_cik, get_company_facts, extract_financials, get_recent_filings, format_financials_for_prompt, get_8k_filings, format_8k_for_prompt, fetch_8k_content
 from scraper.stock_data import get_stock_data, format_stock_data_for_prompt, get_extended_financials, format_extended_financials_for_prompt
 from scraper.web_search import search_web, search_news, format_search_results, dedup_results
 from scraper.google_news import search_google_news
@@ -46,13 +47,9 @@ def _save_and_link_sources(company, dossier_result, pending_sources, _10k_data=N
         analysis_id = dossier_result["analysis_id"]
         source_ids = []
 
-        # Numerical API data — already structured in dossiers, no value embedding.
-        # Always save via legacy path to avoid dedup_key collisions (these have url=None).
-        _no_rag_types = {"yahoo_finance", "sec_xbrl"}
-
         for s in (pending_sources or []):
             try:
-                if _use_rag and s["source_type"] not in _no_rag_types:
+                if _use_rag:
                     sid, _ = capture_and_embed(
                         conn,
                         dossier_id=dossier_id,
@@ -245,6 +242,7 @@ def _analyze_public(company, cik_info, _cb=None):
                 "title": f"Yahoo Finance: {ticker}",
                 "content": market_text,
                 "raw_data": json.dumps({k: v for k, v in stock_data.items() if k != '_raw'}),
+                "dedup_kwargs": {"ticker": ticker, "source_date": datetime.now().strftime("%Y-%m-%d")},
             })
         except Exception:
             pass
@@ -287,13 +285,32 @@ def _analyze_public(company, cik_info, _cb=None):
         eight_k_detail = '\n'.join(f"• {e.get('form', '8-K')} ({e.get('date', 'N/A')}): {', '.join(e.get('items', []))}" for e in eight_k[:10])
         _cb("source_done", {"source": "8k_filings", "status": "done", "summary": f"{len(eight_k)} events", "detail": eight_k_detail})
         try:
-            # Save individual 8-K filings (not a concatenated blob) for per-filing dedup
-            for filing_event in eight_k:
+            # Fetch full 8-K document text in parallel (one HTTP call per filing)
+            filings_with_urls = [(i, f) for i, f in enumerate(eight_k) if f.get("url")]
+            fetched_content = {}
+            if filings_with_urls:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+                    future_to_idx = {
+                        ex.submit(fetch_8k_content, f["url"], 8000): i
+                        for i, f in filings_with_urls
+                    }
+                    for future in concurrent.futures.as_completed(future_to_idx):
+                        idx = future_to_idx[future]
+                        try:
+                            fetched_content[idx] = future.result() or ""
+                        except Exception:
+                            fetched_content[idx] = ""
+
+            for i, filing_event in enumerate(eight_k):
+                full_text = fetched_content.get(i, "")
+                description = filing_event.get("description", "")
+                # Prefer fetched full text; fall back to description if unavailable
+                content = full_text if full_text else description
                 _pending_sources.append({
                     "source_type": "sec_8k",
                     "url": filing_event.get("url") or f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=8-K",
-                    "title": f"8-K {filing_event.get('date', '')} — {filing_event.get('description', '')}",
-                    "content": filing_event.get("description", ""),
+                    "title": f"8-K {filing_event.get('date', '')} — {description}",
+                    "content": content,
                     "source_date": filing_event.get("date"),
                     "dedup_kwargs": {
                         "company": company,
