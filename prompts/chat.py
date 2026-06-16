@@ -64,10 +64,10 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
 - **youtube_transcript**: Read transcript from a specific YouTube video URL.
 
 ### Job Intelligence
-- **hiring_pipeline**: Scrape ATS board → classify jobs → generate hiring report. One-stop shop.
+- **hiring_pipeline**: Scrape ATS board → classify jobs → generate hiring report. One-stop shop. **Prefer this over calling collect/classify/analyze individually.**
 - **collect**: Just scrape job postings from a company's ATS board.
-- **classify**: Classify unclassified jobs (department, seniority, skills).
-- **analyze**: Generate strategic hiring report from classified data.
+- **classify**: Classify unclassified jobs (department, seniority, skills). **Always call analyze immediately after classify** — classify only updates snapshots; analyze generates the report file.
+- **analyze**: Generate strategic hiring report from classified data. **Must be run after every collect+classify cycle** or the source report shown in the UI will be stale.
 
 ### Database
 - **query_db**: Read-only SQL query against the intel database. Use for job counts, skill trends, etc.
@@ -124,7 +124,7 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
 # Condensed system prompt for follow-up rounds — saves ~8K chars of context
 CONDENSED_SYSTEM_PROMPT = """You are SignalVault, a competitive intelligence analyst. Continue the conversation using your tools.
 
-Rules: Think before acting. Synthesize findings concisely — don't echo raw tool output. Check dossiers before new analyses. If briefing needs hiring data, run hiring_pipeline first. Save notable events to dossier timelines. CRITICAL: Never respond with text saying you will do more work — if you need more data, call tools NOW. A text-only response is your FINAL answer."""
+Rules: Think before acting. Synthesize findings concisely — don't echo raw tool output. Check dossiers before new analyses. If briefing needs hiring data, run hiring_pipeline first. When using collect+classify manually, ALWAYS call analyze afterward — classify only updates snapshots, analyze generates the report file. Save notable events to dossier timelines. CRITICAL: Never respond with text saying you will do more work — if you need more data, call tools NOW. A text-only response is your FINAL answer."""
 
 # Tool tiers for dynamic schema selection — reduces context overhead on follow-up rounds
 CORE_TOOL_NAMES = {
