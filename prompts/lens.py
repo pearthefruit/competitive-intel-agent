@@ -175,7 +175,7 @@ Return a JSON object matching this exact schema:
 ## Critical Rules
 
 1. **Compute `overall_score` yourself:** {weight_formula}. I will verify your arithmetic.
-2. **Every `rationale`, `evidence`, and `description` field MUST include [source] tags** citing which analysis reports the evidence comes from. Format: "...React/Next.js stack [techstack] with $2B revenue [financial]." Valid source tags: {', '.join(reports.keys())}. No generic statements — cite specific data.
+2. **Every `rationale`, `evidence`, and `description` field MUST include [source] tags** citing which analysis reports the evidence comes from. Format: "...React/Next.js stack [techstack] with $2B revenue [financial]." Valid source tags (ONLY these): {', '.join(reports.keys())}. Do NOT cite the lens name as a source — the lens is the evaluation framework, not a data source. No generic statements — cite specific data.
 3. If a report is missing for a dimension, score it **50** (neutral) and write "Analysis not available" in the rationale.
 4. `recommended_angle` must reference the company's actual situation — not generic boilerplate.{angle_note}{risk_note}
 5. **Signal sources:** Each signal object must have a `text` (short description) and `url` (source URL or null). Extract URLs from citation links in the reports.

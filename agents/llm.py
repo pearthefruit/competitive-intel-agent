@@ -126,9 +126,15 @@ PROVIDER_DEFS = OrderedDict([
         "env_key": "GEMINI_API_KEYS",
         "url": None,
         "models": [
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3-pro",
+            "gemini-2.5-pro",
+            "gemini-3.5-flash",
             "gemini-2.5-flash",
             "gemini-2.5-flash-lite",
             "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
             "gemini-3.1-flash-lite-preview",
         ],
     }),
@@ -183,8 +189,10 @@ FAST_CHAIN = {
             "mistral-small-latest",
         ],
         "gemini": [
-            "gemini-2.5-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3.1-flash-lite",
             "gemini-3.1-flash-lite-preview",
+            "gemini-2.5-flash-lite",
         ],
         "openrouter": [
             "nvidia/nemotron-nano-9b-v2:free",
@@ -384,16 +392,18 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
                     response = model.generate_content(prompt, generation_config=gen_config)
                 http.close()
                 # Extract token counts from Gemini response
-                in_tok = out_tok = None
+                in_tok = out_tok = think_tok = cache_tok = None
                 try:
                     um = response.usage_metadata
                     in_tok = um.prompt_token_count
                     out_tok = um.candidates_token_count
+                    think_tok = getattr(um, 'thoughts_token_count', None)
+                    cache_tok = getattr(um, 'cached_content_token_count', None)
                 except Exception:
                     pass
                 _dur = int((_time.time() - _t0) * 1000)
                 print(f"[llm] ✓ {model_id} (key …{key_hint}) {_dur}ms" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
-                log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok, duration_ms=_dur)
+                log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok, thinking_tokens=think_tok, cached_tokens=cache_tok, duration_ms=_dur)
                 result_text = response.text if not json_mode else response.text
                 return (normalize_citations(result_text) if not json_mode else result_text), model_id
             else:
@@ -448,16 +458,18 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
                         genai.configure(api_key=key)
                         model = genai.GenerativeModel(p["model"])
                         response = model.generate_content(prompt)
-                    in_tok = out_tok = None
+                    in_tok = out_tok = think_tok = cache_tok = None
                     try:
                         um = response.usage_metadata
                         in_tok = um.prompt_token_count
                         out_tok = um.candidates_token_count
+                        think_tok = getattr(um, 'thoughts_token_count', None)
+                        cache_tok = getattr(um, 'cached_content_token_count', None)
                     except Exception:
                         pass
                     _dur = int((_time.time() - _t0) * 1000)
                     print(f"[llm] ✓ {model_id} (key …{key_hint}) [schema fallback] {_dur}ms" + (f" [{in_tok}→{out_tok} tok]" if in_tok else ""))
-                    log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok, duration_ms=_dur)
+                    log_llm_call(provider, p["model"], key_hint, "success", caller=caller, input_tokens=in_tok, output_tokens=out_tok, thinking_tokens=think_tok, cached_tokens=cache_tok, duration_ms=_dur)
                     return response.text, model_id
                 except Exception as retry_e:
                     retry_err = str(retry_e)

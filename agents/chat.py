@@ -295,6 +295,8 @@ class ChatLLM:
                 tc_count = len(result.get("tool_calls") or [])
                 in_tok = result.pop("_input_tokens", None)
                 out_tok = result.pop("_output_tokens", None)
+                think_tok = result.pop("_thinking_tokens", None)
+                cache_tok = result.pop("_cached_tokens", None)
                 tok_str = f" [{in_tok}→{out_tok} tok]" if in_tok else ""
                 print(f"[chat] OK {p['name']}/{p['model']}"
                       + (f" → {tc_count} tool call(s)" if tc_count else " → text response")
@@ -302,7 +304,8 @@ class ChatLLM:
                 from db import log_llm_call
                 key_hint = p["key"][-4:] if len(p["key"]) >= 4 else "****"
                 log_llm_call(p["name"], p["model"], key_hint, "success", caller="chat",
-                             input_tokens=in_tok, output_tokens=out_tok)
+                             input_tokens=in_tok, output_tokens=out_tok,
+                             thinking_tokens=think_tok, cached_tokens=cache_tok)
                 return result
             except Exception as e:
                 error_str = str(e)
@@ -418,6 +421,8 @@ class ChatLLM:
             um = response.usage_metadata
             result["_input_tokens"] = um.prompt_token_count
             result["_output_tokens"] = um.candidates_token_count
+            result["_thinking_tokens"] = getattr(um, 'thoughts_token_count', None)
+            result["_cached_tokens"] = getattr(um, 'cached_content_token_count', None)
         except Exception:
             pass
         return result

@@ -488,6 +488,9 @@ function openNarrativeDetail(narrativeId) {
                         </div>
                     </div>` : ''}
 
+                    <!-- Prediction Scorecard (Phase 3) — loaded async below -->
+                    <div id="narrative-prediction-scorecard-${n.id}" style="margin-bottom:16px"></div>
+
                     <!-- Sub-claims / Threads -->
                     <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:6px">SUB-CLAIMS (${subClaims.length})</div>
                     <div id="narrative-subclaims-${n.id}">
@@ -519,6 +522,8 @@ function openNarrativeDetail(narrativeId) {
                     </div>
                     <div id="narrative-search-log" style="display:none;margin-top:12px;max-height:200px;overflow-y:auto;font-size:10px;background:var(--bg-primary);border:1px solid var(--border);border-radius:8px;padding:8px"></div>
                 </div>`;
+            // Phase 3: load prediction scorecard asynchronously
+            loadNarrativePredictionScorecard(n.id);
         });
 }
 
@@ -824,6 +829,90 @@ function _finishNarrativeSearch(narrativeId, btn) {
     loadNarratives();
     // Only refresh detail if we're still on that narrative
     if (_activeNarrativeId === narrativeId) setTimeout(() => openNarrativeDetail(narrativeId), 500);
+}
+
+// ===================== PREDICTION SCORECARD (Phase 3) =====================
+
+function loadNarrativePredictionScorecard(narrativeId) {
+    const container = document.getElementById(`narrative-prediction-scorecard-${narrativeId}`);
+    if (!container) return;
+    container.innerHTML = '<div style="font-size:10px;color:var(--text-muted)">Loading predictions...</div>';
+
+    fetch(`/api/narratives/${narrativeId}/prediction-scorecard`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) { container.innerHTML = ''; return; }
+            container.innerHTML = _renderNarrativePredictionScorecard(narrativeId, data);
+        })
+        .catch(() => { container.innerHTML = ''; });
+}
+
+function _renderNarrativePredictionScorecard(narrativeId, data) {
+    const overall = data.overall || {};
+    const threads = data.threads || [];
+    const total = overall.total || 0;
+    const open = overall.open || 0;
+    const confirmed = overall.confirmed || 0;
+    const refuted = overall.refuted || 0;
+    const confPct = overall.confidence_pct;
+
+    if (total === 0) {
+        return `<div style="padding:10px 12px;background:var(--bg-tertiary);border-radius:8px;border:1px solid var(--border);margin-bottom:4px">
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);margin-bottom:4px">PREDICTION SCORECARD</div>
+            <div style="font-size:10px;color:var(--text-muted)">No predictions generated yet. Add signals to linked threads to generate predictions.</div>
+        </div>`;
+    }
+
+    // Overall confidence bar
+    const resolved = confirmed + refuted;
+    const confBarHtml = resolved > 0 ? `
+        <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--bg-primary);margin:6px 0 4px">
+            <div style="width:${confirmed/resolved*100}%;background:#22c55e;transition:width 0.3s"></div>
+            <div style="width:${refuted/resolved*100}%;background:#ef4444;transition:width 0.3s"></div>
+        </div>
+        <div style="display:flex;gap:10px;font-size:9px;margin-bottom:6px">
+            <span style="color:#22c55e">✓ ${confirmed} confirmed</span>
+            <span style="color:#ef4444">✗ ${refuted} refuted</span>
+            <span style="color:#3b82f6">◌ ${open} open</span>
+            ${confPct != null ? `<span style="color:var(--text-muted);margin-left:auto;font-weight:600">${confPct}% confidence</span>` : ''}
+        </div>` : `<div style="font-size:9px;color:#3b82f6;margin:4px 0 6px">◌ ${open} open · awaiting resolution</div>`;
+
+    // Per-thread breakdown (collapsible)
+    const threadsHtml = threads.map(t => {
+        const tc = t.counts || {};
+        const tt = tc.total || 0;
+        if (tt === 0) return '';
+        const tc_resolved = (tc.confirmed || 0) + (tc.refuted || 0);
+        const tc_confPct = t.confidence_pct;
+        const statusDots = [
+            tc.confirmed > 0 ? `<span style="color:#22c55e">✓${tc.confirmed}</span>` : '',
+            tc.refuted > 0 ? `<span style="color:#ef4444">✗${tc.refuted}</span>` : '',
+            tc.open > 0 ? `<span style="color:#3b82f6">◌${tc.open}</span>` : '',
+        ].filter(Boolean).join(' ');
+        return `<div style="padding:5px 8px;margin-bottom:3px;background:var(--bg-primary);border-radius:5px;border-left:2px solid ${tc_confPct != null ? (tc_confPct >= 60 ? '#22c55e' : tc_confPct >= 30 ? '#eab308' : '#ef4444') : '#3b82f6'}">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+                <span style="font-size:10px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" title="${escHtml(t.thread_title)}">${escHtml(t.thread_title)}</span>
+                <span style="font-size:9px;white-space:nowrap;flex-shrink:0;display:flex;gap:5px">${statusDots || `<span style="color:var(--text-muted)">${tt} total</span>`}</span>
+            </div>
+            ${tc_confPct != null ? `<div style="font-size:9px;color:var(--text-muted);margin-top:2px">${tc_confPct}% confidence (${tc_resolved} resolved)</div>` : ''}
+        </div>`;
+    }).filter(Boolean).join('');
+
+    const hasThreadDetail = threadsHtml.length > 0;
+    const scorecardId = `scorecard-threads-${narrativeId}`;
+
+    return `<div style="padding:10px 12px;background:var(--bg-tertiary);border-radius:8px;border:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted)">PREDICTION SCORECARD</div>
+            <div style="display:flex;gap:8px;align-items:center">
+                <span style="font-size:9px;color:var(--text-muted)">${total} predictions</span>
+                ${hasThreadDetail ? `<span onclick="const b=document.getElementById('${scorecardId}');b.style.display=b.style.display==='none'?'':'none'" style="font-size:9px;color:var(--accent);cursor:pointer;user-select:none">▾ by thread</span>` : ''}
+                <span onclick="switchSignalTab('predictions')" style="font-size:9px;color:var(--accent);cursor:pointer;text-decoration:underline;user-select:none">View all →</span>
+            </div>
+        </div>
+        ${confBarHtml}
+        ${hasThreadDetail ? `<div id="${scorecardId}" style="display:none;margin-top:6px">${threadsHtml}</div>` : ''}
+    </div>`;
 }
 
 function deleteNarrative(narrativeId) {

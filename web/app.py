@@ -6702,10 +6702,8 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
         handle = (data.get("handle") or "dualassets").strip().lstrip("@")
         since_days = int(data.get("since_days") or 1)
 
-        # Resolve user_id
+        # Resolve user_id (best-effort; falls back to handle string)
         user_id = resolve_user_id(handle)
-        if not user_id:
-            return jsonify({"error": f"Could not resolve user_id for @{handle}"}), 400
 
         # Ensure account record exists
         conn = get_connection(db_path)
@@ -6719,9 +6717,9 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
         # Determine since_timestamp
         since_ts = int((datetime.now(timezone.utc) - timedelta(days=since_days)).timestamp())
 
-        # Fetch posts
+        # Fetch posts via yt-dlp (handle, not user_id)
         try:
-            posts = fetch_new_posts(user_id, since_timestamp=since_ts, max_posts=20)
+            posts = fetch_new_posts(handle, since_timestamp=since_ts, max_posts=20)
         except RuntimeError as e:
             return jsonify({"error": str(e)}), 429 if "rate limit" in str(e).lower() else 502
 

@@ -158,6 +158,8 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     caller TEXT,
     input_tokens INTEGER,
     output_tokens INTEGER,
+    thinking_tokens INTEGER,
+    cached_tokens INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -583,6 +585,8 @@ def _migrate_db(conn):
         ("signals", "engagement_json", "TEXT"),
         ("brainstorms", "thread_titles_json", "TEXT"),
         ("llm_usage", "duration_ms", "INTEGER"),
+        ("llm_usage", "thinking_tokens", "INTEGER"),
+        ("llm_usage", "cached_tokens", "INTEGER"),
         ("documents", "source_url", "TEXT"),
         ("documents", "sender", "TEXT"),
         ("source_documents", "dedup_key", "TEXT"),
@@ -733,13 +737,14 @@ def init_db(db_path="intel.db"):
 
 
 def log_llm_call(provider, model, key_hint, status, error=None, caller=None,
-                  input_tokens=None, output_tokens=None, duration_ms=None, db_path="intel.db"):
+                  input_tokens=None, output_tokens=None, thinking_tokens=None,
+                  cached_tokens=None, duration_ms=None, db_path="intel.db"):
     """Log an LLM API call for usage tracking."""
     try:
         conn = get_connection(db_path)
         conn.execute(
-            "INSERT INTO llm_usage (provider, model, key_hint, status, error, caller, input_tokens, output_tokens, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (provider, model, key_hint, status, error, caller, input_tokens, output_tokens, duration_ms),
+            "INSERT INTO llm_usage (provider, model, key_hint, status, error, caller, input_tokens, output_tokens, thinking_tokens, cached_tokens, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (provider, model, key_hint, status, error, caller, input_tokens, output_tokens, thinking_tokens, cached_tokens, duration_ms),
         )
         conn.commit()
         conn.close()

@@ -1056,10 +1056,35 @@ function renderScoreRing(score, size) {
     </div>`;
 }
 
-function renderSubScore(label, score, algoData) {
+function _rubricHtml(rubric, score) {
+    if (!rubric) return '';
+    const rows = rubric.split('\n').map(line => {
+        line = line.trim();
+        const m = line.match(/^(\d+)[-–](\d+):\s*(.*)/);
+        if (!m) return '';
+        const lo = parseInt(m[1]), hi = parseInt(m[2]);
+        const isCurrent = score >= lo && score <= hi;
+        const bandCc = _scoreColorClass(Math.round((lo + hi) / 2));
+        const bandColor = bandCc === 'vanguard' ? 'var(--green)' : bandCc === 'contender' ? 'var(--accent)' : bandCc === 'exposed' ? 'var(--yellow)' : 'var(--red)';
+        return `<tr style="${isCurrent ? 'background:rgba(255,255,255,0.07);' : ''}">
+            <td style="color:${bandColor};white-space:nowrap;padding:2px 8px 2px 0;font-weight:600;vertical-align:top">${m[1]}-${m[2]}</td>
+            <td style="color:${isCurrent ? 'var(--text-primary)' : 'var(--text-muted)'};line-height:1.4">${escHtml(m[3])}</td>
+        </tr>`;
+    }).filter(Boolean).join('');
+    if (!rows) return '';
+    return `<div style="margin-top:8px;border-top:1px solid rgba(255,255,255,0.1);padding-top:6px">
+        <div style="font-size:11px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Scoring Rubric</div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px">${rows}</table>
+    </div>`;
+}
+
+function renderSubScore(label, score, algoData, rubric) {
     const cc = _scoreColorClass(score);
     let infoIcon = '';
     let tipHtml = '';
+    const tipId = 'sub-tip-' + label.replace(/[^a-zA-Z]/g, '');
+    const rubric_ = _rubricHtml(rubric, score);
+
     if (algoData && algoData.algorithmic_score !== undefined) {
         // DMS hybrid scoring: algorithmic base → LLM adjustment
         const algoScore = algoData.algorithmic_score;
@@ -1070,18 +1095,16 @@ function renderSubScore(label, score, algoData) {
         const deltaStr = delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : '±0';
         let tipRows = signals.map(s => `<div class="methodology-tip-row">${escHtml(s)}</div>`).join('');
         if (!tipRows) tipRows = '<div class="methodology-tip-row" style="font-style:italic">No structured signals</div>';
-        const tipId = 'algo-tip-' + label.replace(/[^a-zA-Z]/g, '');
         infoIcon = ` <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('${tipId}')" style="font-size:11px">&#9432;</span>`;
         tipHtml = `<div class="methodology-tip sub-score-tip" id="${tipId}">
                 <div class="methodology-tip-title">Algorithmic Base: ${algoScore}/100 → Final: ${score}/100 (${deltaStr})</div>
                 <div class="methodology-tip-row"><strong>Confidence:</strong> ${confPct}</div>
                 <div style="margin-top:4px;font-size:12px;font-weight:600;color:var(--text-secondary)">Signals:</div>
-                ${tipRows}
+                ${tipRows}${rubric_}
             </div>`;
-    } else if (algoData && algoData.signals && algoData.signals.length > 0) {
-        // Lens scoring: pure LLM, show evidence signals as tooltip
-        const signals = algoData.signals;
-        const tipId = 'lens-tip-' + label.replace(/[^a-zA-Z]/g, '');
+    } else if ((algoData && algoData.signals && algoData.signals.length > 0) || rubric_) {
+        // Lens scoring: show evidence signals + rubric
+        const signals = (algoData && algoData.signals) || [];
         let tipRows = signals.map(s => {
             const txt = escHtml(s.text || '');
             return s.url
@@ -1090,8 +1113,8 @@ function renderSubScore(label, score, algoData) {
         }).join('');
         infoIcon = ` <span class="score-info-icon" onclick="event.stopPropagation();toggleMethodologyTip('${tipId}')" style="font-size:11px">&#9432;</span>`;
         tipHtml = `<div class="methodology-tip sub-score-tip" id="${tipId}">
-                <div class="methodology-tip-title">Evidence Signals · Score: ${score}/100</div>
-                ${tipRows}
+                ${tipRows ? `<div class="methodology-tip-title">Evidence Signals · Score: ${score}/100</div>${tipRows}` : `<div class="methodology-tip-title">Score: ${score}/100</div>`}
+                ${rubric_}
             </div>`;
     }
     return `<div class="sub-score-row-wrap">
@@ -1174,7 +1197,7 @@ function _renderScoringSection(scoring, isFullBriefing) {
     // Sub-scores
     dims.forEach(d => {
         const sub = subs[d.key] || {};
-        html += renderSubScore(d.label, sub.score || 0, sub);
+        html += renderSubScore(d.label, sub.score || 0, sub, d.rubric);
     });
 
     // Sub-score rationales with source badges
@@ -3416,7 +3439,7 @@ function _buildBriefingDashboard(content) {
     let barsHtml = '';
     dims.forEach(d => {
         const sub = subs[d.key] || {};
-        barsHtml += renderSubScore(d.label, sub.score || 0, sub);
+        barsHtml += renderSubScore(d.label, sub.score || 0, sub, d.rubric);
     });
 
     let confLine = '';
