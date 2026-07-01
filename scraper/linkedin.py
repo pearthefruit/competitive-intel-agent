@@ -49,7 +49,7 @@ class LinkedInScraper:
         """
         print(f"[linkedin] Searching LinkedIn for {company_name} jobs...")
 
-        # Fetch SERP cards (up to 100 jobs across 4 pages)
+        # Fetch SERP cards (up to 500 jobs across 20 pages)
         serp_jobs = self._fetch_serp_cards(url)
         print(f"[linkedin] Found {len(serp_jobs)} job card(s)")
 
@@ -129,7 +129,7 @@ class LinkedInScraper:
         else:
             keywords = search_url  # Treat as raw search term
 
-        for start in range(0, 100, 25):
+        for start in range(0, 500, 25):
             api_params = {"keywords": keywords, "start": str(start)}
             api_url = f"{GUEST_API}?{urlencode(api_params)}"
 

@@ -8,6 +8,7 @@ let currentReportFilename = null;
 let allReports = [];
 let allCompanies = [];
 let openCompanies = new Set();
+const _expandedReportTypes = new Set(); // "company|type" keys for accordion state
 let companySortMode = 'recent'; // 'recent' or 'alpha'
 
 // Context pill state
@@ -502,6 +503,25 @@ function toggleCompany(name) {
     renderCompanyList();
 }
 
+function toggleReportType(company, type, event) {
+    if (event) event.stopPropagation();
+    const key = company + '|' + type;
+    if (_expandedReportTypes.has(key)) _expandedReportTypes.delete(key);
+    else _expandedReportTypes.add(key);
+    renderCompanyList();
+}
+
+function _reportSubLabel(reportFile) {
+    if (!reportFile) return '';
+    const stem = reportFile.replace(/\.md$/, '').replace(/\\/g, '/').split('/').pop();
+    const dateMatch = stem.match(/_(\d{4}-\d{2}-\d{2})$/);
+    if (!dateMatch) return stem;
+    const withoutDate = stem.slice(0, stem.lastIndexOf('_' + dateMatch[1]));
+    const underscoreIdx = withoutDate.indexOf('_');
+    if (underscoreIdx === -1) return withoutDate;
+    return withoutDate.slice(underscoreIdx + 1).replace(/_/g, ' ');
+}
+
 function renderCompanyList() {
     const filter = (document.getElementById('company-filter').value || '').toLowerCase();
     const list = document.getElementById('company-list');
@@ -545,19 +565,54 @@ function renderCompanyList() {
                 </div>`;
             }
 
-                // Analysis items
+                // Analysis items — grouped by type; types with multiple runs get an accordion
+                const _analysisGroups = {};
                 (company.analyses || []).forEach(a => {
-                    const isActive = currentReportFilename === a.report_file ? ' active' : '';
-                    const noReport = !a.has_report ? ' no-report' : '';
-                    const dateStr = _formatSidebarDate(a.date);
-                itemsHtml += `<div class="report-item can-drag${isActive}" onclick="openReport('${escHtml(a.report_file)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(a.report_file)}','${escHtml(company.name)}')">
-                    <span class="report-type-dot dot-${a.type}"></span>
-                    <div class="report-rename-wrap">
-                        <span class="report-name-text">${escHtml(a.type)}</span>
-                        <span class="rename-btn" onclick="renameReport('${escHtml(a.report_file)}', event)" title="Rename report">Edit</span>
-                    </div>
-                    <span class="report-date">${dateStr}</span></div>`;
-            });
+                    if (!_analysisGroups[a.type]) _analysisGroups[a.type] = [];
+                    _analysisGroups[a.type].push(a);
+                });
+                Object.entries(_analysisGroups).forEach(([type, entries]) => {
+                    if (entries.length === 1) {
+                        const a = entries[0];
+                        const isActive = currentReportFilename === a.report_file ? ' active' : '';
+                        const noReport = !a.has_report ? ' no-report' : '';
+                        const dateStr = _formatSidebarDate(a.date);
+                        itemsHtml += `<div class="report-item can-drag${isActive}${noReport}" onclick="openReport('${escHtml(a.report_file)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(a.report_file)}','${escHtml(company.name)}')">
+                            <span class="report-type-dot dot-${type}"></span>
+                            <div class="report-rename-wrap">
+                                <span class="report-name-text">${escHtml(type)}</span>
+                                <span class="rename-btn" onclick="renameReport('${escHtml(a.report_file)}', event)" title="Rename report">Edit</span>
+                            </div>
+                            <span class="report-date">${dateStr}</span></div>`;
+                    } else {
+                        const groupKey = company.name + '|' + type;
+                        const isExpanded = _expandedReportTypes.has(groupKey);
+                        const mostRecentDate = _formatSidebarDate(entries[0].date);
+                        let subItemsHtml = '';
+                        entries.forEach(a => {
+                            const isActive = currentReportFilename === a.report_file ? ' active' : '';
+                            const noReport = !a.has_report ? ' no-report' : '';
+                            const dateStr = _formatSidebarDate(a.date);
+                            const subLabel = _reportSubLabel(a.report_file) || type;
+                            subItemsHtml += `<div class="report-item report-subitem can-drag${isActive}${noReport}" onclick="openReport('${escHtml(a.report_file)}')" onmousedown="handleSidebarMouseDown(event,'report','${escHtml(a.report_file)}','${escHtml(company.name)}')">
+                                <div class="report-rename-wrap">
+                                    <span class="report-name-text">${escHtml(subLabel)}</span>
+                                    <span class="rename-btn" onclick="renameReport('${escHtml(a.report_file)}', event)" title="Rename report">Edit</span>
+                                </div>
+                                <span class="report-date">${dateStr}</span></div>`;
+                        });
+                        itemsHtml += `<div class="report-type-group${isExpanded ? ' open' : ''}">
+                            <div class="report-type-group-header" onclick="toggleReportType('${escHtml(company.name)}','${escHtml(type)}',event)">
+                                <span class="report-type-group-chevron">&#9654;</span>
+                                <span class="report-type-dot dot-${type}"></span>
+                                <span class="report-type-group-name">${escHtml(type)}</span>
+                                <span class="report-type-group-count">${entries.length}</span>
+                                <span class="report-date" style="margin-left:auto">${mostRecentDate}</span>
+                            </div>
+                            <div class="report-type-group-items">${subItemsHtml}</div>
+                        </div>`;
+                    }
+                });
 
             // Orphan reports (files not linked to any dossier_analyses row)
             (company.orphan_reports || []).forEach(fn => {
