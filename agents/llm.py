@@ -890,6 +890,42 @@ _TYPE_KEY_FACTS_PROMPTS = {
 }
 
 
+def _flatten_fact_value(v):
+    """Coerce a single fact list entry to a display string.
+
+    The extraction prompts ask for string arrays, but models sometimes return
+    objects like {"name": "Acme", "threat": "high"} — pick the name-like field.
+    Returns a string, or None if nothing usable.
+    """
+    if isinstance(v, dict):
+        for key in ("name", "title", "label", "company", "area", "value"):
+            val = v.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        for val in v.values():
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        return None
+    if v is None:
+        return None
+    return str(v)
+
+
+# Fields whose prompts intentionally return arrays of objects — never flatten
+_STRUCTURED_LIST_FIELDS = {"recent_executive_hires", "executive_departures"}
+
+
+def normalize_fact_lists(facts):
+    """Flatten list-of-dicts fact values into lists of strings, in place.
+
+    Skips fields that are structured by design (see _STRUCTURED_LIST_FIELDS).
+    """
+    for k, v in facts.items():
+        if isinstance(v, list) and k not in _STRUCTURED_LIST_FIELDS:
+            facts[k] = [s for s in (_flatten_fact_value(item) for item in v) if s]
+    return facts
+
+
 def extract_key_facts(company, report_text, analysis_type=None):
     """Extract structured key facts from a report. Returns dict or None."""
     # Truncate very long reports to save tokens
@@ -902,7 +938,7 @@ def extract_key_facts(company, report_text, analysis_type=None):
 
     if isinstance(facts, dict):
         # Clean out null values
-        return {k: v for k, v in facts.items() if v is not None}
+        return normalize_fact_lists({k: v for k, v in facts.items() if v is not None})
     return None
 
 

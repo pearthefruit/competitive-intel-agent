@@ -2218,6 +2218,11 @@ async function _showLensPicker(companyName) {
     if (b && b.scoring && b.scoring._lens) {
         defaultLensId = b.scoring._lens.id;
     }
+    // A lens just created from this picker takes precedence
+    if (_lensPickerPreselect) {
+        defaultLensId = _lensPickerPreselect;
+        _lensPickerPreselect = null;
+    }
 
     // Remove any existing picker
     const existing = document.querySelector('.lens-picker-overlay');
@@ -2236,6 +2241,10 @@ async function _showLensPicker(companyName) {
             ${isDefault ? '<div style="font-size:10px;color:var(--green);margin-top:2px">Last used</div>' : ''}
         </div>`;
     });
+    pillsHtml += `<div class="lens-picker-pill" style="border-style:dashed" onclick="_newLensFromPicker('${escHtml(companyName).replace(/'/g, "\\'")}')">
+        <div style="font-size:14px;font-weight:600;color:var(--accent)">+ New Lens</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Define a custom evaluation lens</div>
+    </div>`;
 
     overlay.innerHTML = `<div class="niche-builder-modal" style="max-width:460px">
         <div class="niche-builder-header">
@@ -2257,6 +2266,30 @@ async function _showLensPicker(companyName) {
     const escHandler = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); } };
     document.addEventListener('keydown', escHandler);
     overlay._escHandler = escHandler;
+}
+
+// Set when the lens builder is opened from the briefing lens picker —
+// on create, the picker reopens with the new lens preselected.
+var _lensBuilderReturnCompany = null;
+var _lensPickerPreselect = null;
+var _lastCreatedLensId = null;
+
+function _newLensFromPicker(companyName) {
+    const picker = document.querySelector('.lens-picker-overlay');
+    if (picker) {
+        if (picker._escHandler) document.removeEventListener('keydown', picker._escHandler);
+        picker.remove();
+    }
+    _lensBuilderReturnCompany = companyName;
+    openLensBuilder();
+}
+
+function _finishLensBuilderAndReturn() {
+    const company = _lensBuilderReturnCompany;
+    _lensBuilderReturnCompany = null;
+    _lensPickerPreselect = _lastCreatedLensId;
+    closeLensBuilder();
+    if (company) _showLensPicker(company);
 }
 
 function _selectLensForBriefing(el, lensId) {
@@ -2417,6 +2450,7 @@ function closeLensBuilder() {
         if (overlay._escHandler) document.removeEventListener('keydown', overlay._escHandler);
         overlay.remove();
     }
+    _lensBuilderReturnCompany = null;
 }
 
 function openLensBuilder() {
@@ -2510,7 +2544,12 @@ async function generateLensConfig() {
         });
 
         document.getElementById('lb-config-preview').innerHTML = previewHtml;
-        document.getElementById('lens-builder-footer').innerHTML = `<button class="briefing-btn" onclick="closeLensBuilder()">Close</button>`;
+        _lastCreatedLensId = lens.id;
+        if (_lensBuilderReturnCompany) {
+            document.getElementById('lens-builder-footer').innerHTML = `<button class="briefing-btn briefing-btn-primary" onclick="_finishLensBuilderAndReturn()">Use This Lens</button>`;
+        } else {
+            document.getElementById('lens-builder-footer').innerHTML = `<button class="briefing-btn" onclick="closeLensBuilder()">Close</button>`;
+        }
 
         _cachedLenses = null;
         showToast(`Lens "${lens.name}" created successfully`, 'success');
@@ -2562,7 +2601,11 @@ function showLegacyDossierDetail(d) {
         ['key_products', 'key_competitors', 'key_risks', 'top_patent_areas'].forEach(k => {
             if (Array.isArray(allFacts[k]) && allFacts[k].length) {
                 const label = k.replace(/_/g, ' ');
-                html += `<div style="margin-top:8px"><div class="fact-label">${escHtml(label)}</div><div class="fact-value">${allFacts[k].map(v => escHtml(String(v))).join(', ')}</div></div>`;
+                const items = allFacts[k].map(v => {
+                    if (v && typeof v === 'object') return v.name || v.title || v.label || v.company || v.area || Object.values(v).find(x => typeof x === 'string') || '';
+                    return String(v);
+                }).filter(Boolean);
+                html += `<div style="margin-top:8px"><div class="fact-label">${escHtml(label)}</div><div class="fact-value">${items.map(v => escHtml(v)).join(', ')}</div></div>`;
             }
         });
         html += '</div>';
