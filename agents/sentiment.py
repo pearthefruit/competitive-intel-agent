@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from agents.llm import generate_text, save_to_dossier, get_temporal_context, unique_report_path
+from agents.source_capture import normalize_source_type
 from db import get_connection, save_source_document, link_sources_to_analysis
 from scraper.web_search import search_web, search_news, search_reddit, search_tiktok, format_search_results, dedup_results
 from scraper.google_news import search_google_news
@@ -246,14 +247,17 @@ def sentiment_analysis(company, progress_cb=None):
     # Persist sources with body content (TikTok already saved above with full transcript)
     for r in unique:
         body = r.get("body", "")
-        src = r.get("source", "article")
+        src = r.get("source", "news_article")
         if body and src not in ("tiktok", "instagram"):
+            # Canonicalize — news search results carry publisher names in "source"
+            stype, publisher = normalize_source_type(src)
             _pending_sources.append({
-                "source_type": src,
+                "source_type": stype,
                 "url": r.get("href") or r.get("url"),
                 "title": (r.get("title") or "")[:500],
                 "content": body,
                 "raw_data": None,
+                "metadata": {"publisher": publisher} if publisher else None,
             })
 
     search_text = format_search_results(unique)
@@ -324,7 +328,7 @@ def _flush_sources(company, dossier_result, pending_sources):
                         title=s.get("title"),
                         url=s.get("url"),
                         content=s.get("content"),
-                        metadata=None,
+                        metadata=s.get("metadata"),
                         source_date=s.get("source_date"),
                         sections=None,
                         dedup_kwargs=s.get("dedup_kwargs"),

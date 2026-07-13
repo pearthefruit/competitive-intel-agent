@@ -589,6 +589,7 @@ def _migrate_db(conn):
         ("llm_usage", "cached_tokens", "INTEGER"),
         ("documents", "source_url", "TEXT"),
         ("documents", "sender", "TEXT"),
+        ("documents", "source_doc_id", "INTEGER REFERENCES source_documents(id)"),
         ("source_documents", "dedup_key", "TEXT"),
         ("source_documents", "source_date", "TEXT"),
         ("source_documents", "metadata_json", "TEXT"),
@@ -3925,15 +3926,15 @@ def delete_board_note(conn, note_id):
 
 def create_document(conn, doc_id, title, source, year, file_type, file_path,
                     stored_path, storage_mode, section_count, extracted_text_json,
-                    source_url=None, sender=None):
+                    source_url=None, sender=None, source_doc_id=None):
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
         """INSERT INTO documents
            (id, title, source, year, file_type, file_path, stored_path, storage_mode,
-            section_count, extracted_text_json, source_url, sender, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            section_count, extracted_text_json, source_url, sender, source_doc_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (doc_id, title, source, year, file_type, file_path, stored_path, storage_mode,
-         section_count, extracted_text_json, source_url, sender, now),
+         section_count, extracted_text_json, source_url, sender, source_doc_id, now),
     )
     conn.commit()
 
@@ -3942,7 +3943,7 @@ def get_documents(conn):
     rows = conn.execute(
         """SELECT d.id, d.title, d.source, d.year, d.file_type, d.file_path,
                   d.stored_path, d.storage_mode, d.section_count, d.created_at,
-                  d.sender, d.source_url,
+                  d.sender, d.source_url, d.source_doc_id,
                   COUNT(a.id) as annotation_count
            FROM documents d
            LEFT JOIN document_annotations a ON a.document_id = d.id
@@ -4013,6 +4014,75 @@ def delete_annotation(conn, annotation_id):
 def update_document_title(conn, doc_id, title):
     conn.execute("UPDATE documents SET title = ? WHERE id = ?", (title, doc_id))
     conn.commit()
+
+
+def ensure_filing_document(conn, source_doc_id):
+    """Bridge a captured SEC 10-K (source_documents + source_sections) into
+    the Documents module so it's readable and annotatable.
+
+    Idempotent: if a documents row already references this source_doc_id,
+    returns its id without changes. Only sec_10k is bridged for now — 8-Ks
+    and news would clutter the reading list. Raises ValueError otherwise.
+    Returns the documents.id of the bridged row.
+    """
+    existing = conn.execute(
+        "SELECT id FROM documents WHERE source_doc_id = ?", (source_doc_id,)
+    ).fetchone()
+    if existing:
+        return existing["id"]
+
+    src = conn.execute(
+        "SELECT * FROM source_documents WHERE id = ?", (source_doc_id,)
+    ).fetchone()
+    if not src:
+        raise ValueError(f"source_documents row {source_doc_id} not found")
+    src = dict(src)
+    if src.get("source_type") != "sec_10k":
+        raise ValueError(
+            f"ensure_filing_document only bridges sec_10k sources "
+            f"(got '{src.get('source_type')}')"
+        )
+
+    section_rows = conn.execute(
+        """SELECT section_label, content FROM source_sections
+           WHERE source_doc_id = ? ORDER BY id""",
+        (source_doc_id,),
+    ).fetchall()
+    sections = [
+        {"index": i, "label": r["section_label"], "text": r["content"] or ""}
+        for i, r in enumerate(section_rows)
+    ]
+
+    # Fiscal year from metadata, fallback to the source_date's year
+    year = None
+    try:
+        meta = json.loads(src.get("metadata_json") or "{}")
+        fy = str(meta.get("fiscal_year") or "")[:4]
+        if fy.isdigit():
+            year = int(fy)
+    except Exception:
+        pass
+    if year is None:
+        sd = str(src.get("source_date") or "")[:4]
+        if sd.isdigit():
+            year = int(sd)
+
+    doc_id = f"doc_sec_{source_doc_id}"
+    create_document(
+        conn, doc_id,
+        title=src.get("title") or f"SEC filing #{source_doc_id}",
+        source="SEC EDGAR",
+        year=year,
+        file_type="sec_filing",
+        file_path=None,
+        stored_path=None,
+        storage_mode="reference",
+        section_count=len(sections),
+        extracted_text_json=json.dumps(sections),
+        source_url=src.get("url"),
+        source_doc_id=source_doc_id,
+    )
+    return doc_id
 
 
 # ---------------------------------------------------------------------------

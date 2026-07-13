@@ -6060,6 +6060,7 @@
 .doc-card-type { background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 3px;
     padding: 1px 5px; font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
 .doc-card-ann { color: var(--accent); }
+.doc-card-type-sec { color: var(--green); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.08); }
 
 /* Pane 2 — text view */
 .doc-text-pane {
@@ -6092,6 +6093,7 @@
     background: transparent; color: var(--text-secondary); cursor: pointer; transition: background .15s;
 }
 .doc-action-btn:hover { background: var(--bg-tertiary); }
+a.doc-action-btn { text-decoration: none; display: inline-flex; align-items: center; }
 .doc-action-btn-danger:hover { color: #ef4444; border-color: #ef4444; }
 .doc-text-body {
     flex: 1; overflow-y: auto; padding: 24px 48px;

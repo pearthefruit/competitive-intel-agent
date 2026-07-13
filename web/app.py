@@ -1891,17 +1891,42 @@ def create_app(db_path="intel.db"):
         if is_source_mode:
             system_content += "\n\n[SOURCE MODE] You are in Source Interrogation mode. You ONLY have access to the search_sources tool. Do NOT attempt to call any other tool. Answer questions exclusively from the captured sources retrieved via search_sources. If the sources don't contain the answer, say so directly."
 
+        # Corpus awareness: tell the model which companies have captured sources
+        # so it reaches for search_sources instead of re-searching the live web.
+        corpus_line = ""
+        if not is_source_mode:
+            try:
+                _conn = get_connection(db_path)
+                _rows = _conn.execute(
+                    "SELECT d.company_name, COUNT(*) n, "
+                    "MAX(CASE WHEN sd.source_type='sec_10k' THEN 1 ELSE 0 END) has_10k "
+                    "FROM source_documents sd JOIN dossiers d ON d.id = sd.dossier_id "
+                    "GROUP BY d.company_name ORDER BY n DESC LIMIT 15"
+                ).fetchall()
+                _conn.close()
+                if _rows:
+                    corpus_line = (
+                        "\n\n[Captured sources available — prefer search_sources for these companies]: "
+                        + ", ".join(
+                            f"{r['company_name']} ({r['n']} docs{', incl. 10-K' if r['has_10k'] else ''})"
+                            for r in _rows
+                        )
+                    )
+                    system_content += corpus_line
+            except Exception as e:
+                print(f"[chat] corpus awareness query failed (non-fatal): {e}")
+
         history = [{"role": "system", "content": system_content}] + messages
 
         def generate():
           try:
-            yield from _generate_inner(history, today, db_path, is_source_mode)
+            yield from _generate_inner(history, today, db_path, is_source_mode, corpus_line)
           except Exception as e:
             import traceback
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'text': f'Server error: {str(e)[:300]}'})}\n\n"
 
-        def _generate_inner(history, today, db_path, is_source_mode=False):
+        def _generate_inner(history, today, db_path, is_source_mode=False, corpus_line=""):
             try:
                 llm = ChatLLM()
             except RuntimeError as e:
@@ -1923,8 +1948,9 @@ def create_app(db_path="intel.db"):
                 else:
                     current_tools = get_tool_schemas("follow_up")
                     # Swap to condensed system prompt to save ~8K chars
+                    # (keep the captured-sources line so search_sources stays preferred)
                     if history and history[0].get("role") == "system":
-                        history[0]["content"] = CONDENSED_SYSTEM_PROMPT + date_suffix
+                        history[0]["content"] = CONDENSED_SYSTEM_PROMPT + date_suffix + corpus_line
 
                 # Compress old tool results as safety net
                 _compress_history(history)

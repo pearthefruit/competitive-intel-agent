@@ -400,8 +400,16 @@ function sovInterceptSourceLinks(el) {
         if (!sourceId) return;
 
         const btn = document.createElement('button');
-        btn.style.cssText = 'background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:4px;color:#a5b4fc;cursor:pointer;font-size:11px;padding:2px 8px;margin:0 2px';
-        btn.textContent = '↗ View Source';
+        const linkText = (a.textContent || '').trim();
+        if (/^[¹²³⁴⁵⁶⁷⁸⁹⁰\d]{1,4}$/.test(linkText)) {
+            // Superscript-style citation ([¹](source:ID)) — compact chip
+            btn.style.cssText = 'background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:4px;color:#a5b4fc;cursor:pointer;font-size:10px;padding:0 4px;margin:0 1px;vertical-align:super;line-height:1.4';
+            btn.textContent = linkText;
+            btn.title = 'View stored source';
+        } else {
+            btn.style.cssText = 'background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:4px;color:#a5b4fc;cursor:pointer;font-size:11px;padding:2px 8px;margin:0 2px';
+            btn.textContent = '↗ View Source';
+        }
         btn.onclick = () => sovOpenSourceViewer(parseInt(sourceId), chunkText);
         a.replaceWith(btn);
 

@@ -261,8 +261,17 @@ function interceptSourceLinks(msgEl) {
         if (!firstCitation) firstCitation = { id: parseInt(sourceId), text: chunkText };
         const btn = document.createElement('button');
         btn.className = 'source-link-btn';
-        btn.style.cssText = 'background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:4px;color:#a5b4fc;cursor:pointer;font-size:11px;padding:2px 8px;margin-left:4px';
-        btn.textContent = '↗ View Source';
+        // Superscript-style citations ([¹](source:ID)) render as compact chips;
+        // chunk-hint links keep the full "View Source" button.
+        const linkText = (a.textContent || '').trim();
+        if (/^[¹²³⁴⁵⁶⁷⁸⁹⁰\d]{1,4}$/.test(linkText)) {
+            btn.style.cssText = 'background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:4px;color:#a5b4fc;cursor:pointer;font-size:10px;padding:0 4px;margin:0 1px;vertical-align:super;line-height:1.4';
+            btn.textContent = linkText;
+            btn.title = 'View stored source';
+        } else {
+            btn.style.cssText = 'background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:4px;color:#a5b4fc;cursor:pointer;font-size:11px;padding:2px 8px;margin-left:4px';
+            btn.textContent = '↗ View Source';
+        }
         btn.onclick = () => openSourceViewer(parseInt(sourceId), chunkText);
         a.replaceWith(btn);
     });

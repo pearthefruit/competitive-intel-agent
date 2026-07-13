@@ -14,6 +14,37 @@ CHUNK_OVERLAP_WORDS = 50
 SHORT_SOURCE_CUTOFF = 600   # words; under this → single chunk, no split
 SCORE_THRESHOLD = 0.30      # filter noise results in semantic search
 
+# Canonical source_type enum — every source_documents row must use one of
+# these. Anything else (e.g. a publisher name leaking in from a news search
+# result) is stored as "news_article" with the original string preserved in
+# metadata_json under "publisher".
+CANONICAL_SOURCE_TYPES = frozenset({
+    "sec_10k", "sec_8k", "sec_xbrl", "yahoo_finance", "analyst", "propublica",
+    "news_article", "google_news", "web", "web_crawl", "pricing_page",
+    "reddit", "hackernews", "youtube", "blind", "fishbowl", "tiktok",
+    "instagram", "1point3acres", "patent", "hiring_data", "data_point",
+})
+
+# Legacy/variant spellings collapsed into a single canonical value
+SOURCE_TYPE_ALIASES = {
+    "article": "news_article",
+    "google news": "google_news",
+}
+
+
+def normalize_source_type(source_type) -> tuple:
+    """Normalize a raw source_type to the canonical enum.
+
+    Returns (canonical_type, publisher). publisher is the original string
+    when the value was not canonical (e.g. 'Forbes') and should be stored in
+    metadata under "publisher"; None when the value was already canonical.
+    """
+    raw = (source_type or "").strip().lower()
+    raw = SOURCE_TYPE_ALIASES.get(raw, raw)
+    if raw in CANONICAL_SOURCE_TYPES:
+        return raw, None
+    return "news_article", (str(source_type).strip() if source_type else None)
+
 
 # ── Dedup key logic ──────────────────────────────────────────────────────────
 
@@ -102,6 +133,13 @@ def capture_and_embed(
         save_source_chunks,
     )
     from agents.embeddings import embed_batch
+
+    # Enforce the canonical source_type enum (safety net for dynamic strings
+    # like publisher names) — original value preserved as metadata publisher
+    source_type, publisher = normalize_source_type(source_type)
+    if publisher:
+        metadata = dict(metadata) if metadata else {}
+        metadata.setdefault("publisher", publisher)
 
     # Build the dedup key
     dk_kwargs = dict(dedup_kwargs or {})

@@ -54,6 +54,9 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
 - **landscape_analysis**: Auto-discover competitors and analyze the landscape.
 - **batch_company_analysis**: Run analysis pipelines on multiple companies in parallel (max 5). Returns combined results with Digital Maturity Scores for ranking. Use when the user asks about multiple companies or wants to compare/rank a group (e.g., "which CPG companies are most behind digitally?", "rank the top 5 banks").
 
+### Captured Sources (RAG)
+- **search_sources**: Semantic search over sources captured during past analyses — 10-K sections, 8-Ks, news, Reddit/Blind posts. FIRST stop for factual questions about any previously-analyzed company; use live search only if this returns nothing relevant.
+
 ### Search (web, social, video)
 - **web_search**: General web + news search via DuckDuckGo. Good for recent events, earnings, product launches.
 - **search_financial_news**: Financial news specifically (Reuters, Bloomberg, FT, WSJ, SeekingAlpha).
@@ -99,6 +102,8 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
 
 ## Critical Rules
 - **NEVER answer company intelligence questions from general knowledge.** Always use tools to get real data. If the user asks about a company's digital maturity, hiring trends, financials, competitors, or technology — run the appropriate analysis tools. Your training data is stale; the tools provide current intelligence.
+- **Captured sources FIRST.** For factual questions about a specific company (financials, risk factors, filings, news, sentiment, hiring), call `search_sources` FIRST when that company likely has captured sources — any previously-analyzed company does (see the [Captured sources available] list when present). Fall back to live web search only when search_sources returns nothing relevant. This does not replace analysis tools: "run a financial analysis" still means `financial_analysis` — search_sources is for answering questions from data already captured.
+- **Cite stored sources.** When an answer draws on captured sources, cite with superscript links to the stored source ID from the search_sources result — e.g. `[¹](source:123)` — NOT the external URL. Use `[¹](url)` citations only for live web results.
 - **NEVER say "I will perform additional searches" or "Let me search for more" without actually calling tools in the same response.** If you need more data, call the tools NOW — don't respond with text promising to do more later. Every response must either contain tool calls OR be your final answer. There is no "next turn" — if you respond with text only, the conversation ends.
 - **Multi-company queries → `batch_company_analysis`.** When the user asks to rank, compare, or evaluate multiple companies (e.g., "which CPG companies are most behind?", "compare top 5 banks"), use `web_search` to identify the companies, then call `batch_company_analysis` with those names. Do NOT analyze companies one-by-one — the batch tool runs them in parallel and produces ranked results with Digital Maturity Scores.
 
@@ -124,7 +129,7 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
 # Condensed system prompt for follow-up rounds — saves ~8K chars of context
 CONDENSED_SYSTEM_PROMPT = """You are SignalVault, a competitive intelligence analyst. Continue the conversation using your tools.
 
-Rules: Think before acting. Synthesize findings concisely — don't echo raw tool output. Check dossiers before new analyses. If briefing needs hiring data, run hiring_pipeline first. When using collect+classify manually, ALWAYS call analyze afterward — classify only updates snapshots, analyze generates the report file. Save notable events to dossier timelines. CRITICAL: Never respond with text saying you will do more work — if you need more data, call tools NOW. A text-only response is your FINAL answer."""
+Rules: Think before acting. Synthesize findings concisely — don't echo raw tool output. Check dossiers before new analyses. For factual questions about a previously-analyzed company, call search_sources FIRST; use live web search only if it returns nothing relevant. Cite captured sources as [¹](source:ID) using the source ID from the tool result, not external URLs. If briefing needs hiring data, run hiring_pipeline first. When using collect+classify manually, ALWAYS call analyze afterward — classify only updates snapshots, analyze generates the report file. Save notable events to dossier timelines. CRITICAL: Never respond with text saying you will do more work — if you need more data, call tools NOW. A text-only response is your FINAL answer."""
 
 # Tool tiers for dynamic schema selection — reduces context overhead on follow-up rounds
 CORE_TOOL_NAMES = {
@@ -805,12 +810,14 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "search_sources",
             "description": (
-                "Search raw source documents captured during analysis of a specific company. "
-                "Use when the user asks what a specific document says — "
-                "'show me the 10-K', 'what does the MD&A say about X', "
-                "'find the 8-K about the acquisition', 'what did the filings say about Y'. "
-                "Only works for companies where financial analysis has been run. "
-                "Returns relevant passages with source citations and scores."
+                "Search the captured source corpus for a previously-analyzed company. "
+                "FIRST stop for any factual question about such a company — financials, "
+                "risk factors, filings, news, Reddit/Blind sentiment, hiring. "
+                "Semantic search over 10-K sections, 8-K filings, news articles, and social "
+                "posts captured during analyses. Also answers direct document questions "
+                "('what does the MD&A say about X', 'find the 8-K about the acquisition'). "
+                "If this returns nothing relevant, fall back to live search/analysis tools. "
+                "Returns relevant passages with source IDs — cite them as [¹](source:ID)."
             ),
             "parameters": {
                 "type": "object",

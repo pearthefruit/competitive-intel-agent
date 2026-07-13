@@ -518,8 +518,8 @@ def format_8k_for_prompt(filings):
 
 # ── 10-K section extraction for RAG indexing ───────────────────────────────────────────────
 
-# Sections worth capturing for semantic search. Keyed by the lowercase anchor
-# name used in EDGAR HTML (e.g. <a name="item1">).
+# Sections worth capturing for semantic search. Keys are stable identifiers
+# stored in source_sections.section_key (matched via _SECTION_PATTERNS).
 SECTION_LABELS = {
     "item1":  "Business",
     "item1a": "Risk Factors",
@@ -529,47 +529,193 @@ SECTION_LABELS = {
     "item8":  "Financial Statements",
 }
 
-# Maximum filing HTML size we will parse (5 MB)
-_MAX_10K_BYTES = 5 * 1024 * 1024
+# Maximum filing HTML size we will download (30 MB). Modern inline-XBRL
+# 10-K primary documents typically run 5-30 MB.
+_MAX_10K_BYTES = 30 * 1024 * 1024
+
+# Hard cap per extracted section (words) — safety against runaway spans
+_MAX_SECTION_WORDS = 60_000
+
+try:
+    import lxml  # noqa: F401
+    _LXML_AVAILABLE = True
+except ImportError:
+    _LXML_AVAILABLE = False
+
+# Heading regexes per SECTION_LABELS key. Require the heading title words
+# (not just "Item 1A") to avoid matching bare cross-references. The quote
+# lookbehind rejects quoted cross-references like see "Item 1A. Risk Factors".
+_SEP = r"\s*[.:—–\-]?\s*"
+_NOQ = r"(?<![\"“‘'])"
 
 
-def _extract_text_between(tag_start, tag_end, soup):
-    """Return plain text of all content between two BS4 tag objects.
+def _title_words(*words):
+    """Build a heading-title regex tolerating dropcap/small-caps splits.
 
-    Iterates siblings of tag_start until tag_end is reached.
-    Block-level elements get paragraph separator treatment.
+    Some filers (e.g. Microsoft) style each word's first letter in its own
+    span, so extracted text reads "B USINESS" — allow whitespace after the
+    first letter of every word.
     """
-    from bs4 import Tag, NavigableString
-    parts = []
-    node = tag_start.next_sibling
-    while node is not None and node != tag_end:
-        if isinstance(node, NavigableString):
-            t = str(node).strip()
-            if t:
-                parts.append(t)
-        elif isinstance(node, Tag):
-            block_tags = {"p", "div", "tr", "li", "h1", "h2", "h3",
-                          "h4", "h5", "h6", "br"}
-            inner = node.get_text(separator=" ").strip()
-            if inner:
-                if node.name in block_tags:
-                    parts.append("\n\n" + inner)
-                else:
-                    parts.append(" " + inner)
-        node = node.next_sibling
+    return r"\s+".join(w[0] + r"\s*" + w[1:] for w in words)
 
-    raw = " ".join(parts)
-    raw = re.sub(r" {2,}", " ", raw)
-    raw = re.sub(r"\n{3,}", "\n\n", raw)
-    return raw.strip()
+
+_SECTION_PATTERNS = {
+    "item1":  re.compile(_NOQ + r"item\s+1" + _SEP + _title_words("business"), re.IGNORECASE),
+    "item1a": re.compile(_NOQ + r"item\s+1a" + _SEP + _title_words("risk", "factors"), re.IGNORECASE),
+    "item2":  re.compile(_NOQ + r"item\s+2" + _SEP + _title_words("propert") + r"(?:ies|y)", re.IGNORECASE),
+    "item7":  re.compile(_NOQ + r"item\s+7" + _SEP + r"m\s*anagement[’']?s?\s+d\s*iscussion", re.IGNORECASE),
+    "item7a": re.compile(_NOQ + r"item\s+7a" + _SEP + _title_words("quantitative", "and", "qualitative"), re.IGNORECASE),
+    "item8":  re.compile(_NOQ + r"item\s+8" + _SEP + _title_words("financial", "statements"), re.IGNORECASE),
+}
+
+_HIDDEN_STYLE_RE = re.compile(r"display\s*:\s*none", re.IGNORECASE)
+
+
+def _extract_filing_text(html):
+    """Parse filing HTML and return plain text in reading order.
+
+    Strips inline-XBRL noise before extraction: ix:hidden/ix:header blocks
+    (raw XBRL fact values), scripts, styles, and display:none elements.
+    Normalizes unicode/non-breaking spaces so heading regexes match.
+    """
+    import warnings
+
+    # Some filers split words across inline spans mid-word ("RIS"+"K FACTORS"),
+    # so we must extract with NO separator to rejoin them — and instead mark
+    # block boundaries explicitly with newlines before parsing.
+    html = re.sub(r"(?i)(</(?:p|div|tr|li|h[1-6]|table|section)>)", r"\1\n", html)
+    html = re.sub(r"(?i)<br\s*/?>", "\n", html)
+
+    parser = "lxml" if _LXML_AVAILABLE else "html.parser"
+    with warnings.catch_warnings():
+        # Inline-XBRL docs carry an XML declaration; the HTML parser is intentional
+        warnings.simplefilter("ignore")
+        soup = _BeautifulSoup(html, parser)
+
+    for tag in soup.find_all(["script", "style", "ix:hidden", "ix:header"]):
+        tag.decompose()
+    for tag in soup.find_all(style=_HIDDEN_STYLE_RE):
+        tag.decompose()
+
+    text = soup.get_text(separator="")
+    # Normalize &nbsp;/unicode spaces, collapse whitespace runs
+    text = re.sub("[\u00a0\u1680\u2000-\u200b\u202f\u205f\u3000\ufeff]", " ", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n(\s*\n)+", "\n\n", text)
+    return text.strip()
+
+
+def _find_section_spans(text):
+    """Locate section start offsets in extracted filing text.
+
+    Returns ordered list of (section_key, start_offset).
+
+    Constraint handled here: heading strings also appear in the Table of
+    Contents, "Part II" divider mini-TOCs, and running page headers — all
+    followed almost immediately by the next heading. So we require chosen
+    matches to (a) be followed by substantial content before the next
+    detected heading, (b) fall past the TOC region when possible, and
+    (c) form a monotonically increasing sequence in item order.
+    """
+    import bisect
+
+    per_key = {}
+    all_positions = []
+    for key in SECTION_LABELS:
+        pattern = _SECTION_PATTERNS.get(key)
+        if pattern is None:
+            continue
+        positions = [m.start() for m in pattern.finditer(text)]
+        per_key[key] = positions
+        all_positions.extend(positions)
+    all_positions.sort()
+
+    def _gap_after(p):
+        """Chars between this match and the next detected heading (any key)."""
+        i = bisect.bisect_right(all_positions, p)
+        return (all_positions[i] - p) if i < len(all_positions) else len(text) - p
+
+    # TOC / divider rows list the next item heading within a line; a real
+    # section heading is followed by ~200+ words (~1200 chars) of content.
+    min_gap = 1200
+    # TOC + cover page live in the first few percent of the text; cap the
+    # cutoff absolutely so huge filings don't skip a legitimate early Item 1.
+    toc_cutoff = min(int(len(text) * 0.05), 50_000)
+
+    spans = []
+    last_pos = -1
+    for key in SECTION_LABELS:
+        positions = [p for p in per_key.get(key, []) if p > last_pos]
+        if not positions:
+            continue
+        substantial = [p for p in positions if _gap_after(p) >= min_gap]
+        viable = [p for p in substantial if p > toc_cutoff] or substantial
+        if viable:
+            pos = viable[0]
+        else:
+            pos = positions[-1]  # all matches trivial — last is likeliest body
+        spans.append((key, pos))
+        last_pos = pos
+    return spans
+
+
+def _find_latest_10k(cik):
+    """Search the full submissions index for the most recent 10-K / 10-K/A.
+
+    Frequent 8-K filers push the 10-K out of small get_recent_filings()
+    windows, so this scans ALL recent forms, filtered by type.
+    Returns {form, date, document, description, url} or None.
+    """
+    cik_padded = str(cik).zfill(10)
+    url = SUBMISSIONS_URL.format(cik=cik_padded)
+
+    http = httpx.Client(headers=EDGAR_HEADERS, timeout=15)
+    try:
+        resp = http.get(url)
+        if resp.status_code != 200:
+            print(f"[edgar] _find_latest_10k: submissions API returned {resp.status_code}")
+            return None
+
+        recent = resp.json().get("filings", {}).get("recent", {})
+        forms = recent.get("form", [])
+        dates = recent.get("filingDate", [])
+        docs = recent.get("primaryDocument", [])
+        descriptions = recent.get("primaryDocDescription", [])
+        accessions = recent.get("accessionNumber", [])
+
+        for i in range(len(forms)):
+            if forms[i] not in ("10-K", "10-K/A"):
+                continue
+            accession = accessions[i] if i < len(accessions) else ""
+            doc = docs[i] if i < len(docs) else ""
+            if not (accession and doc):
+                continue
+            acc_no_dashes = accession.replace("-", "")
+            return {
+                "form": forms[i],
+                "date": dates[i] if i < len(dates) else "",
+                "document": doc,
+                "description": descriptions[i] if i < len(descriptions) else "",
+                "url": f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{doc}",
+            }
+        return None
+    except Exception as e:
+        print(f"[edgar] _find_latest_10k: failed — {e}")
+        return None
+    finally:
+        http.close()
 
 
 def fetch_10k_sections(cik, filings):
     """Fetch and extract key sections from the most recent 10-K filing.
 
     Takes the filings list from get_recent_filings() and finds the most
-    recent 10-K or 10-K/A. Fetches the HTML, parses named anchors for
-    the sections in SECTION_LABELS, and returns plain extracted text.
+    recent 10-K or 10-K/A — falling back to a direct submissions-index
+    search when the provided window is too small. Streams the HTML
+    (inline-XBRL filings run 5-30 MB), strips XBRL noise, and splits the
+    plain text into the sections in SECTION_LABELS via heading-pattern
+    matching. Falls back to a single full_text section if fewer than 2
+    sections are detected.
 
     Returns dict:
         {fiscal_year, form_type, filed_date, url,
@@ -582,10 +728,15 @@ def fetch_10k_sections(cik, filings):
 
     # Find most recent 10-K or 10-K/A in filings list
     target = None
-    for f in filings:
+    for f in filings or []:
         if f.get("form") in ("10-K", "10-K/A") and f.get("url"):
             target = f
             break
+
+    if not target:
+        # Frequent 8-K filers push the 10-K past the caller's filings window
+        print("[edgar] no 10-K in provided filings — searching deeper")
+        target = _find_latest_10k(cik)
 
     if not target:
         print("[edgar] fetch_10k_sections: no 10-K filing with URL found")
@@ -594,75 +745,70 @@ def fetch_10k_sections(cik, filings):
     filing_url = target["url"]
     filed_date = target.get("date", "")
     form_type = target.get("form", "10-K")
+
+    # A 10-K filed Jan-Jun almost always covers the PRIOR fiscal year
     fiscal_year = filed_date[:4] if filed_date else ""
+    if len(filed_date) >= 7:
+        year, month = int(filed_date[:4]), int(filed_date[5:7])
+        fiscal_year = str(year - 1) if month <= 6 else str(year)
 
     print(f"[edgar] Fetching 10-K sections from {filing_url}...")
 
     try:
         html_headers = dict(EDGAR_HEADERS)
         html_headers["Accept"] = "text/html,application/xhtml+xml"
-        http = httpx.Client(headers=html_headers, timeout=30, follow_redirects=True)
+        http = httpx.Client(headers=html_headers, timeout=60, follow_redirects=True)
         try:
-            resp = http.get(filing_url)
+            with http.stream("GET", filing_url) as resp:
+                if resp.status_code != 200:
+                    print(f"[edgar] fetch_10k_sections: HTTP {resp.status_code} — skipping")
+                    return None
+                chunks = []
+                total = 0
+                for chunk in resp.iter_bytes():
+                    total += len(chunk)
+                    if total > _MAX_10K_BYTES:
+                        print(f"[edgar] fetch_10k_sections: filing too large "
+                              f"(>{_MAX_10K_BYTES // (1024 * 1024)} MB) — skipping")
+                        return None
+                    chunks.append(chunk)
         finally:
             http.close()
-
-        if resp.status_code != 200:
-            print(f"[edgar] fetch_10k_sections: HTTP {resp.status_code} — skipping")
-            return None
-
-        if len(resp.content) > _MAX_10K_BYTES:
-            mb = len(resp.content) / 1024 / 1024
-            print(f"[edgar] fetch_10k_sections: filing too large ({mb:.1f} MB > 5 MB) — skipping")
-            return None
-
-        html = resp.text
+        html = b"".join(chunks).decode("utf-8", errors="replace")
+        del chunks
     except Exception as e:
         print(f"[edgar] fetch_10k_sections: fetch failed — {e}")
         return None
 
     try:
-        soup = _BeautifulSoup(html, "html.parser")
+        text = _extract_filing_text(html)
     except Exception as e:
         print(f"[edgar] fetch_10k_sections: parse failed — {e}")
         return None
+    del html
 
-    # Build ordered key list and locate each anchor
-    ordered_keys = list(SECTION_LABELS.keys())
-    anchor_map = {}
-    for key in ordered_keys:
-        tag = (
-            soup.find("a", attrs={"name": key})
-            or soup.find("a", attrs={"name": key.upper()})
-            or soup.find("a", attrs={"id": key})
-            or soup.find("a", attrs={"id": key.upper()})
-        )
-        if tag:
-            anchor_map[key] = tag
-
-    if not anchor_map:
-        print("[edgar] fetch_10k_sections: no named section anchors found in filing HTML")
+    total_words = len(text.split())
+    if total_words < 2000:
+        # Almost certainly a wrapper/index page, not the actual 10-K
+        print(f"[edgar] fetch_10k_sections: only {total_words} words extracted "
+              f"— likely a wrapper page, skipping")
         return None
 
-    found_keys = [k for k in ordered_keys if k in anchor_map]
+    spans = _find_section_spans(text)
     sections = []
 
-    for i, key in enumerate(found_keys):
-        start_tag = anchor_map[key]
-        end_tag = None
-        if i + 1 < len(found_keys):
-            end_tag = anchor_map[found_keys[i + 1]]
-
-        try:
-            content = _extract_text_between(start_tag, end_tag, soup)
-        except Exception as e:
-            print(f"[edgar] fetch_10k_sections: text extraction failed for {key} — {e}")
-            content = ""
-
-        if not content.strip():
+    for i, (key, start) in enumerate(spans):
+        end = spans[i + 1][1] if i + 1 < len(spans) else len(text)
+        content = text[start:end].strip()
+        words = content.split()
+        word_count = len(words)
+        if word_count < 100:
+            # Trivial span — probably a stray TOC/cross-reference match
             continue
+        if word_count > _MAX_SECTION_WORDS:
+            content = " ".join(words[:_MAX_SECTION_WORDS])
+            word_count = _MAX_SECTION_WORDS
 
-        word_count = len(content.split())
         sections.append({
             "section_key": key,
             "section_label": SECTION_LABELS[key],
@@ -671,9 +817,19 @@ def fetch_10k_sections(cik, filings):
         })
         print(f"[edgar]   {key} ({SECTION_LABELS[key]}): {word_count} words")
 
-    if not sections:
-        print("[edgar] fetch_10k_sections: no section content extracted")
-        return None
+    if len(sections) < 2:
+        # Sectioning failed — a searchable whole filing beats nothing
+        print(f"[edgar] fetch_10k_sections: only {len(sections)} section(s) detected "
+              f"— falling back to full-text capture")
+        words = text.split()
+        if len(words) > _MAX_SECTION_WORDS:
+            text = " ".join(words[:_MAX_SECTION_WORDS])
+        sections = [{
+            "section_key": "full_text",
+            "section_label": "Full 10-K Text",
+            "content": text,
+            "word_count": min(len(words), _MAX_SECTION_WORDS),
+        }]
 
     print(f"[edgar] 10-K sections extracted: {len(sections)} sections "
           f"({form_type}, filed {filed_date})")

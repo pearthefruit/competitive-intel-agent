@@ -222,7 +222,7 @@ def _flush_sources(company, dossier_result, pending_sources):
                         title=s.get("title"),
                         url=s.get("url"),
                         content=s.get("content"),
-                        metadata=None,
+                        metadata=s.get("metadata"),
                         source_date=s.get("source_date"),
                         sections=None,
                         dedup_kwargs=s.get("dedup_kwargs"),

@@ -57,7 +57,7 @@ def _save_and_link_sources(company, dossier_result, pending_sources, _10k_data=N
                         title=s.get("title"),
                         url=s.get("url"),
                         content=s.get("content"),
-                        metadata=None,
+                        metadata=s.get("metadata"),
                         source_date=s.get("source_date"),
                         sections=None,
                         dedup_kwargs=s.get("dedup_kwargs"),
@@ -101,6 +101,14 @@ def _save_and_link_sources(company, dossier_result, pending_sources, _10k_data=N
                 source_ids.append(sid)
                 status = "new" if is_new else "already indexed"
                 print(f"[sources] 10-K sections ({status}): {len(_10k_data.get('sections', []))} sections")
+
+                # Bridge the 10-K into the Documents module (readable/annotatable)
+                try:
+                    from db import ensure_filing_document
+                    doc_id = ensure_filing_document(conn, sid)
+                    print(f"[sources] 10-K bridged to Documents module ({doc_id})")
+                except Exception as e:
+                    print(f"[sources] 10-K Documents bridge failed (non-fatal): {e}")
             except Exception as e:
                 print(f"[sources] 10-K section indexing failed (non-fatal): {e}")
 
@@ -512,11 +520,12 @@ def _analyze_non_sec(company, _cb=None):
         if not body and not article_url:
             continue
         _pending_sources.append({
-            "source_type": r.get("source", "news_article"),
+            "source_type": "news_article",
             "url": article_url,
             "title": (r.get("title") or "")[:500],
             "content": body or r.get("title", ""),
             "raw_data": None,
+            "metadata": {"publisher": r["source"]} if r.get("source") else None,
             "dedup_kwargs": {"url": article_url},
         })
 

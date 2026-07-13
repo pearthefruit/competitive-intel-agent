@@ -41,11 +41,13 @@ function renderDocList() {
         const senderChip = isEmail && d.sender
             ? `<div class="doc-card-sender">from: ${_esc(d.sender)}</div>`
             : '';
+        const isFiling = d.file_type === 'sec_filing';
+        const typeLabel = isFiling ? '10-K' : d.file_type.toUpperCase();
         return `<div class="doc-card${active}" onclick="openDoc('${d.id}')">
             <div class="doc-card-title">${_esc(d.title)}</div>
             ${senderChip}
             <div class="doc-card-meta">
-                <span class="doc-card-type">${d.file_type.toUpperCase()}</span>
+                <span class="doc-card-type${isFiling ? ' doc-card-type-sec' : ''}">${typeLabel}</span>
                 ${meta ? `<span>${_esc(meta)}</span>` : ''}
                 ${annBadge}
             </div>
@@ -79,9 +81,22 @@ async function openDoc(docId) {
         : [doc.source, doc.year].filter(Boolean).join(' · ');
     document.getElementById('doc-text-source').textContent = sourceParts;
 
-    // Save copy button — only show if reference-only and file currently accessible
+    // Save copy button — only show if reference-only with an original file on disk
+    // (emails and SEC filings have no file_path — nothing to copy)
     const saveCopyBtn = document.getElementById('doc-save-copy-btn');
-    saveCopyBtn.style.display = (doc.storage_mode === 'reference' && !doc.stored_path) ? '' : 'none';
+    saveCopyBtn.style.display =
+        (doc.storage_mode === 'reference' && !doc.stored_path && doc.file_path) ? '' : 'none';
+
+    // View on EDGAR — SEC filings link back to the original filing
+    const edgarLink = document.getElementById('doc-edgar-link');
+    if (edgarLink) {
+        if (doc.file_type === 'sec_filing' && doc.source_url) {
+            edgarLink.href = doc.source_url;
+            edgarLink.style.display = '';
+        } else {
+            edgarLink.style.display = 'none';
+        }
+    }
 
     renderDocText();
     renderAnnotations();

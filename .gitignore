@@ -1,5 +1,6 @@
 # Secrets
 .env
+cookies.txt
 
 # Database
 *.db
@@ -27,5 +28,10 @@ screenshots/
 
 # DB variants and backups
 *.db.*
+*.db-shm
+*.db-wal
 intel_backup*.json
 intel_nuke*.json
+
+# One-off logs
+backfill_log.txt

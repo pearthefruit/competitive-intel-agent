@@ -57,7 +57,7 @@ All analysis commands: `collect`, `classify`, `analyze`, `financial`, `competito
 
 ### Agent Source Memory (RAG)
 
-**Status:** BUILT (2026-05-19). Phase 1 fully implemented. 37.8 MB indexed.
+**Status:** BUILT (2026-05-19); source-of-record overhaul 2026-07-12 — 10-K section capture fixed (was silently broken: 5MB cap + dead anchor parsing meant zero 10-Ks ever indexed), `source_type` canonicalized (`CANONICAL_SOURCE_TYPES` in source_capture.py; publisher names → `metadata.publisher`; migration `migrate_source_types.py`), chat is retrieval-first over captured sources with `[¹](source:ID)` citations, and captured 10-Ks auto-bridge into the Documents module (`ensure_filing_document` in db.py, `file_type='sec_filing'`).
 
 A source capture + embedding layer scoped to the Research module. Agents save raw source content at run time; users interrogate it via "Source Mode" chat in the right pane.
 
@@ -78,7 +78,7 @@ A source capture + embedding layer scoped to the Research module. Agents save ra
 
 A reading and capture surface for long-form research documents. User reads → highlights passages → annotations become threads. The module stays thin — synthesis happens through existing threads/narratives/chains.
 
-- **Supported types:** PDF (PyMuPDF), Markdown, plain text, DOCX (python-docx), EPUB (ebooklib), email (extension-extracted HTML)
+- **Supported types:** PDF (PyMuPDF), Markdown, plain text, DOCX (python-docx), EPUB (ebooklib), email (extension-extracted HTML), sec_filing (auto-bridged from captured 10-Ks — green "10-K" badge, "View on EDGAR" link, no file affordances)
 - **Storage modes:** Reference (opens from original path) or Stored (vault copy at `documents/{id}_{slug}.{ext}`). Emails always stored.
 - **Schema:** `documents` (title, source, year, file_type, file_path, stored_path, extracted_text_json), `document_annotations` (selected_text, note, section_index, thread_id)
 - **Extraction:** all formats produce `extracted_text_json` — array of `{index, label, text}` sections
@@ -154,7 +154,7 @@ Five-tab intelligence monitoring workspace: Signals -> Threads -> Narratives -> 
 
 ## Planned Improvements
 
-- **Predictions System** (spec ready, NOT YET BUILT): Falsifiable second-order effects generated from signals/threads/narratives. Structure: "if X, then Y observable via Z by date D." Open predictions sit as latent expectations; incoming signals get checked against them. Replaces raw signal counts as the evidence backbone for narratives. Schema: `predictions` + `prediction_evidence` tables. Full spec at `memory/signalvault-predictions-spec.md`. Phase 1: schema + LLM generator on manual capture + simple Predictions tab.
+- **Predictions System** (BUILT but NON-FUNCTIONAL — confirmed broken end-to-end 2026-05-29; needs debugging, do not treat as shipped): Falsifiable second-order effects generated from signals/threads/narratives. Structure: "if X, then Y observable via Z by date D." All 4 phases coded: backend `agents/predictions.py`, frontend `web/static/js/predictions.js`. Top-level Predictions tab was removed 2026-05-29 (kept intact for revival: `#sig-tab-predictions` div, predictions.js, detail-pane ribbons in signals.js). If revived, rebuild as ribbon/board-overlay surface — likely as "claims with deadlines" inside the planned claim ledger, not on the signals side. Schema: `predictions` + `prediction_evidence` tables. Full spec at `memory/signalvault-predictions-spec.md`.
 - **Thread naming and dedup**: titles too generic (e.g. "Labor Market Trends" duplicated); fuzzy dedup misses same-domain near-dupes
 - **Keyboard nav — `e` key**: edit signal body in Global Signals module (all other keys built)
 - **Documents module bug fixes**: module is functional but buggy (2026-05-24)
