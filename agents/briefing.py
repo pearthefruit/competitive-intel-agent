@@ -372,7 +372,7 @@ def generate_briefing(company_name, db_path="intel.db", lens_id=None):
             f"Incorporate these trends into your Strategic Outlook and Key Opportunities sections. "
             f"Highlight which changes are most strategically significant."
         )
-    briefing = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN)
+    briefing = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN, expect="object")
 
     if not isinstance(briefing, dict):
         msg = "LLM did not return valid JSON — all providers may be rate-limited or down"

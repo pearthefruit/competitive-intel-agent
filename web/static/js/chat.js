@@ -2559,6 +2559,24 @@ async function generateLensConfig() {
     }
 }
 
+async function reextractFacts(companyName, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Re-extracting…'; }
+    try {
+        const resp = await fetch(`/api/dossiers/${encodeURIComponent(companyName)}/reextract-facts`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.ok) {
+            showToast('Key facts re-extracted', 'success');
+            await openDossier(companyName);
+        } else {
+            showToast(data.error || 'Re-extraction failed', 'error');
+            if (btn) { btn.disabled = false; btn.textContent = '↻ Re-extract facts'; }
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '↻ Re-extract facts'; }
+    }
+}
+
 function showLegacyDossierDetail(d) {
     _activeDossierData = d;
     if (typeof onDossierSelected === 'function') onDossierSelected(d.company_name);
@@ -2672,13 +2690,20 @@ function showLegacyDossierDetail(d) {
             else if (days >= 30) { freshness = 'stale'; label = `${days}d ago`; }
             else if (days >= 7) { freshness = 'recent'; label = `${days}d ago`; }
             else { label = days === 0 ? 'Today' : `${days}d ago`; }
+            const factsMissing = latest.report_file && !latest.key_facts_json;
             html += `<div class="staleness-row">
                 <span style="color:var(--text-primary);font-weight:500;min-width:80px">${escHtml(type)}</span>
                 <span class="staleness-badge staleness-${freshness}">${label}</span>
                 <span style="font-size:14px;color:var(--text-muted)">${runs.length} run${runs.length > 1 ? 's' : ''}</span>
                 ${latest.report_file ? `<span style="font-size:12px;color:var(--accent);cursor:pointer" onclick="openReport('${escHtml(latest.report_file.replace(/^reports[\\/\\\\]/, ''))}')">View report</span>` : ''}
+                ${factsMissing ? `<span style="font-size:11px;color:#eab308;background:rgba(234,179,8,0.12);border:1px solid rgba(234,179,8,0.3);border-radius:4px;padding:1px 6px" title="Key facts extraction failed for this analysis — click Re-extract below">facts missing</span>` : ''}
             </div>`;
         });
+        const anyFactsMissing = d.analyses.some(a => a.report_file && !a.key_facts_json);
+        if (anyFactsMissing) {
+            html += `<div style="margin-top:8px"><button class="dash-refresh-btn" style="padding:5px 14px;font-size:12px" onclick="reextractFacts('${escHtml(d.company_name).replace(/'/g, "\\'")}', this)">&#8635; Re-extract facts</button>
+                <span style="font-size:11px;color:var(--text-muted);margin-left:8px">Re-runs key-fact extraction from saved reports (no re-scraping)</span></div>`;
+        }
         html += '</div>';
     }
 

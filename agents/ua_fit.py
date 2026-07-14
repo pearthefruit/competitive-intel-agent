@@ -333,11 +333,11 @@ def score_ua_fit(company_name, website_url=None, db_path="intel.db", progress_cb
     prompt = build_ua_fit_prompt(company_name, reports, website_url)
 
     print(f"[ua-fit] Generating prospect fit score for {company_name}...")
-    fit_data = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN)
+    fit_data = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN, expect="object", required_keys=["sub_scores"])
 
     if not isinstance(fit_data, dict) or "sub_scores" not in fit_data:
         print(f"[ua-fit] LLM did not return valid fit data. Retrying...")
-        fit_data = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN)
+        fit_data = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN, expect="object", required_keys=["sub_scores"])
         if not isinstance(fit_data, dict) or "sub_scores" not in fit_data:
             print(f"[ua-fit] Failed to generate prospect fit score for {company_name}.")
             return None

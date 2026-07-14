@@ -173,6 +173,7 @@ let _signalsSourceTypeFilter = 'all';
 let _sigAssignmentFilter = 'all';   // 'all' | 'assigned' | 'unassigned'
 let _threadMomentumFilter = 'all';  // 'all' | 'accelerating' | 'fading' | 'dormant'
 let _threadSizeMin = 0;             // minimum signal count
+let _signalsDaysBack = 7;           // raw feed time window (7 | 30 | 90 | 365)
 
 // Unified domain toggle — all domains active by default
 var _ALL_DOMAINS = ['economics', 'finance', 'geopolitics', 'tech_ai', 'labor', 'regulatory'];  // var: accessed from board.js (separate script scope)
@@ -246,7 +247,12 @@ function _renderFeedFilters(tab) {
                 _feedFilterPill('all', 'All', _sigAssignmentFilter, '_setSigAssignment') +
                 _feedFilterPill('assigned', 'Assigned', _sigAssignmentFilter, '_setSigAssignment') +
                 _feedFilterPill('unassigned', 'Unassigned', _sigAssignmentFilter, '_setSigAssignment') +
-            '</div>';
+            '</div>' +
+            '<select onchange="_setSignalsDaysBack(+this.value)" class="feed-filter-select">' +
+                [7, 30, 90, 365].map(d =>
+                    '<option value="' + d + '"' + (_signalsDaysBack === d ? ' selected' : '') + '>Last ' + (d === 365 ? 'year' : d + ' days') + '</option>'
+                ).join('') +
+            '</select>';
     } else if (tab === 'threads') {
         container.innerHTML =
             '<div class="feed-filter-group">' +
@@ -275,6 +281,12 @@ function _setSigAssignment(value) {
     _sigAssignmentFilter = value;
     _renderFeedFilters('raw');
     renderSignalFeed();
+}
+
+function _setSignalsDaysBack(days) {
+    _signalsDaysBack = days;
+    _renderFeedFilters(_signalTab);
+    loadSignals(); // window change requires a re-fetch, not just a re-render
 }
 
 function _setThreadMomentum(value) {
@@ -364,7 +376,7 @@ function filterSignalDomain(domain) {
 }
 
 function loadSignals() {
-    const params = new URLSearchParams({ days_back: 7, limit: 300 });
+    const params = new URLSearchParams({ days_back: _signalsDaysBack, limit: 300 });
     // Load raw signals, threads, and brainstorms in parallel
     Promise.all([
         fetch('/api/signals?' + params).then(r => r.json()),
@@ -527,9 +539,15 @@ function renderSignalFeed() {
     _updateDomainCounts();
 
     if (!filtered.length) {
+        const windowLabel = _signalsDaysBack === 365 ? 'year' : `${_signalsDaysBack} days`;
+        const widenBtn = (_signalsCache.length === 0 && _signalsDaysBack < 365)
+            ? `<button onclick="_setSignalsDaysBack(${_signalsDaysBack === 7 ? 90 : 365})" style="margin-top:12px;padding:6px 16px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.3);border-radius:8px;color:#3b82f6;font-size:11px;font-weight:600;cursor:pointer">Show last ${_signalsDaysBack === 7 ? '90 days' : 'year'}</button>`
+            : '';
         container.innerHTML = `<div class="signals-empty">
             <div style="font-size:32px;margin-bottom:12px">&#128225;</div>
-            <div>No signals match this filter</div>
+            <div>${_signalsCache.length === 0 ? `No signals collected in the last ${windowLabel}` : 'No signals match this filter'}</div>
+            ${_signalsCache.length === 0 ? '<div style="color:var(--text-muted);font-size:12px;margin-top:6px">Run a scan or widen the time window.</div>' : ''}
+            ${widenBtn}
         </div>`;
         return;
     }
@@ -1220,7 +1238,7 @@ function renderThreadFeed() {
         const domains = _parseDomains(t.domain);
         const domColor = _DOMAIN_COLORS[domains[0]] || '#6b7280';
         const age = t.last_signal_at ? _timeAgo(t.last_signal_at) : _timeAgo(t.created_at);
-        const dormantStyle = lifecycle === 'dormant' ? 'opacity:0.45;' : lifecycle === 'cooling' ? 'opacity:0.7;' : '';
+        const dormantStyle = lifecycle === 'dormant' ? 'opacity:0.72;' : lifecycle === 'cooling' ? 'opacity:0.85;' : '';
         const lifecycleLabel = lifecycle === 'dormant' ? `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px">dormant · ${m.days_since_last || 0}d</span>` :
                                lifecycle === 'cooling' ? `<span style="font-size:9px;color:var(--text-muted);background:var(--bg-tertiary);padding:1px 5px;border-radius:3px">cooling</span>` : '';
 

@@ -20,7 +20,7 @@ def generate_predictions_for_signal(signal_id: int, signal_title: str, signal_bo
     """Generate 2-3 predictions for a signal. Runs in background thread — silent failure."""
     try:
         prompt = build_predictions_prompt(signal_title, signal_body or '', domain or 'general')
-        result = generate_json(prompt, chain=FAST_CHAIN)
+        result = generate_json(prompt, chain=FAST_CHAIN, expect="object", required_keys=["predictions"])
         predictions = result.get('predictions', []) if result else []
 
         today = datetime.date.today()
@@ -115,7 +115,7 @@ def match_signal_to_predictions(signal_id: int, signal_title: str, signal_body: 
                 pred['claim'],
                 pred.get('mechanism', '')
             )
-            result = generate_json(prompt, chain=FAST_CHAIN)
+            result = generate_json(prompt, chain=FAST_CHAIN, expect="object", required_keys=["stance", "weight"])
             if not result:
                 continue
 
@@ -160,7 +160,7 @@ def generate_predictions_for_thread(thread_id: int, thread_title: str, thread_bo
     from prompts.predictions import build_thread_predictions_prompt
     try:
         prompt = build_thread_predictions_prompt(thread_title, thread_body or '')
-        result = generate_json(prompt, chain=FAST_CHAIN)
+        result = generate_json(prompt, chain=FAST_CHAIN, expect="object", required_keys=["predictions"])
         predictions = result.get('predictions', []) if result else []
 
         today = datetime.date.today()

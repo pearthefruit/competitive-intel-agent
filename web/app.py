@@ -627,6 +627,16 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify(dossier)
 
+    @app.route("/api/dossiers/<path:company_name>/reextract-facts", methods=["POST"])
+    def reextract_facts_api(company_name):
+        """Re-run key-fact extraction from saved reports (no re-scraping)."""
+        from agents.llm import reextract_all_key_facts
+        try:
+            summary = reextract_all_key_facts(company_name, db_path=db_path)
+            return jsonify({"ok": True, "summary": summary})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     @app.route("/api/dossiers/<path:company_name>/events", methods=["POST"])
     def create_dossier_event(company_name):
         data = request.json

@@ -551,8 +551,46 @@ def _extract_json(text):
     return None
 
 
-def generate_json(prompt, timeout=60, chain=None):
+def _validate_json_shape(result, expect, required_keys):
+    """Validate/coerce a parsed LLM JSON payload against a lightweight shape spec.
+
+    Returns the (possibly unwrapped) payload, or None if it can't be made to fit.
+    - expect="array": unwraps single-key dict wrappers like {"signals": [...]}
+    - expect="object": unwraps single-element arrays like [{...}]
+    - required_keys: object must contain every listed key
+    """
+    if result is None:
+        return None
+    if expect == "array":
+        if isinstance(result, dict):
+            # Models often wrap arrays: {"items": [...]} / {"signals": [...]}
+            list_values = [v for v in result.values() if isinstance(v, list)]
+            if len(list_values) == 1:
+                result = list_values[0]
+            else:
+                return None
+        if not isinstance(result, list):
+            return None
+    elif expect == "object":
+        if isinstance(result, list) and len(result) == 1 and isinstance(result[0], dict):
+            result = result[0]
+        if not isinstance(result, dict):
+            return None
+    if required_keys and isinstance(result, dict):
+        missing = [k for k in required_keys if k not in result]
+        if missing:
+            print(f"[llm] JSON missing required keys: {missing}")
+            return None
+    return result
+
+
+def generate_json(prompt, timeout=60, chain=None, expect=None, required_keys=None):
     """Generate text and parse as JSON. Retries on parse failure.
+
+    expect: "object" | "array" | None — top-level shape to enforce (with
+    coercion for common model mistakes: wrapped arrays, single-element lists).
+    required_keys: keys the object must contain; a miss counts as a parse
+    failure and triggers the strict retry.
 
     Returns parsed dict/list or None.
     """
@@ -563,26 +601,34 @@ def generate_json(prompt, timeout=60, chain=None):
         print(f"[llm] JSON generation failed — all providers down: {e}")
         return None
 
-    result = _extract_json(text)
+    result = _validate_json_shape(_extract_json(text), expect, required_keys)
     if result is not None:
         return result
 
-    # Parse failed — log and retry with stricter instruction
-    print(f"[llm] {model} returned non-JSON ({len(text)} chars), retrying with stricter prompt...")
+    # Parse/shape failed — log and retry with stricter instruction
+    print(f"[llm] {model} returned non-JSON or wrong shape ({len(text)} chars), retrying with stricter prompt...")
     print(f"[llm] Response preview: {text[:150]}...")
 
+    shape_hint = ""
+    if expect == "array":
+        shape_hint = " The top-level value MUST be a JSON array."
+    elif expect == "object":
+        shape_hint = " The top-level value MUST be a JSON object."
+    if required_keys:
+        shape_hint += f" The object MUST include these keys: {', '.join(required_keys)}."
+
     try:
-        retry_prompt = prompt + "\n\nCRITICAL: Return ONLY valid JSON. No explanation, no markdown fences, no text before or after the JSON object."
+        retry_prompt = prompt + "\n\nCRITICAL: Return ONLY valid JSON. No explanation, no markdown fences, no text before or after the JSON." + shape_hint
         text2, model2 = generate_text(retry_prompt, timeout=timeout, chain=chain, json_mode=True)
     except RuntimeError:
         print(f"[llm] Retry also failed — all providers exhausted")
         return None
 
-    result = _extract_json(text2)
+    result = _validate_json_shape(_extract_json(text2), expect, required_keys)
     if result is not None:
         return result
 
-    print(f"[llm] Retry from {model2} also non-JSON: {text2[:150]}...")
+    print(f"[llm] Retry from {model2} also non-JSON/wrong shape: {text2[:150]}...")
     return None
 
 
@@ -934,7 +980,7 @@ def extract_key_facts(company, report_text, analysis_type=None):
 
     prompt_template = _TYPE_KEY_FACTS_PROMPTS.get(analysis_type, _KEY_FACTS_PROMPT)
     prompt = prompt_template.format(company=company, report_text=report_text)
-    facts = generate_json(prompt, timeout=30, chain=CHEAP_CHAIN)
+    facts = generate_json(prompt, timeout=30, chain=CHEAP_CHAIN, expect="object")
 
     if isinstance(facts, dict):
         # Clean out null values
@@ -1178,8 +1224,20 @@ def save_to_dossier(company, analysis_type, report_file=None, report_text=None,
                 facts_detail = '\n'.join(f'• {k}: {str(v)[:100]}' for k, v in list(new_facts.items())[:12])
                 _cb('source_done', {'source': 'extract', 'status': 'done', 'summary': f'{len(new_facts)} facts: {", ".join(list(new_facts.keys())[:5])}', 'detail': facts_detail})
             else:
-                print("[dossier] No key facts extracted")
-                _cb('source_done', {'source': 'extract', 'status': 'skipped', 'summary': 'No facts extracted'})
+                # Extraction failure is a real defect state (providers down or bad
+                # LLM output) — record it durably so the UI can flag + offer retry.
+                print(f"[dossier] KEY FACTS EXTRACTION FAILED for {company}/{analysis_type} — analysis saved without facts")
+                _cb('source_done', {'source': 'extract', 'status': 'error', 'summary': 'Key facts extraction FAILED — retry from dossier view'})
+                try:
+                    add_dossier_event(
+                        conn, dossier_id,
+                        event_type="extraction_failed",
+                        title=f"Key facts extraction failed ({analysis_type})",
+                        description="LLM extraction returned nothing — providers may be down. Use Re-extract facts on the dossier.",
+                        event_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                    )
+                except Exception:
+                    pass
 
         # Detect changes vs. previous analysis
         if new_facts:

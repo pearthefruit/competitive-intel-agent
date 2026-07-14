@@ -287,12 +287,12 @@ def discover_prospects(niche, top_n=15, db_path="intel.db", context=None, progre
 
     search_text = format_search_results(unique)
     prompt = build_discovery_prompt(niche, search_text, context=context, top_n=top_n)
-    companies = generate_json(prompt, timeout=60)
+    companies = generate_json(prompt, timeout=60, expect="array")
 
     if not isinstance(companies, list):
         print("[discover] LLM did not return a valid list. Retrying...")
         _cb("extracting", {"text": "Retrying extraction..."})
-        companies = generate_json(prompt, timeout=60)
+        companies = generate_json(prompt, timeout=60, expect="array")
         if not isinstance(companies, list):
             print("[discover] Failed to extract companies from search results.")
             return []
@@ -522,12 +522,12 @@ def discover_similar(seed_company, top_n=10, db_path="intel.db", progress_cb=Non
 
     search_text = format_search_results(unique)
     prompt = build_similar_discovery_prompt(seed_company, search_text, profile=profile, top_n=top_n)
-    companies = generate_json(prompt, timeout=60)
+    companies = generate_json(prompt, timeout=60, expect="array")
 
     if not isinstance(companies, list):
         print("[discover_similar] LLM did not return a valid list. Retrying...")
         _cb("extracting", {"text": "Retrying extraction..."})
-        companies = generate_json(prompt, timeout=60)
+        companies = generate_json(prompt, timeout=60, expect="array")
         if not isinstance(companies, list):
             print("[discover_similar] Failed to extract companies from search results.")
             return []

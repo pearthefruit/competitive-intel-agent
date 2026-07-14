@@ -334,7 +334,7 @@
                     <div style="margin-top:10px;padding:10px 12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18);border-radius:8px">
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
                             <span style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.05em">Predictions</span>
-                            <span onclick="typeof switchSignalTab === 'function' && switchSignalTab('predictions')" style="font-size:10px;color:#3b82f6;cursor:pointer;font-weight:600">View all &rarr;</span>
+                            <span onclick="openPredictionsOverlay()" style="font-size:10px;color:#3b82f6;cursor:pointer;font-weight:600">View all &rarr;</span>
                         </div>
                         ${items}
                     </div>`;
@@ -342,6 +342,47 @@
             .catch(err => {
                 console.warn('[predictions ribbon] fetch error:', err);
             });
+    };
+
+    // ══════════════════════════════════════════════════════════════════════
+    // Predictions Overlay — full list surface (replaces the removed tab).
+    // Reparents the live #predictions-list into a modal so loadPredictions()
+    // and all its handlers keep working unchanged.
+    // ══════════════════════════════════════════════════════════════════════
+
+    window.openPredictionsOverlay = function () {
+        const list = document.getElementById('predictions-list');
+        if (!list || document.querySelector('.predictions-overlay')) return;
+
+        const overlay = document.createElement('div');
+        overlay.className = 'niche-builder-overlay predictions-overlay';
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) closePredictionsOverlay(); });
+        overlay.innerHTML = `<div class="niche-builder-modal" style="max-width:680px;width:90%;max-height:82vh;display:flex;flex-direction:column">
+            <div class="niche-builder-header">
+                <h2>Predictions</h2>
+                <button class="icp-wizard-close" onclick="closePredictionsOverlay()">&times;</button>
+            </div>
+            <div id="predictions-overlay-body" style="padding:12px 20px;overflow-y:auto;flex:1"></div>
+        </div>`;
+        document.body.appendChild(overlay);
+
+        list._homeParent = list.parentElement;
+        document.getElementById('predictions-overlay-body').appendChild(list);
+        loadPredictions();
+
+        const esc = (e) => { if (e.key === 'Escape') closePredictionsOverlay(); };
+        document.addEventListener('keydown', esc);
+        overlay._esc = esc;
+    };
+
+    window.closePredictionsOverlay = function () {
+        const overlay = document.querySelector('.predictions-overlay');
+        const list = document.getElementById('predictions-list');
+        if (list && list._homeParent) { list._homeParent.appendChild(list); list._homeParent = null; }
+        if (overlay) {
+            if (overlay._esc) document.removeEventListener('keydown', overlay._esc);
+            overlay.remove();
+        }
     };
 
     // ── Per-signal prediction trigger ──────────────────────────────────────
@@ -583,7 +624,10 @@
             const sp = STATUS_PILL[p.status] || STATUS_PILL.open;
             const date = p.expected_by ? _formatDate(p.expected_by) : '';
             const claimTrunc = p.claim && p.claim.length > 55 ? p.claim.substring(0, 53) + '…' : (p.claim || '');
-            return `<div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06);cursor:default" title="${_escHtml(p.claim)}">
+            return `<div class="board-pred-row" data-parent-kind="${_escHtml(p.parent_kind || '')}" data-parent-id="${p.parent_id || ''}"
+                         style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06);cursor:pointer;border-radius:4px"
+                         title="${_escHtml(p.claim)} — click to open the ${_escHtml(p.parent_kind || 'source')}"
+                         onmouseenter="this.style.background='rgba(59,130,246,0.08)'" onmouseleave="this.style.background=''">
                 <div style="display:flex;align-items:center;gap:5px">
                     <span style="color:${sp.dot};font-size:8px;flex-shrink:0">&#9679;</span>
                     <span style="font-size:10px;color:#d1d5db;flex:1;line-height:1.3">${_escHtml(claimTrunc)}</span>
@@ -599,8 +643,19 @@
             </div>
             ${rows}
             <div style="margin-top:8px;text-align:right">
-                <span onclick="switchSignalTab('predictions')" style="font-size:10px;color:#3b82f6;cursor:pointer;font-weight:600">All predictions &rarr;</span>
+                <span onclick="openPredictionsOverlay()" style="font-size:10px;color:#3b82f6;cursor:pointer;font-weight:600">All predictions &rarr;</span>
             </div>`;
+
+        // Row click → open the parent signal/thread detail (event delegation)
+        panel.addEventListener('click', (e) => {
+            const row = e.target.closest('.board-pred-row');
+            if (!row) return;
+            const kind = row.dataset.parentKind;
+            const id = parseInt(row.dataset.parentId, 10);
+            if (!id) return;
+            if (kind === 'thread' && typeof openThreadDetail === 'function') openThreadDetail(id);
+            else if (kind === 'signal' && typeof openSignalDetail === 'function') openSignalDetail(id);
+        });
 
         container.style.position = 'relative'; // ensure absolute children are positioned correctly
         container.appendChild(panel);

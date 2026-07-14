@@ -250,11 +250,11 @@ def score_with_lens(company_name, lens_id, db_path="intel.db", website_url=None,
     prompt = build_lens_scoring_prompt(company_name, config, reports, website_url)
 
     print(f"[lens] Generating {lens_name} score for {company_name}...")
-    score_data = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN)
+    score_data = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN, expect="object", required_keys=["sub_scores"])
 
     if not isinstance(score_data, dict) or "sub_scores" not in score_data:
         print(f"[lens] Invalid LLM response. Retrying...")
-        score_data = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN)
+        score_data = generate_json(prompt, timeout=90, chain=BRIEFING_CHAIN, expect="object", required_keys=["sub_scores"])
         if not isinstance(score_data, dict) or "sub_scores" not in score_data:
             print(f"[lens] Failed to generate score for {company_name}")
             return None
