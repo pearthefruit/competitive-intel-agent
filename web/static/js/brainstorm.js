@@ -1247,16 +1247,24 @@ function closeSignalDetail() {
         if (detailPane) detailPane.style.display = 'none';
     } else {
         // Feed views: reset to empty state (keep pane visible)
+        const isPred = _signalTab === 'predictions';
+        const emptyMain = isPred ? 'Select a prediction to view details' : 'Select a thread to view details';
+        const emptySub = isPred ? 'Click any prediction in the list.' : 'Click any thread in the feed or graph.';
         if (detailBody) detailBody.innerHTML = `
             <div class="signals-empty" id="signals-detail-empty" style="display:flex">
                 <div style="font-size:32px;margin-bottom:12px">&#128270;</div>
-                <div>Select a thread to view details</div>
-                <div style="color:var(--text-muted);font-size:12px;margin-top:6px">Click any thread in the feed or graph.</div>
+                <div>${emptyMain}</div>
+                <div style="color:var(--text-muted);font-size:12px;margin-top:6px">${emptySub}</div>
             </div>`;
     }
     if (closeBtn) closeBtn.style.display = 'none';
-    // Clear board predictions panel when detail pane closes (Phase 4 — Surface 3)
-    if (typeof _clearBoardPredPanel === 'function') _clearBoardPredPanel();
+    // On the board, closing the detail pane returns the predictions panel to
+    // "all" (persist) rather than clearing it; elsewhere clear it.
+    if (_signalTab === 'graph' && typeof _boardPredShowAll === 'function') {
+        _boardPredShowAll();
+    } else if (typeof _clearBoardPredPanel === 'function') {
+        _clearBoardPredPanel();
+    }
 }
 
 // Structured execution data (persists for "View Last Execution" button)

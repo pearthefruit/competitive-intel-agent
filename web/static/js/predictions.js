@@ -74,7 +74,10 @@
             .then(data => {
                 if (data.error) { _showPredictionToast('Error: ' + data.error, true); return; }
                 _showPredictionToast(`Prediction marked as ${status}.`);
-                loadPredictions();
+                // Refresh whichever surfaces are showing this prediction
+                if (document.getElementById('predictions-list')) loadPredictions();
+                if (_activePredictionId === id && typeof openPredictionDetail === 'function') openPredictionDetail(id);
+                if (typeof _overlayPredictionsOnBoard === 'function' && document.getElementById('sig-graph-container')) _overlayPredictionsOnBoard();
             })
             .catch(err => {
                 console.error('[predictions] resolve error:', err);
@@ -238,8 +241,10 @@
                 <span style="margin-left:auto;font-size:10px;color:#6b7280">Due ${expectedBy}</span>
                 <span style="font-size:11px" title="Confidence">${confidence}</span>
             </div>
-            <!-- Claim -->
-            <div style="font-size:12px;color:#e5e7eb;line-height:1.55;font-weight:500;margin-bottom:6px">${_escHtml(p.claim)}</div>
+            <!-- Claim (click opens full detail in the right pane) -->
+            <div onclick="openPredictionDetail(${p.id})" title="Open prediction detail"
+                 style="font-size:12px;color:#e5e7eb;line-height:1.55;font-weight:500;margin-bottom:6px;cursor:pointer"
+                 onmouseenter="this.style.color='#fff'" onmouseleave="this.style.color='#e5e7eb'">${_escHtml(p.claim)}</div>
             <!-- Mechanism -->
             ${p.mechanism ? `<div style="font-size:11px;color:#9ca3af;line-height:1.5;margin-bottom:4px"><span style="color:#6b7280;font-weight:600">Why: </span>${_escHtml(p.mechanism)}</div>` : ''}
             <!-- Falsifier -->
@@ -377,9 +382,10 @@
                     const sp = STATUS_PILL[p.status] || STATUS_PILL.open;
                     const date = p.expected_by ? _formatDate(p.expected_by) : '';
                     const claimTrunc = p.claim && p.claim.length > 80 ? p.claim.substring(0, 78) + '…' : (p.claim || '');
-                    return `<div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+                    return `<div onclick="openPredictionDetail(${p.id})" style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;border-radius:4px"
+                                 onmouseenter="this.style.background='rgba(59,130,246,0.08)'" onmouseleave="this.style.background=''" title="${_escHtml(p.claim)} — open detail">
                         <span style="color:${sp.dot};font-size:9px;flex-shrink:0">&#9679;</span>
-                        <span style="font-size:11px;color:#d1d5db;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_escHtml(p.claim)}">${_escHtml(claimTrunc)}</span>
+                        <span style="font-size:11px;color:#d1d5db;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_escHtml(claimTrunc)}</span>
                         ${date ? `<span style="font-size:10px;color:#6b7280;white-space:nowrap;flex-shrink:0">${date}</span>` : ''}
                     </div>`;
                 }).join('');
@@ -398,45 +404,140 @@
             });
     };
 
-    // ══════════════════════════════════════════════════════════════════════
-    // Predictions Overlay — full list surface (replaces the removed tab).
-    // Reparents the live #predictions-list into a modal so loadPredictions()
-    // and all its handlers keep working unchanged.
-    // ══════════════════════════════════════════════════════════════════════
-
+    // "View all" now routes to the Predictions tab (the real destination).
+    // Kept as named functions so existing callers keep working.
     window.openPredictionsOverlay = function () {
-        const list = document.getElementById('predictions-list');
-        if (!list || document.querySelector('.predictions-overlay')) return;
+        if (typeof switchModule === 'function') switchModule('signals');
+        if (typeof switchSignalTab === 'function') switchSignalTab('predictions');
+    };
+    window.closePredictionsOverlay = function () { /* no-op: tab-based now */ };
 
-        const overlay = document.createElement('div');
-        overlay.className = 'niche-builder-overlay predictions-overlay';
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) closePredictionsOverlay(); });
-        overlay.innerHTML = `<div class="niche-builder-modal" style="max-width:680px;width:90%;max-height:82vh;display:flex;flex-direction:column">
-            <div class="niche-builder-header">
-                <h2>Predictions</h2>
-                <button class="icp-wizard-close" onclick="closePredictionsOverlay()">&times;</button>
-            </div>
-            <div id="predictions-overlay-body" style="padding:12px 20px;overflow-y:auto;flex:1"></div>
-        </div>`;
-        document.body.appendChild(overlay);
+    // ══════════════════════════════════════════════════════════════════════
+    // Prediction Detail — shared right pane
+    // Opened by clicking a prediction anywhere (list card, board panel row,
+    // timeline dot, ribbon). Shows the claim + full fields, the source it was
+    // generated from, and the evidence signals — then resolve actions.
+    // ══════════════════════════════════════════════════════════════════════
 
-        list._homeParent = list.parentElement;
-        document.getElementById('predictions-overlay-body').appendChild(list);
-        loadPredictions();
+    let _activePredictionId = null;
 
-        const esc = (e) => { if (e.key === 'Escape') closePredictionsOverlay(); };
-        document.addEventListener('keydown', esc);
-        overlay._esc = esc;
+    window.openPredictionDetail = function (predId) {
+        _activePredictionId = predId;
+        const detailBody = (typeof _showDetailPane === 'function')
+            ? _showDetailPane('Prediction Detail')
+            : document.getElementById('signals-detail-body');
+        if (!detailBody) return;
+        detailBody.innerHTML = `<div style="padding:24px;color:#6b7280;font-size:12px">Loading prediction…</div>`;
+
+        fetch(`/api/predictions/${predId}`)
+            .then(r => r.json())
+            .then(json => {
+                if (_activePredictionId !== predId) return; // superseded
+                if (!json.prediction) { detailBody.innerHTML = `<div style="padding:24px;color:#ef4444;font-size:12px">Prediction not found.</div>`; return; }
+                detailBody.innerHTML = _renderPredictionDetail(json.prediction, json.evidence || []);
+            })
+            .catch(() => {
+                detailBody.innerHTML = `<div style="padding:24px;color:#ef4444;font-size:12px">Failed to load prediction.</div>`;
+            });
     };
 
-    window.closePredictionsOverlay = function () {
-        const overlay = document.querySelector('.predictions-overlay');
-        const list = document.getElementById('predictions-list');
-        if (list && list._homeParent) { list._homeParent.appendChild(list); list._homeParent = null; }
-        if (overlay) {
-            if (overlay._esc) document.removeEventListener('keydown', overlay._esc);
-            overlay.remove();
+    function _renderPredictionDetail(p, evidence) {
+        const sp = STATUS_PILL[p.status] || STATUS_PILL.open;
+        const ip = INDICATOR_PILL[p.indicator_type] || INDICATOR_PILL.leading;
+        const isOpen = p.status === 'open';
+        const expectedBy = p.expected_by ? _formatDate(p.expected_by) : '—';
+
+        const overduePill = p.overdue
+            ? `<span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3)">Overdue</span>` : '';
+
+        // Source (generated-from) block
+        const sourceBlock = p.parent_id ? `
+            <div style="margin-top:16px">
+                <div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Generated from</div>
+                <div onclick="_openPredictionParent('${_escHtml(p.parent_kind || 'signal')}', ${p.parent_id})"
+                     style="padding:8px 10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;cursor:pointer;display:flex;align-items:center;gap:8px"
+                     onmouseenter="this.style.background='rgba(59,130,246,0.08)'" onmouseleave="this.style.background='rgba(255,255,255,0.03)'">
+                    <span style="font-size:9px;color:#6b7280;text-transform:uppercase;flex-shrink:0">${_escHtml(p.parent_kind || 'signal')}</span>
+                    <span style="font-size:12px;color:#d1d5db;flex:1">${_escHtml(p.parent_title || '(source ' + p.parent_id + ')')}</span>
+                    <span style="color:#3b82f6;font-size:12px">&rarr;</span>
+                </div>
+            </div>` : '';
+
+        // Evidence block
+        let evidenceBlock = '';
+        if (evidence.length) {
+            const rows = evidence.map(e => {
+                const col = e.stance === 'supports' ? '#22c55e' : e.stance === 'refutes' ? '#ef4444' : '#f59e0b';
+                return `<div onclick="_openPredictionEvidenceSignal(${e.signal_id})"
+                             style="padding:7px 10px;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;display:flex;gap:8px;align-items:baseline"
+                             onmouseenter="this.style.background='rgba(255,255,255,0.03)'" onmouseleave="this.style.background=''">
+                    <span style="color:${col};font-size:10px;font-weight:600;min-width:54px;text-transform:capitalize">${_escHtml(e.stance)}</span>
+                    <span style="color:#d1d5db;font-size:12px;flex:1">${_escHtml(e.title || '')}</span>
+                    <span style="color:#6b7280;font-size:10px">${Math.round((e.weight || 0) * 100)}%</span>
+                </div>${e.note ? `<div style="font-size:10px;color:#6b7280;font-style:italic;padding:0 10px 6px 64px">${_escHtml(e.note)}</div>` : ''}`;
+            }).join('');
+            evidenceBlock = `
+                <div style="margin-top:16px">
+                    <div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+                        Evidence signals (${evidence.length})
+                    </div>
+                    <div style="border:1px solid rgba(255,255,255,0.08);border-radius:8px;overflow:hidden">${rows}</div>
+                </div>`;
+        } else {
+            evidenceBlock = `
+                <div style="margin-top:16px">
+                    <div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Evidence signals</div>
+                    <div style="font-size:11px;color:#6b7280;padding:10px;background:rgba(255,255,255,0.02);border-radius:8px">No signals matched to this prediction yet. New signals are checked against open predictions on capture.</div>
+                </div>`;
         }
+
+        const sug = p.suggested_resolution;
+        const suggestBanner = sug ? `
+            <div style="margin-top:14px;padding:8px 10px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;
+                        background:${sug === 'confirmed' ? 'rgba(22,163,74,0.08)' : 'rgba(239,68,68,0.08)'};
+                        border:1px solid ${sug === 'confirmed' ? 'rgba(22,163,74,0.3)' : 'rgba(239,68,68,0.3)'}">
+                <span style="font-size:11px;color:${sug === 'confirmed' ? '#16a34a' : '#ef4444'}">
+                    ${sug === 'confirmed' ? `${p.supports_count} supporting signals — suggested: <strong>Confirm</strong>` : `${p.refutes_count} refuting signals — suggested: <strong>Refute</strong>`}
+                </span>
+                <button onclick="resolvePrediction(${p.id},'${sug}')" style="padding:4px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;background:${sug === 'confirmed' ? 'rgba(22,163,74,0.18)' : 'rgba(239,68,68,0.18)'};border:1px solid ${sug === 'confirmed' ? 'rgba(22,163,74,0.4)' : 'rgba(239,68,68,0.4)'};color:${sug === 'confirmed' ? '#16a34a' : '#ef4444'}">Apply</button>
+            </div>` : '';
+
+        const actionBtns = isOpen ? `
+            <div style="display:flex;gap:6px;margin-top:16px">
+                <button onclick="resolvePrediction(${p.id},'confirmed')" style="flex:1;padding:7px 0;background:rgba(22,163,74,0.12);border:1px solid rgba(22,163,74,0.3);border-radius:6px;color:#16a34a;font-size:12px;font-weight:600;cursor:pointer">&#10003; Confirm</button>
+                <button onclick="resolvePrediction(${p.id},'refuted')" style="flex:1;padding:7px 0;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);border-radius:6px;color:#ef4444;font-size:12px;font-weight:600;cursor:pointer">&#10007; Refute</button>
+                <button onclick="resolvePrediction(${p.id},'dismissed')" style="flex:1;padding:7px 0;background:rgba(107,114,128,0.1);border:1px solid rgba(107,114,128,0.3);border-radius:6px;color:#6b7280;font-size:12px;font-weight:600;cursor:pointer">&mdash; Dismiss</button>
+            </div>` : '';
+
+        const resolvedNote = (!isOpen && p.resolution_note)
+            ? `<div style="margin-top:12px;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:6px;font-size:11px;color:#9ca3af;font-style:italic">"${_escHtml(p.resolution_note)}"</div>` : '';
+
+        return `
+        <div style="padding:16px 20px">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+                <span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:.04em;background:${sp.bg};color:${sp.color};border:1px solid ${sp.border}">${sp.label}</span>
+                ${overduePill}
+                <span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:${ip.bg};color:${ip.color}">${ip.label}</span>
+                <span style="margin-left:auto;font-size:11px;color:#6b7280">Due ${expectedBy}</span>
+                <span style="font-size:11px">${_renderConfidence(p.confidence || 3)}</span>
+            </div>
+            <div style="font-size:14px;color:#e5e7eb;line-height:1.55;font-weight:500;margin-bottom:12px">${_escHtml(p.claim)}</div>
+            ${p.mechanism ? `<div style="font-size:12px;color:#9ca3af;line-height:1.55;margin-bottom:8px"><span style="color:#6b7280;font-weight:600">Why: </span>${_escHtml(p.mechanism)}</div>` : ''}
+            ${p.falsifier ? `<div style="font-size:12px;color:#9ca3af;line-height:1.55"><span style="color:#6b7280;font-weight:600">Falsifier: </span>${_escHtml(p.falsifier)}</div>` : ''}
+            ${suggestBanner}
+            ${actionBtns}
+            ${resolvedNote}
+            ${sourceBlock}
+            ${evidenceBlock}
+        </div>`;
+    }
+
+    // Open an evidence signal in the shared pane, then restore focus context.
+    window._openPredictionEvidenceSignal = function (signalId) {
+        if (typeof switchSignalTab === 'function' && typeof _signalTab !== 'undefined' && _signalTab !== 'raw' && _signalTab !== 'graph') {
+            switchSignalTab('raw');
+        }
+        if (typeof openSignalDetail === 'function') openSignalDetail(signalId);
     };
 
     // ── Per-signal prediction trigger ──────────────────────────────────────
@@ -567,10 +668,7 @@
             const sp = STATUS_PILL[p.status] || STATUS_PILL.open;
             const topPx = p.row * rowHeight + 4;
             const claimTrunc = p.claim && p.claim.length > 40 ? p.claim.substring(0, 38) + '…' : (p.claim || '');
-            const clickAttr = p.parent_id
-                ? `onclick="_openPredictionParent('${_escHtml(p.parent_kind || 'signal')}', ${p.parent_id})"`
-                : '';
-            return `<div ${clickAttr} style="position:absolute;left:${p.pct.toFixed(1)}%;top:${topPx}px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;z-index:2;cursor:${p.parent_id ? 'pointer' : 'default'}"
+            return `<div onclick="openPredictionDetail(${p.id})" style="position:absolute;left:${p.pct.toFixed(1)}%;top:${topPx}px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;z-index:2;cursor:pointer"
                          title="${_escHtml(p.claim)} — ${_formatDate(p.expected_by)}${p.parent_title ? ' (from: ' + _escHtml(p.parent_title) + ')' : ''}">
                 <div style="width:9px;height:9px;border-radius:50%;background:${sp.dot};box-shadow:0 0 5px ${sp.dot}55;flex-shrink:0"></div>
                 ${showLabels ? `<span style="font-size:8px;color:#9ca3af;white-space:nowrap;max-width:${_tlZoom >= 3 ? 130 : 90}px;overflow:hidden;text-overflow:ellipsis;margin-top:2px;text-align:center">${_escHtml(claimTrunc)}</span>` : ''}
@@ -672,47 +770,34 @@
         // Remove existing panel
         if (_boardPredPanel) { _boardPredPanel.remove(); _boardPredPanel = null; }
 
-        // Filter: if threadId given, show only thread-level predictions for that thread
-        // otherwise show all open predictions for all threads
-        let preds;
-        if (threadId != null) {
-            preds = allPreds.filter(p => p.parent_kind === 'thread' && p.parent_id === threadId);
-        } else {
-            preds = allPreds.filter(p => p.status === 'open').slice(0, 8);
-        }
-
-        if (!preds.length) return; // nothing to show — keep board clean
+        // Filter: if threadId given, show only thread-level predictions for that
+        // thread; otherwise show all open predictions.
+        const filtered = threadId != null
+            ? allPreds.filter(p => p.parent_kind === 'thread' && p.parent_id === threadId)
+            : allPreds.filter(p => p.status === 'open').slice(0, 8);
 
         const panel = document.createElement('div');
         panel.id = 'board-pred-panel';
         _boardPredPanel = panel;
         panel.style.cssText = [
-            'position:absolute',
-            'bottom:16px',
-            'right:16px',
-            'width:220px',
-            'background:rgba(10,10,10,0.92)',
-            'border:1px solid rgba(59,130,246,0.3)',
-            'border-radius:10px',
-            'padding:10px 12px',
-            'z-index:20',
-            'pointer-events:all',
-            'box-shadow:0 4px 20px rgba(0,0,0,0.6)',
-            'max-height:280px',
-            'overflow-y:auto',
+            'position:absolute', 'bottom:16px', 'right:16px', 'width:230px',
+            'background:rgba(10,10,10,0.92)', 'border:1px solid rgba(59,130,246,0.3)',
+            'border-radius:10px', 'padding:10px 12px', 'z-index:20', 'pointer-events:all',
+            'box-shadow:0 4px 20px rgba(0,0,0,0.6)', 'max-height:300px', 'overflow-y:auto',
         ].join(';');
 
-        const title = threadId != null
-            ? `Predictions for thread`
-            : `Open predictions (${preds.length})`;
+        const title = threadId != null ? 'Predictions for thread' : `Open predictions (${filtered.length})`;
+        const backToAll = threadId != null
+            ? `<span onclick="_boardPredShowAll()" title="Show all open predictions" style="font-size:9px;color:#3b82f6;cursor:pointer;font-weight:600">&larr; All</span>`
+            : '';
 
-        const rows = preds.map(p => {
+        const rows = filtered.length ? filtered.map(p => {
             const sp = STATUS_PILL[p.status] || STATUS_PILL.open;
             const date = p.expected_by ? _formatDate(p.expected_by) : '';
             const claimTrunc = p.claim && p.claim.length > 55 ? p.claim.substring(0, 53) + '…' : (p.claim || '');
-            return `<div class="board-pred-row" data-parent-kind="${_escHtml(p.parent_kind || '')}" data-parent-id="${p.parent_id || ''}"
+            return `<div class="board-pred-row" data-pred-id="${p.id}"
                          style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06);cursor:pointer;border-radius:4px"
-                         title="${_escHtml(p.claim)} — click to open the ${_escHtml(p.parent_kind || 'source')}"
+                         title="${_escHtml(p.claim)} — open prediction detail"
                          onmouseenter="this.style.background='rgba(59,130,246,0.08)'" onmouseleave="this.style.background=''">
                 <div style="display:flex;align-items:center;gap:5px">
                     <span style="color:${sp.dot};font-size:8px;flex-shrink:0">&#9679;</span>
@@ -720,27 +805,27 @@
                 </div>
                 <div style="font-size:9px;color:#6b7280;margin-top:2px;padding-left:13px">${date ? `Due ${date}` : ''}${p.parent_title ? `${date ? ' · ' : ''}from: ${_escHtml(p.parent_title.length > 40 ? p.parent_title.substring(0, 38) + '…' : p.parent_title)}` : ''}</div>
             </div>`;
-        }).join('');
+        }).join('')
+        : `<div style="font-size:10px;color:#6b7280;padding:8px 0;line-height:1.4">${threadId != null ? 'No predictions for this thread yet.' : 'No open predictions.'}</div>`;
 
         panel.innerHTML = `
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px">
                 <span style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.05em">&#128302; ${_escHtml(title)}</span>
-                <span onclick="this.closest('#board-pred-panel').remove()" style="font-size:12px;color:#6b7280;cursor:pointer;line-height:1">&times;</span>
+                <span style="display:flex;align-items:center;gap:8px">${backToAll}
+                    <span onclick="_clearBoardPredPanel()" title="Hide panel" style="font-size:12px;color:#6b7280;cursor:pointer;line-height:1">&times;</span>
+                </span>
             </div>
             ${rows}
             <div style="margin-top:8px;text-align:right">
                 <span onclick="openPredictionsOverlay()" style="font-size:10px;color:#3b82f6;cursor:pointer;font-weight:600">All predictions &rarr;</span>
             </div>`;
 
-        // Row click → open the parent signal/thread detail (event delegation)
+        // Row click → open prediction detail in the shared pane (event delegation)
         panel.addEventListener('click', (e) => {
             const row = e.target.closest('.board-pred-row');
             if (!row) return;
-            const kind = row.dataset.parentKind;
-            const id = parseInt(row.dataset.parentId, 10);
-            if (!id) return;
-            if (kind === 'thread' && typeof openThreadDetail === 'function') openThreadDetail(id);
-            else if (kind === 'signal' && typeof openSignalDetail === 'function') openSignalDetail(id);
+            const id = parseInt(row.dataset.predId, 10);
+            if (id && typeof openPredictionDetail === 'function') openPredictionDetail(id);
         });
 
         container.style.position = 'relative'; // ensure absolute children are positioned correctly
@@ -750,16 +835,19 @@
     /**
      * Update the board panel to show predictions for a specific thread.
      * Called from openThreadDetail() when on the board tab.
-     * @param {number} threadId
      */
     window._updateBoardPredPanelForThread = function (threadId) {
         if (!_boardPredData.length) return; // overlay not yet loaded — skip
         _renderBoardPredPanel(_boardPredData, threadId);
     };
 
-    /**
-     * Clear the board predictions panel (called when detail pane closes).
-     */
+    /** Reset the board panel to show all open predictions (persist, don't hide). */
+    window._boardPredShowAll = function () {
+        if (!_boardPredData.length) return;
+        _renderBoardPredPanel(_boardPredData, null);
+    };
+
+    /** Explicitly hide the board predictions panel (× button). */
     window._clearBoardPredPanel = function () {
         if (_boardPredPanel) { _boardPredPanel.remove(); _boardPredPanel = null; }
     };

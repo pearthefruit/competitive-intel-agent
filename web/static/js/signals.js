@@ -341,9 +341,10 @@ function switchSignalTab(tab) {
         if (searchInput) searchInput.placeholder = `Filter ${(_TAB_TITLES[tab] || 'signals').toLowerCase()}…`;
     }
     _renderFeedFilters(tab);
-    // Toggle shared detail pane — raw, graph, causal, feed-sources, predictions have no shared detail
+    // Toggle shared detail pane — raw, graph, causal, feed-sources have no shared detail.
+    // Predictions uses it (prediction detail opens there), like threads/narratives.
     const sharedDetail = document.getElementById('signals-detail');
-    if (tab === 'raw' || tab === 'graph' || tab === 'causal' || tab === 'feed-sources' || tab === 'predictions') {
+    if (tab === 'raw' || tab === 'graph' || tab === 'causal' || tab === 'feed-sources') {
         if (sharedDetail) sharedDetail.style.display = 'none';
     } else {
         if (sharedDetail) sharedDetail.style.display = '';
@@ -1267,7 +1268,22 @@ function renderThreadFeed() {
 function openSignalDetail(signalId) {
     // Match by loose equality to handle string/int mismatch from dataset
     const s = _signalsCache.find(x => x.id == signalId);
-    if (!s) { console.warn('[signals] Signal not found in cache:', signalId); return; }
+    if (!s) {
+        // Signal is outside the loaded feed window (e.g. a prediction's source
+        // or evidence signal). Fetch it, add to cache, then re-render.
+        fetch(`/api/signals/${signalId}`)
+            .then(r => r.json())
+            .then(json => {
+                if (json.signal) {
+                    if (!_signalsCache.find(x => x.id == json.signal.id)) _signalsCache.push(json.signal);
+                    openSignalDetail(signalId);
+                } else {
+                    _showToast('Signal not found', 'error');
+                }
+            })
+            .catch(() => _showToast('Failed to load signal', 'error'));
+        return;
+    }
     _activeSignalId = s.id;
     ++_detailRequestId; // cancel any pending thread detail fetches
 

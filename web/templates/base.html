@@ -505,9 +505,10 @@
                     <button class="sig-feed-tab" data-tab="causal" onclick="switchSignalTab('causal')">Chains</button>
                     <button class="sig-feed-tab" data-tab="narratives" onclick="switchSignalTab('narratives')">Narratives</button>
                     <button class="sig-feed-tab" data-tab="graph" onclick="switchSignalTab('graph')">Board</button>
+                    <button class="sig-feed-tab" data-tab="predictions" onclick="switchSignalTab('predictions')">Predictions</button>
                     <button class="sig-feed-tab" data-tab="execution" onclick="switchSignalTab('execution')">Execution</button>
                     <button class="sig-feed-tab" data-tab="feed-sources" onclick="switchSignalTab('feed-sources')">Feed Sources</button>
-                    <!-- Predictions tab removed 2026-05-29 (feature non-functional; content div + predictions.js + detail-pane ribbons left intact for future revival as a ribbon surface) -->
+                    <!-- Predictions tab revived 2026-07-19 (engine now functional; renders #predictions-list inline, detail opens in shared right pane) -->
                 </div>
             </div>
             <div id="signals-filter-bar" style="padding:6px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">

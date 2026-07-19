@@ -2256,6 +2256,26 @@ def create_app(db_path="intel.db"):
         conn.close()
         return jsonify({"signals": signals})
 
+    @app.route("/api/signals/<int:sig_id>", methods=["GET"])
+    def get_single_signal_api(sig_id):
+        """Fetch one signal by id (with thread_info), regardless of time window.
+
+        Lets detail views open signals older than the loaded feed window
+        (e.g. a prediction's source or evidence signal).
+        """
+        conn = get_connection(db_path)
+        thread_sub = """(SELECT GROUP_CONCAT(sc.id || '::' || REPLACE(sc.title, '|||', ''), '|||')
+            FROM signal_cluster_items sci
+            JOIN signal_clusters sc ON sc.id = sci.cluster_id
+            WHERE sci.signal_id = s.id) AS thread_info"""
+        row = conn.execute(
+            f"SELECT s.*, {thread_sub} FROM signals s WHERE s.id = ?", (sig_id,)
+        ).fetchone()
+        conn.close()
+        if not row:
+            return jsonify({"error": "Signal not found"}), 404
+        return jsonify({"signal": dict(row)})
+
     @app.route("/api/signals/<int:sig_id>/scrape", methods=["POST"])
     def signals_scrape_api(sig_id):
         """Scrape full article text for a specific signal and update DB."""
@@ -3652,6 +3672,51 @@ Return JSON: {{"title": "New directional title"}}"""
         rows = conn.execute(query, params).fetchall()
         conn.close()
         return jsonify({'data': [_annotate(r) for r in rows]})
+
+    @app.route("/api/predictions/<int:pred_id>", methods=["GET"])
+    def get_prediction_detail(pred_id):
+        """Full prediction detail: fields + parent (source) + evidence signals."""
+        conn = get_connection(db_path)
+        row = conn.execute("""
+            SELECT p.*,
+                   COALESCE(s.title, sc.title) AS parent_title,
+                   COUNT(pe.signal_id) as evidence_count,
+                   SUM(CASE WHEN pe.stance='supports' THEN 1 ELSE 0 END) as supports_count,
+                   SUM(CASE WHEN pe.stance='refutes' THEN 1 ELSE 0 END) as refutes_count,
+                   SUM(CASE WHEN pe.stance='partial' THEN 1 ELSE 0 END) as partial_count
+            FROM predictions p
+            LEFT JOIN prediction_evidence pe ON pe.prediction_id = p.id
+            LEFT JOIN signals s ON p.parent_kind = 'signal' AND s.id = p.parent_id
+            LEFT JOIN signal_clusters sc ON p.parent_kind = 'thread' AND sc.id = p.parent_id
+            WHERE p.id = ?
+            GROUP BY p.id
+        """, (pred_id,)).fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': 'Not found'}), 404
+
+        evidence = conn.execute("""
+            SELECT pe.stance, pe.weight, pe.note, pe.created_at,
+                   s.id as signal_id, s.title, s.url as source_url, s.published_at, s.domain
+            FROM prediction_evidence pe
+            JOIN signals s ON s.id = pe.signal_id
+            WHERE pe.prediction_id = ?
+            ORDER BY pe.weight DESC, pe.created_at DESC
+        """, (pred_id,)).fetchall()
+        conn.close()
+
+        today_iso = datetime.now().date().isoformat()
+        pred = dict(row)
+        pred['overdue'] = (pred.get('status') == 'open'
+                           and bool(pred.get('expected_by')) and pred['expected_by'] < today_iso)
+        supports = pred.get('supports_count') or 0
+        refutes = pred.get('refutes_count') or 0
+        if pred.get('status') == 'open':
+            if supports >= 3 and supports > refutes:
+                pred['suggested_resolution'] = 'confirmed'
+            elif refutes >= 2 and refutes > supports:
+                pred['suggested_resolution'] = 'refuted'
+        return jsonify({'prediction': pred, 'evidence': [dict(e) for e in evidence]})
 
     @app.route("/api/predictions/<int:pred_id>/evidence", methods=["GET"])
     def prediction_evidence_list(pred_id):
