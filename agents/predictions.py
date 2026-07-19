@@ -24,6 +24,20 @@ MIN_HORIZON_DAYS = 7
 MAX_HORIZON_DAYS = 540
 
 
+def _embed_claim(claim: str, mechanism: str = ''):
+    """Embed a prediction claim for evidence matching. None on failure.
+
+    Soft-fails so a missing/broken embedding model never blocks generation — the
+    prediction is still stored, just skipped by the matcher until backfilled.
+    """
+    try:
+        from agents.embeddings import embed_text
+        return embed_text(prediction_embed_text(claim, mechanism))
+    except Exception as e:
+        logger.warning(f"Claim embedding failed (prediction still saved): {e}")
+        return None
+
+
 def _clamp_horizon(p) -> int:
     try:
         horizon = int(p.get('horizon_days', 90))
@@ -66,8 +80,8 @@ def generate_predictions_for_signal(signal_id: int, signal_title: str, signal_bo
             db.execute(
                 """INSERT INTO predictions
                    (parent_kind, parent_id, claim, mechanism, horizon_days, expected_by,
-                    falsifier, confidence, indicator_type)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    falsifier, confidence, indicator_type, claim_embedding)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 ('signal', signal_id,
                  p.get('claim', ''),
                  p.get('mechanism', ''),
@@ -75,7 +89,8 @@ def generate_predictions_for_signal(signal_id: int, signal_title: str, signal_bo
                  expected_by,
                  p.get('falsifier', ''),
                  int(p.get('confidence', 3)),
-                 p.get('indicator_type', 'leading'))
+                 p.get('indicator_type', 'leading'),
+                 _embed_claim(p.get('claim', ''), p.get('mechanism', '')))
             )
         db.commit()
         logger.info(f"Generated {len(predictions[:3])} predictions for signal {signal_id}")
@@ -101,49 +116,98 @@ def generate_predictions_async(signal_id: int, signal_title: str, signal_body: s
 
 # ── Phase 2: Signal → Prediction evidence matching ────────────────────────────
 
-def keyword_candidates(signal_title: str, signal_body: str, db, limit: int = 10) -> list:
-    """Return open predictions that share keyword overlap with the signal. No LLM."""
-    import re
-    # Tokenize signal: extract meaningful words (>4 chars), lowercase, deduplicate
-    text = f"{signal_title} {signal_body or ''}"
-    words = set(w.lower() for w in re.findall(r'\b[a-zA-Z]{5,}\b', text))
-    if not words:
+# Cosine floor for handing a (signal, prediction) pair to the LLM judge.
+# Tuned on intel.db (120 signals x 136 open predictions). Started at 0.45, raised
+# to 0.50 after an A/B of the judge showed it calls nearly every 0.45-0.50 pair
+# 'unrelated' — those candidates cost a call and yield no evidence. Below ~0.45
+# matches are thematic-only, which is what produced the inert 'partial' rows under
+# the old keyword filter.
+MIN_MATCH_SIMILARITY = 0.50
+
+# Only the lead of a signal body carries its topic; the tail drags the vector
+# toward generic newswire language.
+_SIGNAL_EMBED_CHARS = 300
+
+
+def prediction_embed_text(claim: str, mechanism: str = '') -> str:
+    """Canonical text embedded for a prediction. Keep in sync with backfill."""
+    return f"{claim} {mechanism or ''}".strip()
+
+
+def signal_embed_text(title: str, body: str = '') -> str:
+    """Canonical text embedded for a signal when matching against predictions."""
+    return f"{title} {(body or '')[:_SIGNAL_EMBED_CHARS]}".strip()
+
+
+def semantic_candidates(signal_title: str, signal_body: str, db, limit: int = 5,
+                        min_similarity: float = MIN_MATCH_SIMILARITY,
+                        exclude_signal_id: int = None) -> list:
+    """Return open predictions semantically close to the signal. No LLM.
+
+    Replaces the previous keyword/IDF overlap filter, which ranked essentially at
+    random: with only ~10^2 open predictions, IDF cannot separate topical tokens
+    from ordinary English, so long signals matched long predictions on filler
+    words. Cosine over MiniLM ranks by meaning and is corpus-size independent.
+
+    Predictions with no stored embedding are skipped rather than silently treated
+    as non-matching — run backfill_prediction_embeddings.py after upgrading.
+    """
+    import numpy as np
+    from agents.embeddings import embed_text
+
+    text = signal_embed_text(signal_title, signal_body)
+    if not text:
         return []
 
-    # Fetch open predictions
-    rows = db.execute(
-        "SELECT id, claim, mechanism, expected_by FROM predictions WHERE status = 'open'"
-    ).fetchall()
+    # Exclude pairs already judged, so re-runs and retro-matching don't spend
+    # candidate slots re-judging evidence we already hold.
+    sql = """SELECT id, claim, mechanism, expected_by, claim_embedding
+             FROM predictions
+             WHERE status = 'open' AND claim_embedding IS NOT NULL"""
+    params = ()
+    if exclude_signal_id is not None:
+        sql += """ AND id NOT IN (SELECT prediction_id FROM prediction_evidence
+                                  WHERE signal_id = ?)"""
+        params = (exclude_signal_id,)
 
-    candidates = []
+    rows = db.execute(sql, params).fetchall()
+    if not rows:
+        return []
+
+    try:
+        q = np.frombuffer(embed_text(text), dtype=np.float32)
+    except Exception as e:
+        logger.warning(f"Signal embedding failed, skipping match: {e}")
+        return []
+
+    scored = []
     for row in rows:
-        pred_text = f"{row['claim']} {row['mechanism'] or ''}".lower()
-        overlap = sum(1 for w in words if w in pred_text)
-        if overlap >= 2:  # at least 2 keyword matches
-            candidates.append((overlap, dict(row)))
+        emb = np.frombuffer(row['claim_embedding'], dtype=np.float32)
+        # Both vectors are L2-normalized, so dot product == cosine similarity.
+        sim = float(np.dot(q, emb))
+        if sim >= min_similarity:
+            cand = dict(row)
+            cand.pop('claim_embedding', None)
+            cand['similarity'] = sim
+            scored.append(cand)
 
-    # Return top candidates sorted by overlap score
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return [c[1] for c in candidates[:limit]]
+    scored.sort(key=lambda c: c['similarity'], reverse=True)
+    return scored[:limit]
 
 
 def match_signal_to_predictions(signal_id: int, signal_title: str, signal_body: str, db):
     """Match a signal against open predictions. Write evidence rows. Called in background thread."""
     from prompts.predictions import build_evidence_judge_prompt
 
-    candidates = keyword_candidates(signal_title, signal_body, db)
+    # Cap at 5 LLM judge calls per signal. Already-judged pairs are excluded in
+    # the query rather than skipped in this loop, so they don't consume slots.
+    candidates = semantic_candidates(
+        signal_title, signal_body, db, limit=5, exclude_signal_id=signal_id
+    )
     if not candidates:
         return
 
-    for pred in candidates[:5]:  # cap at 5 LLM calls per signal
-        # Skip if evidence already recorded for this pair
-        existing = db.execute(
-            "SELECT 1 FROM prediction_evidence WHERE prediction_id=? AND signal_id=?",
-            (pred['id'], signal_id)
-        ).fetchone()
-        if existing:
-            continue
-
+    for pred in candidates:
         try:
             prompt = build_evidence_judge_prompt(
                 signal_title,
@@ -169,7 +233,10 @@ def match_signal_to_predictions(signal_id: int, signal_title: str, signal_body: 
                 (pred['id'], signal_id, stance, weight, note)
             )
             db.commit()
-            logger.info(f"Evidence: signal {signal_id} {stance} prediction {pred['id']} (w={weight:.2f})")
+            logger.info(
+                f"Evidence: signal {signal_id} {stance} prediction {pred['id']} "
+                f"(w={weight:.2f}, cos={pred.get('similarity', 0):.2f})"
+            )
         except Exception as e:
             logger.warning(f"Evidence judge failed for prediction {pred['id']}: {e}")
 
@@ -206,8 +273,8 @@ def generate_predictions_for_thread(thread_id: int, thread_title: str, thread_bo
             db.execute(
                 """INSERT INTO predictions
                    (parent_kind, parent_id, claim, mechanism, horizon_days, expected_by,
-                    falsifier, confidence, indicator_type)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    falsifier, confidence, indicator_type, claim_embedding)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 ('thread', thread_id,
                  p.get('claim', ''),
                  p.get('mechanism', ''),
@@ -215,7 +282,8 @@ def generate_predictions_for_thread(thread_id: int, thread_title: str, thread_bo
                  expected_by,
                  p.get('falsifier', ''),
                  int(p.get('confidence', 3)),
-                 p.get('indicator_type', 'leading'))
+                 p.get('indicator_type', 'leading'),
+                 _embed_claim(p.get('claim', ''), p.get('mechanism', '')))
             )
         db.commit()
         logger.info(f"Generated {len(predictions[:3])} predictions for thread {thread_id}")

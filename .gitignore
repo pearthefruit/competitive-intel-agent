@@ -35,3 +35,6 @@ intel_nuke*.json
 
 # One-off logs
 backfill_log.txt
+
+# One-off recovery dumps from data migrations/purges
+purged_evidence_*.json

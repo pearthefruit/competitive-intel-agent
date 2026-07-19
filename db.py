@@ -523,6 +523,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     resolved_by_signal_id INTEGER REFERENCES signals(id),
     resolution_note TEXT,
     indicator_type TEXT,             -- 'leading' | 'concurrent' | 'lagging'
+    claim_embedding BLOB,            -- MiniLM vector of claim+mechanism, for evidence matching
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -593,6 +594,7 @@ def _migrate_db(conn):
         ("source_documents", "dedup_key", "TEXT"),
         ("source_documents", "source_date", "TEXT"),
         ("source_documents", "metadata_json", "TEXT"),
+        ("predictions", "claim_embedding", "BLOB"),
     ]
     for table, column, col_type in migrations:
         try:
