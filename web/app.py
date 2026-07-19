@@ -56,6 +56,19 @@ from db import (init_db, get_connection, get_all_dossiers, get_dossier_by_compan
 
 # --- Helpers ---
 
+def _launch_prediction_match(db_path):
+    """Kick off a background drain of the signal->prediction match queue.
+
+    Fire-and-forget: ingestion must never fail because prediction matching
+    couldn't start. Callers that stream (e.g. the scan SSE endpoint) report
+    progress themselves; this is for the plain-JSON ingest paths.
+    """
+    try:
+        from agents.predictions import match_pending_signals_async
+        match_pending_signals_async(lambda: get_connection(db_path))
+    except Exception as e:
+        print(f"[predictions] match launch error: {e}")
+
 def _parse_report_filename(filename):
     """Extract company name, analysis type, and date from a report filename."""
     import re
@@ -2228,6 +2241,22 @@ def create_app(db_path="intel.db"):
                 sr = synth_result[0] or {}
                 yield f"data: {json.dumps({'type': 'threads_ready', 'assigned': sr.get('assigned_count', 0), 'new_threads': sr.get('new_thread_count', 0)})}\n\n"
 
+            # Match the new signals against open predictions. Runs after synthesis
+            # so enriched article bodies are in place, and as a single background
+            # drain rather than a thread per signal. Scans previously had no
+            # prediction hook at all, so a scan carrying the exact confirming
+            # evidence would silently pass every open prediction by.
+            if new_count > 0:
+                try:
+                    from agents.predictions import (match_pending_signals_async,
+                                                    count_pending_match)
+                    pending = count_pending_match(conn)
+                    if pending:
+                        yield f"data: {json.dumps({'type': 'status', 'text': f'Matching {pending} signals against open predictions...'})}\n\n"
+                        match_pending_signals_async(lambda: get_connection(db_path))
+                except Exception as _match_err:
+                    print(f"[signals] prediction match launch error: {_match_err}")
+
             # Save scan history (last 3 only)
             from db import save_scan_history
             _sr = synth_result[0] or {}
@@ -3616,6 +3645,8 @@ Return JSON: {{"title": "New directional title"}}"""
 
         def _annotate(row):
             d = dict(row)
+            # SELECT p.* pulls the match embedding; raw bytes aren't JSON serializable.
+            d.pop('claim_embedding', None)
             d['overdue'] = (d.get('status') == 'open'
                             and bool(d.get('expected_by')) and d['expected_by'] < today_iso)
             supports = d.get('supports_count') or 0
@@ -3707,6 +3738,8 @@ Return JSON: {{"title": "New directional title"}}"""
 
         today_iso = datetime.now().date().isoformat()
         pred = dict(row)
+        # SELECT p.* pulls the match embedding; raw bytes aren't JSON serializable.
+        pred.pop('claim_embedding', None)
         pred['overdue'] = (pred.get('status') == 'open'
                            and bool(pred.get('expected_by')) and pred['expected_by'] < today_iso)
         supports = pred.get('supports_count') or 0
@@ -6818,6 +6851,8 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
                         review_count = len(needs_review)
 
                 conn.commit()
+                if new_count:
+                    _launch_prediction_match(db_path)
                 return jsonify({
                     "imported": new_count,
                     "keyword_assigned": kw_count,
@@ -7035,6 +7070,9 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
             now_iso = datetime.now(timezone.utc).isoformat()
             update_feed_account_fetch(conn, account_id, now_iso, latest_taken_at)
 
+            if new_count:
+                _launch_prediction_match(db_path)
+
             return jsonify({
                 "imported": new_count,
                 "keyword_assigned": kw_count,
@@ -7042,6 +7080,38 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
                 "review_queue": review_count,
                 "dry_run": False,
             })
+        finally:
+            conn.close()
+
+    @app.route("/api/predictions/match-pending", methods=["POST"])
+    def predictions_match_pending_api():
+        """Drain the pending signal->prediction match queue.
+
+        Backstop for signals ingested before matching existed, or while LLM
+        providers were unavailable. Runs in the background; poll GET for status.
+        """
+        from agents.predictions import (match_pending_signals_async,
+                                        count_pending_match, MAX_BATCH_MATCH_SIGNALS)
+        limit = int((request.json or {}).get("limit") or MAX_BATCH_MATCH_SIGNALS)
+        conn = get_connection(db_path)
+        pending = count_pending_match(conn)
+        conn.close()
+        if not pending:
+            return jsonify({"data": {"pending": 0, "message": "Nothing to match."}})
+        match_pending_signals_async(lambda: get_connection(db_path), limit)
+        return jsonify({"data": {
+            "pending": pending,
+            "processing": min(pending, limit),
+            "message": f"Matching {min(pending, limit)} of {pending} pending signals in background.",
+        }})
+
+    @app.route("/api/predictions/match-pending", methods=["GET"])
+    def predictions_match_pending_status_api():
+        """How many signals still await a prediction-evidence pass."""
+        from agents.predictions import count_pending_match
+        conn = get_connection(db_path)
+        try:
+            return jsonify({"data": {"pending": count_pending_match(conn)}})
         finally:
             conn.close()
 

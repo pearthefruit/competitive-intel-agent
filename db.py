@@ -527,6 +527,16 @@ CREATE TABLE IF NOT EXISTS predictions (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Signal match embeddings: MiniLM vectors used for prediction evidence matching.
+-- Deliberately a side table, not a column on signals: ~a dozen endpoints do
+-- SELECT * FROM signals and jsonify the rows, and raw BLOBs are not JSON
+-- serializable, so a column here breaks them all.
+CREATE TABLE IF NOT EXISTS signal_match_embeddings (
+    signal_id INTEGER PRIMARY KEY REFERENCES signals(id) ON DELETE CASCADE,
+    embedding BLOB NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Prediction evidence: signals that support or refute a prediction
 CREATE TABLE IF NOT EXISTS prediction_evidence (
     prediction_id INTEGER NOT NULL REFERENCES predictions(id) ON DELETE CASCADE,
@@ -595,6 +605,7 @@ def _migrate_db(conn):
         ("source_documents", "source_date", "TEXT"),
         ("source_documents", "metadata_json", "TEXT"),
         ("predictions", "claim_embedding", "BLOB"),
+        ("signals", "predictions_matched_at", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:
