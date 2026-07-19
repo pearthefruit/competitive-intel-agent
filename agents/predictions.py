@@ -15,6 +15,42 @@ from prompts.predictions import build_predictions_prompt
 
 logger = logging.getLogger(__name__)
 
+# Predictions past due by more than this many days auto-expire (still open ones
+# within the grace window surface as "overdue" in the UI instead).
+EXPIRY_GRACE_DAYS = 14
+
+# Sanity bounds on LLM-provided horizons
+MIN_HORIZON_DAYS = 7
+MAX_HORIZON_DAYS = 540
+
+
+def _clamp_horizon(p) -> int:
+    try:
+        horizon = int(p.get('horizon_days', 90))
+    except (TypeError, ValueError):
+        horizon = 90
+    return max(MIN_HORIZON_DAYS, min(MAX_HORIZON_DAYS, horizon))
+
+
+def sweep_expired_predictions(db, grace_days: int = EXPIRY_GRACE_DAYS) -> int:
+    """Mark open predictions past expected_by + grace as expired. Returns count.
+
+    Cheap single UPDATE — safe to run on every predictions list request.
+    """
+    cutoff = (datetime.date.today() - datetime.timedelta(days=grace_days)).isoformat()
+    cur = db.execute(
+        """UPDATE predictions
+           SET status = 'expired',
+               resolved_at = CURRENT_TIMESTAMP,
+               resolution_note = 'Auto-expired ' || CAST(julianday('now') - julianday(expected_by) AS INTEGER) || ' days past due with no resolution'
+           WHERE status = 'open' AND expected_by < ?""",
+        (cutoff,),
+    )
+    db.commit()
+    if cur.rowcount:
+        logger.info(f"Expired {cur.rowcount} predictions past {grace_days}d grace")
+    return cur.rowcount
+
 
 def generate_predictions_for_signal(signal_id: int, signal_title: str, signal_body: str, domain: str, db):
     """Generate 2-3 predictions for a signal. Runs in background thread — silent failure."""
@@ -25,7 +61,7 @@ def generate_predictions_for_signal(signal_id: int, signal_title: str, signal_bo
 
         today = datetime.date.today()
         for p in predictions[:3]:
-            horizon = int(p.get('horizon_days', 90))
+            horizon = _clamp_horizon(p)
             expected_by = (today + datetime.timedelta(days=horizon)).isoformat()
             db.execute(
                 """INSERT INTO predictions
@@ -165,7 +201,7 @@ def generate_predictions_for_thread(thread_id: int, thread_title: str, thread_bo
 
         today = datetime.date.today()
         for p in predictions[:3]:
-            horizon = int(p.get('horizon_days', 90))
+            horizon = _clamp_horizon(p)
             expected_by = (today + datetime.timedelta(days=horizon)).isoformat()
             db.execute(
                 """INSERT INTO predictions

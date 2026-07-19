@@ -3583,6 +3583,30 @@ Return JSON: {{"title": "New directional title"}}"""
         status = request.args.get('status', '')
         board_mode = request.args.get('board', '') == '1'
 
+        # Lifecycle sweep: auto-expire open predictions past due + grace window.
+        # Cheap single UPDATE, so it runs on every list request.
+        from agents.predictions import sweep_expired_predictions
+        _sweep_conn = get_connection(db_path)
+        try:
+            sweep_expired_predictions(_sweep_conn)
+        finally:
+            _sweep_conn.close()
+
+        today_iso = datetime.now().date().isoformat()
+
+        def _annotate(row):
+            d = dict(row)
+            d['overdue'] = (d.get('status') == 'open'
+                            and bool(d.get('expected_by')) and d['expected_by'] < today_iso)
+            supports = d.get('supports_count') or 0
+            refutes = d.get('refutes_count') or 0
+            if d.get('status') == 'open':
+                if supports >= 3 and supports > refutes:
+                    d['suggested_resolution'] = 'confirmed'
+                elif refutes >= 2 and refutes > supports:
+                    d['suggested_resolution'] = 'refuted'
+            return d
+
         if board_mode:
             # Lightweight query for board overlay — skip evidence join for performance
             query = """
@@ -3603,7 +3627,7 @@ Return JSON: {{"title": "New directional title"}}"""
             conn = get_connection(db_path)
             rows = conn.execute(query, params).fetchall()
             conn.close()
-            return jsonify({'data': [dict(r) for r in rows]})
+            return jsonify({'data': [_annotate(r) for r in rows]})
 
         query = """
             SELECT p.*,
@@ -3627,7 +3651,7 @@ Return JSON: {{"title": "New directional title"}}"""
         conn = get_connection(db_path)
         rows = conn.execute(query, params).fetchall()
         conn.close()
-        return jsonify({'data': [dict(r) for r in rows]})
+        return jsonify({'data': [_annotate(r) for r in rows]})
 
     @app.route("/api/predictions/<int:pred_id>/evidence", methods=["GET"])
     def prediction_evidence_list(pred_id):

@@ -121,6 +121,7 @@
             { label: 'Confirmed', value: 'confirmed' },
             { label: 'Refuted',   value: 'refuted' },
             { label: 'Dismissed', value: 'dismissed' },
+            { label: 'Expired',   value: 'expired' },
         ];
         const btns = filters.map(f => {
             const active = _activeStatusFilter === f.value;
@@ -157,13 +158,41 @@
         const expectedBy = p.expected_by ? _formatDate(p.expected_by) : '—';
         const isOpen = p.status === 'open';
 
+        const evParts = [];
+        if (p.supports_count > 0) evParts.push(`<span style="color:#22c55e">${p.supports_count}&#8593;</span>`);
+        if (p.refutes_count > 0) evParts.push(`<span style="color:#ef4444">${p.refutes_count}&#8595;</span>`);
+        if (p.partial_count > 0) evParts.push(`<span style="color:#f59e0b">${p.partial_count}~</span>`);
         const evidenceBadge = p.evidence_count > 0
             ? `<span class="pred-evidence-badge" onclick="toggleEvidence(${p.id}, this)"
+                 title="Click to see the signals recorded as evidence (${p.supports_count || 0} supporting, ${p.refutes_count || 0} refuting, ${p.partial_count || 0} partial)"
                  style="cursor:pointer; background:rgba(168,85,247,0.15); color:#a855f7;
                         border:1px solid rgba(168,85,247,0.3); border-radius:4px;
                         padding:2px 7px; font-size:11px; margin-left:6px;">
-                 ${p.evidence_count} evidence</span>`
+                 ${p.evidence_count} evidence${evParts.length ? ' &middot; ' + evParts.join(' ') : ''}</span>`
             : '';
+
+        const overduePill = p.overdue
+            ? `<span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:.04em;
+                    background:rgba(234,179,8,0.15);color:#eab308;border:1px solid rgba(234,179,8,0.3)"
+                    title="Past due but within the ${14}-day grace window — resolve it or it will auto-expire">Overdue</span>`
+            : '';
+
+        const sug = p.suggested_resolution;
+        const suggestBanner = sug ? `
+            <div style="margin-top:10px;padding:8px 10px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;
+                        background:${sug === 'confirmed' ? 'rgba(22,163,74,0.08)' : 'rgba(239,68,68,0.08)'};
+                        border:1px solid ${sug === 'confirmed' ? 'rgba(22,163,74,0.3)' : 'rgba(239,68,68,0.3)'}">
+                <span style="font-size:11px;color:${sug === 'confirmed' ? '#16a34a' : '#ef4444'}">
+                    ${sug === 'confirmed'
+                        ? `${p.supports_count} supporting signals &mdash; suggested resolution: <strong>Confirm</strong>`
+                        : `${p.refutes_count} refuting signals &mdash; suggested resolution: <strong>Refute</strong>`}
+                </span>
+                <button onclick="resolvePrediction(${p.id},'${sug}')"
+                    style="padding:4px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;
+                           background:${sug === 'confirmed' ? 'rgba(22,163,74,0.18)' : 'rgba(239,68,68,0.18)'};
+                           border:1px solid ${sug === 'confirmed' ? 'rgba(22,163,74,0.4)' : 'rgba(239,68,68,0.4)'};
+                           color:${sug === 'confirmed' ? '#16a34a' : '#ef4444'}">Apply</button>
+            </div>` : '';
 
         const actionBtns = isOpen ? `
             <div style="display:flex;gap:6px;margin-top:10px">
@@ -202,6 +231,7 @@
             <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px">
                 <span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:.04em;
                     background:${sp.bg};color:${sp.color};border:1px solid ${sp.border}">${sp.label}</span>
+                ${overduePill}
                 <span style="padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;
                     background:${ip.bg};color:${ip.color}">${ip.label}</span>
                 ${evidenceBadge}
@@ -216,6 +246,7 @@
             ${p.falsifier ? `<div style="font-size:11px;color:#9ca3af;line-height:1.5"><span style="color:#6b7280;font-weight:600">Falsifier: </span>${_escHtml(p.falsifier)}</div>` : ''}
             ${parentLine}
             ${resolvedNote}
+            ${suggestBanner}
             ${actionBtns}
         </div>`;
     }

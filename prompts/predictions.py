@@ -1,5 +1,11 @@
 """Prompts for generating falsifiable predictions from signals."""
 
+import datetime
+
+
+def _today_str() -> str:
+    return datetime.date.today().strftime("%B %d, %Y")
+
 
 def build_evidence_judge_prompt(signal_title: str, signal_body: str, prediction_claim: str, prediction_mechanism: str) -> str:
     return f"""You are evaluating whether a new signal supports, refutes, or is unrelated to a prediction.
@@ -26,27 +32,20 @@ Return JSON:
 }}"""
 
 
-def build_thread_predictions_prompt(thread_title: str, thread_body: str) -> str:
-    return f"""You are a competitive intelligence analyst generating falsifiable forward-looking predictions.
-
-Given this intelligence thread (a synthesized cluster of related signals):
-TITLE: {thread_title}
-SYNTHESIS: {thread_body[:2000]}
-
-Generate 2-3 falsifiable, time-bounded second-order predictions. Each prediction is a specific consequence that should become observable within a defined timeframe IF this thread's pattern continues.
-
-Rules:
+_SHARED_RULES = """Rules:
+- TODAY'S DATE IS {today}. Every date you mention in a claim or falsifier MUST be AFTER today.
+  Compute deadline dates as today + horizon_days. NEVER use dates from before {today} —
+  a prediction with a past deadline is invalid and will be discarded.
 - Be SPECIFIC and FALSIFIABLE — vague predictions are useless
 - Time horizon: 30-180 days realistically; use 365 only for structural shifts
 - Each prediction must have a clear falsifier (what would prove it wrong)
-- Prefer leading indicators over lagging ones
-- Do NOT restate the thread — predict the NEXT effect
+- Prefer leading indicators over lagging ones"""
 
-Return JSON:
+_SHARED_SCHEMA = """Return JSON:
 {{
   "predictions": [
     {{
-      "claim": "string — complete falsifiable statement: 'If X, then Y will be observable via Z by [date]'",
+      "claim": "string — complete falsifiable statement: 'If X, then Y will be observable via Z by [date after {today}]'",
       "mechanism": "string — 1-2 sentences explaining why this effect follows",
       "horizon_days": integer,
       "falsifier": "string — specific observable condition that would refute this",
@@ -57,7 +56,24 @@ Return JSON:
 }}"""
 
 
+def build_thread_predictions_prompt(thread_title: str, thread_body: str) -> str:
+    today = _today_str()
+    return f"""You are a competitive intelligence analyst generating falsifiable forward-looking predictions.
+
+Given this intelligence thread (a synthesized cluster of related signals):
+TITLE: {thread_title}
+SYNTHESIS: {thread_body[:2000]}
+
+Generate 2-3 falsifiable, time-bounded second-order predictions. Each prediction is a specific consequence that should become observable within a defined timeframe IF this thread's pattern continues.
+
+{_SHARED_RULES.format(today=today)}
+- Do NOT restate the thread — predict the NEXT effect
+
+{_SHARED_SCHEMA.format(today=today)}"""
+
+
 def build_predictions_prompt(signal_title: str, signal_body: str, domain: str) -> str:
+    today = _today_str()
     return f"""You are a competitive intelligence analyst generating falsifiable forward-looking predictions.
 
 Given this signal:
@@ -67,23 +83,7 @@ BODY: {signal_body[:2000]}
 
 Generate 2-3 falsifiable, time-bounded second-order predictions. Each prediction is a specific consequence that should become observable within a defined timeframe IF this signal's trend continues.
 
-Rules:
-- Be SPECIFIC and FALSIFIABLE — vague predictions are useless
-- Time horizon: 30-180 days realistically; use 365 only for structural shifts
-- Each prediction must have a clear falsifier (what would prove it wrong)
-- Prefer leading indicators over lagging ones
+{_SHARED_RULES.format(today=today)}
 - Do NOT restate the signal — predict the NEXT effect
 
-Return JSON:
-{{
-  "predictions": [
-    {{
-      "claim": "string — complete falsifiable statement: 'If X, then Y will be observable via Z by [date]'",
-      "mechanism": "string — 1-2 sentences explaining why this effect follows",
-      "horizon_days": integer,
-      "falsifier": "string — specific observable condition that would refute this",
-      "confidence": integer 1-5,
-      "indicator_type": "leading|concurrent|lagging"
-    }}
-  ]
-}}"""
+{_SHARED_SCHEMA.format(today=today)}"""
