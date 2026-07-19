@@ -187,6 +187,15 @@
         const resolvedNote = (!isOpen && p.resolution_note) ? `
             <div style="margin-top:8px;padding:6px 8px;background:rgba(255,255,255,0.03);border-radius:6px;font-size:11px;color:#9ca3af;font-style:italic">"${_escHtml(p.resolution_note)}"</div>` : '';
 
+        // Provenance: the signal/thread this prediction was generated from
+        const ptTrunc = p.parent_title && p.parent_title.length > 70 ? p.parent_title.substring(0, 68) + '…' : (p.parent_title || '');
+        const parentLine = p.parent_title ? `
+            <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.05);font-size:11px;color:#6b7280">
+                From ${_escHtml(p.parent_kind || 'signal')}:
+                <span onclick="_openPredictionParent('${_escHtml(p.parent_kind)}', ${p.parent_id})"
+                      style="color:#3b82f6;cursor:pointer" title="${_escHtml(p.parent_title)}">${_escHtml(ptTrunc)} &rarr;</span>
+            </div>` : '';
+
         return `
         <div class="pred-card" style="border:1px solid rgba(255,255,255,0.08);border-radius:10px;background:rgba(255,255,255,0.03);padding:12px;margin-bottom:10px">
             <!-- Header row: status + indicator + confidence + date -->
@@ -205,10 +214,24 @@
             ${p.mechanism ? `<div style="font-size:11px;color:#9ca3af;line-height:1.5;margin-bottom:4px"><span style="color:#6b7280;font-weight:600">Why: </span>${_escHtml(p.mechanism)}</div>` : ''}
             <!-- Falsifier -->
             ${p.falsifier ? `<div style="font-size:11px;color:#9ca3af;line-height:1.5"><span style="color:#6b7280;font-weight:600">Falsifier: </span>${_escHtml(p.falsifier)}</div>` : ''}
+            ${parentLine}
             ${resolvedNote}
             ${actionBtns}
         </div>`;
     }
+
+    // Open the parent signal/thread a prediction was generated from.
+    // Closes the overlay first so the detail pane is visible.
+    window._openPredictionParent = function (kind, id) {
+        if (typeof closePredictionsOverlay === 'function') closePredictionsOverlay();
+        if (kind === 'thread') {
+            if (typeof switchSignalTab === 'function') switchSignalTab('threads');
+            if (typeof openThreadDetail === 'function') openThreadDetail(id);
+        } else {
+            if (typeof switchSignalTab === 'function') switchSignalTab('raw');
+            if (typeof openSignalDetail === 'function') openSignalDetail(id);
+        }
+    };
 
     function _renderConfidence(score) {
         const filled = Math.round(score);
@@ -433,9 +456,22 @@
             });
     }
 
+    let _tlZoom = 1; // 1 | 1.5 | 2 | 3 | 4 — inner width multiplier
+
+    window._tlZoomStep = function (dir) {
+        const steps = [1, 1.5, 2, 3, 4];
+        const idx = steps.indexOf(_tlZoom);
+        const next = steps[Math.min(steps.length - 1, Math.max(0, idx + dir))];
+        if (next === _tlZoom) return;
+        _tlZoom = next;
+        _loadPredictionsTimeline();
+    };
+
     /**
      * Render a div-based horizontal timeline of dated predictions.
      * Appended directly to #predictions-list (after filter row).
+     * Zoomable: inner axis width = _tlZoom × container, scrolls horizontally.
+     * Claim labels only render at zoom ≥ 2 (dots + tooltips below that).
      * @param {Array} predictions  All predictions from /api/predictions
      */
     window._renderPredictionsTimeline = function (predictions) {
@@ -455,38 +491,37 @@
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        // Use today as axis start; axis end = latest expected_by + 1 month padding, max 12 months out
-        const maxMs = Math.max(...dated.map(p => new Date(p.expected_by).getTime()));
+        // Overdue predictions (due before today, still open) get a gutter count
+        // instead of being clamped onto the "Today" line.
+        const overdue = dated.filter(p => new Date(p.expected_by) < today && p.status === 'open');
+        const future = dated.filter(p => new Date(p.expected_by) >= today);
+
+        // Axis: today → latest expected_by + 1 month padding, max 12 months out
+        const maxMs = future.length ? Math.max(...future.map(p => new Date(p.expected_by).getTime())) : today.getTime();
         const maxDate = new Date(Math.min(maxMs + 30 * 86400000, today.getTime() + 365 * 86400000));
-        maxDate.setDate(1); // snap to month start
-        maxDate.setMonth(maxDate.getMonth() + 1); // add one month of padding
+        maxDate.setDate(1);
+        maxDate.setMonth(maxDate.getMonth() + 1);
 
         const totalMs = maxDate - today;
-        if (totalMs <= 0) {
-            container.innerHTML += '<div style="color:#6b7280;text-align:center;padding:40px">All predictions are overdue.</div>';
-            return;
-        }
 
-        // Build month markers
+        // Month markers — with year on January and on the first marker
         const months = [];
         const cursor = new Date(today);
         cursor.setDate(1);
-        cursor.setMonth(cursor.getMonth() + 1); // first whole month after today
-        while (cursor <= maxDate) {
+        cursor.setMonth(cursor.getMonth() + 1);
+        let first = true;
+        while (cursor <= maxDate && totalMs > 0) {
             const pct = ((cursor - today) / totalMs) * 100;
-            months.push({ label: cursor.toLocaleDateString('en-US', { month: 'short' }), pct });
+            const yr = (first || cursor.getMonth() === 0) ? ` '${String(cursor.getFullYear()).slice(2)}` : '';
+            months.push({ label: cursor.toLocaleDateString('en-US', { month: 'short' }) + yr, pct });
             cursor.setMonth(cursor.getMonth() + 1);
+            first = false;
         }
 
-        // Stagger dots to reduce vertical overlap — assign row based on expected_by proximity
-        // Simple approach: assign each dot to row 0, 1, or 2 based on insertion order
         const ROWS = 3;
-        const rowCounters = Array(ROWS).fill(0);
-        const dottedPreds = dated.map((p, i) => {
+        const dottedPreds = future.map((p, i) => {
             const pct = ((new Date(p.expected_by) - today) / totalMs) * 100;
-            const row = i % ROWS; // simple round-robin stagger
-            rowCounters[row]++;
-            return { ...p, pct: Math.max(0, Math.min(99, pct)), row };
+            return { ...p, pct: Math.max(0, Math.min(99, pct)), row: i % ROWS };
         });
 
         const monthMarkersHtml = months.map(m =>
@@ -495,33 +530,53 @@
             </div>`
         ).join('');
 
-        // Dot rows — 3 rows, each 28px tall
-        const rowHeight = 28;
+        const showLabels = _tlZoom >= 2;
+        const rowHeight = showLabels ? 30 : 20;
         const dotsHtml = dottedPreds.map(p => {
             const sp = STATUS_PILL[p.status] || STATUS_PILL.open;
             const topPx = p.row * rowHeight + 4;
             const claimTrunc = p.claim && p.claim.length > 40 ? p.claim.substring(0, 38) + '…' : (p.claim || '');
-            return `<div style="position:absolute;left:${p.pct.toFixed(1)}%;top:${topPx}px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;z-index:2"
-                         title="${_escHtml(p.claim)} — ${_formatDate(p.expected_by)}">
-                <div style="width:10px;height:10px;border-radius:50%;background:${sp.dot};box-shadow:0 0 6px ${sp.dot}55;cursor:default;flex-shrink:0"></div>
-                <span style="font-size:8px;color:#9ca3af;white-space:nowrap;max-width:70px;overflow:hidden;text-overflow:ellipsis;margin-top:2px;text-align:center">${_escHtml(claimTrunc)}</span>
+            const clickAttr = p.parent_id
+                ? `onclick="_openPredictionParent('${_escHtml(p.parent_kind || 'signal')}', ${p.parent_id})"`
+                : '';
+            return `<div ${clickAttr} style="position:absolute;left:${p.pct.toFixed(1)}%;top:${topPx}px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;z-index:2;cursor:${p.parent_id ? 'pointer' : 'default'}"
+                         title="${_escHtml(p.claim)} — ${_formatDate(p.expected_by)}${p.parent_title ? ' (from: ' + _escHtml(p.parent_title) + ')' : ''}">
+                <div style="width:9px;height:9px;border-radius:50%;background:${sp.dot};box-shadow:0 0 5px ${sp.dot}55;flex-shrink:0"></div>
+                ${showLabels ? `<span style="font-size:8px;color:#9ca3af;white-space:nowrap;max-width:${_tlZoom >= 3 ? 130 : 90}px;overflow:hidden;text-overflow:ellipsis;margin-top:2px;text-align:center">${_escHtml(claimTrunc)}</span>` : ''}
             </div>`;
         }).join('');
 
-        // X-axis baseline
+        const overdueChip = overdue.length
+            ? `<span onclick="loadPredictions('open')" title="${overdue.length} open predictions past their due date — click to review in list view"
+                     style="font-size:10px;color:#eab308;background:rgba(234,179,8,0.12);border:1px solid rgba(234,179,8,0.3);border-radius:10px;padding:2px 8px;cursor:pointer;font-weight:600">&#9888; ${overdue.length} overdue</span>`
+            : '';
+
+        const zoomControls = `
+            <div style="display:flex;align-items:center;gap:6px">
+                ${overdueChip}
+                <span style="font-size:10px;color:#6b7280;margin-left:6px">Zoom</span>
+                <button onclick="_tlZoomStep(-1)" ${_tlZoom <= 1 ? 'disabled' : ''} style="width:22px;height:22px;border:1px solid rgba(255,255,255,0.15);border-radius:6px;background:rgba(255,255,255,0.04);color:#9ca3af;font-size:13px;cursor:pointer;line-height:1;${_tlZoom <= 1 ? 'opacity:0.35;cursor:default' : ''}">&minus;</button>
+                <span style="font-size:10px;color:#9ca3af;min-width:26px;text-align:center">${_tlZoom}x</span>
+                <button onclick="_tlZoomStep(1)" ${_tlZoom >= 4 ? 'disabled' : ''} style="width:22px;height:22px;border:1px solid rgba(255,255,255,0.15);border-radius:6px;background:rgba(255,255,255,0.04);color:#9ca3af;font-size:13px;cursor:pointer;line-height:1;${_tlZoom >= 4 ? 'opacity:0.35;cursor:default' : ''}">+</button>
+            </div>`;
+
         const timelineHtml = `
-            <div id="predictions-timeline" style="position:relative;margin-top:24px;margin-bottom:12px;padding:0 8px">
-                <!-- Month labels + markers -->
-                <div style="position:relative;height:20px;margin-bottom:4px">${monthMarkersHtml}</div>
-                <!-- Axis bar -->
-                <div style="position:relative;height:${ROWS * rowHeight + 16}px;border-top:2px solid rgba(255,255,255,0.12);border-bottom:1px solid rgba(255,255,255,0.05)">
-                    ${dotsHtml}
-                    <!-- Today marker -->
-                    <div style="position:absolute;left:0;top:0;bottom:0;border-left:2px solid rgba(59,130,246,0.6);z-index:3">
-                        <span style="position:absolute;top:2px;left:4px;font-size:8px;color:#3b82f6;font-weight:700;white-space:nowrap">Today</span>
+            <div id="predictions-timeline" style="margin-top:8px;margin-bottom:12px">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+                    <span style="font-size:10px;color:#6b7280">${dottedPreds.length} upcoming · dots are clickable${showLabels ? '' : ' · zoom in for labels'}</span>
+                    ${zoomControls}
+                </div>
+                <div style="overflow-x:auto;overflow-y:hidden;padding-bottom:6px">
+                    <div style="position:relative;width:${(_tlZoom * 100).toFixed(0)}%;min-width:100%;padding:0 8px">
+                        <div style="position:relative;height:20px;margin-bottom:4px">${monthMarkersHtml}</div>
+                        <div style="position:relative;height:${ROWS * rowHeight + 16}px;border-top:2px solid rgba(255,255,255,0.12);border-bottom:1px solid rgba(255,255,255,0.05)">
+                            ${dotsHtml}
+                            <div style="position:absolute;left:0;top:0;bottom:0;border-left:2px solid rgba(59,130,246,0.6);z-index:3">
+                                <span style="position:absolute;top:2px;left:4px;font-size:8px;color:#3b82f6;font-weight:700;white-space:nowrap">Today</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <!-- Legend -->
                 <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap">
                     ${Object.entries(STATUS_PILL).map(([k, v]) =>
                         `<span style="font-size:10px;color:${v.color};display:flex;align-items:center;gap:3px">
@@ -632,7 +687,7 @@
                     <span style="color:${sp.dot};font-size:8px;flex-shrink:0">&#9679;</span>
                     <span style="font-size:10px;color:#d1d5db;flex:1;line-height:1.3">${_escHtml(claimTrunc)}</span>
                 </div>
-                ${date ? `<div style="font-size:9px;color:#6b7280;margin-top:2px;padding-left:13px">Due ${date}</div>` : ''}
+                <div style="font-size:9px;color:#6b7280;margin-top:2px;padding-left:13px">${date ? `Due ${date}` : ''}${p.parent_title ? `${date ? ' · ' : ''}from: ${_escHtml(p.parent_title.length > 40 ? p.parent_title.substring(0, 38) + '…' : p.parent_title)}` : ''}</div>
             </div>`;
         }).join('');
 

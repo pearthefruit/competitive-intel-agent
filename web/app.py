@@ -3586,17 +3586,20 @@ Return JSON: {{"title": "New directional title"}}"""
         if board_mode:
             # Lightweight query for board overlay — skip evidence join for performance
             query = """
-                SELECT id,
-                       SUBSTR(claim, 1, 60) || CASE WHEN LENGTH(claim) > 60 THEN '…' ELSE '' END AS claim,
-                       expected_by, status, confidence, indicator_type, parent_kind, parent_id
-                FROM predictions
-                WHERE status IN ('open', 'confirmed')
+                SELECT p.id,
+                       SUBSTR(p.claim, 1, 60) || CASE WHEN LENGTH(p.claim) > 60 THEN '…' ELSE '' END AS claim,
+                       p.expected_by, p.status, p.confidence, p.indicator_type, p.parent_kind, p.parent_id,
+                       COALESCE(s.title, sc.title) AS parent_title
+                FROM predictions p
+                LEFT JOIN signals s ON p.parent_kind = 'signal' AND s.id = p.parent_id
+                LEFT JOIN signal_clusters sc ON p.parent_kind = 'thread' AND sc.id = p.parent_id
+                WHERE p.status IN ('open', 'confirmed')
             """
             params = []
             if status:
-                query += " AND status = ?"
+                query += " AND p.status = ?"
                 params.append(status)
-            query += " ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, expected_by ASC"
+            query += " ORDER BY CASE p.status WHEN 'open' THEN 0 ELSE 1 END, p.expected_by ASC"
             conn = get_connection(db_path)
             rows = conn.execute(query, params).fetchall()
             conn.close()
@@ -3604,12 +3607,15 @@ Return JSON: {{"title": "New directional title"}}"""
 
         query = """
             SELECT p.*,
+                   COALESCE(s.title, sc.title) AS parent_title,
                    COUNT(pe.signal_id) as evidence_count,
                    SUM(CASE WHEN pe.stance='supports' THEN 1 ELSE 0 END) as supports_count,
                    SUM(CASE WHEN pe.stance='refutes' THEN 1 ELSE 0 END) as refutes_count,
                    SUM(CASE WHEN pe.stance='partial' THEN 1 ELSE 0 END) as partial_count
             FROM predictions p
             LEFT JOIN prediction_evidence pe ON pe.prediction_id = p.id
+            LEFT JOIN signals s ON p.parent_kind = 'signal' AND s.id = p.parent_id
+            LEFT JOIN signal_clusters sc ON p.parent_kind = 'thread' AND sc.id = p.parent_id
             WHERE 1=1
         """
         params = []
