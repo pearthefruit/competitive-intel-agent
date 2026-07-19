@@ -89,23 +89,20 @@ PROVIDER_DEFS = OrderedDict([
         "models": [
             "openai/gpt-oss-120b",
             "llama-3.3-70b-versatile",
-            "meta-llama/llama-4-scout-17b-16e-instruct",
-            "qwen/qwen3-32b",
+            "qwen/qwen3.6-27b",
             "openai/gpt-oss-20b",
-            "moonshotai/kimi-k2-instruct-0905",
+            "groq/compound",
+            "groq/compound-mini",
             "llama-3.1-8b-instant",
-            "compound-beta",
-            "compound-beta-mini",
         ],
     }),
     ("cerebras", {
         "env_key": "CEREBRAS_API_KEY",
         "url": "https://api.cerebras.ai/v1/chat/completions",
         "models": [
-            "qwen-3-235b-a22b-instruct-2507",
             "gpt-oss-120b",
             "zai-glm-4.7",
-            "llama3.1-8b",
+            "gemma-4-31b",
         ],
     }),
     ("mistral", {
@@ -114,11 +111,12 @@ PROVIDER_DEFS = OrderedDict([
         "models": [
             "mistral-large-latest",
             "mistral-medium-latest",
-            "mistral-small-latest",
             "magistral-medium-latest",
+            "mistral-small-latest",
             "magistral-small-latest",
             "ministral-14b-latest",
             "ministral-8b-latest",
+            "ministral-3b-latest",
             "open-mistral-nemo",
         ],
     }),
@@ -128,38 +126,42 @@ PROVIDER_DEFS = OrderedDict([
         "models": [
             "gemini-3.1-pro-preview",
             "gemini-3.1-pro-preview-customtools",
-            "gemini-3-pro",
+            "gemini-3-pro-preview",
+            "gemini-pro-latest",
             "gemini-2.5-pro",
             "gemini-3.5-flash",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
             "gemini-3-flash-preview",
+            "gemini-flash-latest",
+            "gemini-2.5-flash",
             "gemini-3.1-flash-lite",
             "gemini-3.1-flash-lite-preview",
+            "gemini-flash-lite-latest",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
         ],
     }),
     ("openrouter", {
         "env_key": "OPENROUTER_API_KEY",
         "url": "https://openrouter.ai/api/v1/chat/completions",
+        # OpenRouter's free tier churns hard — 14 of the previous 18 ids 404'd as of
+        # 2026-07-19. Re-audit periodically; a dead id costs a whole fallback slot.
         "models": [
-            "nousresearch/hermes-3-llama-3.1-405b:free",
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
             "nvidia/nemotron-3-super-120b-a12b:free",
-            "openai/gpt-oss-120b:free",
-            "qwen/qwen3-next-80b-a3b-instruct:free",
-            "meta-llama/llama-3.3-70b-instruct:free",
-            "arcee-ai/trinity-large-preview:free",
+            "tencent/hy3:free",
+            "google/gemma-4-31b-it:free",
+            "google/gemma-4-26b-a4b-it:free",
+            "poolside/laguna-m.1:free",
+            "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
             "nvidia/nemotron-3-nano-30b-a3b:free",
-            "google/gemma-3-27b-it:free",
-            "z-ai/glm-4.5-air:free",
-            "mistralai/mistral-small-3.1-24b-instruct:free",
-            "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
             "openai/gpt-oss-20b:free",
-            "minimax/minimax-m2.5:free",
-            "stepfun/step-3.5-flash:free",
-            "arcee-ai/trinity-mini:free",
-            "google/gemma-3-12b-it:free",
+            "poolside/laguna-xs-2.1:free",
+            "nvidia/nemotron-nano-12b-v2-vl:free",
             "nvidia/nemotron-nano-9b-v2:free",
-            "qwen/qwen3-coder:free",
+            # Router alias — OpenRouter picks whichever free model is currently up.
+            # Slow (~12s) but immune to model renames, so it earns the last slot.
+            "openrouter/free",
         ],
     }),
 ])
@@ -177,28 +179,38 @@ FAST_CHAIN = {
         "groq": [
             "llama-3.1-8b-instant",
             "openai/gpt-oss-20b",
-            "compound-beta-mini",
+            "groq/compound-mini",
+            "qwen/qwen3.6-27b",
         ],
+        # Cerebras has no small model any more (llama3.1-8b was retired); its
+        # hardware makes even the 31b fast enough for this tier.
         "cerebras": [
-            "llama3.1-8b",
+            "gemma-4-31b",
+            "zai-glm-4.7",
         ],
         "mistral": [
+            "ministral-3b-latest",
             "ministral-8b-latest",
             "ministral-14b-latest",
             "open-mistral-nemo",
             "mistral-small-latest",
         ],
+        # Lite models first: gemini-3.5-flash measured ~20s on a trivial prompt
+        # (vs <1s for the lites), which defeats the purpose of this tier. Kept as
+        # the last Gemini option rather than dropped.
         "gemini": [
-            "gemini-3.5-flash",
             "gemini-3.1-flash-lite",
-            "gemini-3.1-flash-lite-preview",
+            "gemini-flash-lite-latest",
             "gemini-2.5-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.5-flash",
         ],
         "openrouter": [
             "nvidia/nemotron-nano-9b-v2:free",
-            "google/gemma-3-12b-it:free",
-            "arcee-ai/trinity-mini:free",
-            "qwen/qwen3-coder:free",
+            "nvidia/nemotron-3-nano-30b-a3b:free",
+            "google/gemma-4-26b-a4b-it:free",
+            "google/gemma-4-31b-it:free",
+            "openai/gpt-oss-20b:free",
         ],
     },
 }
@@ -207,12 +219,12 @@ FAST_CHAIN = {
 CHEAP_CHAIN = {
     "order": ["groq", "cerebras", "mistral", "openrouter"],
     "models": {
-        "groq": ["llama-3.1-8b-instant"],
-        "cerebras": ["llama3.1-8b"],
-        "mistral": ["ministral-8b-latest"],
+        "groq": ["llama-3.1-8b-instant", "groq/compound-mini"],
+        "cerebras": ["gemma-4-31b"],
+        "mistral": ["ministral-3b-latest", "ministral-8b-latest"],
         "openrouter": [
             "nvidia/nemotron-nano-9b-v2:free",
-            "google/gemma-3-12b-it:free",
+            "nvidia/nemotron-3-nano-30b-a3b:free",
         ],
     },
 }
@@ -415,6 +427,16 @@ def generate_text(prompt, timeout=60, chain=None, caller=None, json_mode=False):
                 if resp.status_code == 200:
                     resp_json = resp.json()
                     text = resp_json["choices"][0]["message"]["content"]
+                    # Some models return HTTP 200 with null/empty content — classifiers
+                    # and code-tuned models do this on general prompts. Treated as
+                    # success this would hand "" to the caller and surface far away as
+                    # a JSON parse error, so fail over to the next model instead.
+                    if not text or not text.strip():
+                        err = "empty content (HTTP 200)"
+                        print(f"[llm] {model_id} (key …{key_hint}) {err} — trying next")
+                        log_llm_call(provider, p["model"], key_hint, "error", error=err, caller=caller)
+                        http.close()
+                        continue
                     # Extract token counts from OpenAI-compatible response
                     in_tok = out_tok = None
                     usage = resp_json.get("usage")
