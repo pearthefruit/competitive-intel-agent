@@ -1,5 +1,6 @@
 """Agent: Patent/IP Analysis — agentic USPTO search with name-variation retry."""
 
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -176,13 +177,57 @@ def patent_analysis(company, progress_cb=None):
 
     if patents:
         for p in patents:
-            content = p.get("patent_abstract") or p.get("abstract") or p.get("description") or ""
+            abstract = p.get("patent_abstract") or p.get("abstract") or p.get("description") or ""
+            title = p.get("patent_title") or p.get("title") or ""
+            number = p.get("number") or p.get("patent_number") or ""
+
+            # Persist reference metadata so patents can be filtered/cited by
+            # assignee, inventor, dates, and classification without re-fetching.
+            cpc = ", ".join(
+                (c.get("title") or c.get("id") or "")
+                for c in p.get("cpc_categories", [])
+            ).strip(", ")
+            # Google Patents highlights query terms with <b> tags — strip HTML
+            # so assignee/inventor stay clean for filtering.
+            def _clean(v):
+                return re.sub(r"<[^>]+>", "", v).strip() if isinstance(v, str) else v
+            metadata = {
+                k: v for k, v in {
+                    "patent_number": number,
+                    "assignee": _clean(p.get("assignee")),
+                    "inventor": _clean(p.get("inventor")),
+                    "filing_date": p.get("filing_date"),
+                    "priority_date": p.get("priority_date"),
+                    "publication_date": p.get("date") or p.get("publication_date"),
+                    "status": p.get("status"),
+                    "type": p.get("type"),
+                    "uspc_class": p.get("uspc_class"),
+                    "active_countries": p.get("active_countries"),
+                    "cpc": cpc or None,
+                }.items() if v
+            }
+
+            # Prefer the abstract as embeddable content; fall back to a compact
+            # reference line so metadata-rich USPTO patents (no abstract) are
+            # still captured instead of silently dropped.
+            content = abstract
+            if not content:
+                ref_bits = [title]
+                if number:
+                    ref_bits.append(f"Patent {number}")
+                if p.get("assignee"):
+                    ref_bits.append(f"Assignee: {p['assignee']}")
+                if p.get("status"):
+                    ref_bits.append(f"Status: {p['status']}")
+                content = ". ".join(b for b in ref_bits if b)
+
             if content:
                 _pending_sources.append({
                     "source_type": "patent",
                     "url": p.get("patent_url") or p.get("url"),
-                    "title": (p.get("patent_title") or p.get("title") or "")[:500],
+                    "title": title[:500],
                     "content": content[:50000],
+                    "metadata": metadata or None,
                     "raw_data": None,
                 })
         patents_text = format_patents_for_prompt(patents, total_count)

@@ -127,6 +127,123 @@ Not enough data for hiring analysis — only {len(jobs)} role(s) found (minimum 
     return str(filename)
 
 
+def _capture_hiring_sources(company_name, company, jobs, db_path):
+    """Register scraped job postings into the source RAG store.
+
+    Until now the hiring agent read jobs from the DB, wrote a report, and
+    stopped — the postings themselves (and their ATS provenance) never entered
+    ``source_documents`` / ``source_chunks``, so "Chat with Sources" could not
+    see them (the ``hiring_data`` source_type was reserved but never written).
+    This indexes each posting plus a provenance summary so the hiring evidence
+    is semantically searchable and available to the value-creation lens.
+
+    Non-fatal: any failure is logged and swallowed so it never breaks the run.
+    """
+    try:
+        from agents.source_capture import capture_and_embed
+        from db import get_or_create_dossier
+    except Exception as e:
+        print(f"[analyze] Source capture unavailable — skipping hiring source indexing: {e}")
+        return
+
+    board_url = company.get("url") or ""
+    ats = company.get("ats_type") or "unknown"
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    conn = get_connection(db_path)
+    try:
+        dossier_id = get_or_create_dossier(conn, company_name)
+        captured = 0
+
+        for job in jobs:
+            title = job.get("title") or "Untitled role"
+            job_url = job.get("url") or f"job://{company.get('id')}/{job.get('id')}"
+            skills = _safe_json_loads(job.get("key_skills"))
+            tags = _safe_json_loads(job.get("strategic_tags"))
+
+            dept = job.get("department_category") or job.get("department") or "Unknown"
+            if job.get("department_subcategory"):
+                dept = f"{dept} / {job['department_subcategory']}"
+
+            parts = [
+                f"Job title: {title}",
+                f"Company: {company_name}",
+                f"Department: {dept}",
+                f"Seniority: {job.get('seniority_level') or 'Unknown'}",
+                f"Location: {job.get('location') or 'Unknown'}",
+            ]
+            if job.get("salary"):
+                parts.append(f"Salary: {job['salary']}")
+            if skills:
+                parts.append(f"Key skills: {', '.join(skills)}")
+            if tags:
+                parts.append(f"Strategic tags: {', '.join(tags)}")
+            parts.append(f"Sourced from: {ats} ATS ({board_url})")
+            if job.get("description"):
+                parts.append("\nJob description:\n" + str(job["description"]))
+            content = "\n".join(parts)
+
+            try:
+                _, is_new = capture_and_embed(
+                    conn,
+                    dossier_id=dossier_id,
+                    source_type="hiring_data",
+                    title=f"Job posting: {title} — {company_name}",
+                    url=job_url,
+                    content=content,
+                    metadata={
+                        "department": job.get("department_category") or job.get("department"),
+                        "seniority": job.get("seniority_level"),
+                        "location": job.get("location"),
+                        "salary": job.get("salary"),
+                        "ats": ats,
+                        "source_board": job.get("source_board") or board_url,
+                    },
+                    source_date=job.get("date_posted"),
+                )
+                if is_new:
+                    captured += 1
+            except Exception as e:
+                print(f"[analyze] Failed to capture job '{title}' (non-fatal): {e}")
+
+        # Provenance summary — directly answers "what job board / ATS?" and
+        # gives the retriever an aggregate hiring view. Keyed per company+day so
+        # re-runs refresh the counts instead of returning early on dedup.
+        dept_counts = Counter((j.get("department_category") or "Other") for j in jobs)
+        loc_counts = Counter((j.get("location") or "Unknown") for j in jobs)
+        dept_line = ", ".join(f"{d} ({n})" for d, n in dept_counts.most_common())
+        loc_line = ", ".join(f"{l} ({n})" for l, n in loc_counts.most_common(8))
+        provenance = (
+            f"Hiring data provenance for {company_name}.\n"
+            f"All {len(jobs)} job postings analyzed were sourced from the {ats} ATS "
+            f"at {board_url}.\n"
+            f"Scraped and analyzed on {today}.\n"
+            f"Department breakdown: {dept_line}.\n"
+            f"Top locations: {loc_line}."
+        )
+        try:
+            capture_and_embed(
+                conn,
+                dossier_id=dossier_id,
+                source_type="hiring_data",
+                title=f"Hiring provenance — {company_name}",
+                url=board_url or f"hiring-provenance://{company_name}",
+                content=provenance,
+                metadata={"ats": ats, "job_board_url": board_url, "jobs_analyzed": len(jobs)},
+                source_date=today,
+                dedup_kwargs={"url": f"hiring-provenance://{company_name.lower()}/{today}"},
+            )
+        except Exception as e:
+            print(f"[analyze] Failed to capture hiring provenance (non-fatal): {e}")
+
+        conn.commit()
+        print(f"[analyze] Indexed {captured} new hiring source(s) + provenance for {company_name}")
+    except Exception as e:
+        print(f"[analyze] Hiring source capture failed (non-fatal): {e}")
+    finally:
+        conn.close()
+
+
 def analyze(company_name, db_path="intel.db"):
     """Generate strategic report for the given company.
 
@@ -295,4 +412,10 @@ def analyze(company_name, db_path="intel.db"):
 
     print(f"[analyze] Report saved to {filename}")
     save_to_dossier(company_name, "hiring", report_file=str(filename), report_text=report, model_used=model_used, db_path=db_path)
+
+    # Register the scraped postings into the source RAG store so the hiring
+    # evidence (JDs, roles, ATS provenance) is interrogable via Chat with
+    # Sources and available to the value-creation lens.
+    _capture_hiring_sources(company_name, company, jobs, db_path)
+
     return str(filename)
