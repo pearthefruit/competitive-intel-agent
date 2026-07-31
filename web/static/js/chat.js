@@ -3295,6 +3295,20 @@ async function openReport(filename) {
             return;
         }
 
+        // Restore the Report panel. A prior Sources-tab or source-citation
+        // click hides #right-content and shows the sources/source-viewer panels;
+        // without this the report renders invisibly behind "Source not found".
+        const _rc = document.getElementById('right-content');
+        if (_rc) _rc.style.display = '';
+        const _sp = document.getElementById('sources-panel');
+        if (_sp) _sp.style.display = 'none';
+        const _svp = document.getElementById('source-viewer-panel');
+        if (_svp) _svp.style.display = 'none';
+        const _tr = document.getElementById('rp-tab-report');
+        if (_tr) _tr.classList.add('active');
+        const _ts = document.getElementById('rp-tab-sources');
+        if (_ts) _ts.classList.remove('active');
+
         const contentEl = document.getElementById('right-content');
         const meta = await _renderReportInto(filename, contentEl);
         if (!meta) return;
