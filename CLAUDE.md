@@ -67,9 +67,9 @@ A source capture + embedding layer scoped to the Research module. Agents save ra
 - **Dedup:** by source identity (10-K: company+fiscal_year; 8-K: accession_number; other: URL hash)
 - **Chat:** `search_sources` tool, scoped to one company. Source Mode suppresses all other agent tools.
 - **UI:** Sources tab in Research right pane → "Chat with these sources" → Source Mode header banner
-- **Phase 1 (done):** financial agent (10-Ks, 8-Ks, news articles)
-- **Phase 2 (TODO):** sentiment agent (Reddit, Blind, news)
-- **Phase 3 (TODO):** competitors agent
+- **Capture coverage:** all seven analysis agents call `capture_and_embed` — financial, sentiment, competitors, patents, techstack, seo, pricing — plus hiring via `_capture_hiring_sources()` in `analyze.py`. (The old "Phase 2 sentiment / Phase 3 competitors TODO" note was stale; both have been wired for some time.)
+- **Retrieval diversity** (`_select_diverse` in `source_capture.py`): chunk counts are wildly uneven by source type — a 10-K averages ~160 chunks, a news article or patent exactly 1. Flat top-k ranking therefore returned **2.3 documents / 1.9 source types on average, with 6.5 of 8 slots from a single document** (measured over 10 real queries across HPE/Oracle/Mastercard/DocuSign/Dave/StubHub); in 5 of 10 cases all 8 slots came from one document. `MAX_CHUNKS_PER_DOC = 3` / `MAX_CHUNKS_PER_SECTION = 2` raise that to **4.5 docs / 3.3 types** for 0.023 of mean cosine (0.493 → 0.470). Thresholding happens *before* selection, and unfilled slots backfill from capped-out chunks, so the caps reshape ranking without ever shrinking the result. Where a company's corpus is genuinely one document the caps correctly change nothing — that is a coverage problem, not a ranking one.
+- **Coverage gap (2026-07-30):** 232 of 508 dossiers have been analyzed; only **35 have sources**. The other 197 were analyzed before RAG shipped (~2026-05-14), so retrieval-first chat silently finds nothing and falls back to web search for them. Recoverable without network: 851 report `.md` files on disk, and 46 sourceless dossiers whose job postings are still in the local `jobs` table. 146 sourceless dossiers had a financial analysis and are SEC-reachable. Note `backfill_10k_sources.py` gates on "has `sec_xbrl`, no `sec_10k`", which structurally cannot reach those 146.
 - Storage estimate: ~1MB per company per full financial run
 
 ### Documents Module

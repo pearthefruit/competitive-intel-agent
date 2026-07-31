@@ -14,6 +14,18 @@ CHUNK_OVERLAP_WORDS = 50
 SHORT_SOURCE_CUTOFF = 600   # words; under this → single chunk, no split
 SCORE_THRESHOLD = 0.30      # filter noise results in semantic search
 
+# ── Retrieval diversity ──────────────────────────────────────────────────────
+# Chunk counts are wildly uneven by source type: a 10-K averages ~160 chunks
+# while a news article or patent is exactly 1 (both sit under
+# SHORT_SOURCE_CUTOFF). Ranking on raw score alone therefore lets a single
+# filing section monopolize every slot in the top_k, so the answer is built
+# from one narrow slice of a 90k-word document while the news, hiring and
+# sentiment sources for the same company are never seen. These caps spread the
+# budget across documents and sections first, then fall back to score order.
+DEFAULT_TOP_K = 8
+MAX_CHUNKS_PER_DOC = 3
+MAX_CHUNKS_PER_SECTION = 2
+
 # Canonical source_type enum — every source_documents row must use one of
 # these. Anything else (e.g. a publisher name leaking in from a news search
 # result) is stored as "news_article" with the original string preserved in
@@ -221,13 +233,55 @@ def capture_and_embed(
 
 # ── Semantic search ───────────────────────────────────────────────────────────
 
+def _select_diverse(scored: list, top_k: int) -> list:
+    """Pick top_k chunks in score order, spread across source docs and sections.
+
+    Two passes. The first walks the ranking and admits a chunk only while its
+    document and section are under their caps; anything the caps reject is
+    deferred. The second backfills unfilled slots from those deferrals, still
+    in score order. Returning fewer passages than asked would be a worse trade
+    than returning a concentrated tail, so the caps reshape the ranking without
+    ever shrinking the result.
+    """
+    picked, deferred = [], []
+    per_doc, per_section = {}, {}
+
+    for row in scored:
+        if len(picked) >= top_k:
+            break
+        doc_id = row.get("source_doc_id")
+        if per_doc.get(doc_id, 0) >= MAX_CHUNKS_PER_DOC:
+            deferred.append(row)
+            continue
+        # The section cap applies only to sectioned documents (10-Ks). Flat
+        # sources leave section_key NULL on every chunk, so capping by section
+        # there would just be a second, tighter document cap.
+        sec_key = row.get("section_key")
+        if sec_key:
+            sk = (doc_id, sec_key)
+            if per_section.get(sk, 0) >= MAX_CHUNKS_PER_SECTION:
+                deferred.append(row)
+                continue
+            per_section[sk] = per_section.get(sk, 0) + 1
+        per_doc[doc_id] = per_doc.get(doc_id, 0) + 1
+        picked.append(row)
+
+    if len(picked) < top_k:
+        picked.extend(deferred[: top_k - len(picked)])
+    # Backfilled rows are appended after picks that outrank them, so the caps
+    # decide membership but not order. Re-sort so callers and citation numbering
+    # still see strictly descending relevance.
+    picked.sort(key=lambda r: r["score"], reverse=True)
+    return picked
+
+
 def search_sources(
     conn,
     query: str,
     dossier_id: int,
     source_type=None,
     section_key=None,
-    top_k: int = 8,
+    top_k: int = DEFAULT_TOP_K,
 ) -> list:
     """Semantic search scoped to one company's captured sources.
 
@@ -248,7 +302,12 @@ def search_sources(
         return []
 
     query_bytes = embed_text(query)
-    scored = semantic_search(query_bytes, rows, top_k=top_k)
+    # Score the whole candidate set, drop noise, then let the diversity caps
+    # choose the final top_k. Thresholding before selection matters: a
+    # below-threshold chunk should never be admitted just to spread coverage.
+    scored = semantic_search(query_bytes, rows, top_k=len(rows))
+    scored = [r for r in scored if r["score"] >= SCORE_THRESHOLD]
+    scored = _select_diverse(scored, top_k)
 
     return [
         {
@@ -261,5 +320,4 @@ def search_sources(
             "score":         r["score"],
         }
         for r in scored
-        if r["score"] >= SCORE_THRESHOLD
     ]
