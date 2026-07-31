@@ -87,9 +87,47 @@
 
     // ── Rendering ──────────────────────────────────────────────────────────
 
+    /**
+     * Toggle the pane between list flow and full-height timeline flow.
+     * List mode must keep the default block/overflow-y:auto behaviour or the
+     * prediction cards stop scrolling, so the flex fill is opt-in via class.
+     */
+    function _setTimelineFill(on) {
+        const tab = document.getElementById('sig-tab-predictions');
+        if (tab) tab.classList.toggle('tl-fill', !!on);
+    }
+
+    // Dots are painted from data, so their handlers are delegated rather than
+    // inlined — claim text routinely contains quotes and apostrophes, which
+    // silently break inline onclick attributes built by string concatenation.
+    let _tlDelegationBound = false;
+    function _bindTimelineDelegation() {
+        if (_tlDelegationBound) return;
+        const container = document.getElementById('predictions-list');
+        if (!container) return;
+        container.addEventListener('click', (e) => {
+            const hit = e.target.closest('.tl-dot-hit');
+            if (hit && container.contains(hit)) {
+                const id = parseInt(hit.dataset.predId, 10);
+                if (!isNaN(id) && typeof openPredictionDetail === 'function') openPredictionDetail(id);
+            }
+        });
+        _tlDelegationBound = true;
+    }
+
+    // Row count is derived from the band's height, so a pane resize has to
+    // re-run the layout or the dots keep the old spread.
+    let _tlResizeRaf = null;
+    window.addEventListener('resize', () => {
+        if (_predViewMode !== 'timeline') return;
+        if (_tlResizeRaf) cancelAnimationFrame(_tlResizeRaf);
+        _tlResizeRaf = requestAnimationFrame(() => _loadPredictionsTimeline());
+    });
+
     function _renderPredictions(predictions) {
         const container = document.getElementById('predictions-list');
         if (!container) return;
+        _setTimelineFill(false);
 
         if (!predictions.length) {
             container.innerHTML =
@@ -609,6 +647,8 @@
     window._renderPredictionsTimeline = function (predictions) {
         const container = document.getElementById('predictions-list');
         if (!container) return;
+        _setTimelineFill(true);
+        _bindTimelineDelegation();
 
         // Filter to predictions with expected_by dates, sorted ascending
         const dated = predictions
@@ -616,6 +656,7 @@
             .sort((a, b) => a.expected_by.localeCompare(b.expected_by));
 
         if (!dated.length) {
+            _setTimelineFill(false);   // nothing to fill; let the message center normally
             container.innerHTML += '<div style="color:#6b7280;text-align:center;padding:40px">No dated predictions to display.</div>';
             return;
         }
@@ -650,12 +691,6 @@
             first = false;
         }
 
-        const ROWS = 3;
-        const dottedPreds = future.map((p, i) => {
-            const pct = ((new Date(p.expected_by) - today) / totalMs) * 100;
-            return { ...p, pct: Math.max(0, Math.min(99, pct)), row: i % ROWS };
-        });
-
         const monthMarkersHtml = months.map(m =>
             `<div style="position:absolute;left:${m.pct.toFixed(1)}%;top:0;bottom:0;border-left:1px dashed rgba(255,255,255,0.06);pointer-events:none">
                 <span style="position:absolute;top:-18px;left:2px;font-size:9px;color:#4b5563;white-space:nowrap">${m.label}</span>
@@ -663,17 +698,6 @@
         ).join('');
 
         const showLabels = _tlZoom >= 2;
-        const rowHeight = showLabels ? 30 : 20;
-        const dotsHtml = dottedPreds.map(p => {
-            const sp = STATUS_PILL[p.status] || STATUS_PILL.open;
-            const topPx = p.row * rowHeight + 4;
-            const claimTrunc = p.claim && p.claim.length > 40 ? p.claim.substring(0, 38) + '…' : (p.claim || '');
-            return `<div onclick="openPredictionDetail(${p.id})" style="position:absolute;left:${p.pct.toFixed(1)}%;top:${topPx}px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;z-index:2;cursor:pointer"
-                         title="${_escHtml(p.claim)} — ${_formatDate(p.expected_by)}${p.parent_title ? ' (from: ' + _escHtml(p.parent_title) + ')' : ''}">
-                <div style="width:9px;height:9px;border-radius:50%;background:${sp.dot};box-shadow:0 0 5px ${sp.dot}55;flex-shrink:0"></div>
-                ${showLabels ? `<span style="font-size:8px;color:#9ca3af;white-space:nowrap;max-width:${_tlZoom >= 3 ? 130 : 90}px;overflow:hidden;text-overflow:ellipsis;margin-top:2px;text-align:center">${_escHtml(claimTrunc)}</span>` : ''}
-            </div>`;
-        }).join('');
 
         const overdueChip = overdue.length
             ? `<span onclick="loadPredictions('open')" title="${overdue.length} open predictions past their due date — click to review in list view"
@@ -689,24 +713,26 @@
                 <button onclick="_tlZoomStep(1)" ${_tlZoom >= 4 ? 'disabled' : ''} style="width:22px;height:22px;border:1px solid rgba(255,255,255,0.15);border-radius:6px;background:rgba(255,255,255,0.04);color:#9ca3af;font-size:13px;cursor:pointer;line-height:1;${_tlZoom >= 4 ? 'opacity:0.35;cursor:default' : ''}">+</button>
             </div>`;
 
+        // Shell first, dots second. The number of rows depends on how tall the
+        // band actually ends up, and that is only knowable once it is in the DOM
+        // and flex has resolved — so the dots are rendered in a second pass below.
         const timelineHtml = `
-            <div id="predictions-timeline" style="margin-top:8px;margin-bottom:12px">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-                    <span style="font-size:10px;color:#6b7280">${dottedPreds.length} upcoming · dots are clickable${showLabels ? '' : ' · zoom in for labels'}</span>
+            <div id="predictions-timeline" style="margin-top:8px;margin-bottom:4px">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-shrink:0">
+                    <span style="font-size:10px;color:#6b7280">${future.length} upcoming · dots are clickable${showLabels ? '' : ' · zoom in for labels'}</span>
                     ${zoomControls}
                 </div>
-                <div style="overflow-x:auto;overflow-y:hidden;padding-bottom:6px">
-                    <div style="position:relative;width:${(_tlZoom * 100).toFixed(0)}%;min-width:100%;padding:0 8px">
-                        <div style="position:relative;height:20px;margin-bottom:4px">${monthMarkersHtml}</div>
-                        <div style="position:relative;height:${ROWS * rowHeight + 16}px;border-top:2px solid rgba(255,255,255,0.12);border-bottom:1px solid rgba(255,255,255,0.05)">
-                            ${dotsHtml}
-                            <div style="position:absolute;left:0;top:0;bottom:0;border-left:2px solid rgba(59,130,246,0.6);z-index:3">
+                <div class="tl-scroll" style="overflow-x:auto;overflow-y:hidden;padding-bottom:6px">
+                    <div class="tl-inner" style="position:relative;width:${(_tlZoom * 100).toFixed(0)}%;min-width:100%;padding:0 8px">
+                        <div style="position:relative;height:20px;margin-bottom:4px;flex-shrink:0">${monthMarkersHtml}</div>
+                        <div class="tl-band" id="tl-band" style="position:relative;min-height:120px;border-top:2px solid rgba(255,255,255,0.12);border-bottom:1px solid rgba(255,255,255,0.05)">
+                            <div style="position:absolute;left:0;top:0;bottom:0;border-left:2px solid rgba(59,130,246,0.6);z-index:3;pointer-events:none">
                                 <span style="position:absolute;top:2px;left:4px;font-size:8px;color:#3b82f6;font-weight:700;white-space:nowrap">Today</span>
                             </div>
                         </div>
                     </div>
                 </div>
-                <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap">
+                <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap;flex-shrink:0">
                     ${Object.entries(STATUS_PILL).map(([k, v]) =>
                         `<span style="font-size:10px;color:${v.color};display:flex;align-items:center;gap:3px">
                             <span style="width:8px;height:8px;border-radius:50%;background:${v.dot};display:inline-block"></span>${v.label}
@@ -716,7 +742,92 @@
             </div>`;
 
         container.innerHTML += timelineHtml;
+        _paintTimelineDots(future, today, totalMs, showLabels);
     };
+
+    /**
+     * Second render pass: fill the (now measured) band with dots.
+     *
+     * Rows are derived from the band's real height rather than hardcoded, so the
+     * timeline uses whatever vertical space the pane gives it. The previous fixed
+     * 3 rows meant ~175 predictions piled into a 76px strip — dots overlapped each
+     * other and the 9px hit targets were nearly unclickable.
+     */
+    function _paintTimelineDots(future, today, totalMs, showLabels, _retry) {
+        const band = document.getElementById('tl-band');
+        if (!band) return;
+
+        const ROW_H = showLabels ? 34 : 26;   // per-row pitch, incl. label space
+        const PAD = 6;
+
+        // A band measuring 0 means flex has not resolved yet (tab still being
+        // shown). Measuring anyway would silently collapse to the 3-row minimum,
+        // which is the exact bug this pass exists to fix — so wait one frame.
+        if (!band.clientHeight && !_retry) {
+            requestAnimationFrame(() => _paintTimelineDots(future, today, totalMs, showLabels, true));
+            return;
+        }
+        const h = band.clientHeight || 120;
+        // Clamped: below 3 rows the spread is pointless, above 14 the dots get
+        // too fine to aim at even though they would technically fit.
+        const rows = Math.max(3, Math.min(14, Math.floor((h - PAD * 2) / ROW_H)));
+
+        // Lane packing, not round-robin. Round-robin (i % rows) spreads dots
+        // evenly but makes vertical position meaningless — sparse weeks render as
+        // tall a stack as busy ones, so the chart reads as a uniform grid and
+        // hides the density it exists to show. Instead each dot takes the lowest
+        // lane whose last dot is far enough left, so height genuinely tracks
+        // how many predictions cluster on a date.
+        const bandW = band.clientWidth || 800;
+        const LABEL_MAX = _tlZoom >= 3 ? 130 : 90;
+        const DOT_HALF = 11;
+        const LABEL_HALF = LABEL_MAX / 2;   // labels are centred on their dot
+        // Right edge of the last item placed in each lane, so collision tests
+        // account for the label's real footprint rather than the dot's.
+        const laneRight = new Array(rows).fill(-Infinity);
+        const rowStep = (h - PAD * 2 - ROW_H) / Math.max(1, rows - 1);
+
+        const dotsHtml = future.map((p) => {
+            const pct = Math.max(0, Math.min(99, ((new Date(p.expected_by) - today) / totalMs) * 100));
+            const x = (pct / 100) * bandW;
+
+            // Label only where a lane can actually fit the text. Labelling every
+            // dot at this density produced ~250 overlapping label pairs — the
+            // claims rendered on top of each other and none were readable. A dot
+            // that cannot be labelled still gets placed, just bare; the header
+            // already tells the user to zoom in for labels.
+            let row = -1, labelled = false;
+            if (showLabels) {
+                row = laneRight.findIndex(right => x - LABEL_HALF >= right);
+                labelled = row !== -1;
+            }
+            if (row === -1) row = laneRight.findIndex(right => x - DOT_HALF >= right);
+            if (row === -1) {
+                // Every lane is occupied at this x — overflow into the lane with
+                // the most room rather than dropping the dot.
+                row = laneRight.indexOf(Math.min(...laneRight));
+                labelled = false;
+            }
+            laneRight[row] = x + (labelled ? LABEL_HALF : DOT_HALF);
+
+            const top = PAD + row * rowStep;
+            const sp = STATUS_PILL[p.status] || STATUS_PILL.open;
+            const claimTrunc = p.claim && p.claim.length > 40 ? p.claim.substring(0, 38) + '…' : (p.claim || '');
+            const label = labelled
+                ? `<span class="tl-dot-label" style="position:absolute;top:19px;font-size:8px;color:#9ca3af;white-space:nowrap;max-width:${LABEL_MAX}px;overflow:hidden;text-overflow:ellipsis;text-align:center;pointer-events:none">${_escHtml(claimTrunc)}</span>`
+                : '';
+            return `<div class="tl-dot-hit" data-pred-id="${p.id}"
+                         style="position:absolute;left:${pct.toFixed(2)}%;top:${top.toFixed(1)}px;transform:translateX(-50%);z-index:2"
+                         title="${_escHtml(p.claim)} — ${_formatDate(p.expected_by)}${p.parent_title ? ' (from: ' + _escHtml(p.parent_title) + ')' : ''}">
+                    <div class="tl-dot" style="width:12px;height:12px;border-radius:50%;background:${sp.dot};box-shadow:0 0 6px ${sp.dot}66"></div>
+                    ${label}
+                </div>`;
+        }).join('');
+
+        // insertAdjacentHTML, not innerHTML — the "Today" marker is already a
+        // child of the band and must survive the dot paint.
+        band.insertAdjacentHTML('beforeend', dotsHtml);
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     // SURFACE 3: Board Overlay — Floating Mini-Panel

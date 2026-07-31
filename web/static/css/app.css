@@ -3915,6 +3915,29 @@
         #sig-tab-graph.active { display: flex !important; flex-direction: column; }
         #sig-tab-causal.active { display: flex !important; flex-direction: column; }
 
+        /* Predictions timeline: claim the full pane height instead of sitting in a
+           76px band. Applied via the .tl-fill class only in timeline mode — list
+           mode keeps the default block flow so cards scroll normally.
+           In-flow flex (not fixed/absolute), so the filter row, band and legend
+           all stay visible and share the space. */
+        #sig-tab-predictions.tl-fill.active { display: flex !important; flex-direction: column; overflow-y: hidden; }
+        #sig-tab-predictions.tl-fill #predictions-list { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+        #sig-tab-predictions.tl-fill #predictions-timeline { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+        /* min-height:0 on every flex ancestor — without it the band refuses to
+           shrink below content height and the whole column overflows the pane. */
+        #sig-tab-predictions.tl-fill .tl-scroll { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+        #sig-tab-predictions.tl-fill .tl-inner { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+        #sig-tab-predictions.tl-fill .tl-band { flex: 1; min-height: 0; }
+
+        /* Dot hit target is deliberately larger than the dot: 24px of clickable
+           area around a 12px visual. At ~175 predictions the dots crowd together,
+           and a 9px target was effectively unclickable. */
+        .tl-dot-hit { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .tl-dot-hit .tl-dot { transition: transform .12s ease, box-shadow .12s ease; }
+        .tl-dot-hit:hover { z-index: 10; }
+        .tl-dot-hit:hover .tl-dot { transform: scale(1.45); }
+        .tl-dot-hit:hover .tl-dot-label { color: #e5e7eb; }
+
         /* Board tab subtabs: Graph | Chains */
         .board-subtab-bar { display: flex; align-items: center; gap: 4px; padding: 5px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
         .board-subtab-btn { padding: 4px 12px; border-radius: 5px; border: 1px solid var(--border); background: none; color: var(--text-muted); font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
