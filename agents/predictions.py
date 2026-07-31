@@ -47,9 +47,16 @@ def _clamp_horizon(p) -> int:
 
 
 def sweep_expired_predictions(db, grace_days: int = EXPIRY_GRACE_DAYS) -> int:
-    """Mark open predictions past expected_by + grace as expired. Returns count.
+    """Mark open qualitative predictions past expected_by + grace as expired.
 
     Cheap single UPDATE — safe to run on every predictions list request.
+
+    Skips `resolution_kind = 'series'` rows: those are binary forecasts bound to a
+    data release, and `expected_by` on them is only an estimate of when the number
+    publishes. Expiring one because a release ran late would drop a forecast that
+    is about to resolve cleanly, and would bias the Brier score toward whichever
+    outcomes happen to publish on time. `agents.forecasts.resolve_due_forecasts()`
+    owns their lifecycle, including abandonment.
     """
     cutoff = (datetime.date.today() - datetime.timedelta(days=grace_days)).isoformat()
     cur = db.execute(
@@ -57,7 +64,8 @@ def sweep_expired_predictions(db, grace_days: int = EXPIRY_GRACE_DAYS) -> int:
            SET status = 'expired',
                resolved_at = CURRENT_TIMESTAMP,
                resolution_note = 'Auto-expired ' || CAST(julianday('now') - julianday(expected_by) AS INTEGER) || ' days past due with no resolution'
-           WHERE status = 'open' AND expected_by < ?""",
+           WHERE status = 'open' AND expected_by < ?
+             AND (resolution_kind IS NULL OR resolution_kind != 'series')""",
         (cutoff,),
     )
     db.commit()

@@ -606,6 +606,24 @@ def _migrate_db(conn):
         ("source_documents", "metadata_json", "TEXT"),
         ("predictions", "claim_embedding", "BLOB"),
         ("signals", "predictions_matched_at", "TEXT"),
+        # Binary series-bound forecasts. Existing rows keep resolution_kind NULL,
+        # which reads as 'llm_judge' everywhere — see agents/forecasts.py.
+        ("predictions", "resolution_kind", "TEXT"),   # NULL/'llm_judge' | 'series'
+        ("predictions", "probability", "REAL"),       # 0-1, the scoreable forecast
+        ("predictions", "series_id", "TEXT"),         # FRED series, e.g. 'UNRATE'
+        ("predictions", "comparator", "TEXT"),        # 'above' | 'below'
+        ("predictions", "threshold", "REAL"),
+        ("predictions", "target_period", "TEXT"),     # ISO date of the observation forecast
+        ("predictions", "baseline_value", "REAL"),    # comparable value when forecast was made
+        # 'level' (or NULL, for rows predating this) compares the raw observation.
+        # 'change_pct' compares its period-over-period % change — required for
+        # trending index series where a level threshold is settled by drift alone.
+        ("predictions", "basis", "TEXT"),
+        ("predictions", "resolved_value", "REAL"),    # the quantity actually compared
+        ("predictions", "resolved_level", "REAL"),    # raw observation level, for audit
+        ("predictions", "prior_value", "REAL"),       # prior observation, for change math
+        ("predictions", "outcome", "INTEGER"),        # 1 = happened, 0 = did not
+        ("predictions", "brier_score", "REAL"),
     ]
     for table, column, col_type in migrations:
         try:

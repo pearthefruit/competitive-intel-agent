@@ -224,6 +224,70 @@ def chat_cmd(db):
     chat_repl(db)
 
 
+@cli.command("forecast")
+@click.option("--signal-id", type=int, default=None,
+              help="Generate binary forecasts from one signal")
+@click.option("--resolve", is_flag=True, help="Resolve forecasts whose data has landed")
+@click.option("--score", is_flag=True, help="Show the calibration record")
+@click.option("--db", default="intel.db", help="SQLite database path")
+def forecast_cmd(signal_id, resolve, score, db):
+    """Binary series-bound forecasts — the Brier-scoreable prediction path."""
+    from db import get_connection, init_db
+    from agents.forecasts import (generate_forecasts_for_signal,
+                                  resolve_due_forecasts, brier_summary,
+                                  BRIER_COINFLIP, ForecastUnavailable)
+    init_db(db)  # idempotent; applies the forecast column migration on older DBs
+    conn = get_connection(db)
+    try:
+        if signal_id:
+            row = conn.execute(
+                "SELECT id, title, body, domain FROM signals WHERE id = ?",
+                (signal_id,)).fetchone()
+            if not row:
+                print(f"No signal {signal_id}")
+                return
+            try:
+                ids = generate_forecasts_for_signal(
+                    row["id"], row["title"], row["body"], row["domain"], conn)
+            except ForecastUnavailable as e:
+                # Loud on purpose: an outage reported as "0 forecasts" reads as the
+                # model declining, and that misreading compounds silently.
+                print(f"LLM unavailable — NOT a decline. Nothing judged.\n  {e}")
+                return
+            if not ids:
+                print("Model declined — no forecast for this signal.")
+            print(f"Generated {len(ids)} forecast(s): {ids or '—'}")
+            for pid in ids:
+                p = conn.execute(
+                    "SELECT claim, probability, expected_by FROM predictions WHERE id = ?",
+                    (pid,)).fetchone()
+                print(f"  [{p['probability']:.0%}] {p['claim']}  (resolves ~{p['expected_by']})")
+
+        if resolve:
+            print(resolve_due_forecasts(conn))
+
+        if score:
+            s = brier_summary(conn)
+            if not s["n"]:
+                print("No resolved forecasts yet — nothing to score.")
+                return
+            verdict = "better than chance" if s["vs_coinflip"] > 0 else "worse than chance"
+            print(f"\n  Resolved forecasts : {s['n']}")
+            print(f"  Brier score        : {s['brier']}  ({verdict}; "
+                  f"{BRIER_COINFLIP} = always saying 50%)")
+            print(f"  Base rate          : {s['base_rate']:.0%} of forecasts came true")
+            print("\n  Reliability (does 70% actually mean 70%?)")
+            for b in s["buckets"]:
+                print(f"    {b['range']:>9}  n={b['n']:<4} said {b['predicted']:.0%}  "
+                      f"happened {b['actual']:.0%}")
+            print("\n  By series")
+            for r in s["by_series"]:
+                print(f"    {r['series_id']:<14} n={r['n']:<4} brier {r['brier']}")
+            print()
+    finally:
+        conn.close()
+
+
 @cli.command("web")
 @click.option("--port", default=5001, help="Port to run on (default: 5001)")
 @click.option("--db", default="intel.db", help="SQLite database path")
