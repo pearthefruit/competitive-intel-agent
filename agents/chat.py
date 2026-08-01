@@ -1318,21 +1318,35 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                                 f"Sources may not have been captured yet — run a financial analysis first."
                             )
                         else:
+                            from agents.source_capture import SYNTHESIS_SOURCE_TYPES
                             parts = []
+                            n_synth = 0
                             for r in results:
                                 label = r.get("section_label") or r.get("source_type", "").replace("_", " ").title()
                                 score_pct = int(r.get("score", 0) * 100)
                                 text = (r.get("chunk_text") or "").strip()[:600]
                                 chunk_hint = (r.get("chunk_text") or "").strip()[:80].replace("\n", " ")
+                                # Mark our own analysis output inline. Without this the
+                                # model cannot tell a passage we wrote from a filing we
+                                # fetched, and will cite synthesis as evidence.
+                                is_synth = r.get("source_type") in SYNTHESIS_SOURCE_TYPES
+                                if is_synth:
+                                    n_synth += 1
+                                tag = " [OUR OWN PRIOR ANALYSIS — not primary evidence]" if is_synth else ""
                                 parts.append(
-                                    f"**{r.get('source_title', 'Source')}** — {label} [{score_pct}% match]\n"
+                                    f"**{r.get('source_title', 'Source')}** — {label} [{score_pct}% match]{tag}\n"
                                     f"{text}\n"
                                     f'["{chunk_hint}…"](source:{r.get("source_doc_id", "")})'
                                 )
-                            tool_result = (
-                                f"Found {len(results)} relevant passage(s) in {company}'s captured sources:\n\n"
-                                + "\n\n---\n\n".join(parts)
-                            )
+                            header = f"Found {len(results)} relevant passage(s) in {company}'s captured sources:"
+                            if n_synth:
+                                header += (
+                                    f"\n\nNOTE: {n_synth} of these are SignalVault's own prior analysis "
+                                    f"reports, not primary sources. Treat them as a summary of earlier "
+                                    f"work — attribute claims to the underlying evidence where possible, "
+                                    f"and say so plainly when a statement rests only on prior analysis."
+                                )
+                            tool_result = header + "\n\n" + "\n\n---\n\n".join(parts)
                 except Exception as e:
                     tool_result = f"Source search failed: {e}"
                 finally:

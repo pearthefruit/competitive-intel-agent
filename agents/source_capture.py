@@ -26,6 +26,18 @@ DEFAULT_TOP_K = 8
 MAX_CHUNKS_PER_DOC = 3
 MAX_CHUNKS_PER_SECTION = 2
 
+# Per-source-type slot caps. The per-document cap cannot help when a type is
+# spread across many documents: a company with 720 job postings has 720 separate
+# hiring_data docs, so nothing stops them filling every slot. Same for our own
+# analysis reports, which should yield to primary evidence when any exists.
+# Types absent from this dict are uncapped. As with the other caps, an unfilled
+# budget backfills from capped-out chunks — so a company whose only captured
+# material is its reports still gets a full result set.
+SLOT_CAPS_BY_TYPE = {
+    "analysis_report": 2,
+    "hiring_data": 3,
+}
+
 # Canonical source_type enum — every source_documents row must use one of
 # these. Anything else (e.g. a publisher name leaking in from a news search
 # result) is stored as "news_article" with the original string preserved in
@@ -35,7 +47,15 @@ CANONICAL_SOURCE_TYPES = frozenset({
     "news_article", "google_news", "web", "web_crawl", "pricing_page",
     "reddit", "hackernews", "youtube", "blind", "fishbowl", "tiktok",
     "instagram", "1point3acres", "patent", "hiring_data", "data_point",
+    "analysis_report",
 })
+
+# Source types that are our own LLM synthesis rather than primary evidence.
+# They are retrievable — for most companies the analysis reports are the only
+# thing ever captured — but they must never be mistaken for a source. Callers
+# render them with a distinct badge, and SLOT_CAPS_BY_TYPE keeps them from
+# crowding out real evidence when real evidence exists.
+SYNTHESIS_SOURCE_TYPES = frozenset({"analysis_report"})
 
 # Legacy/variant spellings collapsed into a single canonical value
 SOURCE_TYPE_ALIASES = {
@@ -231,25 +251,227 @@ def capture_and_embed(
     return (source_doc_id, True)
 
 
+# ── Analysis reports as sources ───────────────────────────────────────────────
+# Our own reports are the only material most companies ever have: 197 of the 232
+# analyzed dossiers were analyzed before source capture existed, so retrieval
+# finds nothing for them and chat silently falls back to web search. Indexing the
+# reports closes that, but they are synthesis — kept in a separate source_type,
+# slot-capped, and badged so they can never pass as primary evidence.
+
+# Headings whose bodies are link lists rather than prose. Retrieving them returns
+# a wall of URLs that matches everything and informs nothing; the links are far
+# more useful parsed out into metadata as provenance.
+_LINKLIST_HEADINGS = {"sources", "source", "references", "citations", "individual reports"}
+
+
+def _slugify_heading(text: str) -> str:
+    import re
+    s = re.sub(r"[*_`#]", "", text or "").strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+    return s or "section"
+
+
+def split_report_sections(text: str) -> tuple:
+    """Split a markdown analysis report into (sections, cited_urls).
+
+    Reports average ~4.7 `##` headings, so they section as naturally as a 10-K
+    and reuse the same sectioned-capture path. Content before the first heading
+    (title block and executive summary) is kept as a leading 'summary' section
+    rather than dropped — for many reports it is the densest part.
+
+    Link-list sections are excluded from the returned sections and their URLs
+    returned separately. A report with no headings at all falls through the same
+    preamble path and comes back as one 'summary' section; the 'report' fallback
+    below only fires for input that is empty or whitespace.
+    """
+    import re
+
+    lines = (text or "").splitlines()
+    sections, cited = [], []
+    cur_label, cur_buf = None, []
+
+    def flush():
+        if not cur_buf:
+            return
+        body = "\n".join(cur_buf).strip()
+        if not body:
+            return
+        label = (cur_label or "Summary").strip()
+        clean = re.sub(r"[*_`]", "", label).strip()
+        if clean.lower() in _LINKLIST_HEADINGS:
+            cited.extend(re.findall(r"https?://[^\s)\]]+", body))
+            return
+        sections.append({
+            "section_key": _slugify_heading(clean),
+            "section_label": clean,
+            "content": body,
+            "word_count": len(body.split()),
+        })
+
+    for line in lines:
+        m = re.match(r"^##\s+(.*)$", line)
+        if m:
+            flush()
+            cur_label, cur_buf = m.group(1), []
+        else:
+            cur_buf.append(line)
+    flush()
+
+    if not sections:
+        body = (text or "").strip()
+        if body:
+            sections = [{
+                "section_key": "report",
+                "section_label": "Report",
+                "content": body,
+                "word_count": len(body.split()),
+            }]
+
+    # Dedup URLs, order-stable
+    seen, urls = set(), []
+    for u in cited:
+        u = u.rstrip(".,;")
+        if u not in seen:
+            seen.add(u)
+            urls.append(u)
+    return sections, urls
+
+
+def _supersede_prior_reports(conn, dossier_id: int, analysis_type: str, keep_doc_id=None):
+    """Un-index older analysis_report docs for this dossier + analysis_type.
+
+    Analyses accumulate one row per run, so a company can hold a March and a July
+    financial report. Indexing both would leave chat arbitrating between two
+    versions of the same synthesis and citing superseded numbers with full
+    confidence. Only the newest is retrievable; the older files stay on disk and
+    in dossier_analyses, they simply leave the search corpus.
+
+    Deletes chunks and sections explicitly rather than trusting ON DELETE CASCADE,
+    which needs a per-connection `PRAGMA foreign_keys=ON` that is not guaranteed.
+    Returns the number of documents removed.
+    """
+    import json as _json
+
+    rows = conn.execute(
+        "SELECT id, metadata_json FROM source_documents "
+        "WHERE dossier_id = ? AND source_type = 'analysis_report'",
+        (dossier_id,),
+    ).fetchall()
+
+    victims = []
+    for r in rows:
+        doc_id = r["id"] if not isinstance(r, tuple) else r[0]
+        if keep_doc_id is not None and doc_id == keep_doc_id:
+            continue
+        raw = r["metadata_json"] if not isinstance(r, tuple) else r[1]
+        try:
+            meta = _json.loads(raw) if raw else {}
+        except Exception:
+            meta = {}
+        if meta.get("analysis_type") == analysis_type:
+            victims.append(doc_id)
+
+    for doc_id in victims:
+        conn.execute("DELETE FROM source_chunks WHERE source_doc_id = ?", (doc_id,))
+        conn.execute("DELETE FROM source_sections WHERE source_doc_id = ?", (doc_id,))
+        conn.execute("DELETE FROM source_documents WHERE id = ?", (doc_id,))
+    if victims:
+        conn.commit()
+    return len(victims)
+
+
+def capture_analysis_report(conn, dossier_id: int, company: str, analysis_type: str,
+                            report_file: str, report_text=None, report_date=None) -> tuple:
+    """Index an analysis report as a (synthesis-tier) source. Returns (id, is_new).
+
+    Idempotent per report file. Supersedes older reports of the same type for
+    this dossier once the new one is safely indexed.
+    """
+    import os
+    from db import get_source_by_dedup_key
+
+    if not report_file:
+        return (None, False)
+
+    basename = os.path.basename(report_file)
+    url = f"report://{basename}"
+    dk = dedup_key("analysis_report", url=url)
+
+    # Already indexed — return before superseding anything, so a repeated run is
+    # a genuine no-op rather than a delete-and-re-embed cycle.
+    existing = get_source_by_dedup_key(conn, dk)
+    if existing:
+        return (existing["id"], False)
+
+    if report_text is None:
+        try:
+            with open(report_file, "r", encoding="utf-8", errors="ignore") as fh:
+                report_text = fh.read()
+        except Exception as e:
+            print(f"[source_capture] Cannot read report {report_file}: {e}")
+            return (None, False)
+
+    if not (report_text or "").strip():
+        return (None, False)
+
+    sections, cited_urls = split_report_sections(report_text)
+    if not sections:
+        return (None, False)
+
+    title = f"{analysis_type.replace('_', ' ').title()} analysis: {company}"
+    if report_date:
+        title += f" ({report_date})"
+
+    doc_id, is_new = capture_and_embed(
+        conn,
+        dossier_id=dossier_id,
+        source_type="analysis_report",
+        title=title,
+        url=url,
+        content=None,          # sectioned path
+        sections=sections,
+        metadata={
+            "analysis_type": analysis_type,
+            "company": company,
+            "report_file": report_file,
+            "synthesis": True,     # not primary evidence — badge accordingly
+            "cited_urls": cited_urls,
+            "section_count": len(sections),
+        },
+        source_date=report_date,
+        dedup_kwargs={"url": url},
+    )
+
+    if is_new and doc_id:
+        _supersede_prior_reports(conn, dossier_id, analysis_type, keep_doc_id=doc_id)
+
+    return (doc_id, is_new)
+
+
 # ── Semantic search ───────────────────────────────────────────────────────────
 
 def _select_diverse(scored: list, top_k: int) -> list:
-    """Pick top_k chunks in score order, spread across source docs and sections.
+    """Pick top_k chunks in score order, spread across docs, sections and types.
 
     Two passes. The first walks the ranking and admits a chunk only while its
-    document and section are under their caps; anything the caps reject is
+    document, section and source type are under their caps; anything rejected is
     deferred. The second backfills unfilled slots from those deferrals, still
     in score order. Returning fewer passages than asked would be a worse trade
     than returning a concentrated tail, so the caps reshape the ranking without
     ever shrinking the result.
     """
     picked, deferred = [], []
-    per_doc, per_section = {}, {}
+    per_doc, per_section, per_type = {}, {}, {}
 
     for row in scored:
         if len(picked) >= top_k:
             break
         doc_id = row.get("source_doc_id")
+        stype = row.get("source_type")
+        type_cap = SLOT_CAPS_BY_TYPE.get(stype)
+        if type_cap is not None and per_type.get(stype, 0) >= type_cap:
+            deferred.append(row)
+            continue
         if per_doc.get(doc_id, 0) >= MAX_CHUNKS_PER_DOC:
             deferred.append(row)
             continue
@@ -264,6 +486,7 @@ def _select_diverse(scored: list, top_k: int) -> list:
                 continue
             per_section[sk] = per_section.get(sk, 0) + 1
         per_doc[doc_id] = per_doc.get(doc_id, 0) + 1
+        per_type[stype] = per_type.get(stype, 0) + 1
         picked.append(row)
 
     if len(picked) < top_k:

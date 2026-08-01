@@ -84,16 +84,26 @@ async function _loadSourcesForCompany(company) {
             sec_10k: '10-K Annual Report', sec_8k: '8-K Material Events',
             news_article: 'News Articles', propublica: 'ProPublica 990',
             reddit_post: 'Reddit', blind_post: 'Blind',
+            hiring_data: 'Job Postings',
+            analysis_report: 'Our Analysis (synthesis — not a source)',
         };
+        // Source types that are our own LLM output rather than primary evidence.
+        // Kept visually distinct and sorted last so the pane never presents a
+        // report we wrote as if it were something we found.
+        const SYNTHESIS_TYPES = new Set(['analysis_report']);
         let html = '';
-        for (const [type, items] of Object.entries(groups)) {
+        const orderedTypes = Object.keys(groups).sort((a, b) =>
+            (SYNTHESIS_TYPES.has(a) ? 1 : 0) - (SYNTHESIS_TYPES.has(b) ? 1 : 0));
+        for (const type of orderedTypes) {
+            const items = groups[type];
+            const isSynth = SYNTHESIS_TYPES.has(type);
             html += `<div class="source-group-label">${TYPE_LABELS[type] || type.replace(/_/g,' ')}</div>`;
             for (const s of items) {
                 const date = s.source_date ? s.source_date.slice(0,10) : '';
                 html += `<div class="source-card" onclick="openSourceViewer(${s.id})">
                     <div class="source-card-title">${_escHtml(s.title || 'Untitled')}</div>
                     <div class="source-card-meta">
-                        <span class="source-type-badge">${type.replace(/_/g,' ')}</span>
+                        <span class="source-type-badge${isSynth ? ' synthesis' : ''}">${isSynth ? 'synthesis' : type.replace(/_/g,' ')}</span>
                         ${date ? `<span>${date}</span>` : ''}
                     </div>
                 </div>`;

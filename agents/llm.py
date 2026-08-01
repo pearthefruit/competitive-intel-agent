@@ -1317,6 +1317,24 @@ def save_to_dossier(company, analysis_type, report_file=None, report_text=None,
             model_used=model_used,
         )
 
+        # Index the report itself as a synthesis-tier source. Every analysis
+        # agent funnels through here, so this one hook covers all analysis types
+        # without touching them individually. Non-fatal by design: a capture or
+        # embedding failure must never lose an analysis that already ran.
+        if report_file:
+            try:
+                from agents.source_capture import capture_analysis_report
+                _doc_id, _is_new = capture_analysis_report(
+                    conn, dossier_id, company, analysis_type,
+                    report_file=report_file,
+                    report_text=report_text,
+                    report_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                )
+                if _is_new:
+                    print(f"[dossier] Indexed {analysis_type} report as source {_doc_id}")
+            except Exception as e:
+                print(f"[dossier] Report source indexing failed (non-fatal): {e}")
+
         conn.close()
         print(f"[dossier] Saved {analysis_type} analysis to {company} dossier")
         save_detail = f"Company: {company}\nType: {analysis_type}\nReport: {report_file or 'N/A'}\nModel: {model_used or 'N/A'}"

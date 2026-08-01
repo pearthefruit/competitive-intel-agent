@@ -3448,6 +3448,9 @@
         .source-card-title { font-size:12px;font-weight:600;color:var(--text-primary);margin-bottom:3px; }
         .source-card-meta { font-size:11px;color:var(--text-muted);display:flex;gap:6px;align-items:center; }
         .source-type-badge { font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(99,102,241,0.2);color:#a5b4fc;text-transform:uppercase;font-weight:600; }
+        /* Amber, not the indigo used for primary sources: an analysis report is
+           our own synthesis, and must never read as evidence we gathered. */
+        .source-type-badge.synthesis { background:rgba(251,191,36,0.18);color:#fbbf24; }
         .source-group-label { font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);padding:8px 0 4px;font-weight:600; }
         .chat-with-sources-btn { width:100%;padding:8px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:6px;color:#a5b4fc;cursor:pointer;font-size:12px;transition:background .15s; }
         .chat-with-sources-btn:hover { background:rgba(99,102,241,0.25); }
