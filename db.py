@@ -2407,7 +2407,7 @@ _PRESET_LENSES = [
                     "key": "ops_maturity",
                     "label": "Business Process & Ops Maturity",
                     "weight": 0.25,
-                    "sources": ["ops_maturity", "techstack", "hiring"],
+                    "sources": ["ops_maturity", "techstack"],
                     "rubric": (
                         "Score how much of the business runs on repeatable systems versus the owner's head. "
                         "Judge demand generation, sales process, and back-office tooling.\n"
@@ -2429,7 +2429,7 @@ _PRESET_LENSES = [
                     "key": "digital_leverage",
                     "label": "Digital Maturity & Upside",
                     "weight": 0.20,
-                    "sources": ["techstack", "seo", "brand_ad"],
+                    "sources": ["techstack", "brand_ad"],
                     "rubric": (
                         "IMPORTANT — this dimension scores VALUE CREATION HEADROOM, not current sophistication. "
                         "A competent business with an unexploited digital channel scores HIGHER than one already "
@@ -2475,7 +2475,7 @@ _PRESET_LENSES = [
                     "key": "owner_dependency",
                     "label": "Owner Dependency & Transferability",
                     "weight": 0.10,
-                    "sources": ["ops_maturity", "hiring", "sentiment"],
+                    "sources": ["ops_maturity", "sentiment"],
                     "rubric": (
                         "Score how much of the enterprise value survives the owner leaving. "
                         "Lower dependency scores HIGHER.\n"

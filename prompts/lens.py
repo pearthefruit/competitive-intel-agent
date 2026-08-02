@@ -43,6 +43,19 @@ def _build_opportunities_schema(opportunities_label):
         }]
 
 
+# Default scope bands assume a Big 4 consulting engagement. They are wrong by an
+# order of magnitude for lenses that evaluate small companies — proposing a
+# "$500K-1M, 3-6 month" workstream to a $4M-revenue acquisition target quotes a
+# fee larger than the target's annual profit. Lenses override this via
+# config["scope_guidance"].
+_DEFAULT_SCOPE_GUIDANCE = (
+    "Scope estimation (Big 4 blended rate ~$3-5K/consultant/day):\n"
+    "  $500K-1M (3-6mo, small team) | $1-3M (6-12mo, medium) | $2-5M (9-18mo, large) | "
+    "$5M+ (12-24mo, only $50B+ companies).\n"
+    "  CRITICAL: Scale to company size."
+)
+
+
 def build_lens_scoring_prompt(company_name, lens_config, reports, website_url=None):
     """Build a dynamic scoring prompt from a lens config and analysis reports.
 
@@ -62,6 +75,10 @@ def build_lens_scoring_prompt(company_name, lens_config, reports, website_url=No
     angle_guidance = lens_config.get("angle_guidance", "")
     risk_focus = lens_config.get("risk_focus", "")
     opportunities_label = lens_config.get("opportunities_label", "Consulting Opportunities")
+    scope_guidance = lens_config.get("scope_guidance") or _DEFAULT_SCOPE_GUIDANCE
+    opportunities_framing = lens_config.get("opportunities_framing") or (
+        "Identify consulting services this company likely needs, evaluated through this scoring lens."
+    )
 
     website_note = f"\n**Website:** {website_url}" if website_url else ""
 
@@ -180,16 +197,14 @@ Return a JSON object matching this exact schema:
 4. `recommended_angle` must reference the company's actual situation — not generic boilerplate.{angle_note}{risk_note}
 5. **Signal sources:** Each signal object must have a `text` (short description) and `url` (source URL or null). Extract URLs from citation links in the reports.
 
-## Engagement Opportunities (3-5 items)
+## {opportunities_label} (3-5 items)
 
-Identify consulting services this company likely needs, evaluated through this scoring lens.
+{opportunities_framing}
 - Focus on gaps OUTSIDE the company's core competency — never sell them what they already do well.
-- If a dimension scores 80+, do NOT suggest HIGH priority consulting for that area.
+- If a dimension scores 80+, do NOT suggest a HIGH priority item for that area.
 - Each `evidence` field must cite specific data with [source] tags.
 - `source_analyses`: list which analysis types support this opportunity.
-- Scope estimation (Big 4 blended rate ~$3-5K/consultant/day):
-  $500K-1M (3-6mo, small team) | $1-3M (6-12mo, medium) | $2-5M (9-18mo, large) | $5M+ (12-24mo, only $50B+ companies).
-  CRITICAL: Scale to company size.
+- {scope_guidance}
 
 ## Risk Profile (3-5 items)
 
@@ -206,7 +221,7 @@ Return ONLY the JSON object. No explanation, no markdown fences."""
 
 _AVAILABLE_ANALYSES = [
     "techstack", "financial", "brand_ad", "sentiment",
-    "competitors", "hiring", "patents", "seo", "pricing",
+    "competitors", "hiring", "patents", "seo", "pricing", "ops_maturity",
 ]
 
 _LENS_CONFIG_SCHEMA = {
@@ -231,6 +246,8 @@ _LENS_CONFIG_SCHEMA = {
     "scoring_context": "You are a ... consultant evaluating ...",
     "angle_guidance": "Focus on ...",
     "risk_focus": "key risk areas to watch for",
+    "opportunities_framing": "One sentence telling the scorer what kind of opportunity to identify (e.g. 'Identify post-close value creation levers an acquirer could pull', 'Identify consulting services this company likely needs')",
+    "scope_guidance": "Cost/effort bands appropriate to the SIZE of company this lens evaluates, plus a one-line sanity rule. Omit this key to use the default Big 4 consulting bands.",
 }
 
 
@@ -275,6 +292,7 @@ Brief descriptions:
 - **patents**: Patent portfolio — innovation areas, R&D intensity, AI/ML patents
 - **seo**: Website SEO audit — search visibility, content strategy
 - **pricing**: Product pricing strategy — tiers, models, competitive positioning
+- **ops_maturity**: Business process maturity — lead capture, sales funnel, booking tools, content recency, self-serve, hiring infrastructure, vertical operating software. Best signal for small private companies.
 
 ## Requirements
 
@@ -290,6 +308,16 @@ Brief descriptions:
 6. The `scoring_context` should set the persona for the scoring LLM
 7. Keep rubric descriptions concise but specific enough to score against
 8. Prefer fewer, more targeted analysis types over running everything
+9. **`scope_guidance` must match the size of company this lens evaluates.** The default
+   assumes a Big 4 engagement with a $500K floor. That is wrong by an order of magnitude
+   for a lens aimed at small or mid-size businesses — it would propose a workstream
+   costing more than the target earns in a year. If this lens evaluates companies below
+   roughly $100M revenue, set explicit smaller bands (e.g. "<$25K (weeks) | $25-100K
+   (1-2 quarters) | $100-500K (year 1)") and add a sanity rule tying cost to the target's
+   own economics. If the lens evaluates large enterprises, omit the key entirely.
+10. `opportunities_framing` should match what the lens is FOR. An investment lens
+   identifies theses, an M&A lens identifies value creation levers, a consulting lens
+   identifies services. Do not default to consulting language for a non-consulting lens.
 
 ## Output Format
 
