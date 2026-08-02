@@ -71,20 +71,43 @@ function _sovLoadReport() {
 
 // ── Right pane: Sources list ──────────────────────────────────────────────────
 
-// Ids the last search_sources call actually returned, in rank order.
-var _sovRelevantIds = [];
-var _sovRelevantQuery = '';
+// One entry per answered question: {turn, question, queries[], ids[]}.
+// Kept as a list rather than a single "current" set so earlier answers keep
+// their evidence — otherwise a follow-up question silently destroys the trail
+// for the answer you were in the middle of checking.
+var _sovAnswerSources = [];
+var _sovCurrentTurn = 0;
+var _sovTurnCounter = 0;
+var _sovCurrentQuestion = '';
 
 function _sovSetRelevant(ids, query) {
-    _sovRelevantIds = (ids || []).map(String);
-    _sovRelevantQuery = query || '';
+    let entry = _sovAnswerSources.find(e => e.turn === _sovCurrentTurn);
+    if (!entry) {
+        entry = { turn: _sovCurrentTurn, question: _sovCurrentQuestion, queries: [], ids: [] };
+        _sovAnswerSources.push(entry);
+    }
+    // A single answer can search more than once across the agent loop; merge
+    // rather than replace, preserving first-seen rank order.
+    if (query && !entry.queries.includes(query)) entry.queries.push(query);
+    for (const id of (ids || []).map(String)) {
+        if (!entry.ids.includes(id)) entry.ids.push(id);
+    }
     _sovLoadSources();
 }
 
 function sovClearRelevant() {
-    _sovRelevantIds = [];
-    _sovRelevantQuery = '';
+    _sovAnswerSources = [];
     _sovLoadSources();
+}
+
+/** Jump the sources pane to the evidence behind a given answer. */
+function sovScrollToTurn(turn) {
+    const el = document.getElementById(`sov-turn-${turn}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    el.classList.remove('sov-turn-flash');
+    void el.offsetWidth;            // restart the animation on repeat clicks
+    el.classList.add('sov-turn-flash');
 }
 
 async function _sovLoadSources() {
@@ -104,39 +127,38 @@ async function _sovLoadSources() {
             news_article: 'News', analyst: 'Analyst Estimates',
             propublica: 'ProPublica 990', reddit_post: 'Reddit', blind_post: 'Blind',
         };
-        // Documents the last answer was actually built from, pinned on top.
-        const relevant = [];
-        if (_sovRelevantIds.length) {
-            const byId = new Map(sources.map(s => [String(s.id), s]));
-            for (const id of _sovRelevantIds) {
-                const hit = byId.get(String(id));
-                if (hit) relevant.push(hit);
-            }
-        }
-        const pinned = new Set(relevant.map(s => String(s.id)));
-
-        const groups = {};
-        for (const s of sources) {
-            if (pinned.has(String(s.id))) continue;   // never show a card twice
-            const g = s.source_type || 'other';
-            if (!groups[g]) groups[g] = [];
-            groups[g].push(s);
-        }
+        const byId = new Map(sources.map(s => [String(s.id), s]));
+        const pinned = new Set();
         let html = '';
-        if (relevant.length) {
-            html += `<div class="sov-relevant-head">
-                        <span>◆ Used in this answer</span>
-                        <span class="sov-relevant-clear" onclick="sovClearRelevant()">show all</span>
+
+        // Newest answer first — that's the one you're reading right now.
+        // A document used by several answers appears under each of them, but
+        // is excluded from the catch-all group below so nothing is listed twice
+        // in the same breath.
+        for (let i = _sovAnswerSources.length - 1; i >= 0; i--) {
+            const entry = _sovAnswerSources[i];
+            const docs = entry.ids.map(id => byId.get(String(id))).filter(Boolean);
+            if (!docs.length) continue;
+            docs.forEach(d => pinned.add(String(d.id)));
+
+            const isLatest = i === _sovAnswerSources.length - 1;
+            html += `<div class="sov-relevant-head" id="sov-turn-${entry.turn}">
+                        <span>◆ ${isLatest ? 'Used in this answer' : 'Used in earlier answer'}</span>
+                        ${i === _sovAnswerSources.length - 1
+                            ? '<span class="sov-relevant-clear" onclick="sovClearRelevant()">show all</span>' : ''}
                      </div>`;
-            if (_sovRelevantQuery) {
-                html += `<div class="sov-relevant-sub">searched: “${_sovEsc(_sovRelevantQuery)}”</div>`;
+            if (entry.question) {
+                html += `<div class="sov-relevant-q">“${_sovEsc(entry.question)}”</div>`;
             }
-            relevant.forEach((s, i) => {
+            if (entry.queries.length) {
+                html += `<div class="sov-relevant-sub">searched: ${entry.queries.map(q => `“${_sovEsc(q)}”`).join(', ')}</div>`;
+            }
+            docs.forEach((s, n) => {
                 const date = s.source_date ? s.source_date.slice(0, 10) : '';
                 const type = s.source_type || 'other';
                 const isSynth = type === 'analysis_report';
                 html += `<div class="sov-source-card sov-relevant" onclick="sovOpenSourceViewer(${s.id})">
-                    <span class="sov-relevant-rank">${i + 1}</span>
+                    <span class="sov-relevant-rank">${n + 1}</span>
                     <div style="font-size:12px;font-weight:600;color:var(--text-primary);line-height:1.4">${_sovEsc(s.title || 'Untitled')}</div>
                     <div style="display:flex;gap:6px;margin-top:4px;align-items:center">
                         <span class="sov-badge${isSynth ? ' synth' : ''}">${isSynth ? 'our analysis' : type.replace(/_/g,' ')}</span>
@@ -144,7 +166,15 @@ async function _sovLoadSources() {
                     </div>
                 </div>`;
             });
-            html += `<div class="sov-relevant-rest">Everything else captured</div>`;
+        }
+        if (pinned.size) html += `<div class="sov-relevant-rest">Everything else captured</div>`;
+
+        const groups = {};
+        for (const s of sources) {
+            if (pinned.has(String(s.id))) continue;
+            const g = s.source_type || 'other';
+            if (!groups[g]) groups[g] = [];
+            groups[g].push(s);
         }
         for (const [type, items] of Object.entries(groups)) {
             const label = TYPE_LABELS[type] || type.replace(/_/g, ' ');
@@ -234,7 +264,7 @@ async function sovOpenSourceViewer(sourceId, highlightText) {
                         <div style="font-size:10px;color:var(--text-muted)">Full content may require login on the source site.</div>
                     </div>`;
             } else {
-                body.innerHTML = `<div style="white-space:pre-wrap;line-height:1.7">${_sovEsc(content || '(no content)')}</div>`;
+                _sovRenderText(body, content);
                 if (_sovHighlightText) _sovApplyHighlight(body, _sovHighlightText);
                 _sovInitDocSelection(body);
             }
@@ -250,11 +280,34 @@ function _sovShowSection(idx) {
     _sovRenderSection(idx);
 }
 
+/** Render source text as markdown when it looks like markdown.
+ *
+ * Captured sources are a mix: 10-K sections and our own analysis reports are
+ * real markdown with tables and headings, while a scraped news snippet is
+ * plain text where stray "*" or "#" characters would be mangled by a parser.
+ * So the format is sniffed rather than assumed, and anything unrecognised
+ * falls back to pre-wrap, which is lossless.
+ */
+function _sovRenderText(container, text) {
+    const raw = text || '';
+    const looksMarkdown = /^\s*#{1,6}\s|\n\s*\|.*\|\s*\n\s*\|?\s*[-:]+/.test(raw)
+                          || /\n\s*[-*]\s+\S/.test(raw)
+                          || /\*\*[^*\n]+\*\*/.test(raw);
+    if (looksMarkdown && typeof marked !== 'undefined' && marked.parse) {
+        container.innerHTML = `<div class="sov-md">${marked.parse(raw)}</div>`;
+    } else {
+        container.innerHTML = `<div style="white-space:pre-wrap;line-height:1.7">${_sovEsc(raw || '(no content)')}</div>`;
+    }
+}
+
 function _sovRenderSection(idx) {
     const body = document.getElementById('sov-viewer-body');
     const sec  = _sovSections[idx];
     if (!sec) return;
-    body.innerHTML = `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:8px">${_sovEsc(sec.section_label)}</div><div style="white-space:pre-wrap">${_sovEsc(sec.content || '')}</div>`;
+    const head = `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:8px">${_sovEsc(sec.section_label)}</div>`;
+    const holder = document.createElement('div');
+    _sovRenderText(holder, sec.content || '');
+    body.innerHTML = head + holder.innerHTML;
     if (_sovHighlightText) _sovApplyHighlight(body, _sovHighlightText);
     _sovInitDocSelection(body);
 }
@@ -294,6 +347,11 @@ async function sovSend() {
     _sovSending = true;
     input.value = '';
     input.style.height = '';
+
+    // Each question opens a new turn, so its retrieved sources get their own
+    // section instead of overwriting the previous answer's evidence.
+    _sovCurrentTurn = ++_sovTurnCounter;
+    _sovCurrentQuestion = text;
 
     _sovMessages.push({ role: 'user', content: text });
     _sovRenderMessages();
@@ -355,8 +413,8 @@ async function sovSend() {
                         document.querySelectorAll('.sov-typing, .sov-tool-bubble').forEach(e => e.remove());
                         if (evt.text && evt.text.trim()) {
                             assistantText = evt.text;
-                            _sovMessages.push({ role: 'assistant', content: assistantText });
-                            assistantEl = _sovAppendMsg('assistant', assistantText);
+                            _sovMessages.push({ role: 'assistant', content: assistantText, turn: _sovCurrentTurn });
+                            assistantEl = _sovAppendMsg('assistant', assistantText, _sovCurrentTurn);
                             sovInterceptSourceLinks(assistantEl);
                             _sovInitChatSelection(assistantEl);
                         }
@@ -386,11 +444,11 @@ function _sovRenderMessages() {
         return;
     }
     for (const m of _sovMessages) {
-        _sovAppendMsg(m.role, m.content);
+        _sovAppendMsg(m.role, m.content, m.turn);
     }
 }
 
-function _sovAppendMsg(role, content) {
+function _sovAppendMsg(role, content, turn) {
     const container = document.getElementById('sov-messages');
     const el = document.createElement('div');
     el.className = `sov-msg sov-msg-${role}`;
@@ -401,6 +459,16 @@ function _sovAppendMsg(role, content) {
     } else if (role === 'assistant') {
         el.style.cssText = 'align-self:flex-start;max-width:90%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:2px 10px 10px 10px;padding:10px 14px;font-size:13px;color:var(--text-primary);line-height:1.6';
         el.innerHTML = marked.parse ? marked.parse(content) : content;
+        // Clicking an answer jumps the pane to the evidence behind it, so a
+        // long conversation stays navigable instead of forcing a scroll hunt.
+        if (turn) {
+            el.classList.add('sov-msg-linked');
+            el.title = 'Show the sources behind this answer';
+            el.addEventListener('click', (ev) => {
+                if (ev.target.closest('a,button')) return;   // don't hijack links
+                sovScrollToTurn(turn);
+            });
+        }
     } else {
         el.style.cssText = 'align-self:flex-start;max-width:90%;color:#ef4444;font-size:12px;padding:4px 0';
         el.textContent = 'Error: ' + content;
