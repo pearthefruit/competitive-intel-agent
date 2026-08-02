@@ -5,6 +5,8 @@ from urllib.parse import quote
 
 import httpx
 
+from scraper.money import format_money
+
 try:
     from bs4 import BeautifulSoup as _BeautifulSoup
     _BS4_AVAILABLE = True
@@ -386,16 +388,10 @@ def format_financials_for_prompt(financials, filings):
             if value is None:
                 continue
 
-            # Format large numbers
+            # Shared formatter — every financial source must present the same
+            # units, since they all land in one prompt. See scraper/money.py.
             if isinstance(value, (int, float)):
-                if abs(value) >= 1_000_000_000:
-                    formatted = f"${value / 1_000_000_000:.2f}B"
-                elif abs(value) >= 1_000_000:
-                    formatted = f"${value / 1_000_000:.1f}M"
-                elif abs(value) >= 1_000:
-                    formatted = f"${value / 1_000:.1f}K"
-                else:
-                    formatted = f"{value:,.0f}"
+                formatted = format_money(value)
             else:
                 formatted = str(value)
 

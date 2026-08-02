@@ -135,13 +135,14 @@ def format_990_for_prompt(filing_data):
 
 
 def _fmt_money(value):
-    """Format a dollar amount with commas, or 'N/A' if missing."""
-    if value is None:
-        return "N/A"
-    try:
-        return f"${int(value):,}"
-    except (ValueError, TypeError):
-        return str(value)
+    """Format a 990 dollar amount in the shared magnitude-suffixed format.
+
+    990 figures arrive as raw dollars. Emitting them that way put '$501,098'
+    into a report that otherwise talks in $M/$B, and the model rendered it as
+    '$501.1M' — off by 1000x. Scale is knowable here, so it is resolved here.
+    """
+    from scraper.money import format_money
+    return format_money(value)
 
 
 def _safe_sub(a, b):
