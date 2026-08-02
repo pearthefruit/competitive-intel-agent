@@ -24,7 +24,7 @@ python main.py chat                     # Interactive chat REPL
 python main.py ua-discover --niche "DTC skincare" --top-n 15  # Prospect discovery
 ```
 
-All analysis commands: `collect`, `classify`, `analyze`, `financial`, `competitors`, `sentiment`, `patents`, `techstack`, `seo`, `pricing`, `compare`, `landscape`, `profile`
+All analysis commands: `collect`, `classify`, `analyze`, `financial`, `competitors`, `sentiment`, `patents`, `techstack`, `seo`, `pricing`, `ops-maturity`, `compare`, `landscape`, `profile`
 
 ## Architecture
 
@@ -84,7 +84,7 @@ A source capture + embedding layer scoped to the Research module. Agents save ra
 
 A reading and capture surface for long-form research documents. User reads → highlights passages → annotations become threads. The module stays thin — synthesis happens through existing threads/narratives/chains.
 
-- **Supported types:** PDF (PyMuPDF), Markdown, plain text, DOCX (python-docx), EPUB (ebooklib), email (extension-extracted HTML), sec_filing (auto-bridged from captured 10-Ks — green "10-K" badge, "View on EDGAR" link, no file affordances)
+- **Supported types:** PDF (PyMuPDF), Markdown, plain text, DOCX (python-docx), EPUB (ebooklib), spreadsheets (CSV/TSV via stdlib `csv` with delimiter sniffing, XLSX/XLS via openpyxl `data_only=True` so formulas render as cached values) — each worksheet becomes labelled sections of ≤60 rows rendered as markdown tables; email (extension-extracted HTML), sec_filing (auto-bridged from captured 10-Ks — green "10-K" badge, "View on EDGAR" link, no file affordances)
 - **Storage modes:** Reference (opens from original path) or Stored (vault copy at `documents/{id}_{slug}.{ext}`). Emails always stored.
 - **Schema:** `documents` (title, source, year, file_type, file_path, stored_path, extracted_text_json), `document_annotations` (selected_text, note, section_index, thread_id)
 - **Extraction:** all formats produce `extracted_text_json` — array of `{index, label, text}` sections
@@ -94,6 +94,67 @@ A reading and capture surface for long-form research documents. User reads → h
 - **Embeddings:** MiniLM (same stack as Source RAG). `backfill_embeddings.py` for retroactive indexing.
 - **Phase 2 (TODO):** "Propose narratives" button — LLM clusters document threads into narrative stubs
 - **Phase 3 (TODO):** PDF.js rendering (layout-faithful, bounding-box annotations)
+
+### SMB M&A Lens & Operations Maturity
+
+Added to support evaluating $1M-$25M private companies as acquisition targets — a
+population the rest of the system was not built for, since none of it has SEC
+filings, analyst coverage, or job listings in the `jobs` table.
+
+- **`ops_maturity` analysis type** (`agents/ops_maturity.py`, `scraper/ops_detect.py`,
+  `prompts/ops_maturity.py`). Asks whether a business runs on systems or on its owner:
+  lead capture, booking funnel, content recency, self-serve, hiring infrastructure,
+  vertical operating software. Registered in `_DISPATCH_REGISTRY` (needs_website=True).
+  - **Targeted path probing, not BFS crawling.** `probe_paths()` GETs a fixed list of
+    known routes (`/pricing`, `/blog`, `/demo`, `/careers`, `/login`, …). The site
+    crawler's nav-priority BFS returns whichever three links are in the header, so
+    absence in its output means nothing; probing a known list makes absence a finding.
+  - **Two failure modes are detected explicitly, because both otherwise produce a
+    confident and wrong "this business has no funnel" verdict.** `blocked` — a WAF
+    challenge is served as a real HTML body with a 403, so `is_blocked()` catches it
+    and the agent aborts rather than reporting a false negative (jobber.com does this).
+    `catchall` — some sites return 200 for every URL including nonsense ones, which
+    would score as maximally mature; a control probe against a random path detects it
+    and any page whose body matches the control is discarded (zabbs.com does this).
+    When either fires, `probe_quality.absence_is_meaningful` is False and the prompt
+    is told absence proves nothing.
+  - Content **recency** is the signal, not existence — a blog last posted to two years
+    ago is a worse sign than no blog, because a program started and died.
+- **SMB M&A preset lens** (`smb-ma`): earnings quality 30%, ops maturity 25%, digital
+  leverage 20%, market dynamics 15%, owner dependency 10%. Six analyses per target
+  (financial, ops_maturity, techstack, brand_ad, competitors, sentiment).
+  - `digital_leverage` scores **headroom, not sophistication** — an unexploited channel
+    on a real business scores higher than an already-optimized paid program, because
+    the acquirer's post-close lever is bigger.
+- **Two new lens config keys, both defaulted so existing lenses are unchanged:**
+  `scope_guidance` (the Big 4 `$500K-1M`-minimum scope bands are absurd on a $4M target —
+  they quote a fee larger than the target's annual profit) and `opportunities_framing`.
+  Both are in `_LENS_CONFIG_SCHEMA` too, so lenses built through the "Create New Lens"
+  modal can set them — otherwise any user-generated small-company lens silently inherits
+  the enterprise scope bands. `POST /api/lenses/generate` persists the config dict
+  verbatim, so no per-key wiring is needed when adding further config keys.
+- **Revenue estimators are now in the financial fallback chain.**
+  `scraper/revenue_estimators.py` existed but was only called from `niche_eval.py`, so
+  `financial_analysis()` dead-ended for private SMBs. Now runs when there is no ticker
+  and no 990. New `local_services` business type covers trades/medical/personal-care —
+  the largest lower-middle-market M&A population, previously classified as `other`
+  (= no estimator). ⚠ Its per-vertical multipliers in `_LOCAL_SERVICE_PROFILES` are
+  **unvalidated industry priors** that set the order of magnitude, not the number, and
+  the 4-year review-accumulation window is an assumption stated in every
+  `estimate_basis` string. Estimates are captured as the `revenue_estimate` source type,
+  which is in `SYNTHESIS_SOURCE_TYPES` so they can never be mistaken for a disclosure.
+- **Tech detection**: Google analytics products are now split by ID format rather than
+  script name (`G-` = GA4, `UA-` = Universal Analytics, dead since Jul 2023 and a real
+  negative signal, `AW-` = Ads conversion, `GTM-` = Tag Manager) — they all load from
+  googletagmanager.com, so the old single "Google Analytics" bucket hid the useful
+  distinction. Added ~50 SMB fingerprints across Email & SMS Marketing, Scheduling &
+  Booking, Vertical Operating Software, Reviews & Social Proof, Subscriptions & Billing,
+  and SMB Finance & Payments. For a sub-$25M company what the business *runs on* is a
+  far better maturity signal than its frontend framework. Note Instagram has no pixel of
+  its own (IG conversions fire the Meta pixel) and Meta's Conversions API is server-side
+  and undetectable from page source.
+  - ⚠ `FINGERPRINTS` patterns are matched with `re.IGNORECASE`, so `[A-Z0-9]` in an ID
+    pattern is not case-sensitive — anchor ID patterns on surrounding context.
 
 ### Two Modules
 
