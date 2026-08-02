@@ -16,7 +16,7 @@ from prompts.briefing import build_briefing_prompt
 ALL_ANALYSIS_TYPES = [
     "hiring", "financial", "competitors", "sentiment", "patents",
     "techstack", "seo", "pricing", "profile", "compare", "landscape",
-    "executive_signals",
+    "executive_signals", "ops_maturity",
 ]
 
 

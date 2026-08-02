@@ -33,6 +33,7 @@ _DISPATCH_REGISTRY = {
     "patents":     ("agents.patents",      "patent_analysis",      "Patents",           False),
     "seo":         ("agents.seo",          "seo_audit",            "SEO Audit",         True),
     "pricing":     ("agents.pricing",      "pricing_analysis",     "Pricing",           True),
+    "ops_maturity": ("agents.ops_maturity", "ops_maturity_analysis", "Ops Maturity",    True),
 }
 
 
@@ -60,6 +61,8 @@ def _run_analysis(analysis_type, company_name, website_url=None, db_path="intel.
 
     if analysis_type == "techstack":
         return fn(website_url, max_pages=3, company_name=company_name, db_path=db_path, progress_cb=progress_cb)
+    elif analysis_type == "ops_maturity":
+        return fn(website_url, company_name=company_name, db_path=db_path, progress_cb=progress_cb)
     elif analysis_type == "seo":
         return fn(website_url, max_pages=5, company_name=company_name, progress_cb=progress_cb)
     elif analysis_type == "pricing":

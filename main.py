@@ -106,6 +106,16 @@ def techstack_cmd(url, max_pages, company, db):
     techstack_analysis(url, max_pages, company_name=company, db_path=db)
 
 
+@cli.command("ops-maturity")
+@click.option("--url", required=True, help="Website URL to analyze")
+@click.option("--company", default=None, help="Company name (for dossier linking)")
+@click.option("--db", default="intel.db", help="SQLite database path")
+def ops_maturity_cmd(url, company, db):
+    """Assess business process / operations maturity from a company website."""
+    from agents.ops_maturity import ops_maturity_analysis
+    ops_maturity_analysis(url, company_name=company, db_path=db)
+
+
 @cli.command("patents")
 @click.option("--company", required=True, help="Company name")
 def patents_cmd(company):

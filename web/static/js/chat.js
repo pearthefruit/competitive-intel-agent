@@ -826,7 +826,7 @@ let _activeBriefingData = null;
 let _activeDossierData = null;
 let _activeDashboardLens = null; // lens override for expanded dashboard view
 
-const _VALID_SOURCES = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis','brand_ad','executive_signals'];
+const _VALID_SOURCES = ['hiring','financial','patents','techstack','sentiment','competitors','seo','pricing','profile','landscape','compare','analysis','brand_ad','executive_signals','ops_maturity'];
 
 // Match source tags including hyphens (e.g. [lens_ctv-ad-sales], [brand_ad])
 const _SOURCE_TAG_RE = /\[([\w][\w,\s-]*)\]/g;

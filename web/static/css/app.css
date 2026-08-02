@@ -1382,6 +1382,7 @@
         .source-compare { background: rgba(251,191,36,0.18); color: #fbbf24; }
         .source-analysis { background: rgba(107,114,128,0.18); color: #9ca3af; }
         .source-lens { background: rgba(6,182,212,0.18); color: #22d3ee; }
+        .source-ops_maturity { background: rgba(249,115,22,0.18); color: #fb923c; }
 
         /* Source reference popover */
         .source-popover {
