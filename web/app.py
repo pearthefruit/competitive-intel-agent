@@ -6407,7 +6407,7 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
         filename = f.filename or "document"
         file_type = detect_file_type(filename)
         if not file_type:
-            return jsonify({"error": f"Unsupported file type — accepted: .pdf .md .txt .docx .epub"}), 400
+            return jsonify({"error": "Unsupported file type — accepted: .pdf .md .txt .docx .epub .csv .tsv .xlsx .xls"}), 400
 
         title = (request.form.get("title") or "").strip() or os.path.splitext(filename)[0]
         source = (request.form.get("source") or "").strip()
@@ -6500,7 +6500,7 @@ Be honest — if a signal contradicts the claim, say so. Neutral means related b
 
         file_type = detect_file_type(file_path)
         if not file_type:
-            return jsonify({"error": "Unsupported file type (.pdf .md .txt .docx .epub only)"}), 400
+            return jsonify({"error": "Unsupported file type (.pdf .md .txt .docx .epub .csv .tsv .xlsx .xls only)"}), 400
 
         if not title:
             title = os.path.splitext(os.path.basename(file_path))[0]

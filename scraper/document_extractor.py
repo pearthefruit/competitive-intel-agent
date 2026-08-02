@@ -15,6 +15,11 @@ SUPPORTED_TYPES = {
     '.txt': 'text',
     '.docx': 'docx',
     '.epub': 'epub',
+    '.csv': 'spreadsheet',
+    '.tsv': 'spreadsheet',
+    '.xlsx': 'spreadsheet',
+    '.xlsm': 'spreadsheet',
+    '.xls': 'spreadsheet',
 }
 
 
@@ -36,6 +41,7 @@ def extract_document(file_path, file_type):
         'text': _extract_text,
         'docx': _extract_docx,
         'epub': _extract_epub,
+        'spreadsheet': _extract_spreadsheet,
     }
     handler = handlers.get(file_type)
     if not handler:
@@ -179,6 +185,135 @@ def _extract_text(file_path):
     with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
         content = f.read()
     return [{'index': 0, 'label': None, 'text': content.strip()}]
+
+
+# Spreadsheets are chunked by row so a large export does not become one
+# unreadable section — and so annotations can anchor to a range of rows.
+_SPREADSHEET_ROWS_PER_SECTION = 60
+_SPREADSHEET_MAX_ROWS = 5000
+_SPREADSHEET_MAX_COLS = 40
+
+
+def _fmt_cell(v):
+    """Render a cell value for a markdown table."""
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return str(v).replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _rows_to_markdown(rows, header=None):
+    """Render a list of row tuples as a markdown table."""
+    width = max((len(r) for r in rows), default=0)
+    if header:
+        width = max(width, len(header))
+    if width == 0:
+        return ""
+    width = min(width, _SPREADSHEET_MAX_COLS)
+
+    def _row(cells):
+        padded = list(cells)[:width] + [""] * (width - len(cells))
+        return "| " + " | ".join(_fmt_cell(c) for c in padded) + " |"
+
+    lines = []
+    if header:
+        lines.append(_row(header))
+        lines.append("|" + "|".join(["---"] * width) + "|")
+    else:
+        # Markdown needs a header row; use column letters so alignment is readable
+        lines.append(_row([chr(65 + i) if i < 26 else f"C{i+1}" for i in range(width)]))
+        lines.append("|" + "|".join(["---"] * width) + "|")
+    for r in rows:
+        lines.append(_row(r))
+    return "\n".join(lines)
+
+
+def _looks_like_header(row):
+    """True when a row is mostly non-empty text — i.e. probably column labels."""
+    cells = [c for c in row if c is not None and str(c).strip()]
+    if len(cells) < 2:
+        return False
+    text_cells = sum(1 for c in cells if not isinstance(c, (int, float)))
+    return text_cells >= len(cells) * 0.6
+
+
+def _extract_spreadsheet(file_path):
+    """Extract CSV/TSV/XLSX into markdown table sections, one group of rows per section.
+
+    Each worksheet becomes its own labelled run of sections. This is deliberately
+    a *reading* surface — it does not try to interpret a P&L. Seller-provided
+    financial workbooks have no consistent layout, so structured extraction of
+    revenue/EBITDA belongs in an LLM pass against a fixed schema, not here.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    sheets = []  # list of (sheet_name_or_None, rows)
+
+    if ext in ('.csv', '.tsv'):
+        import csv as _csv
+        delimiter = '\t' if ext == '.tsv' else ','
+        with open(file_path, 'r', encoding='utf-8-sig', errors='replace', newline='') as f:
+            sample = f.read(8192)
+            f.seek(0)
+            if ext == '.csv':
+                try:
+                    delimiter = _csv.Sniffer().sniff(sample, delimiters=',;\t|').delimiter
+                except Exception:
+                    delimiter = ','
+            rows = []
+            for i, row in enumerate(_csv.reader(f, delimiter=delimiter)):
+                if i >= _SPREADSHEET_MAX_ROWS:
+                    break
+                rows.append(row)
+        sheets.append((None, rows))
+    else:
+        try:
+            import openpyxl
+        except ImportError:
+            raise ImportError("openpyxl required for Excel files: pip install openpyxl")
+        # data_only=True gives cached formula results rather than "=SUM(B2:B9)"
+        wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        try:
+            for ws in wb.worksheets:
+                rows = []
+                for i, row in enumerate(ws.iter_rows(values_only=True)):
+                    if i >= _SPREADSHEET_MAX_ROWS:
+                        break
+                    if all(c is None or str(c).strip() == "" for c in row):
+                        continue
+                    rows.append(list(row))
+                if rows:
+                    sheets.append((ws.title, rows))
+        finally:
+            wb.close()
+
+    sections = []
+    for sheet_name, rows in sheets:
+        if not rows:
+            continue
+        header = rows[0] if _looks_like_header(rows[0]) else None
+        body = rows[1:] if header else rows
+        total = len(body)
+        for start in range(0, max(total, 1), _SPREADSHEET_ROWS_PER_SECTION):
+            chunk = body[start:start + _SPREADSHEET_ROWS_PER_SECTION]
+            if not chunk:
+                continue
+            parts = []
+            if sheet_name:
+                parts.append(f"## {sheet_name}")
+            end = min(start + len(chunk), total)
+            parts.append(f"*Rows {start + 1}–{end} of {total}*")
+            parts.append("")
+            parts.append(_rows_to_markdown(chunk, header))
+            label = sheet_name or os.path.basename(file_path)
+            if total > _SPREADSHEET_ROWS_PER_SECTION:
+                label = f"{label} ({start + 1}–{end})"
+            sections.append({'index': len(sections), 'label': label,
+                             'text': "\n".join(parts)})
+
+    if not sections:
+        sections = [{'index': 0, 'label': None, 'text': '*(empty spreadsheet)*'}]
+    return sections
 
 
 def _extract_docx(file_path):
