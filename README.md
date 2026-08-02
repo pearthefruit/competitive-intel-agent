@@ -1,280 +1,144 @@
-# Signal Vault
+# SignalVault
 
-A competitive intelligence platform that scrapes job boards, analyzes financials, maps competitors, and generates consulting-ready intelligence briefings — from the terminal or a three-pane web dashboard.
+A competitive intelligence platform. It captures company evidence from public sources, keeps that evidence as the system of record, and turns it into scored assessments you can interrogate — from the terminal or a web dashboard.
 
-Built with Python, Flask, and free LLM APIs (Gemini, Groq, Cerebras, Mistral, OpenRouter) with public data sources (SEC EDGAR, PatentsView, DuckDuckGo, Reddit, HackerNews, YouTube, 1Point3Acres).
+Built with Python, Flask, and SQLite, on free LLM APIs (Gemini, Groq, Cerebras, Mistral, OpenRouter) and public data (SEC EDGAR, USPTO, ProPublica, FRED, Reddit, HackerNews, Blind, Google News).
 
-## Features
+> Working notes and architecture detail live in `CLAUDE.md`. This file is the orientation doc.
 
-### Job Intelligence
-- **Auto-detect ATS boards** — Custom APIs (Amazon, Jane Street) → Greenhouse, Lever, Ashby → Workday → LinkedIn fallback
-- **LLM classification** — department, seniority, skills, strategic signals
-- **Strategic reports** — hiring patterns, growth signals, org structure insights
+## The idea
 
-### Research & Analysis
-| Tool | Source | What it does |
-|------|--------|-------------|
-| `financial` | SEC EDGAR / web search | Revenue, profitability, R&D, cash position (public); funding & valuation (private) |
-| `competitors` | Web search + LLM | Competitive landscape, differentiators, market positioning |
-| `sentiment` | Web + Reddit + HN + Blind + 1P3A | Employee reviews, workplace culture, interview experiences |
-| `patents` | USPTO PatentsView | Innovation areas, IP strategy, filing trends |
-| `pricing` | Site crawl + LLM | Pricing tiers, feature matrix, positioning strategy |
-| `seo` | Site crawl + LLM | On-page SEO signals, structured data, AI-readiness |
-| `techstack` | Site crawl + fingerprinting | Frontend frameworks, analytics, CDN, CMS, marketing tools |
+Most competitive research tools produce a document and stop. SignalVault keeps the **sources** — every filing section, article, job posting, and prior report is chunked and embedded — so any claim can be traced back, re-queried, and contradicted later. Analyses, scores, and briefings are layers on top of that store, not replacements for it.
 
-### Company Dossiers
-- **Accumulating intelligence** -- all analyses are saved to a per-company dossier with extracted key facts
-- **Change detection** -- automatically detects changes between analysis runs (revenue shifts, new competitors, sentiment changes)
-- **Timeline events** -- track acquisitions, product launches, leadership changes, funding rounds
-- **Intelligence briefings** -- consulting-ready documents with Digital Maturity Score (0-100), engagement opportunity map, budget signals, and competitive pressure assessment
+Three surfaces:
 
-### Web Dashboard
-- **Three-pane SPA** -- reports list, chat interface, and report/dossier viewer
-- **Context-aware chat** -- automatically scopes conversations to the company you're viewing
-- **PDF export** -- server-side styled PDF generation for any report
-- **Source popovers** -- priority-ordered key facts displayed on briefing cards
+| Module | What it's for |
+|---|---|
+| **Research** | Analyze one company in depth. Reports, dossiers, chat over captured sources, lens scoring, briefings. |
+| **Prospecting** | Find companies. Niche or "find similar" discovery → market sizing → lens scoring on the survivors. |
+| **Signals** | Monitor over time. Signals → threads → narratives → causal board, with falsifiable predictions and FRED-bound forecasts. |
 
-### Utilities
-- **Interactive chat** -- natural language interface with tool-calling and 31 tools (ask anything)
-- **SQL queries** -- query the job database directly
-- **Web search** -- search the web, Reddit, Hacker News, and YouTube for company context
+## Analyses
 
-## Architecture
+Each runs standalone, saves a markdown report, extracts key facts onto the company's dossier, and captures its sources into the RAG store.
 
-```
-competitive-intel-agent/
-├── main.py                 # CLI entry point (Click)
-├── db.py                   # SQLite schema, migrations, all DB helpers
-├── agents/                 # Agent modules (one per tool)
-│   ├── llm.py              # LLM provider rotation, generate_text/generate_json, key facts extraction, change detection, save_to_dossier
-│   ├── chat.py             # Agentic chat with multi-provider function calling (ChatLLM class)
-│   ├── briefing.py         # Intelligence briefing generator (Digital Maturity Score)
-│   ├── collect.py          # Job scraping from ATS boards
-│   ├── classify.py         # Job classification (department, seniority, strategic tags)
-│   ├── analyze.py          # Strategic hiring analysis report
-│   ├── financial.py        # SEC EDGAR / web search financial analysis
-│   ├── competitors.py      # Competitive landscape mapping
-│   ├── sentiment.py        # Employee sentiment analysis
-│   ├── patents.py          # Patent portfolio analysis
-│   ├── pricing.py          # Pricing strategy analysis
-│   ├── seo.py              # SEO & AEO audit
-│   ├── techstack.py        # Technology stack detection
-│   ├── profile.py          # Full company profile (runs financial + competitors + sentiment + patents)
-│   └── compare.py          # Head-to-head comparison + landscape analysis
-├── scraper/                # Data collection modules
-│   ├── ats_api.py          # Greenhouse, Lever, Ashby APIs
-│   ├── custom_api.py       # Custom company APIs (Amazon, Jane Street) with extensible registry
-│   ├── detect.py           # ATS auto-detection: custom APIs → Greenhouse/Lever/Ashby → Workday → LinkedIn
-│   ├── linkedin.py         # LinkedIn guest API scraper
-│   ├── workday.py          # Workday ATS API scraper
-│   ├── sec_edgar.py        # SEC EDGAR XBRL API client
-│   ├── stock_data.py       # Stock price data via yfinance
-│   ├── patents.py          # USPTO PatentsView + Google Patents
-│   ├── site_crawler.py     # Generic website crawler (httpx + BS4)
-│   ├── tech_detect.py      # Technology fingerprinting
-│   ├── web_search.py       # DuckDuckGo search wrapper (news, web, reddit, youtube)
-│   ├── reddit_rss.py       # Reddit RSS feed scraper with comment fetching
-│   ├── hackernews.py       # HackerNews Algolia API search + comment fetching
-│   ├── onepoint3acres.py   # 1Point3Acres interview experience scraper (Chinese tech community)
-│   └── youtube.py          # YouTube search + transcript extraction
-├── prompts/                # LLM prompt templates
-│   ├── chat.py             # System prompt, condensed prompt, tool schemas + tiered selection for chat agent
-│   ├── briefing.py         # Briefing prompt with Digital Maturity scoring rubric
-│   ├── classify.py         # Job classification prompt
-│   ├── analyze.py          # Strategic report prompt
-│   ├── financial.py        # Financial analysis prompts
-│   ├── competitors.py      # Competitor mapping prompt
-│   ├── sentiment.py        # Sentiment analysis prompt
-│   ├── patents.py          # Patent analysis prompt
-│   ├── pricing.py          # Pricing analysis prompt
-│   ├── seo.py              # SEO audit prompt
-│   ├── techstack.py        # Tech stack prompt
-│   ├── compare.py          # Comparison prompt
-│   └── profile.py          # Executive profile prompt
-├── web/
-│   ├── app.py              # Flask app factory, API routes, SSE chat endpoint, tool result summarization
-│   └── templates/
-│       └── base.html       # Entire SPA — HTML + CSS + JS in one file (~3000 lines)
-├── reports/                # Generated markdown reports (gitignored)
-└── intel.db                # SQLite database (gitignored)
-```
+| Analysis | Sources | Produces |
+|---|---|---|
+| `financial` | SEC EDGAR XBRL, 8-K, ProPublica 990, Yahoo Finance, revenue estimators, web | Revenue, margins, cash, growth; estimates for private companies |
+| `competitors` | Web, news, Reddit, HN, YouTube | Landscape, differentiators, threat level |
+| `sentiment` | Blind, Glassdoor, Fishbowl, Reddit, HN, 1Point3Acres, TikTok, news | Employee sentiment, culture, interview experience |
+| `patents` | USPTO / PatentsView, Google Patents | Innovation areas, IP posture, filing trends |
+| `techstack` | Site crawl + fingerprinting | Frameworks, analytics, ad pixels, vertical software |
+| `ops_maturity` | Targeted path probing | Whether a business runs on systems or on its owner |
+| `seo` | Site crawl | On-page SEO, structured data, AI-answer readiness |
+| `pricing` | Site crawl | Tiers, feature matrix, positioning |
+| `hiring` | ATS boards (Greenhouse, Lever, Ashby, Workday, LinkedIn, custom APIs) | Hiring patterns, org structure, growth signals |
+| `executive_signals` | 8-K, filings, web | Leadership changes, investment domains |
+| `brand_ad` | Web, ad libraries | Brand and paid-media posture |
 
-**LLM Provider Rotation:** 5 providers with 17+ model fallbacks. Report generation uses Gemini (primary, multi-key rotation) -> Groq -> Cerebras -> Mistral -> OpenRouter (free models). The chat interface uses Gemini (primary, native function calling) -> Groq -> Cerebras -> Mistral -> OpenRouter, with automatic rate-limit fallback through the chain.
+Plus `profile` (several at once), `compare` (head-to-head), and `landscape` (auto-discovered competitor set).
 
-**Chat Context Management:** The chat system uses a multi-step LLM approach to prevent context overflow on smaller models. Tool results are compressed via secondary LLM calls before entering conversation history (user still sees full results). Dynamic tool schema selection drops from 31 tools (~17K chars) on round 1 to 11 follow-up tools (~6K chars) on subsequent rounds. The system prompt swaps from the full version (~9K chars) to a condensed version (~400 chars) after round 1. Net effect: rounds 2+ use ~4K chars of fixed overhead instead of ~26K.
+## Lenses
+
+A **lens** is an evaluation framework: named dimensions, weights, and rubrics. The same company scores differently through different lenses, and you can build your own in the UI.
+
+Presets: `ctv-ad-sales`, `digital-transformation`, `workforce-management`, `software-investment`, `stock-investment`, `procurement`, `smb-ma`.
+
+Scoring runs the dimensions' required analyses (reusing anything under 7 days old), feeds the reports to the model against the rubric, then **recomputes the weighted overall in Python** — LLM arithmetic is never trusted.
+
+`smb-ma` exists because $1M–$25M private targets break every assumption the rest of the system makes: no filings, no analyst coverage, no ATS board. It leans on ops maturity probing and revenue estimation instead, and carries its own scope guidance so it doesn't quote a Big-4 fee larger than the target's annual profit.
+
+## Source memory (RAG)
+
+Every analysis captures what it read. Sources are deduplicated by identity, chunked, and embedded with MiniLM into SQLite.
+
+- **10-K sections** (Item 1, 1A, 7, 7A, 8) are indexed separately; short sources stay single-chunk.
+- **Retrieval spreads across documents** — a 10-K is ~160 chunks and a news article is 1, so flat top-k ranking used to hand every slot to one filing. Per-document and per-type caps fix that.
+- **Analysis reports are captured too**, as a clearly-marked *synthesis* tier that can never be mistaken for primary evidence.
+- **Chat is retrieval-first**: for a previously-analyzed company the model searches captured sources before touching the web, and the Sources pane pins exactly what each answer used.
+- **Sources are rejected, never deleted.** A deleted source gets re-inserted by the next run; a rejected one stays as its own blocklist.
+
+## Signals, predictions, forecasts
+
+The Signals module tracks developing stories: captured signals are assigned to threads (TF-IDF classifier → LLM batch → human review queue), threads compose into narratives, and narratives render on a causal board.
+
+**Predictions** are falsifiable second-order effects — "if X, then Y observable via Z by date D" — generated from signals and threads. Incoming signals are matched against open predictions semantically (MiniLM cosine, not keyword overlap, which measurably fails at this corpus size) and judged as supporting, refuting, or mixed.
+
+**Forecasts** are the scoreable path: yes/no statements bound to a FRED series, with a real probability and a Brier score. The resolution date comes from the release calendar, not the model. Needs `FRED_API_KEY`.
 
 ## Setup
-
-### 1. Install dependencies
 
 ```bash
 cd competitive-intel-agent
 pip install -r requirements.txt
+cp .env.example .env      # then fill in keys
 ```
 
-### 2. Configure API keys
+| Key | Needed for | Free |
+|---|---|---|
+| `GEMINI_API_KEYS` | Primary provider (comma-separated for rotation) | Yes |
+| `GROQ_API_KEY` | Fallback + fast classification | Yes |
+| `CEREBRAS_API_KEY` / `MISTRAL_API_KEY` / `OPENROUTER_API_KEY` | Further fallbacks | Yes |
+| `USPTO_API_KEY` | Patents (falls back to `PATENTSVIEW_API_KEY`) | Yes |
+| `FRED_API_KEY` | Binary forecasts | Yes |
+| `WHISPER_ENABLED` / `WHISPER_MODEL` | Transcribing video signals | Local |
 
-Copy `.env.example` to `.env` and fill in your keys:
-
-```bash
-cp .env.example .env
-```
-
-| Key | Required | Free? | Get it at |
-|-----|----------|-------|-----------|
-| `GEMINI_API_KEYS` | Recommended (primary) | Yes | [aistudio.google.com](https://aistudio.google.com) |
-| `GROQ_API_KEY` | Recommended | Yes | [console.groq.com](https://console.groq.com) |
-| `CEREBRAS_API_KEY` | Optional | Yes | [cloud.cerebras.ai](https://cloud.cerebras.ai) |
-| `MISTRAL_API_KEY` | Optional | Yes | [console.mistral.ai](https://console.mistral.ai) |
-| `OPENROUTER_API_KEY` | Optional | Free tier | [openrouter.ai](https://openrouter.ai) |
-| `USPTO_API_KEY` | For patents | Yes | [patentsview.org/apis/keyrequest](https://patentsview.org/apis/keyrequest) |
-
-`GEMINI_API_KEYS` supports comma-separated values for multi-key rotation. You need **at least one** of Gemini, Groq, Cerebras, Mistral, or OpenRouter. Gemini is recommended as the primary provider (best quality for reports, native function calling for chat).
+At least one LLM provider is required. Calls fan out across every (model × key) combination for a provider before falling through to the next, so one rate limit doesn't stop a run.
 
 ## Usage
 
-### Job Intelligence Pipeline
-
 ```bash
-# Scrape jobs from a company's ATS board
-python main.py collect --company "Stripe"
+python main.py web --port 5001            # dashboard (restart to pick up code changes)
+python main.py chat                       # terminal chat with tool calling
 
-# Classify all scraped jobs (department, seniority, skills)
-python main.py classify --company "Stripe"
-
-# Generate a strategic intelligence report
-python main.py analyze --company "Stripe"
-
-# Or run the full pipeline in one shot
-python main.py full --company "Stripe"
-
-# Provide a direct ATS URL if auto-detection fails
-python main.py collect --company "Datadog" --url "https://careers.datadoghq.com/jobs"
-```
-
-### Research & Analysis
-
-```bash
-# Financial analysis (SEC EDGAR for public companies, web search for private)
 python main.py financial --company "Apple"
-python main.py financial --company "Stripe"   # private → web search fallback
-
-# Map the competitive landscape
-python main.py competitors --company "Ramp"
-
-# Employee sentiment & workplace culture
 python main.py sentiment --company "Google"
-
-# Patent portfolio analysis
-python main.py patents --company "Apple Inc."
-
-# Pricing strategy analysis
-python main.py pricing --url "https://stripe.com"
-
-# SEO & AEO audit
-python main.py seo --url "https://ramp.com" --max-pages 10
-
-# Technology stack detection
 python main.py techstack --url "https://stripe.com"
-```
-
-### Multi-Company Analysis
-
-```bash
-# Full company profile (financial + competitors + sentiment + patents in parallel)
-python main.py profile --company "Stripe"
-
-# Compare two companies side by side
+python main.py ops-maturity --url "https://example.com" --company "Example"
+python main.py profile --company "Stripe"           # several analyses at once
 python main.py compare --company-a "Stripe" --company-b "Ramp"
-
-# Auto-discover competitors and generate landscape report
 python main.py landscape --company "Stripe" --top-n 3
+
+python main.py full --company "Datadog"             # collect → classify → analyze
+python main.py ua-discover --niche "DTC skincare" --top-n 15
+python main.py forecast --signal-id 42              # FRED-bound binary forecast
 ```
 
-### Web Dashboard
+Full list: `collect`, `classify`, `analyze`, `full`, `financial`, `competitors`, `sentiment`, `patents`, `techstack`, `ops-maturity`, `seo`, `pricing`, `executive-signals`, `profile`, `compare`, `landscape`, `forecast`, `chat`, `web`.
 
-```bash
-# Launch the web UI at http://localhost:5001
-python main.py web
-```
-
-### Interactive Chat
-
-```bash
-python main.py chat
-```
-
-The chat interface understands natural language and can call any tool:
+## Layout
 
 ```
-You: What's Stripe's competitive landscape look like?
-[calling competitor_analysis(company='Stripe')]
-Assistant: I've completed a competitive analysis for Stripe. The report has been
-saved to reports/stripe_competitors_2026-03-21.md. Here are the key findings...
-
-You: How many engineering jobs does Datadog have?
-[calling query_db(sql='SELECT COUNT(*) ...')]
-Assistant: Datadog currently has 47 engineering positions listed...
-
-You: Search for recent Ramp funding news
-[calling web_search(query='Ramp funding news 2026')]
-Assistant: Here's what I found about Ramp's recent funding...
+competitive-intel-agent/
+├── main.py             # Click CLI
+├── db.py               # schema, migrations, all DB helpers
+├── agents/             # one module per analysis, plus llm.py, chat.py,
+│                       #   lens.py, briefing.py, discover.py, niche_eval.py,
+│                       #   predictions.py, forecasts.py, source_capture.py,
+│                       #   embeddings.py, ops_maturity.py
+├── prompts/            # one prompt module per analysis type
+├── scraper/            # data collection: ats_api, sec_edgar, patents,
+│                       #   site_crawler, tech_detect, ops_detect, blind,
+│                       #   fred_api, revenue_estimators, google_news, …
+├── web/
+│   ├── app.py          # Flask app, API routes, SSE streaming
+│   ├── templates/base.html
+│   └── static/js/      # 17 SPA modules — no build step
+├── extension/          # browser extension for signal + document capture
+├── reports/            # generated markdown (gitignored)
+└── intel.db            # SQLite (gitignored)
 ```
 
-### All Commands
+The frontend is deliberately buildless vanilla JS. Modules share globals, so **cross-module variables must use `var`, not `let`**.
 
-```
-Usage: main.py [COMMAND]
+## Conventions
 
-Commands:
-  collect      Scrape all open roles from an ATS board
-  classify     Classify all unclassified jobs for a company
-  analyze      Generate a strategic intelligence report
-  full         Run the full pipeline: collect → classify → analyze
-  financial    Run a financial analysis (SEC EDGAR / web search)
-  competitors  Map the competitive landscape for a company
-  sentiment    Analyze employee sentiment and workplace culture
-  patents      Analyze a company's patent portfolio (USPTO data)
-  pricing      Analyze a website's pricing strategy and product tiers
-  seo          Run an SEO & AEO audit on a website
-  techstack    Detect and analyze a website's technology stack
-  profile      Run a complete company profile (all analyses at once)
-  compare      Compare two companies side by side
-  landscape    Auto-discover competitors and generate landscape analysis
-  chat         Interactive chat — ask questions in plain English
-  web          Launch the web dashboard
-```
-
-## Reports
-
-All reports are saved as markdown files in the `reports/` directory, named:
-```
-reports/{company}_{analysis_type}_{YYYY-MM-DD}.md
-```
-
-Reports work great with [Obsidian](https://obsidian.md) — just point a vault at the `reports/` folder.
-
-## Database
-
-All data is stored in SQLite (`intel.db`) with 7 tables:
-
-**Job Intelligence:**
-- **companies** -- company metadata, ATS info, seniority framework
-- **jobs** -- scraped job postings (title, department, location, description, salary)
-- **classifications** -- LLM-generated labels (department category/subcategory, seniority, skills, strategic signals/tags)
-
-**Company Dossiers:**
-- **dossiers** -- one row per company (company_name UNIQUE NOCASE), accumulates intelligence, stores briefing JSON
-- **dossier_analyses** -- one row per analysis run (links to dossier, stores report_file + key_facts_json + model_used)
-- **dossier_events** -- timeline events (change_detected, manual notes, acquisitions, etc.)
-- **hiring_snapshots** -- periodic captures of hiring stats for temporal trend analysis
-
-Query the database directly:
-```bash
-python main.py chat
-You: how many companies have we analyzed?
-[calling query_db(sql='SELECT COUNT(*) FROM companies')]
-```
+- Never hardcode API keys — `os.environ.get()` only.
+- All LLM calls go through `agents/llm.py`; all prompts live in `prompts/`.
+- Every analysis agent ends by calling `save_to_dossier()`, which extracts key facts and captures the report as a source.
+- Reports are `reports/{company}_{type}_{YYYY-MM-DD}.md`, and work well pointed at an Obsidian vault.
+- No native browser dialogs in the UI — use `_showToast()` / `_showConfirm()` / `_showInlineInput()`.
+- Flask runs with `use_reloader=False`; restart for Python changes.
 
 ## License
 
