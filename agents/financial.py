@@ -444,8 +444,61 @@ def _persist_computed_metrics(company, fin_metrics):
         print(f"[financial] Warning: could not persist computed metrics: {e}")
 
 
+def _dossier_context(company):
+    """Look up website_url / description / sector for a company. Returns a dict (possibly empty)."""
+    try:
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT website_url, description, sector FROM dossiers WHERE company_name = ? COLLATE NOCASE",
+            (company,),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else {}
+    except Exception as e:
+        print(f"[financial] Could not load dossier context for {company}: {e}")
+        return {}
+
+
+def _format_revenue_estimate(est):
+    """Format a revenue_estimators result into a prompt block."""
+    def _usd(v):
+        if not v:
+            return "unknown"
+        if v >= 1_000_000_000:
+            return f"${v / 1_000_000_000:.2f}B"
+        if v >= 1_000_000:
+            return f"${v / 1_000_000:.1f}M"
+        return f"${v:,.0f}"
+
+    lines = [
+        "MODELED REVENUE ESTIMATE (not a reported figure — derived from public activity signals):",
+        f"  Point estimate: {_usd(est.get('revenue'))}",
+        f"  Range: {_usd(est.get('estimate_low'))} – {_usd(est.get('estimate_high'))}",
+        f"  Confidence: {est.get('confidence', 'low')}",
+        f"  Basis: {est.get('estimate_basis', 'n/a')}",
+    ]
+    if est.get("estimated_employees"):
+        lines.append(f"  Estimated employees: {est['estimated_employees']}")
+    if est.get("sector"):
+        lines.append(f"  Sector: {est['sector']}")
+    if est.get("sources"):
+        lines.append(f"  Signal sources: {', '.join(est['sources'])}")
+    lines.append(
+        "  NOTE: This is a model output, not a disclosure. Treat it as an order-of-magnitude "
+        "range and say so explicitly in the report. Never present it as reported revenue."
+    )
+    return "\n".join(lines)
+
+
 def _analyze_non_sec(company, _cb=None):
-    """Analyze a company not in SEC EDGAR using ProPublica 990 + Yahoo Finance + web search."""
+    """Analyze a company not in SEC EDGAR using ProPublica 990 + Yahoo Finance + web search.
+
+    For small private companies with no ticker and no 990, falls back to the
+    type-specific revenue estimators (restaurant / ecommerce / SaaS / services /
+    consumer app) — the same models the Discover niche-eval phase uses. Without
+    this the whole chain dead-ends for sub-$25M private companies, which is
+    exactly the population the SMB M&A lens scores.
+    """
     _cb = _cb or (lambda *a: None)
     print(f"[financial] Searching for financial data on {company}...")
     _pending_sources = []
@@ -590,6 +643,61 @@ def _analyze_non_sec(company, _cb=None):
     else:
         _cb("source_done", {"source": "yahoo_finance", "status": "skipped", "summary": "No ticker found"})
 
+    # Type-specific revenue estimator — only for genuinely private companies with
+    # no reported figures anywhere. A modeled range beats no number at all for
+    # sub-$25M targets, but it must never masquerade as a disclosure.
+    revenue_estimate = None
+    if not ticker and not nonprofit_data:
+        _cb("source_start", {"source": "revenue_estimate", "label": "Revenue Estimate",
+                             "detail": f"Modeling revenue for {company} from activity signals"})
+        try:
+            from scraper.revenue_estimators import estimate_revenue, classify_business_type
+            ctx = _dossier_context(company)
+            # Dossiers created by an analysis run (rather than by Discover) have no
+            # description, and the estimator's classifier is keyword-driven — with
+            # no text it returns "other" and no estimator runs at all. The search
+            # results we just fetched describe the business perfectly well, so use
+            # them as the classification corpus when the dossier is bare.
+            description = ctx.get("description")
+            if not description:
+                description = " ".join(
+                    f"{r.get('title', '')} {(r.get('body') or '')[:200]}"
+                    for r in unique_results[:5]
+                )[:1200]
+            btype = classify_business_type(company, description, ctx.get("sector") or "")
+            est = estimate_revenue(
+                company,
+                website_url=ctx.get("website_url"),
+                description=description,
+                niche_context=ctx.get("sector"),
+            )
+            if est and est.get("revenue"):
+                revenue_estimate = _format_revenue_estimate(est)
+                search_text = revenue_estimate + "\n\n---\n\n" + search_text
+                print(f"[financial] Revenue estimate ({btype}): {est.get('revenue'):,} "
+                      f"[{est.get('confidence')}] — {est.get('estimate_basis', '')[:80]}")
+                _cb("source_done", {"source": "revenue_estimate", "status": "done",
+                                    "summary": f"{btype} model, {est.get('confidence', 'low')} confidence",
+                                    "detail": revenue_estimate})
+                _pending_sources.append({
+                    "source_type": "revenue_estimate",
+                    "url": None,
+                    "title": f"Modeled revenue estimate: {company}",
+                    "content": revenue_estimate,
+                    "raw_data": json.dumps(est),
+                    "dedup_kwargs": {"url": f"revenue_estimate://{company.lower()}/{datetime.now():%Y-%m-%d}"},
+                })
+            else:
+                print(f"[financial] No revenue estimate available (business type: {btype})")
+                _cb("source_done", {"source": "revenue_estimate", "status": "skipped",
+                                    "summary": f"No usable signals ({btype})"})
+        except Exception as e:
+            print(f"[financial] Revenue estimator failed: {e}")
+            _cb("source_done", {"source": "revenue_estimate", "status": "error", "summary": str(e)[:80]})
+    else:
+        _cb("source_done", {"source": "revenue_estimate", "status": "skipped",
+                            "summary": "Reported figures available"})
+
     # Prepend 990 data if available — gives LLM structured financials for nonprofits
     if nonprofit_data:
         search_text = nonprofit_data + "\n\n---\n\nADDITIONAL WEB SEARCH CONTEXT:\n" + search_text
@@ -613,6 +721,8 @@ def _analyze_non_sec(company, _cb=None):
         source_parts.append("ProPublica 990")
     if ticker:
         source_parts.append("Yahoo Finance")
+    if revenue_estimate:
+        source_parts.append("Modeled Revenue Estimate")
     source_parts.append("Web Search")
     source = " + ".join(source_parts)
     header = f"""# Financial Analysis: {company}

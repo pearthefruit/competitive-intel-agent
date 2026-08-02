@@ -31,14 +31,86 @@ from scraper.web_search import search_web
 
 
 # ---------------------------------------------------------------------------
+# Local / trade services
+# ---------------------------------------------------------------------------
+# Per-vertical economics for the review-count model below.
+#   avg_job_value   — typical revenue per completed job or annual contract
+#   jobs_per_review — completed jobs per public review left
+#   employees       — rough headcount at a typical single-location operator
+#
+# ⚠ These are unvalidated industry priors, not measured constants. They set the
+# order of magnitude, not the number. Tune them against real deal data before
+# treating any output as anything more than a size band.
+_LOCAL_SERVICE_PROFILES = {
+    "hvac":          {"avg_job_value": 5500,  "jobs_per_review": 25, "employees": 15, "industry": "HVAC Services"},
+    "plumbing":      {"avg_job_value": 650,   "jobs_per_review": 30, "employees": 12, "industry": "Plumbing Services"},
+    "electrical":    {"avg_job_value": 900,   "jobs_per_review": 30, "employees": 12, "industry": "Electrical Services"},
+    "roofing":       {"avg_job_value": 12000, "jobs_per_review": 20, "employees": 15, "industry": "Roofing"},
+    "landscaping":   {"avg_job_value": 3500,  "jobs_per_review": 25, "employees": 12, "industry": "Landscaping"},
+    "pest_control":  {"avg_job_value": 500,   "jobs_per_review": 40, "employees": 10, "industry": "Pest Control"},
+    "auto_repair":   {"avg_job_value": 700,   "jobs_per_review": 35, "employees": 10, "industry": "Auto Repair"},
+    "dental":        {"avg_job_value": 800,   "jobs_per_review": 40, "employees": 12, "industry": "Dental Practices"},
+    "veterinary":    {"avg_job_value": 350,   "jobs_per_review": 45, "employees": 12, "industry": "Veterinary Services"},
+    "medical":       {"avg_job_value": 250,   "jobs_per_review": 50, "employees": 15, "industry": "Medical Practices"},
+    "salon_spa":     {"avg_job_value": 95,    "jobs_per_review": 60, "employees": 10, "industry": "Personal Care"},
+    "fitness":       {"avg_job_value": 700,   "jobs_per_review": 50, "employees": 8,  "industry": "Fitness & Recreation"},
+    "cleaning":      {"avg_job_value": 250,   "jobs_per_review": 40, "employees": 15, "industry": "Cleaning Services"},
+    "moving":        {"avg_job_value": 1400,  "jobs_per_review": 25, "employees": 12, "industry": "Moving & Storage"},
+    "construction":  {"avg_job_value": 45000, "jobs_per_review": 12, "employees": 20, "industry": "Construction"},
+    "default":       {"avg_job_value": 1200,  "jobs_per_review": 30, "employees": 12, "industry": "Local Services"},
+}
+
+# Keyword → profile. Order matters: first match wins.
+_LOCAL_SERVICE_KEYWORD_MAP = [
+    (["hvac", "heating and cooling", "heating & cooling", "air conditioning", "furnace"], "hvac"),
+    (["plumbing", "plumber", "drain", "rooter", "septic"], "plumbing"),
+    (["electrical", "electrician"], "electrical"),
+    (["roofing", "roofer", "gutter", "siding"], "roofing"),
+    (["landscaping", "lawn care", "tree service", "irrigation", "hardscap"], "landscaping"),
+    (["pest control", "exterminator", "termite"], "pest_control"),
+    (["auto repair", "auto body", "mechanic", "collision", "tire shop", "car wash", "detailing"], "auto_repair"),
+    (["dental", "dentist", "orthodont", "endodont"], "dental"),
+    (["veterinary", "veterinarian", "animal hospital", " vet clinic"], "veterinary"),
+    (["urgent care", "medical practice", "clinic", "physical therapy", "chiropract",
+      "dermatolog", "optometr", "podiatr", "home health"], "medical"),
+    (["salon", "spa ", "barber", "med spa", "nail ", "massage", "aesthetic"], "salon_spa"),
+    (["gym", "fitness", "crossfit", "pilates", "yoga studio", "martial arts"], "fitness"),
+    (["janitorial", "cleaning service", "maid service", "commercial cleaning",
+      "pressure washing", "restoration"], "cleaning"),
+    (["moving company", "movers", "self storage", "junk removal"], "moving"),
+    (["general contractor", "remodeling", "construction", "concrete", "paving",
+      "excavat", "flooring", "fencing", "pool service", "garage door", "locksmith",
+      "window", "painting contractor"], "construction"),
+]
+
+_LOCAL_SERVICES_KEYWORDS = [kw for kws, _ in _LOCAL_SERVICE_KEYWORD_MAP for kw in kws]
+
+# Public reviews accumulate over a business's lifetime, but we want an ANNUAL
+# revenue figure. Without date-filtered review data (which DDG snippets do not
+# expose) the accumulation window has to be assumed. Four years approximates an
+# established operator that actively solicits reviews. This assumption is stated
+# in every estimate_basis string it produces — it is the single largest source
+# of error in the model and must not be silent.
+_REVIEW_ACCUMULATION_YEARS = 4
+
+
+def _classify_local_service(text):
+    """Map free text to a _LOCAL_SERVICE_PROFILES key."""
+    for keywords, profile_key in _LOCAL_SERVICE_KEYWORD_MAP:
+        if any(k in text for k in keywords):
+            return profile_key
+    return "default"
+
+
+# ---------------------------------------------------------------------------
 # Business type classifier
 # ---------------------------------------------------------------------------
 
 def classify_business_type(name, description, niche_context):
     """Classify company into a revenue estimation category.
 
-    Returns one of: 'restaurant' | 'ecommerce' | 'saas' | 'services' |
-                    'consumer_app' | 'other'
+    Returns one of: 'restaurant' | 'local_services' | 'ecommerce' | 'saas' |
+                    'services' | 'consumer_app' | 'other'
 
     Uses keyword matching on name + description + niche — no LLM call.
     """
@@ -50,6 +122,15 @@ def classify_business_type(name, description, niche_context):
                      "brasserie", "tavern", "pub ", "food hall", "catering"]
     if any(k in text for k in restaurant_kw):
         return "restaurant"
+
+    # Local/trade services must be tested before the generic services bucket —
+    # "plumbing services" would otherwise fall through to the B2B services
+    # estimator, which models headcount-driven consulting revenue and is wrong
+    # by an order of magnitude for a job-based trade business. This is also the
+    # single largest population in lower-middle-market M&A, so getting it wrong
+    # means the SMB M&A lens has no financial signal for most of its targets.
+    if any(k in text for k in _LOCAL_SERVICES_KEYWORDS):
+        return "local_services"
 
     app_kw = ["app ", "mobile app", "ios ", "android ", "app store",
               "play store", "saas app", "consumer app", "subscription app",
@@ -94,6 +175,8 @@ def estimate_revenue(company_name, website_url=None, description=None, niche_con
 
     if btype == "restaurant":
         return _estimate_restaurant(company_name, website_url)
+    elif btype == "local_services":
+        return _estimate_local_services(company_name, website_url, description, niche_context)
     elif btype == "ecommerce":
         return _estimate_ecommerce(company_name, website_url)
     elif btype == "saas":
@@ -275,6 +358,116 @@ def _estimate_restaurant(company_name, website_url=None):
 
     except Exception as e:
         print(f"[restaurant_est] Error estimating {company_name}: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Local / trade services estimator (Google Maps review signals)
+# ---------------------------------------------------------------------------
+
+_REVIEW_COUNT_PATTERNS = [
+    r"([\d,]+)\s+(?:google\s+)?reviews",
+    r"([\d,]+)\s+(?:yelp\s+)?reviews",
+    r"based\s+on\s+([\d,]+)\s+reviews",
+    r"\(\s*([\d,]+)\s*\)",          # Google Maps inline count
+    r"([\d,]+)\s+ratings",
+]
+
+
+def _parse_review_count(text):
+    """Extract the first plausible review count from a snippet. Returns int or None."""
+    for pat in _REVIEW_COUNT_PATTERNS:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            raw = m.group(1).replace(",", "")
+            if raw.isdigit() and 0 < int(raw) < 200_000:
+                return int(raw)
+    return None
+
+
+def _estimate_local_services(company_name, website_url=None, description=None, niche_context=None):
+    """Estimate revenue for a local/trade services business from review volume.
+
+    Model:
+      annual_jobs ≈ (review_count × jobs_per_review) / review_accumulation_years
+      revenue     = annual_jobs × avg_job_value
+      range       = ±60%
+
+    Same mechanism as the restaurant estimator, different economics: trades do
+    far fewer, far larger transactions. The band is wider because two of the
+    three inputs are assumed rather than observed — see the warning on
+    _LOCAL_SERVICE_PROFILES.
+    """
+    try:
+        text = " ".join(filter(None, [company_name, description, niche_context])).lower()
+        profile_key = _classify_local_service(text)
+        profile = _LOCAL_SERVICE_PROFILES[profile_key]
+        print(f"[local_svc_est] Starting estimate for: {company_name} (profile: {profile_key})")
+
+        snippets = []
+        for query in (
+            f'"{company_name}" google maps reviews',
+            f'"{company_name}" reviews rating {profile["industry"].lower()}',
+        ):
+            try:
+                results = search_web(query, max_results=4)
+                print(f"[local_svc_est] Query returned {len(results)} results")
+                snippets.extend(results)
+            except Exception as e:
+                print(f"[local_svc_est] Query failed: {e}")
+
+        if not snippets:
+            print("[local_svc_est] No search results — giving up")
+            return None
+
+        best_review_count = None
+        best_source = None
+        for result in snippets:
+            combined = f"{result.get('title', '')} {result.get('body', '')}"
+            rc = _parse_review_count(combined)
+            if rc is not None and (best_review_count is None or rc > best_review_count):
+                best_review_count = rc
+                best_source = result.get("title", "")[:60]
+
+        if best_review_count is None:
+            print("[local_svc_est] No review count found in any result — returning None")
+            return None
+
+        print(f"[local_svc_est] Found review_count={best_review_count} in: {best_source}")
+
+        annual_jobs = (best_review_count * profile["jobs_per_review"]) / _REVIEW_ACCUMULATION_YEARS
+        revenue = int(annual_jobs * profile["avg_job_value"])
+        estimate_low = int(revenue * 0.4)
+        estimate_high = int(revenue * 1.6)
+
+        basis = (
+            f"Google Maps/Yelp search: {best_review_count:,} lifetime reviews, "
+            f"{profile_key} profile (~{profile['jobs_per_review']} jobs/review, "
+            f"${profile['avg_job_value']:,} avg job), annualized over an assumed "
+            f"{_REVIEW_ACCUMULATION_YEARS}-year review accumulation window. "
+            f"Multipliers are industry priors, not measured — treat as a size band only."
+        )
+
+        print(f"[local_svc_est] Result: revenue=${revenue:,} "
+              f"(low=${estimate_low:,}, high=${estimate_high:,})")
+
+        return {
+            "revenue":             revenue,
+            "estimate_low":        estimate_low,
+            "estimate_high":       estimate_high,
+            "is_estimated":        True,
+            "confidence":          "low",
+            "estimate_basis":      basis,
+            "estimated_employees": profile["employees"],
+            "sector":              "Industrials" if profile_key in
+                                   ("hvac", "plumbing", "electrical", "roofing", "construction")
+                                   else "Consumer Discretionary",
+            "industry":            profile["industry"],
+            "sources":             ["google_maps_search"],
+        }
+
+    except Exception as e:
+        print(f"[local_svc_est] Error estimating {company_name}: {e}")
         return None
 
 
