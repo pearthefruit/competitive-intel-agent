@@ -35,7 +35,16 @@ FINGERPRINTS = {
         (r"ant[\.-]design|antd", "Ant Design"),
     ],
     "Analytics": [
-        (r"google-analytics|googletagmanager|gtag|ga\.js|analytics\.js|gtm\.js", "Google Analytics"),
+        # Google analytics products are distinguished by their ID format, not by
+        # script name — every one of them loads from googletagmanager.com. Lumping
+        # them together hides the single most useful signal: a site still carrying
+        # UA- tags has had no working analytics since Google shut Universal
+        # Analytics down in July 2023.
+        # Anchored forms only — patterns here are matched with re.IGNORECASE, so a
+        # bare quoted "G-XXXXXXX" would collide with ordinary strings.
+        (r"gtag/js\?id=G-[A-Z0-9]{7,12}|gtag\(\s*[\"']config[\"']\s*,\s*[\"']G-|measurementid[\"']?\s*:\s*[\"']G-", "Google Analytics 4"),
+        (r"\bUA-\d{4,10}-\d{1,4}\b", "Universal Analytics (DEPRECATED — dead since Jul 2023)"),
+        (r"google-analytics\.com|\banalytics\.js\b", "Google Analytics (version undetermined)"),
         (r"segment[\.-]com|analytics\.min\.js.*segment|cdn\.segment", "Segment"),
         (r"mixpanel[\.-]com|mixpanel\.min", "Mixpanel"),
         (r"hotjar[\.-]com|hotjar\.js", "Hotjar"),
@@ -47,7 +56,7 @@ FINGERPRINTS = {
         (r"clarity\.ms|clarity\.js", "Microsoft Clarity"),
     ],
     "Tag Manager": [
-        (r"googletagmanager\.com/gtm|gtm\.js", "Google Tag Manager"),
+        (r"googletagmanager\.com/gtm|\bGTM-[A-Z0-9]{5,9}\b", "Google Tag Manager"),
         (r"tealium[\.-]com|tealium\.js", "Tealium"),
         (r"ensighten[\.-]com", "Ensighten"),
     ],
@@ -62,6 +71,14 @@ FINGERPRINTS = {
         (r"qualified[\.-]com", "Qualified"),
         (r"6sense[\.-]com", "6sense"),
         (r"clearbit[\.-]com", "Clearbit"),
+        (r"gorgias[\.-]com|gorgias\.chat", "Gorgias"),
+        (r"tidio[\.-]co|tidiochat", "Tidio"),
+        (r"freshdesk[\.-]com|freshchat|freshworks", "Freshdesk/Freshchat"),
+        (r"helpscout[\.-]net|beacon\.helpscout", "Help Scout"),
+        (r"tawk\.to", "Tawk.to"),
+        (r"keap[\.-]com|infusionsoft", "Keap/Infusionsoft"),
+        (r"gohighlevel|msgsndr[\.-]com", "GoHighLevel"),
+        (r"zohostatic|zoho[\.-]com/crm|zoho\.com", "Zoho"),
     ],
     "CDN & Hosting": [
         (r"cloudflare[\.-]com|cf-ray|cf-cache", "Cloudflare"),
@@ -112,8 +129,13 @@ FINGERPRINTS = {
         (r"elasticsearch|elastic[\.-]co", "Elasticsearch"),
     ],
     "Advertising Pixels": [
-        (r"facebook\.com.*fbevents|fbq\(|connect\.facebook\.net.*fbevents", "Facebook Pixel"),
-        (r"googleadservices|google-ads|googlesyndication|conversion.*google", "Google Ads"),
+        # Note: Instagram has no pixel of its own — IG ad conversions fire the
+        # same Meta pixel, so this entry covers both. Meta's Conversions API is
+        # server-side and cannot be detected from page source at all.
+        (r"facebook\.com.*fbevents|fbq\(|connect\.facebook\.net.*fbevents", "Meta Pixel (Facebook/Instagram)"),
+        (r"facebook-domain-verification", "Meta Domain Verification (managed Business Manager)"),
+        (r"\bAW-\d{9,12}\b|googleadservices|conversion_async|google_conversion_id", "Google Ads Conversion Tracking"),
+        (r"google-ads|googlesyndication|conversion.*google", "Google Ads"),
         (r"tiktok\.com.*ttq|analytics\.tiktok|tiktok-pixel", "TikTok Pixel"),
         (r"snap\.licdn\.com|linkedin.*insight|linkedin\.com.*insight", "LinkedIn Insight Tag"),
         (r"snapchat\.com.*scevent|snaptr\(|sc-static\.net.*scevent", "Snapchat Pixel"),
@@ -128,6 +150,73 @@ FINGERPRINTS = {
         (r"bigcommerce[\.-]com", "BigCommerce"),
         (r"magento|mage[\.-]", "Magento"),
         (r"woocommerce|wc-ajax", "WooCommerce"),
+        (r"squarespace-commerce|squarespace\.com/commerce", "Squarespace Commerce"),
+        (r"ecwid[\.-]com", "Ecwid"),
+    ],
+    # ── SMB signal categories ────────────────────────────────────────────────
+    # For a sub-$25M private company the frontend framework says almost nothing —
+    # it was chosen by whoever built the site once, years ago. What the business
+    # actually RUNS ON is the real maturity signal: an operator on ServiceTitan
+    # with Klaviyo flows and online booking is a different acquisition than one
+    # with a WordPress brochure and a phone number.
+    "Email & SMS Marketing": [
+        (r"klaviyo[\.-]com|klaviyo\.js|_learnq", "Klaviyo"),
+        (r"mailchimp[\.-]com|list-manage\.com|mc\.us\d+\.list-manage", "Mailchimp"),
+        (r"constantcontact[\.-]com|ctctcdn", "Constant Contact"),
+        (r"activecampaign[\.-]com|prism\.app-us1", "ActiveCampaign"),
+        (r"attentivemobile|attn\.tv", "Attentive (SMS)"),
+        (r"postscript[\.-]io|getpostscript", "Postscript (SMS)"),
+        (r"omnisend[\.-]com", "Omnisend"),
+        (r"sendinblue[\.-]com|brevo[\.-]com", "Brevo/Sendinblue"),
+        (r"convertkit[\.-]com|ck\.page", "ConvertKit"),
+        (r"getdrip[\.-]com|drip\.com", "Drip"),
+        (r"emailoctopus|mailerlite", "MailerLite/EmailOctopus"),
+    ],
+    "Scheduling & Booking": [
+        (r"calendly[\.-]com", "Calendly"),
+        (r"acuityscheduling[\.-]com|squarespacescheduling", "Acuity Scheduling"),
+        (r"meetings\.hubspot\.com|hubspot.*meetings", "HubSpot Meetings"),
+        (r"chilipiper[\.-]com", "Chili Piper"),
+        (r"squareup\.com/appointments|square.*appointments", "Square Appointments"),
+        (r"setmore[\.-]com|simplybook[\.-]me", "Setmore/SimplyBook"),
+        (r"opentable[\.-]com|resy[\.-]com|sevenrooms[\.-]com", "Restaurant Reservations (OpenTable/Resy/SevenRooms)"),
+        (r"booksy[\.-]com|vagaro[\.-]com|schedulicity", "Booksy/Vagaro/Schedulicity"),
+    ],
+    "Vertical Operating Software": [
+        (r"servicetitan[\.-]com", "ServiceTitan (field service)"),
+        (r"getjobber[\.-]com|jobber[\.-]com", "Jobber (field service)"),
+        (r"housecallpro[\.-]com", "Housecall Pro (field service)"),
+        (r"toasttab[\.-]com|toast[\.-]com/order", "Toast (restaurant POS)"),
+        (r"clover[\.-]com/online|clover\.com", "Clover (POS)"),
+        (r"lightspeedhq[\.-]com|lightspeedapp", "Lightspeed (retail/hospo POS)"),
+        (r"mindbodyonline[\.-]com|mindbody[\.-]io", "Mindbody (fitness/wellness)"),
+        (r"procore[\.-]com|buildertrend[\.-]com", "Procore/Buildertrend (construction)"),
+        (r"shopmonkey[\.-]io|tekmetric[\.-]com", "Shopmonkey/Tekmetric (auto repair)"),
+        (r"dentrix|opendental|curvedental", "Dental PMS"),
+        (r"clio[\.-]com|mycase[\.-]com|smokeball", "Legal PMS (Clio/MyCase)"),
+        (r"rezdy[\.-]com|fareharbor[\.-]com|peek[\.-]com", "Tours & Activities Booking"),
+    ],
+    "Reviews & Social Proof": [
+        (r"yotpo[\.-]com|staticw2\.yotpo", "Yotpo"),
+        (r"trustpilot[\.-]com|widget\.trustpilot", "Trustpilot"),
+        (r"birdeye[\.-]com|birdeye\.js", "Birdeye"),
+        (r"podium[\.-]com|podium\.js", "Podium"),
+        (r"judge\.me|judgeme", "Judge.me"),
+        (r"okendo[\.-]com|bazaarvoice[\.-]com|reviews\.io", "Okendo/Bazaarvoice/Reviews.io"),
+    ],
+    "Subscriptions & Billing": [
+        (r"rechargepayments[\.-]com|rechargecdn", "Recharge"),
+        (r"chargebee[\.-]com", "Chargebee"),
+        (r"recurly[\.-]com", "Recurly"),
+        (r"boldcommerce[\.-]com|bold-subscriptions", "Bold Subscriptions"),
+    ],
+    "SMB Finance & Payments": [
+        (r"quickbooks[\.-]com|intuit[\.-]com/pay", "QuickBooks"),
+        (r"xero[\.-]com", "Xero"),
+        (r"freshbooks[\.-]com", "FreshBooks"),
+        (r"bill[\.-]com", "Bill.com"),
+        (r"squareup[\.-]com|square[\.-]site|squarecdn", "Square"),
+        (r"affirm[\.-]com|klarna[\.-]com|afterpay[\.-]com|sezzle[\.-]com", "Buy Now Pay Later"),
     ],
 }
 
