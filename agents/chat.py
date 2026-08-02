@@ -1338,6 +1338,26 @@ def _execute_tool(name, args, db_path, progress_callback=None):
                                     f"{text}\n"
                                     f'["{chunk_hint}…"](source:{r.get("source_doc_id", "")})'
                                 )
+                            # Tell the UI exactly which documents this answer drew
+                            # on, so the Sources pane can pin them to the top. This
+                            # is the real retrieval set, not a re-ranking guess made
+                            # after the fact from the user's wording.
+                            if progress_callback:
+                                try:
+                                    seen_ids, ordered = set(), []
+                                    for r in results:
+                                        sid = r.get("source_doc_id")
+                                        if sid is not None and sid not in seen_ids:
+                                            seen_ids.add(sid)
+                                            ordered.append(sid)
+                                    progress_callback("sources_used", {
+                                        "company": company,
+                                        "query": query,
+                                        "source_ids": ordered,
+                                    })
+                                except Exception:
+                                    pass  # never break an answer over a UI hint
+
                             header = f"Found {len(results)} relevant passage(s) in {company}'s captured sources:"
                             if n_synth:
                                 header += (

@@ -3451,6 +3451,22 @@
         /* Amber, not the indigo used for primary sources: an analysis report is
            our own synthesis, and must never read as evidence we gathered. */
         .source-type-badge.synthesis { background:rgba(251,191,36,0.18);color:#fbbf24; }
+
+        /* Sources search — a Ctrl-F over captured material, not a chat turn. */
+        .sources-search-row { display:flex;align-items:center;gap:6px;margin-top:8px; }
+        .sources-search-input { flex:1;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:12px;padding:6px 9px;outline:none;transition:border-color .15s; }
+        .sources-search-input:focus { border-color:rgba(99,102,241,0.5); }
+        .sources-search-input::placeholder { color:var(--text-muted); }
+        .sources-search-status { font-size:10px;color:var(--text-muted);white-space:nowrap; }
+
+        /* Pinned relevant block */
+        .source-group-label.relevant-label { display:flex;align-items:center;justify-content:space-between;color:#a5b4fc; }
+        .relevant-clear { cursor:pointer;font-weight:500;text-transform:none;letter-spacing:0;color:var(--text-muted);font-size:10px; }
+        .relevant-clear:hover { color:var(--text-primary); }
+        .relevant-reason { font-size:10px;color:var(--text-muted);padding:0 0 6px;font-style:italic; }
+        .source-card.relevant { border-color:rgba(99,102,241,0.35);background:rgba(99,102,241,0.06); }
+        .relevant-divider { height:1px;background:var(--border);margin:12px 0 4px; }
+        .match-badge { font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(34,197,94,0.18);color:#4ade80;font-weight:600; }
         .source-group-label { font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);padding:8px 0 4px;font-weight:600; }
         .chat-with-sources-btn { width:100%;padding:8px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);border-radius:6px;color:#a5b4fc;cursor:pointer;font-size:12px;transition:background .15s; }
         .chat-with-sources-btn:hover { background:rgba(99,102,241,0.25); }

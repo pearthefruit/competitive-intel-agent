@@ -9,6 +9,14 @@ let _currentSourceId = null;
 let _currentSections = [];
 let _currentHighlightText = null;
 
+// Documents to pin above the normal type-grouped list, newest signal wins.
+// Set either by a chat turn (the ids search_sources actually returned) or by
+// the search box. `var` not `let` — cross-module access, see the base.html rule.
+var _relevantSourceIds = [];
+var _relevantReason = '';       // shown under the heading: the query that produced it
+var _lastSourcesCompany = null; // so the search box knows what it is searching
+var _sourcesCache = [];         // last loaded list, reused when re-ranking
+
 
 // ── Right pane tab switching ─────────────────────────────────────────────────
 
@@ -68,14 +76,31 @@ async function _loadSourcesForCompany(company) {
         }
         const data = await resp.json();
         const sources = data.sources || [];
+        _lastSourcesCompany = company;
+        _sourcesCache = sources;
         if (!sources.length) {
             container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px">No sources captured yet. Run a financial analysis first.</div>';
             if (chatBtn) chatBtn.style.display = 'none';
             return;
         }
-        // Group by source_type
+        // Pinned "Relevant Sources" block. Rendered from the same source
+        // objects as the rest of the list so a document never appears with
+        // different metadata depending on where you look at it.
+        const relevant = [];
+        if (_relevantSourceIds && _relevantSourceIds.length) {
+            const byId = new Map(sources.map(s => [String(s.id), s]));
+            for (const id of _relevantSourceIds) {
+                const hit = byId.get(String(id));
+                if (hit) relevant.push(hit);
+            }
+        }
+        const relevantIdSet = new Set(relevant.map(s => String(s.id)));
+
+        // Group by source_type — excluding anything already pinned above, so
+        // the same card is never shown twice.
         const groups = {};
         for (const s of sources) {
+            if (relevantIdSet.has(String(s.id))) continue;
             const g = s.source_type || 'other';
             if (!groups[g]) groups[g] = [];
             groups[g].push(s);
@@ -92,6 +117,28 @@ async function _loadSourcesForCompany(company) {
         // report we wrote as if it were something we found.
         const SYNTHESIS_TYPES = new Set(['analysis_report']);
         let html = '';
+        if (relevant.length) {
+            html += `<div class="source-group-label relevant-label">
+                        ★ Relevant Sources
+                        <span class="relevant-clear" onclick="clearRelevantSources()">clear</span>
+                     </div>`;
+            if (_relevantReason) {
+                html += `<div class="relevant-reason">${_escHtml(_relevantReason)}</div>`;
+            }
+            for (const s of relevant) {
+                const date = s.source_date ? s.source_date.slice(0, 10) : '';
+                const isSynth = s.source_type === 'analysis_report';
+                html += `<div class="source-card relevant" onclick="openSourceViewer(${s.id})">
+                    <div class="source-card-title">${_escHtml(s.title || 'Untitled')}</div>
+                    <div class="source-card-meta">
+                        <span class="source-type-badge${isSynth ? ' synthesis' : ''}">${isSynth ? 'synthesis' : (s.source_type || '').replace(/_/g,' ')}</span>
+                        ${s._match_kind === 'literal' ? `<span class="match-badge">${s._hits} exact</span>` : ''}
+                        ${date ? `<span>${date}</span>` : ''}
+                    </div>
+                </div>`;
+            }
+            html += '<div class="relevant-divider"></div>';
+        }
         const orderedTypes = Object.keys(groups).sort((a, b) =>
             (SYNTHESIS_TYPES.has(a) ? 1 : 0) - (SYNTHESIS_TYPES.has(b) ? 1 : 0));
         for (const type of orderedTypes) {
@@ -116,6 +163,71 @@ async function _loadSourcesForCompany(company) {
         }
     } catch (e) {
         container.innerHTML = `<div style="color:var(--text-muted);font-size:12px;padding:8px">Error loading sources: ${e.message}</div>`;
+    }
+}
+
+
+// ── Relevant-source surfacing ────────────────────────────────────────────────
+
+/** Pin a set of source ids to the top of the pane. Called by the chat stream
+ *  with the ids search_sources actually returned for an answer. */
+function setRelevantSources(ids, reason) {
+    _relevantSourceIds = (ids || []).map(String);
+    _relevantReason = reason || '';
+    // Only re-render if the pane is actually showing; otherwise the pinned set
+    // is picked up next time the list loads.
+    const panel = document.getElementById('sources-panel');
+    if (panel && panel.style.display !== 'none' && _lastSourcesCompany) {
+        _loadSourcesForCompany(_lastSourcesCompany);
+    }
+}
+
+function clearRelevantSources() {
+    _relevantSourceIds = [];
+    _relevantReason = '';
+    const input = document.getElementById('sources-search-input');
+    if (input) input.value = '';
+    if (_lastSourcesCompany) _loadSourcesForCompany(_lastSourcesCompany);
+}
+
+let _sourceSearchTimer = null;
+
+/** Ctrl-F over the captured sources. Debounced; no LLM on either path. */
+function onSourcesSearchInput(value) {
+    clearTimeout(_sourceSearchTimer);
+    const q = (value || '').trim();
+    if (!q) { clearRelevantSources(); return; }
+    _sourceSearchTimer = setTimeout(() => _runSourcesSearch(q), 220);
+}
+
+async function _runSourcesSearch(q) {
+    if (!_lastSourcesCompany) return;
+    const status = document.getElementById('sources-search-status');
+    if (status) status.textContent = 'searching…';
+    try {
+        const resp = await fetch(
+            `/api/companies/${encodeURIComponent(_lastSourcesCompany)}/sources/search?q=${encodeURIComponent(q)}`);
+        if (!resp.ok) { if (status) status.textContent = ''; return; }
+        const data = await resp.json();
+        const results = data.results || [];
+
+        // Carry match metadata onto the cached source objects so the pinned
+        // cards can show hit counts without a second lookup.
+        const meta = new Map(results.map(r => [String(r.id), r]));
+        for (const s of _sourcesCache) {
+            const m = meta.get(String(s.id));
+            s._match_kind = m ? m.match_kind : null;
+            s._hits = m ? m.hits : 0;
+        }
+
+        const nLiteral = results.filter(r => r.match_kind === 'literal').length;
+        setRelevantSources(results.map(r => r.id),
+            results.length
+                ? `"${q}" — ${nLiteral} exact match${nLiteral === 1 ? '' : 'es'}, ${results.length - nLiteral} related`
+                : `"${q}" — no matches`);
+        if (status) status.textContent = results.length ? '' : 'no matches';
+    } catch (e) {
+        if (status) status.textContent = '';
     }
 }
 

@@ -268,6 +268,20 @@ def create_app(db_path="intel.db"):
 
     init_db(db_path)
 
+    # Warm the MiniLM encoder in the background. It loads lazily on first use,
+    # which costs ~60s — tolerable inside a chat turn, fatal for a search box
+    # the user expects to behave like Ctrl-F. Daemon thread so it never delays
+    # startup or holds the process open.
+    def _warm_embeddings():
+        try:
+            from agents.embeddings import embed_text
+            embed_text("warmup")
+            print("[startup] Embedding model ready")
+        except Exception as e:
+            print(f"[startup] Embedding warmup skipped: {e}")
+
+    threading.Thread(target=_warm_embeddings, daemon=True).start()
+
     # CORS — allow browser extension (chrome-extension://) to hit capture + thread list.
     _CORS_PATHS = {"/api/signals/manual", "/api/signals/threads", "/api/signals/threads/names", "/api/signals/threads/create"}
 
@@ -1162,6 +1176,34 @@ def create_app(db_path="intel.db"):
             return jsonify({"sources": sources, "total": len(sources)})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+
+    @app.route("/api/companies/<path:company_name>/sources/search")
+    def search_company_sources(company_name):
+        """Rank a company's source documents against a query — literal first.
+
+        Drives the Sources-pane search box, so it must feel like Ctrl-F: no LLM
+        call on either path (literal is a SQL LIKE, semantic is a local MiniLM
+        embedding), typically well under 500ms once the model is warm.
+        """
+        from agents.source_capture import search_sources_ranked
+
+        query = (request.args.get("q") or "").strip()
+        if not query:
+            return jsonify({"results": []})
+
+        conn = get_connection(db_path)
+        try:
+            dossier = get_dossier_by_company(conn, company_name)
+            if not dossier:
+                return jsonify({"error": "Company not found"}), 404
+            try:
+                limit = min(int(request.args.get("limit", 15)), 50)
+            except (TypeError, ValueError):
+                limit = 15
+            results = search_sources_ranked(conn, query, dossier["id"], top_k_docs=limit)
+            return jsonify({"query": query, "results": results})
         finally:
             conn.close()
 

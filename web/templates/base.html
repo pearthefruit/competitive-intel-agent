@@ -168,6 +168,12 @@
                             onclick="enterSourceMode()" style="display:none;width:100%">
                         ⚡ Chat with these sources
                     </button>
+                    <div class="sources-search-row">
+                        <input type="text" id="sources-search-input" class="sources-search-input"
+                               placeholder="Find in sources — exact text or idea…"
+                               oninput="onSourcesSearchInput(this.value)">
+                        <span id="sources-search-status" class="sources-search-status"></span>
+                    </div>
                 </div>
                 <div id="sources-list-content" style="flex:1;overflow-y:auto;padding:12px"></div>
             </div>

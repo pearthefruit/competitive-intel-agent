@@ -103,7 +103,7 @@ SYSTEM_PROMPT = """You are SignalVault, an agentic competitive intelligence anal
 ## Critical Rules
 - **NEVER answer company intelligence questions from general knowledge.** Always use tools to get real data. If the user asks about a company's digital maturity, hiring trends, financials, competitors, or technology — run the appropriate analysis tools. Your training data is stale; the tools provide current intelligence.
 - **Captured sources FIRST.** For factual questions about a specific company (financials, risk factors, filings, news, sentiment, hiring), call `search_sources` FIRST when that company likely has captured sources — any previously-analyzed company does (see the [Captured sources available] list when present). Fall back to live web search only when search_sources returns nothing relevant. This does not replace analysis tools: "run a financial analysis" still means `financial_analysis` — search_sources is for answering questions from data already captured.
-- **Cite stored sources.** When an answer draws on captured sources, cite with superscript links to the stored source ID from the search_sources result — e.g. `[¹](source:123)` — NOT the external URL. Use `[¹](url)` citations only for live web results.
+- **Do NOT write inline citation links for stored sources.** Answer in plain prose. The UI surfaces the sources you actually retrieved in the Sources pane alongside your answer, so a citation link adds nothing and models routinely emit malformed markdown for it (full-width brackets, doubled parentheses) that renders as visible junk. Name the source in words when it matters — "the 2025 10-K", "the ProPublica 990" — and say plainly when a figure comes from a single unverified source. Use `[¹](url)` citations only for live web results.
 - **NEVER say "I will perform additional searches" or "Let me search for more" without actually calling tools in the same response.** If you need more data, call the tools NOW — don't respond with text promising to do more later. Every response must either contain tool calls OR be your final answer. There is no "next turn" — if you respond with text only, the conversation ends.
 - **Multi-company queries → `batch_company_analysis`.** When the user asks to rank, compare, or evaluate multiple companies (e.g., "which CPG companies are most behind?", "compare top 5 banks"), use `web_search` to identify the companies, then call `batch_company_analysis` with those names. Do NOT analyze companies one-by-one — the batch tool runs them in parallel and produces ranked results with Digital Maturity Scores.
 
@@ -817,7 +817,8 @@ TOOL_SCHEMAS = [
                 "posts captured during analyses. Also answers direct document questions "
                 "('what does the MD&A say about X', 'find the 8-K about the acquisition'). "
                 "If this returns nothing relevant, fall back to live search/analysis tools. "
-                "Returns relevant passages with source IDs — cite them as [¹](source:ID)."
+                "Returns relevant passages. Do NOT write inline citation links — the UI "
+                "surfaces the retrieved sources next to your answer automatically."
             ),
             "parameters": {
                 "type": "object",

@@ -3085,6 +3085,14 @@ function handleSSE(event, chat) {
         _scrollChatBottom();
 
     } else if (event.type === 'tool_progress') {
+        // search_sources reports the documents it actually retrieved. Pin them
+        // in the Sources pane so the answer and its evidence sit side by side —
+        // this replaced inline (source:ID) citation links, which models kept
+        // emitting as malformed markdown.
+        if (event.event === 'sources_used' && typeof setRelevantSources === 'function') {
+            setRelevantSources(event.source_ids || [],
+                event.query ? `from your question: "${event.query}"` : 'used in the last answer');
+        }
         // Accumulate progress steps in the tool_call message data
         const isStructured = event.structured === true;
         const rawText = event.text || '';

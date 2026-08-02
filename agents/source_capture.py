@@ -251,6 +251,143 @@ def capture_and_embed(
     return (source_doc_id, True)
 
 
+# ── Hybrid document ranking (for the Sources pane) ───────────────────────────
+# Semantic search alone cannot do verification. Measured on this corpus, asking
+# for '$600 million' returned 3 passages of which 0 contained the string, and
+# '4.3%' returned nothing at all — cosine similarity has no notion of exact
+# tokens, and checking whether a specific figure is real is precisely a
+# literal-token question. So literal substring matching runs first and ranks
+# above semantic, which stays for paraphrased/conceptual queries.
+#
+# Unlike search_sources (which feeds an LLM a handful of chunks), this ranks
+# whole documents for a browsable list, with a snippet showing the match.
+
+SNIPPET_WIDTH = 240
+
+
+def _literal_snippet(text: str, needle: str, width: int = SNIPPET_WIDTH) -> str:
+    """Return a window of `text` centred on the first case-insensitive hit."""
+    if not text:
+        return ""
+    lo = text.lower().find(needle.lower())
+    if lo < 0:
+        return text[:width].strip()
+    start = max(0, lo - width // 3)
+    end = min(len(text), lo + len(needle) + (2 * width) // 3)
+    snip = text[start:end].strip().replace("\n", " ")
+    return ("…" if start > 0 else "") + snip + ("…" if end < len(text) else "")
+
+
+def search_sources_ranked(conn, query: str, dossier_id: int,
+                          top_k_docs: int = 15, semantic_pool: int = 60) -> list:
+    """Rank a company's source *documents* against a query, literal matches first.
+
+    Returns dicts with id, source_type, title, url, source_date, match_kind
+    ('literal' | 'semantic'), hits (literal occurrence count), score and snippet.
+
+    No LLM is involved on either path — literal is a SQL LIKE and semantic is a
+    local MiniLM embedding plus a dot product, so this is fast enough to drive a
+    search box rather than a chat turn.
+    """
+    query = (query or "").strip()
+    if not query:
+        return []
+
+    # Escape LIKE metacharacters so a query containing % or _ is taken literally
+    esc = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    pattern = f"%{esc.lower()}%"
+
+    docs = {}
+
+    # ── Literal pass: chunk bodies ────────────────────────────────────────────
+    rows = conn.execute(
+        """SELECT sc.source_doc_id, sc.chunk_text,
+                  sd.source_type, sd.title, sd.url, sd.source_date
+             FROM source_chunks sc
+             JOIN source_documents sd ON sd.id = sc.source_doc_id
+            WHERE sd.dossier_id = ?
+              AND lower(sc.chunk_text) LIKE ? ESCAPE '\\'""",
+        (dossier_id, pattern),
+    ).fetchall()
+
+    for r in rows:
+        doc_id = r["source_doc_id"]
+        text = r["chunk_text"] or ""
+        hits = text.lower().count(query.lower())
+        entry = docs.get(doc_id)
+        if entry is None:
+            docs[doc_id] = {
+                "id": doc_id,
+                "source_type": r["source_type"],
+                "title": r["title"],
+                "url": r["url"],
+                "source_date": r["source_date"],
+                "match_kind": "literal",
+                "hits": hits,
+                "score": 1.0,
+                "snippet": _literal_snippet(text, query),
+            }
+        else:
+            entry["hits"] += hits
+
+    # ── Literal pass: titles ──────────────────────────────────────────────────
+    # A document whose title matches is relevant even when no chunk body does
+    # (short sources, or a company name that only appears in the heading).
+    trows = conn.execute(
+        """SELECT id, source_type, title, url, source_date, content
+             FROM source_documents
+            WHERE dossier_id = ? AND lower(title) LIKE ? ESCAPE '\\'""",
+        (dossier_id, pattern),
+    ).fetchall()
+    for r in trows:
+        if r["id"] in docs:
+            docs[r["id"]]["hits"] += 1
+            continue
+        docs[r["id"]] = {
+            "id": r["id"],
+            "source_type": r["source_type"],
+            "title": r["title"],
+            "url": r["url"],
+            "source_date": r["source_date"],
+            "match_kind": "literal",
+            "hits": 1,
+            "score": 1.0,
+            "snippet": _literal_snippet(r["content"] or r["title"] or "", query),
+        }
+
+    # ── Semantic pass ─────────────────────────────────────────────────────────
+    # Caps off: they protect an LLM context budget, not a browsable list.
+    try:
+        sem = search_sources(conn, query, dossier_id,
+                             top_k=semantic_pool, apply_caps=False)
+    except Exception as e:
+        print(f"[source_capture] Semantic pass failed, literal only: {e}")
+        sem = []
+
+    for r in sem:
+        doc_id = r.get("source_doc_id")
+        if doc_id in docs:
+            continue  # already a literal hit — the stronger signal, keep it
+        docs[doc_id] = {
+            "id": doc_id,
+            "source_type": r.get("source_type"),
+            "title": r.get("source_title"),
+            "url": r.get("url"),
+            "source_date": None,
+            "match_kind": "semantic",
+            "hits": 0,
+            "score": r.get("score", 0.0),
+            "section_label": r.get("section_label"),
+            "snippet": (r.get("chunk_text") or "")[:SNIPPET_WIDTH].replace("\n", " ").strip(),
+        }
+
+    literal = sorted((d for d in docs.values() if d["match_kind"] == "literal"),
+                     key=lambda d: (-d["hits"], (d["title"] or "").lower()))
+    semantic = sorted((d for d in docs.values() if d["match_kind"] == "semantic"),
+                      key=lambda d: -d["score"])
+    return (literal + semantic)[:top_k_docs]
+
+
 # ── Analysis reports as sources ───────────────────────────────────────────────
 # Our own reports are the only material most companies ever have: 197 of the 232
 # analyzed dossiers were analyzed before source capture existed, so retrieval
@@ -505,6 +642,7 @@ def search_sources(
     source_type=None,
     section_key=None,
     top_k: int = DEFAULT_TOP_K,
+    apply_caps: bool = True,
 ) -> list:
     """Semantic search scoped to one company's captured sources.
 
@@ -530,7 +668,9 @@ def search_sources(
     # below-threshold chunk should never be admitted just to spread coverage.
     scored = semantic_search(query_bytes, rows, top_k=len(rows))
     scored = [r for r in scored if r["score"] >= SCORE_THRESHOLD]
-    scored = _select_diverse(scored, top_k)
+    # Caps exist to protect a small LLM context budget. A browsable list wants
+    # every match it can get, so callers rendering UI pass apply_caps=False.
+    scored = _select_diverse(scored, top_k) if apply_caps else scored[:top_k]
 
     return [
         {
