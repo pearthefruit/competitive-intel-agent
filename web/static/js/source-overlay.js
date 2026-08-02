@@ -71,6 +71,22 @@ function _sovLoadReport() {
 
 // ── Right pane: Sources list ──────────────────────────────────────────────────
 
+// Ids the last search_sources call actually returned, in rank order.
+var _sovRelevantIds = [];
+var _sovRelevantQuery = '';
+
+function _sovSetRelevant(ids, query) {
+    _sovRelevantIds = (ids || []).map(String);
+    _sovRelevantQuery = query || '';
+    _sovLoadSources();
+}
+
+function sovClearRelevant() {
+    _sovRelevantIds = [];
+    _sovRelevantQuery = '';
+    _sovLoadSources();
+}
+
 async function _sovLoadSources() {
     const container = document.getElementById('sov-source-list');
     if (!container || !_sovCompany) return;
@@ -88,13 +104,48 @@ async function _sovLoadSources() {
             news_article: 'News', analyst: 'Analyst Estimates',
             propublica: 'ProPublica 990', reddit_post: 'Reddit', blind_post: 'Blind',
         };
+        // Documents the last answer was actually built from, pinned on top.
+        const relevant = [];
+        if (_sovRelevantIds.length) {
+            const byId = new Map(sources.map(s => [String(s.id), s]));
+            for (const id of _sovRelevantIds) {
+                const hit = byId.get(String(id));
+                if (hit) relevant.push(hit);
+            }
+        }
+        const pinned = new Set(relevant.map(s => String(s.id)));
+
         const groups = {};
         for (const s of sources) {
+            if (pinned.has(String(s.id))) continue;   // never show a card twice
             const g = s.source_type || 'other';
             if (!groups[g]) groups[g] = [];
             groups[g].push(s);
         }
         let html = '';
+        if (relevant.length) {
+            html += `<div class="sov-relevant-head">
+                        <span>◆ Used in this answer</span>
+                        <span class="sov-relevant-clear" onclick="sovClearRelevant()">show all</span>
+                     </div>`;
+            if (_sovRelevantQuery) {
+                html += `<div class="sov-relevant-sub">searched: “${_sovEsc(_sovRelevantQuery)}”</div>`;
+            }
+            relevant.forEach((s, i) => {
+                const date = s.source_date ? s.source_date.slice(0, 10) : '';
+                const type = s.source_type || 'other';
+                const isSynth = type === 'analysis_report';
+                html += `<div class="sov-source-card sov-relevant" onclick="sovOpenSourceViewer(${s.id})">
+                    <span class="sov-relevant-rank">${i + 1}</span>
+                    <div style="font-size:12px;font-weight:600;color:var(--text-primary);line-height:1.4">${_sovEsc(s.title || 'Untitled')}</div>
+                    <div style="display:flex;gap:6px;margin-top:4px;align-items:center">
+                        <span class="sov-badge${isSynth ? ' synth' : ''}">${isSynth ? 'our analysis' : type.replace(/_/g,' ')}</span>
+                        ${date ? `<span style="font-size:10px;color:var(--text-muted)">${date}</span>` : ''}
+                    </div>
+                </div>`;
+            });
+            html += `<div class="sov-relevant-rest">Everything else captured</div>`;
+        }
         for (const [type, items] of Object.entries(groups)) {
             const label = TYPE_LABELS[type] || type.replace(/_/g, ' ');
             html += `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);padding:10px 4px 4px">${label}</div>`;
@@ -285,7 +336,14 @@ async function sovSend() {
                         _sovAppendToolCall(evt.name);
 
                     } else if (evt.type === 'tool_progress') {
-                        _sovUpdateToolProgress(evt.text || '');
+                        // search_sources reports the documents it actually read.
+                        // Pin them at the top of this pane so the answer and the
+                        // evidence behind it are side by side.
+                        if (evt.event === 'sources_used') {
+                            _sovSetRelevant(evt.source_ids || [], evt.query || '');
+                        } else {
+                            _sovUpdateToolProgress(evt.text || '');
+                        }
 
                     } else if (evt.type === 'tool_result') {
                         _sovCloseToolCall();

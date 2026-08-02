@@ -6370,6 +6370,53 @@ a.doc-action-btn { text-decoration: none; display: inline-flex; align-items: cen
 }
 .sov-source-card:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.12); }
 
+/* Sources the answer was actually built from.
+   A tinted background alone was too subtle to read as a different category —
+   these carry an amber accent bar, a rank number and a heavier title, so the
+   pinned block reads as a distinct section rather than a slightly bluer list. */
+.sov-relevant-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+    color: #fbbf24; font-weight: 700; padding: 12px 4px 6px;
+}
+.sov-relevant-clear {
+    cursor: pointer; text-transform: none; letter-spacing: 0;
+    color: var(--text-muted); font-weight: 500; font-size: 10px;
+}
+.sov-relevant-clear:hover { color: var(--text-primary); }
+.sov-relevant-sub {
+    font-size: 10px; color: var(--text-muted); font-style: italic;
+    padding: 0 4px 8px;
+}
+.sov-source-card.sov-relevant {
+    position: relative; padding-left: 30px;
+    background: rgba(251,191,36,0.07);
+    border-color: rgba(251,191,36,0.35);
+    box-shadow: inset 3px 0 0 #fbbf24;
+}
+.sov-source-card.sov-relevant:hover {
+    background: rgba(251,191,36,0.13);
+    border-color: rgba(251,191,36,0.55);
+}
+.sov-relevant-rank {
+    position: absolute; left: 9px; top: 9px;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: rgba(251,191,36,0.22); color: #fbbf24;
+    font-size: 9px; font-weight: 700; line-height: 15px; text-align: center;
+}
+/* Hard visual break so the unranked remainder never blurs into the pinned set */
+.sov-relevant-rest {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-muted); padding: 14px 4px 2px;
+    border-top: 1px solid var(--border); margin-top: 12px;
+}
+.sov-badge {
+    font-size: 10px; background: rgba(99,102,241,0.15);
+    border: 1px solid rgba(99,102,241,0.25); color: #a5b4fc;
+    border-radius: 4px; padding: 1px 6px;
+}
+.sov-badge.synth { background: rgba(251,191,36,0.15); border-color: rgba(251,191,36,0.3); color: #fbbf24; }
+
 .sov-section-tab {
     background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
     border-radius: 6px; color: var(--text-muted); cursor: pointer; font-size: 11px;
