@@ -181,10 +181,17 @@ async function _sovLoadSources() {
             html += `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);padding:10px 4px 4px">${label}</div>`;
             for (const s of items) {
                 const date = s.source_date ? s.source_date.slice(0, 10) : '';
-                html += `<div class="sov-source-card" onclick="sovOpenSourceViewer(${s.id})">
+                // Rejected sources stay visible but read as struck-out and dimmed:
+                // they are excluded from retrieval, not hidden from the record.
+                const st = s.status || 'active';
+                const stateCls = st === 'rejected' ? ' sov-src-rejected'
+                               : st === 'disputed' ? ' sov-src-disputed' : '';
+                html += `<div class="sov-source-card${stateCls}" onclick="sovOpenSourceViewer(${s.id})">
                     <div style="font-size:12px;font-weight:500;color:var(--text-primary);line-height:1.4">${_sovEsc(s.title || 'Untitled')}</div>
                     <div style="display:flex;gap:6px;margin-top:3px;align-items:center">
                         <span style="font-size:10px;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.25);color:#a5b4fc;border-radius:4px;padding:1px 6px">${type.replace(/_/g,' ')}</span>
+                        ${st === 'rejected' ? '<span class="sov-state-badge rejected">rejected</span>' : ''}
+                        ${st === 'disputed' ? '<span class="sov-state-badge disputed">disputed</span>' : ''}
                         ${date ? `<span style="font-size:10px;color:var(--text-muted)">${date}</span>` : ''}
                     </div>
                 </div>`;
@@ -204,6 +211,84 @@ function _sovNoSources() {
 function sovShowSourceList() {
     document.getElementById('sov-source-list').style.display   = '';
     document.getElementById('sov-source-viewer').style.display = 'none';
+}
+
+
+// ── Source triage ─────────────────────────────────────────────────────────────
+// Rejecting is not deleting. The row stays, so its dedup_key keeps blocking a
+// re-fetch on the next analysis run — and the record that a source was judged
+// and thrown out is itself worth keeping.
+
+var _sovViewerDoc = null;
+
+function _sovRenderStatusBar(doc) {
+    const bar = document.getElementById('sov-viewer-status');
+    if (!bar) return;
+    const status = doc.status || 'active';
+    const isRejected = status === 'rejected';
+    const isDisputed = status === 'disputed';
+
+    let html = '';
+    if (isRejected || isDisputed) {
+        html += `<div class="sov-status-banner ${status}">
+                    <span>${isRejected ? '⛔ Rejected — excluded from retrieval' : '⚠ Disputed — still retrievable'}</span>
+                    ${doc.status_note ? `<span class="sov-status-note">${_sovEsc(doc.status_note)}</span>` : ''}
+                 </div>`;
+    }
+    html += `<div class="sov-status-actions">
+                ${isRejected
+                    ? `<button class="sov-status-btn" onclick="sovSetStatus(${doc.id},'active',event)">Restore</button>`
+                    : `<button class="sov-status-btn danger" onclick="sovSetStatus(${doc.id},'rejected',event)">Reject source</button>`}
+                ${!isDisputed && !isRejected
+                    ? `<button class="sov-status-btn" onclick="sovSetStatus(${doc.id},'disputed',event)">Flag as disputed</button>` : ''}
+             </div>`;
+    bar.innerHTML = html;
+    bar.style.display = '';
+}
+
+function sovSetStatus(sourceId, status, ev) {
+    // Restoring needs no explanation; rejecting and disputing do, and the note
+    // is the durable part — "wrong entity" outlives whoever clicked the button.
+    if (status === 'active') return _sovApplyStatus(sourceId, status, null);
+
+    const x = ev ? ev.clientX : window.innerWidth / 2;
+    const y = ev ? ev.clientY : window.innerHeight / 2;
+    const placeholder = status === 'rejected'
+        ? 'Why reject this? (optional)'
+        : 'What is disputed? (optional)';
+    if (typeof _showInlineInput === 'function') {
+        _showInlineInput(x, y, placeholder, '', (note) =>
+            _sovApplyStatus(sourceId, status, (note || '').trim() || null));
+    } else {
+        _sovApplyStatus(sourceId, status, null);
+    }
+}
+
+async function _sovApplyStatus(sourceId, status, note) {
+    try {
+        const resp = await fetch(`/api/sources/${sourceId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status, note }),
+        });
+        if (!resp.ok) {
+            if (typeof _showToast === 'function') _showToast('Could not update source', 'error');
+            return;
+        }
+        const row = await resp.json();
+        if (_sovViewerDoc && _sovViewerDoc.id === sourceId) {
+            _sovViewerDoc.status = row.status;
+            _sovViewerDoc.status_note = row.status_note;
+            _sovRenderStatusBar(_sovViewerDoc);
+        }
+        _sovLoadSources();   // reflect the new state in the list behind the viewer
+        if (typeof _showToast === 'function') {
+            _showToast(status === 'rejected'
+                ? 'Source rejected — excluded from retrieval, kept for the record'
+                : status === 'disputed' ? 'Source flagged as disputed'
+                : 'Source restored', status === 'rejected' ? 'warn' : 'success');
+        }
+    } catch (e) { /* non-fatal — the banner just won't update */ }
 }
 
 
@@ -229,6 +314,8 @@ async function sovOpenSourceViewer(sourceId, highlightText) {
         const doc = await resp.json();
         _sovSections = doc.sections || [];
         title.textContent = doc.title || 'Source';
+        _sovViewerDoc = doc;
+        _sovRenderStatusBar(doc);
 
         // Wire up the "Open" link
         const urlLink = document.getElementById('sov-viewer-url');

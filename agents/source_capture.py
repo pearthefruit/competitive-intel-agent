@@ -47,7 +47,7 @@ CANONICAL_SOURCE_TYPES = frozenset({
     "news_article", "google_news", "web", "web_crawl", "pricing_page",
     "reddit", "hackernews", "youtube", "blind", "fishbowl", "tiktok",
     "instagram", "1point3acres", "patent", "hiring_data", "data_point",
-    "analysis_report",
+    "analysis_report", "revenue_estimate", "ops_maturity",
 })
 
 # Source types that are our own LLM synthesis rather than primary evidence.
@@ -55,7 +55,7 @@ CANONICAL_SOURCE_TYPES = frozenset({
 # thing ever captured — but they must never be mistaken for a source. Callers
 # render them with a distinct badge, and SLOT_CAPS_BY_TYPE keeps them from
 # crowding out real evidence when real evidence exists.
-SYNTHESIS_SOURCE_TYPES = frozenset({"analysis_report"})
+SYNTHESIS_SOURCE_TYPES = frozenset({"analysis_report", "revenue_estimate"})
 
 # Legacy/variant spellings collapsed into a single canonical value
 SOURCE_TYPE_ALIASES = {
@@ -306,7 +306,8 @@ def search_sources_ranked(conn, query: str, dossier_id: int,
              FROM source_chunks sc
              JOIN source_documents sd ON sd.id = sc.source_doc_id
             WHERE sd.dossier_id = ?
-              AND lower(sc.chunk_text) LIKE ? ESCAPE '\\'""",
+              AND lower(sc.chunk_text) LIKE ? ESCAPE '\\'
+              AND (sd.status IS NULL OR sd.status != 'rejected')""",
         (dossier_id, pattern),
     ).fetchall()
 
@@ -336,7 +337,8 @@ def search_sources_ranked(conn, query: str, dossier_id: int,
     trows = conn.execute(
         """SELECT id, source_type, title, url, source_date, content
              FROM source_documents
-            WHERE dossier_id = ? AND lower(title) LIKE ? ESCAPE '\\'""",
+            WHERE dossier_id = ? AND lower(title) LIKE ? ESCAPE '\\'
+              AND (status IS NULL OR status != 'rejected')""",
         (dossier_id, pattern),
     ).fetchall()
     for r in trows:

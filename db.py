@@ -624,6 +624,14 @@ def _migrate_db(conn):
         ("predictions", "prior_value", "REAL"),       # prior observation, for change math
         ("predictions", "outcome", "INTEGER"),        # 1 = happened, 0 = did not
         ("predictions", "brier_score", "REAL"),
+        # Source triage. NULL/'active' = usable, 'disputed' = flagged but still
+        # retrievable, 'rejected' = excluded from retrieval. Rows are never
+        # deleted: the dedup key on a kept row is what stops a re-run silently
+        # re-fetching the same bad source, and "we evaluated this and rejected
+        # it" is worth more than the row never having existed.
+        ("source_documents", "status", "TEXT"),
+        ("source_documents", "status_note", "TEXT"),
+        ("source_documents", "status_at", "TEXT"),
     ]
     for table, column, col_type in migrations:
         try:
@@ -2366,6 +2374,167 @@ _PRESET_LENSES = [
             "scoring_context": "You are a workforce management consultant evaluating a company's people operations maturity for a consulting engagement.",
             "angle_guidance": "Identify the biggest gaps between their current workforce management and industry best practices.",
             "risk_focus": "leadership buy-in, budget for HR transformation, change fatigue, competing priorities",
+        },
+    },
+    {
+        "name": "SMB M&A",
+        "slug": "smb-ma",
+        "description": "Evaluate a $1M-$25M revenue private company as an acquisition target — earnings quality, operational maturity, market position, digital leverage, and owner dependency",
+        "config": {
+            "dimensions": [
+                {
+                    "key": "earnings_quality",
+                    "label": "Financial Profile & Earnings Quality",
+                    "weight": 0.30,
+                    "sources": ["financial"],
+                    "rubric": (
+                        "Score the reliability and attractiveness of earnings, NOT just size. "
+                        "Companies in this range rarely have reported financials — a modeled revenue estimate "
+                        "caps this dimension at 65 no matter how good the number looks.\n"
+                        "80-100: Documented financials showing $1M+ EBITDA, 15%+ margin, 3yr revenue stability or growth, "
+                        "clean addbacks, recurring or contracted revenue.\n"
+                        "60-79: Well-evidenced revenue in range with positive but thinner or lumpier earnings. "
+                        "Some customer concentration or one-off addbacks.\n"
+                        "40-59: Revenue modeled rather than documented, or documented but flat/declining, or margin unclear. "
+                        "The normal starting point for an un-diligenced target.\n"
+                        "20-39: Margin compression, revenue decline, heavy customer concentration (>30% one client), "
+                        "or addbacks that look like real operating costs.\n"
+                        "0-19: Below $1M revenue, unprofitable with no path, or the available figures contradict each other.\n"
+                        "If no financial data of any kind: score 50 and say 'no financial data' in the rationale."
+                    ),
+                },
+                {
+                    "key": "ops_maturity",
+                    "label": "Business Process & Ops Maturity",
+                    "weight": 0.25,
+                    "sources": ["ops_maturity", "techstack", "hiring"],
+                    "rubric": (
+                        "Score how much of the business runs on repeatable systems versus the owner's head. "
+                        "Judge demand generation, sales process, and back-office tooling.\n"
+                        "80-100: Documented funnel end to end — lead capture with a real ESP, booking or self-serve checkout, "
+                        "content published within 90 days, CRM/marketing automation, vertical operating software "
+                        "(ServiceTitan, Toast, Jobber, Mindbody, Clio etc.), ATS for hiring.\n"
+                        "60-79: Two or three funnel stages instrumented. Lead capture and a booking path exist "
+                        "but content is stale or there is no CRM.\n"
+                        "40-59: Brochure site with a contact form. Business runs on phone, email and spreadsheets. "
+                        "No visible automation.\n"
+                        "20-39: Static single-page site, no capture mechanism, no scheduling, dead or missing blog, "
+                        "no operating software detected.\n"
+                        "0-19: No functional web presence, or the site is broken/abandoned.\n"
+                        "A stale blog is worse than no blog — content last touched over two years ago is an "
+                        "abandonment signal, not a content signal."
+                    ),
+                },
+                {
+                    "key": "digital_leverage",
+                    "label": "Digital Maturity & Upside",
+                    "weight": 0.20,
+                    "sources": ["techstack", "seo", "brand_ad"],
+                    "rubric": (
+                        "IMPORTANT — this dimension scores VALUE CREATION HEADROOM, not current sophistication. "
+                        "A competent business with an unexploited digital channel scores HIGHER than one already "
+                        "running a mature paid program, because the acquirer's post-close lever is bigger. "
+                        "Score the gap between demonstrated demand and digital exploitation.\n"
+                        "80-100: Real business with proven offline or word-of-mouth demand and an obvious untapped channel — "
+                        "no paid pixels, thin SEO, no email program, but functioning operations and clear customer demand. "
+                        "Large, cheap, well-understood upside.\n"
+                        "60-79: Partial digital footprint — analytics present, one pixel or an email list, "
+                        "but no coordinated program. Moderate headroom.\n"
+                        "40-59: Either a competently run digital program already (little headroom left) OR too little "
+                        "business underneath for digital to matter.\n"
+                        "20-39: Sophisticated multi-channel paid operation already optimized — upside is incremental "
+                        "and the seller is pricing it in.\n"
+                        "0-19: Digitally dead AND no evidence of demand through any other channel — nothing to leverage.\n"
+                        "Negative flags to name explicitly in the rationale: Universal Analytics (UA-) tags still present "
+                        "means tracking has been dead since July 2023; no HTTPS; no mobile viewport; end-of-life site platform."
+                    ),
+                },
+                {
+                    "key": "market_dynamics",
+                    "label": "Market Dynamics",
+                    "weight": 0.15,
+                    "sources": ["competitors", "sentiment"],
+                    "rubric": (
+                        "Score the durability and direction of the market this business sits in — at ITS scale and "
+                        "geography, not the national category. A $6M regional HVAC firm competes locally; do not "
+                        "score it against national players.\n"
+                        "80-100: Growing or structurally stable demand, fragmented competition (roll-up friendly), "
+                        "low disruption risk, durable local or niche moat (licensing, physical presence, switching "
+                        "costs, contracts).\n"
+                        "60-79: Stable demand, ordinary competition, no acute disruption threat.\n"
+                        "40-59: Mature or flat market, or the competitive picture is too thin to judge. "
+                        "The correct default when local competitor data is sparse.\n"
+                        "20-39: Structural headwinds — technology substitution, consolidation by better-capitalized "
+                        "players, regulatory pressure, or demand shifting away.\n"
+                        "0-19: Market in visible decline or facing near-term obsolescence.\n"
+                        "State confidence explicitly — competitor data for small private firms is usually thin, "
+                        "and a low-confidence 50 is more honest than a confident guess."
+                    ),
+                },
+                {
+                    "key": "owner_dependency",
+                    "label": "Owner Dependency & Transferability",
+                    "weight": 0.10,
+                    "sources": ["ops_maturity", "hiring", "sentiment"],
+                    "rubric": (
+                        "Score how much of the enterprise value survives the owner leaving. "
+                        "Lower dependency scores HIGHER.\n"
+                        "80-100: Named management team beyond the owner, multiple locations or crews, hiring "
+                        "infrastructure, brand identity independent of any individual, documented processes.\n"
+                        "60-79: Some delegated management but the owner is still clearly central to sales or delivery.\n"
+                        "40-59: Small team, owner visible in sales and operations. Typical for the size — "
+                        "no strong evidence either way.\n"
+                        "20-39: The owner IS the brand — personal name in the company name, owner's face and bio "
+                        "throughout the site, no team page, all contact routes to one person.\n"
+                        "0-19: Sole practitioner. Licenses, relationships and delivery capability are all personal "
+                        "and non-transferable."
+                    ),
+                },
+            ],
+            "labels": [
+                {"min_score": 80, "label": "Platform Prospect"},
+                {"min_score": 60, "label": "Bolt-On Ready"},
+                {"min_score": 40, "label": "Turnaround Play"},
+                {"min_score": 20, "label": "Diligence Risk"},
+                {"min_score": 0, "label": "Deal Breaker"},
+            ],
+            "score_label": "Acquisition Fit Score",
+            "opportunities_label": "Value Creation Opportunities",
+            "scoring_context": (
+                "You are an operating partner at a lower-middle-market private equity firm or a search fund "
+                "principal, evaluating a $1M-$25M revenue private company as an acquisition target. "
+                "You are underwriting a control deal you will own for 3-7 years, not buying a stock. "
+                "Your job is to separate businesses with durable cash flow and unexploited operating leverage "
+                "from ones whose value walks out the door with the founder. "
+                "Be skeptical: for companies this size the data is thin, and absence of evidence is not "
+                "evidence of quality. Say so plainly when a dimension rests on an estimate rather than a document."
+            ),
+            "angle_guidance": (
+                "Frame every opportunity as a post-close value creation lever with an owner, a timeline, and an "
+                "EBITDA impact — not as a consulting engagement. Prioritize levers the acquirer controls directly: "
+                "pricing, digital demand generation, systematizing the sales process, back-office automation, "
+                "tuck-in acquisitions. Where the target is already strong, say there is no lever there rather "
+                "than inventing one."
+            ),
+            "risk_focus": (
+                "customer concentration, owner/key-man dependency, undocumented or aggressive addbacks, "
+                "deferred maintenance (capex, systems, staffing), licensing and regulatory transferability, "
+                "key employee retention post-close, seller financing expectations, and the gap between "
+                "seller-reported and independently evidenced revenue"
+            ),
+            "opportunities_framing": (
+                "Identify post-close value creation levers an acquirer could pull on this business, "
+                "evaluated through this scoring lens."
+            ),
+            "scope_guidance": (
+                "Scope estimation — this is a $1M-$25M revenue target, NOT an enterprise consulting client. "
+                "Express scope as owner-operator investment, not consulting fees:\n"
+                "  <$25K (weeks, existing staff + a tool) | $25-100K (1-2 quarters, a contractor or one hire) | "
+                "$100-500K (year 1, a small team or a system replacement) | $500K+ (multi-year, only for targets "
+                "at the top of the range).\n"
+                "  CRITICAL: A lever that costs more than one year of the target's EBITDA is not a lever. "
+                "Always state the expected EBITDA impact alongside the cost."
+            ),
         },
     },
 ]
@@ -4279,6 +4448,8 @@ def get_chunks_for_company(conn, dossier_id, source_type=None):
     section_key, section_label.
     Optionally filter by source_type.
     """
+    # Rejected sources stay in the table (see the status migration note) but must
+    # never reach retrieval — that is the whole point of rejecting one.
     if source_type:
         rows = conn.execute(
             """SELECT sc.chunk_text, sc.embedding, sc.source_doc_id,
@@ -4287,7 +4458,8 @@ def get_chunks_for_company(conn, dossier_id, source_type=None):
                FROM source_chunks sc
                JOIN source_documents sd ON sd.id = sc.source_doc_id
                LEFT JOIN source_sections ss ON ss.id = sc.source_section_id
-               WHERE sd.dossier_id = ? AND sd.source_type = ?""",
+               WHERE sd.dossier_id = ? AND sd.source_type = ?
+                 AND (sd.status IS NULL OR sd.status != 'rejected')""",
             (dossier_id, source_type),
         ).fetchall()
     else:
@@ -4298,10 +4470,34 @@ def get_chunks_for_company(conn, dossier_id, source_type=None):
                FROM source_chunks sc
                JOIN source_documents sd ON sd.id = sc.source_doc_id
                LEFT JOIN source_sections ss ON ss.id = sc.source_section_id
-               WHERE sd.dossier_id = ?""",
+               WHERE sd.dossier_id = ?
+                 AND (sd.status IS NULL OR sd.status != 'rejected')""",
             (dossier_id,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def set_source_status(conn, source_id, status, note=None):
+    """Flag a source as active / disputed / rejected. Returns the updated row.
+
+    Never deletes. A rejected row keeps its dedup_key, which is what stops the
+    next analysis run re-fetching and re-inserting the same bad source —
+    deleting it would put you on a treadmill, since the upstream matcher that
+    produced it is usually still wrong.
+    """
+    if status not in ("active", "disputed", "rejected"):
+        raise ValueError(f"invalid source status: {status!r}")
+    conn.execute(
+        "UPDATE source_documents SET status = ?, status_note = ?, "
+        "status_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (status, note, source_id),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT id, status, status_note, status_at FROM source_documents WHERE id = ?",
+        (source_id,),
+    ).fetchone()
+    return dict(row) if row else None
 
 
 # ── Feed account helpers ──────────────────────────────────────────────

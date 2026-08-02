@@ -6417,6 +6417,35 @@ a.doc-action-btn { text-decoration: none; display: inline-flex; align-items: cen
 }
 .sov-badge.synth { background: rgba(251,191,36,0.15); border-color: rgba(251,191,36,0.3); color: #fbbf24; }
 
+/* Source triage. Rejected sources are dimmed and struck through rather than
+   hidden — excluded from retrieval, still on the record. */
+.sov-status-banner {
+    display: flex; flex-direction: column; gap: 3px;
+    padding: 8px 12px; font-size: 11px; font-weight: 600;
+    border-bottom: 1px solid var(--border);
+}
+.sov-status-banner.rejected { background: rgba(239,68,68,0.10); color: #f87171; }
+.sov-status-banner.disputed { background: rgba(234,179,8,0.10); color: #eab308; }
+.sov-status-note { font-weight: 400; color: var(--text-secondary); font-style: italic; }
+.sov-status-actions {
+    display: flex; gap: 6px; padding: 7px 12px;
+    border-bottom: 1px solid var(--border);
+}
+.sov-status-btn {
+    background: none; border: 1px solid var(--border); border-radius: 5px;
+    color: var(--text-muted); font-size: 10px; padding: 3px 9px; cursor: pointer;
+    transition: color .12s, border-color .12s;
+}
+.sov-status-btn:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.25); }
+.sov-status-btn.danger:hover { color: #f87171; border-color: rgba(239,68,68,0.45); }
+
+.sov-source-card.sov-src-rejected { opacity: .45; }
+.sov-source-card.sov-src-rejected > div:first-child { text-decoration: line-through; }
+.sov-source-card.sov-src-disputed { border-color: rgba(234,179,8,0.35); }
+.sov-state-badge { font-size: 9px; border-radius: 3px; padding: 1px 5px; font-weight: 700; text-transform: uppercase; }
+.sov-state-badge.rejected { background: rgba(239,68,68,0.18); color: #f87171; }
+.sov-state-badge.disputed { background: rgba(234,179,8,0.18); color: #eab308; }
+
 /* The question a pinned block answered — anchors the section when several stack up */
 .sov-relevant-q { font-size: 11px; color: var(--text-secondary); padding: 0 4px 2px; font-weight: 600; }
 

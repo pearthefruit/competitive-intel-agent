@@ -1147,7 +1147,7 @@ def create_app(db_path="intel.db"):
             dossier_id = dossier["id"]
             rows = conn.execute(
                 """SELECT id, source_type, title, url, source_date,
-                          metadata_json, fetched_at
+                          metadata_json, fetched_at, status, status_note
                    FROM source_documents
                    WHERE dossier_id = ?
                    ORDER BY fetched_at DESC""",
@@ -1176,6 +1176,33 @@ def create_app(db_path="intel.db"):
             return jsonify({"sources": sources, "total": len(sources)})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
+        finally:
+            conn.close()
+
+    @app.route("/api/sources/<int:source_id>/status", methods=["PATCH"])
+    def update_source_status(source_id):
+        """Flag a source as active / disputed / rejected.
+
+        Deliberately not a delete. A rejected row keeps its dedup_key, and
+        capture_and_embed() returns early on a dedup hit — so the next analysis
+        run cannot silently re-fetch the same bad source. Deleting it would
+        re-insert on the next run, because the upstream matcher that produced it
+        is usually still wrong.
+        """
+        from db import set_source_status
+
+        data = request.json or {}
+        status = (data.get("status") or "").strip()
+        note = (data.get("note") or "").strip() or None
+
+        conn = get_connection(db_path)
+        try:
+            row = set_source_status(conn, source_id, status, note)
+            if not row:
+                return jsonify({"error": "Not found"}), 404
+            return jsonify(row)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
         finally:
             conn.close()
 
